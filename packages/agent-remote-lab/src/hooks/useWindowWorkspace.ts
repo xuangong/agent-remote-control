@@ -95,7 +95,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const readWindow = useCallback(() => currentlyUnavailable.current ? undefined : currentStore.current?.getSnapshot(), []);
   const [deleted, setDeleted] = useState(false);
   const selectStore = (next: WindowWorkspaceStore | undefined) => { currentStore.current = next; setStore(next); };
-  const [groups, setGroups] = useState<WindowGroup[]>([]);
+  const [publishedCatalog, setPublishedCatalog] = useState(() => ({ catalog, groups: catalog.groups }));
+  const groups = publishedCatalog.catalog === catalog ? publishedCatalog.groups : catalog.groups;
   // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
   const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const [error, setError] = useState<string>();
@@ -227,7 +228,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     void result.finally(() => { if (creation.running === result) creation.running = undefined; }).catch(() => {});
     return result;
   };
-  const publishCatalog = (next: WindowGroup[]) => { catalog.groups = next; setGroups(next); };
+  const publishCatalog = (next: WindowGroup[]) => {
+    if (!inScope()) return;
+    catalog.groups = next; setPublishedCatalog({ catalog, groups: next });
+  };
   const updateCatalog = (group: WindowGroup) => {
     if (!inScope() || selection.deleted.has(group.window.id)) return;
     publishCatalog(catalog.groups.some(item => item.window.id === group.window.id)
@@ -576,7 +580,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       const candidate = () => unavailable ? emptyWindow() : importCompositionWindow(composition);
       if (client) { const { candidate: original, snapshot } = await createHosted(candidate, true); if (generation !== selection.generation) return; created = toWindowGroup(snapshot); commitImportedWindowComposition(composition, original, created.window); }
       else created = { window: candidate() };
-      choose(created, true); setError(undefined); setGroups(current => [...current.filter(group => group.window.id !== created.window.id), created]);
+      choose(created, true); setError(undefined); updateCatalog(created);
     },
     /**
      * Renames any Window in the catalog, resolving once the title is applied locally; `saved` settles with the

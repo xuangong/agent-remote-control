@@ -44,6 +44,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   }
   let replays: SessionSuccessionReplay[] = [];
   const acknowledgements: Array<() => void> = [];
+  const activityListeners = new Map<string, RemoteTransportListener>();
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
@@ -59,10 +60,10 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     fetchTimeline: async agentId => timeline(agentId),
     connect: (agentId: string, listener: RemoteTransportListener) => {
       queueMicrotask(() => listener.onOpen());
-      return { close() {}, send(message) {
+      return { close() { if (activityListeners.get(agentId) === listener) activityListeners.delete(agentId); }, send(message) {
         if (message.type === 'negotiate') {
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
-          if (message.observation === 'activity') { listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId, status: 'idle' } }); return; }
+          if (message.observation === 'activity') { activityListeners.set(agentId, listener); listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId, status: 'idle' } }); return; }
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot(agentId) });
         } else if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
@@ -94,6 +95,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   }
   const container = await render(createElement(Access));
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
+    activityListeners,
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     button: (label: string) => visibleButton(container, label),
     async switchMode(mode: 'window' | 'bot') {

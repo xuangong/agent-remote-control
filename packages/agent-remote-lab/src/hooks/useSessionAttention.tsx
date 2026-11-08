@@ -3,6 +3,7 @@ import type { AgentCommand, AgentCommandResult } from '@orchardworks/agent-remot
 import type { SessionEntry } from '../session-tree.js';
 import { SessionAttentionNotifications } from '../session-notifications.js';
 import type { SessionObservation } from '../tracking-state.js';
+import type { WorkbenchMode } from '../workbench-mode.js';
 
 export const TrackViewCommand = { id: 'console:track', name: 'track', kind: 'command', description: 'Toggle Track view; use /track on or /track off', inputHint: '[on|off]' } satisfies AgentCommand;
 export const TrackViewScope = createContext<((args: string) => Promise<AgentCommandResult>) | undefined>(undefined);
@@ -17,17 +18,18 @@ function permission(): NotificationPermission | 'unsupported' {
   return typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 }
 
-export function useSessionAttention(scope: string, active: boolean, onOpen: (session: SessionEntry) => void) {
+export function useSessionAttention(scope: string, active: boolean, onOpen: (session: SessionEntry) => void, mode: WorkbenchMode = 'window') {
   const [mobile, setMobile] = useState(() => window.matchMedia?.('(pointer: coarse)').matches ?? false);
   const [trackChoice, setTrackChoice] = useState(() => preference(trackKey));
   const [notificationChoice, setNotificationChoice] = useState(() => preference(notificationKey) ?? true);
   const [notificationPermission, setPermission] = useState(permission);
   const [permissionError, setPermissionError] = useState(false);
-  const latest = useRef({ active, mobile, notificationChoice, onOpen });
-  latest.current = { active, mobile, notificationChoice, onOpen };
+  const clickScope = useMemo(() => ({ mode, lifetime: {} }), [scope, mode, active, mobile, notificationChoice]);
+  const latest = useRef({ scope, active, mobile, notificationChoice, onOpen, clickScope });
+  latest.current = { scope, active, mobile, notificationChoice, onOpen, clickScope };
   const notifier = useMemo(() => new SessionAttentionNotifications(scope,
-    () => latest.current.active && !latest.current.mobile && latest.current.notificationChoice,
-    session => latest.current.onOpen(session)), [scope]);
+    () => latest.current.scope === scope && latest.current.active && !latest.current.mobile && latest.current.notificationChoice,
+    session => latest.current.onOpen(session), () => latest.current.clickScope), [scope]);
   const mountedNotifier = useRef<SessionAttentionNotifications>();
   useEffect(() => {
     mountedNotifier.current = notifier;

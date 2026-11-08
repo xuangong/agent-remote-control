@@ -70,8 +70,12 @@ it.each([false, true])('opens another Side of the same source beside the first i
   const container = await render(<App baseUrl={scope} transport={transport} directory={new SessionDirectoryClient(scope)} />);
   await vi.waitFor(() => expect(workspace.window?.id).toBe(saved.id));
   if (narrow) await act(async () => { (container.querySelector('#lab-context .lab-rail-close') as HTMLButtonElement | null)?.click(); });
-  const sideEntry = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('[data-view-id="main"] [aria-label="Forked sessions"] button')]
-    .find(button => button.title.startsWith(`${label} ·`));
+  let sourceConversation: HTMLElement | null = null;
+  const sideEntry = (label: string) => {
+    sourceConversation ??= container.querySelector<HTMLElement>('[data-view-id="main"] .lab-session-conversation-host');
+    return [...sourceConversation?.querySelectorAll<HTMLButtonElement>('[aria-label="Forked sessions"] button') ?? []]
+      .find(button => button.title.startsWith(`${label} ·`));
+  };
   const attached = () => workspace.window!.views.filter(view => view.attachedTo === 'main').map(view => view.binding?.nativeSessionId);
   await vi.waitFor(() => expect(sideEntry('Side 2')).toBeDefined());
   await act(async () => sideEntry('Side 1')!.click());
@@ -83,6 +87,7 @@ it.each([false, true])('opens another Side of the same source beside the first i
   expect(workspace.window!.selectedViewId).toBe(second.id);
   await vi.waitFor(() => expect([...container.querySelectorAll('[data-primary-group-id="main"] .lab-session-family-pane')].map(pane => pane.getAttribute('aria-label')))
     .toEqual(['Source', 'First question', 'Second question']));
+  expect(container.contains(sourceConversation)).toBe(true);
   expect(['Side 1', 'Side 2'].map(label => sideEntry(label)?.getAttribute('aria-pressed'))).toEqual(['true', 'true']);
   const first = workspace.window!.views.find(view => view.binding?.nativeSessionId === 'first-side')!;
   if (narrow) {

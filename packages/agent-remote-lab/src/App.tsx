@@ -1567,8 +1567,8 @@ function AppContent({
     && (!compactLayout || !navigation.rosterVisible) && connections.shown(botBinding, botConnection.agentId) ? [displayedBot] : [];
   const latestEligible = useRef(new Set<string>());
   const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
-    if (!latestEligible.current.has(sessionKey(item))) return;
     if (!windowMode) {
+      if (!latestEligible.current.has(sessionKey(item))) return;
       const row = projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections
         .flatMap(section => section.rows).find(row => sessionKey(row.binding) === sessionKey(item));
       if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
@@ -1583,7 +1583,7 @@ function AppContent({
     });
     if (source) { revealSession(source); openAsk(source, sourceStateFor(source)); }
     else void openSession(item, undefined, undefined, false, undefined, 'history');
-  });
+  }, navigation.mode);
   const observeAttention = useCallback((session: SessionEntry, value: import('./tracking-state.js').SessionObservation) => {
     if (latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
   }, [attention.observe]);
@@ -1598,7 +1598,7 @@ function AppContent({
   useLayoutEffect(() => {
     attention.notifier.setEligible(eligible);
     attention.notifier.setDisplayed(displayed);
-  }, [attention.notifier, eligibleKeys, displayedKeys, attention.enabled]);
+  }, [attention.notifier, eligibleKeys, displayedKeys, attention.enabled, navigation.mode]);
   const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sessionStates), [tracking.liveObservations, sessionStates]);
   const botDirectorySources = useMemo<OtherSessionSource[]>(() => {
     const sources: OtherSessionSource[] = [];
@@ -2501,9 +2501,9 @@ function AppContent({
     successionContextFor: succession.successionContextFor }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
     leadingControls={sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setDockViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} /></div> : null}
+    {activated ? tracking.observers : null}
     {!windowWorkspace.unavailable ? <>
     {windowMode && scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
-    {activated ? tracking.observers : null}
     <WindowMenu workspace={windowWorkspace} current={sharedWindow ? directoryView?.binding : currentSession ? windowSessionBinding(currentSession) : undefined}
       visible={windowMode && windowView.visible} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus} />
     <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowMode && windowOverviewOpen} sessionStatus={windowSessionStatus} onOpenChange={setWindowOverviewOpen} />

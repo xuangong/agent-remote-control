@@ -52,14 +52,15 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
 export function SessionConversation(props: SessionConversationProps) {
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
-  const [inputOwner, setInputOwner] = useState<{ target: SessionWindowTarget; count: number }>();
+  const [inputOwner, setInputOwner] = useState<{ source: SessionWindowTarget; target: SessionWindowTarget; count: number }>();
   let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined;
   try {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
   } catch (error) { resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.'; }
-  // Keep the original composer's queue observable until it settles. A changed live locator still fences its actions.
-  const retainingInput = !!inputOwner?.count && sessionKey(inputOwner.target) !== sessionKey(currentTarget);
+  // Keep the same source's queue observable while its live locator follows succession. Explicit navigation admits its own target.
+  const retainingInput = !!inputOwner?.count && sessionKey(inputOwner.source) === sessionKey(target)
+    && sessionKey(inputOwner.target) !== sessionKey(currentTarget);
   if (retainingInput) {
     currentTarget = inputOwner!.target;
     resolutionError ??= 'The previous input is still pending. Check its result before continuing in the replacement session.';
@@ -137,8 +138,8 @@ export function SessionConversation(props: SessionConversationProps) {
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
   const pending = !!resolutionError || !displayedSession;
   return <FamilyChat {...props} onPendingInputChange={count => {
-      setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.target) === sessionKey(currentTarget)
-        ? previous : { target: currentTarget, count } : undefined);
+      setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
+        ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionError ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined} />;

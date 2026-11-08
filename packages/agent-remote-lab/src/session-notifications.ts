@@ -1,8 +1,11 @@
 import type { SessionObservation } from './tracking-state.js';
 import type { SessionEntry } from './session-tree.js';
 import { sessionKey } from './session-tree.js';
+import type { WorkbenchMode } from './workbench-mode.js';
 
 type Reminder = 'idle' | 'waiting';
+interface NotificationClickScope { mode: WorkbenchMode; lifetime: object }
+interface DeliveredNotification { key: string; admission?: symbol; clickScope: NotificationClickScope }
 const ledgerKey = 'agent-remote:notification-receipts';
 
 async function fingerprint(value: string): Promise<string> {
@@ -15,11 +18,13 @@ export class SessionAttentionNotifications {
   private readonly observations = new Map<string, SessionObservation>();
   private readonly displayed = new Set<string>();
   private readonly routes = new Map<string, () => void>();
-  private readonly notifications = new Map<Notification, string>();
+  private readonly notifications = new Map<Notification, DeliveredNotification>();
+  private readonly defaultClickScope: NotificationClickScope = { mode: 'bot', lifetime: {} };
   private eligible: Map<string, symbol> | undefined;
   private disposed = false;
   constructor(private readonly scope: string, private readonly enabled: () => boolean,
-    private readonly open: (session: SessionEntry) => void) {}
+    private readonly open: (session: SessionEntry) => void,
+    private readonly clickScope: () => NotificationClickScope = () => this.defaultClickScope) {}
 
   setEligible(sessions: readonly SessionEntry[]): void {
     const keys = new Set(sessions.map(sessionKey));
@@ -27,13 +32,20 @@ export class SessionAttentionNotifications {
     for (const key of keys) next.set(key, this.eligible?.get(key) ?? Symbol(key));
     this.eligible = next;
     for (const key of this.observations.keys()) if (!keys.has(key)) this.observations.delete(key);
-    for (const [notification, key] of this.notifications) if (!keys.has(key)) {
+    for (const [notification, delivered] of this.notifications) if (!this.acceptsClick(delivered)) {
       notification.close(); this.notifications.delete(notification);
     }
   }
 
   private accepts(key: string, admission?: symbol): boolean {
     return !this.disposed && (!this.eligible || this.eligible.has(key) && (!admission || this.eligible.get(key) === admission));
+  }
+
+  private acceptsClick(delivered: DeliveredNotification): boolean {
+    const current = this.clickScope();
+    return !this.disposed && this.enabled() && delivered.clickScope.lifetime === current.lifetime
+      && delivered.clickScope.mode === current.mode
+      && (current.mode === 'window' || this.accepts(delivered.key, delivered.admission));
   }
 
   setDisplayed(sessions: readonly SessionEntry[]): void {
@@ -61,6 +73,7 @@ export class SessionAttentionNotifications {
     if (!this.enabled()) { this.observations.delete(key); return; }
     if (next.connection !== 'ready' || !next.activity) return;
     const admission = this.eligible?.get(key);
+    const clickScope = this.clickScope();
     this.observations.set(key, next);
     const visibleResult = next.background?.status === 'visible' && (next.background.id !== previous?.background?.id || previous?.background?.status !== 'visible');
     if (!previous?.activity || next.activity === previous.activity && !visibleResult) return;
@@ -74,7 +87,7 @@ export class SessionAttentionNotifications {
     try {
       const id = crypto.subtle ? await fingerprint(identity) : identity;
       const deliver = () => {
-        if (!this.accepts(key, admission) || !this.enabled() || Notification.permission !== 'granted') return;
+        if (!this.accepts(key, admission) || !this.enabled() || this.clickScope().lifetime !== clickScope.lifetime || Notification.permission !== 'granted') return;
         let receipts: string[] = [];
         try {
           const stored: unknown = JSON.parse(localStorage.getItem(ledgerKey) ?? '[]');
@@ -84,10 +97,11 @@ export class SessionAttentionNotifications {
         const notification = new Notification(reminder === 'waiting' ? 'Session needs your input' : 'Session completed', {
           body: session.title, tag: `arc:${id}`,
         });
-        this.notifications.set(notification, key);
+        const delivered = { key, admission, clickScope };
+        this.notifications.set(notification, delivered);
         notification.onclose = () => this.notifications.delete(notification);
         notification.onclick = () => {
-          if (this.accepts(key, admission) && this.enabled()) { window.focus(); this.open(session); }
+          if (this.acceptsClick(delivered)) { window.focus(); this.open(session); }
           notification.close();
         };
         // Only opaque, bounded deduplication receipts are persisted; never message contents.

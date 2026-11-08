@@ -1,4 +1,4 @@
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useSessionAttention, TrackViewScope } from './useSessionAttention.js';
 import { LabWorkbench } from '../components/LabWorkbench.js';
@@ -6,6 +6,31 @@ import { replicaState } from '../test/fixtures.js';
 import { render, unmount } from '../test/setup.js';
 
 afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
+
+it.each(['mode', 'access', 'scope'] as const)('retires the original delivered Window click across a %s round trip', async change => {
+  const notices: Array<{ onclick?: () => void }> = [], opened: string[] = [];
+  vi.stubGlobal('Notification', class { static permission = 'granted'; onclick?: () => void; close() {} constructor() { notices.push(this); } });
+  let update!: (next: Partial<{ scope: string; active: boolean; mode: 'window' | 'bot' }>) => void;
+  let attention!: ReturnType<typeof useSessionAttention>;
+  function Observer() {
+    const [state, setState] = useState({ scope: 'original', active: true, mode: 'window' as 'window' | 'bot' });
+    update = next => setState(current => ({ ...current, ...next }));
+    attention = useSessionAttention(state.scope, state.active, session => opened.push(session.nativeSessionId), state.mode);
+    return null;
+  }
+  const container = await render(<Observer />), original = attention.notifier;
+  const session = { providerId: 'codex', nativeSessionId: 'native', title: 'Research' };
+  await act(async () => {
+    await original.observe(session, { connection: 'ready', activity: 'running', cursor: { epoch: 'epoch', seq: 1 } });
+    await original.observe(session, { connection: 'ready', activity: 'idle', cursor: { epoch: 'epoch', seq: 2 } });
+  });
+  expect(notices).toHaveLength(1);
+  await act(async () => update(change === 'mode' ? { mode: 'bot' } : change === 'access' ? { active: false } : { scope: 'other' }));
+  notices[0]!.onclick!(); expect(opened).toEqual([]);
+  await act(async () => update({ scope: 'original', mode: 'window', active: true }));
+  notices[0]!.onclick!(); expect(opened).toEqual([]);
+  await unmount(container); notices[0]!.onclick!(); expect(opened).toEqual([]);
+});
 function Harness() {
   const attention = useSessionAttention('workspace', true, () => {});
   return <TrackViewScope.Provider value={attention.executeTrack}>

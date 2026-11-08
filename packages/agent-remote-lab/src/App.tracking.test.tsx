@@ -1,7 +1,8 @@
 import { act, useState, type ComponentProps } from 'react';
 import * as teamComponents from './components/TeamMenu.js';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import { WindowRequestError, WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { SessionStarsClient, type SessionStar } from './session-stars-client.js';
@@ -18,6 +19,39 @@ import type { SessionEntry } from './session-tree.js';
 const baseUrl = 'http://localhost/u/alice/';
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
+
+it('continues Bot activity delivery after confirmed deletion of its remembered Window', async () => {
+  const scope = 'http://localhost/u/bot-window-deletion/';
+  seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?window=A');
+  const notices: { options: NotificationOptions }[] = [];
+  vi.stubGlobal('Notification', class { static permission = 'granted'; close() {} constructor(_title: string, readonly options: NotificationOptions) { notices.push(this); } });
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockImplementation(async (_provider, nativeSessionId) => ({ agentId: `agent-${nativeSessionId}`, nativeSessionId }));
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await app.switchMode('bot'); await act(async () => app.button('B1').click());
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    await until(() => expect(app.activityListeners.has('agent-B2')).toBe(true));
+    app.hostedGroups.delete('A');
+    vi.mocked(WindowWorkspaceClient.prototype.inspect).mockImplementation(async id => {
+      const group = app.hostedGroups.get(id);
+      if (!group) throw new WindowRequestError('Deleted', 404, 'window_not_found');
+      return group;
+    });
+    await act(async () => app.workspace().refreshGroups());
+    await until(() => expect(app.workspace().deletedWindowIds).toContain('A'));
+    expect(app.workspace().unavailable).toBe(true);
+    expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull();
+    expect(app.activityListeners.has('agent-B2')).toBe(true);
+    for (const [status, seq] of [['running', 1], ['waiting', 2]] as const) await act(async () => {
+      app.activityListeners.get('agent-B2')!.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: {
+        agentId: 'agent-B2', status, cursor: { epoch: 'bot-B2', seq },
+      } });
+    });
+    await until(() => expect(notices.map(notice => notice.options.body)).toEqual(['B2']));
+    expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
+});
 
 it('scopes App reminders to the current Bot roster and routes clicks by its current group/view identity', async () => {
   const scope = 'http://localhost/u/bot-attention/';

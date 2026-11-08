@@ -50,6 +50,50 @@ it('starts fresh after leaving and reentering eligibility and closes stale notif
   notifier.dispose();
 });
 
+it('retains a delivered Window history target while fencing new delivery after eligibility removal', async () => {
+  const { instances } = setup();
+  const open = vi.fn(), lifetime = {};
+  const notifier = new SessionAttentionNotifications('window-history', () => true, open, () => ({ mode: 'window', lifetime }));
+  vi.spyOn(window, 'focus').mockImplementation(() => {});
+  notifier.setEligible([session]);
+  await notifier.observe(session, value('running', 1)); await notifier.observe(session, value('idle', 2));
+  notifier.setEligible([]);
+  expect(instances[0]!.close).not.toHaveBeenCalled();
+  await notifier.observe(session, value('running', 3)); await notifier.observe(session, value('waiting', 4));
+  expect(instances).toHaveLength(1);
+  instances[0]!.onclick!(); expect(open).toHaveBeenCalledExactlyOnceWith(session);
+  notifier.dispose();
+});
+
+it.each(['mode', 'access', 'scope', 'disposal', 'mode round trip', 'access renewal'] as const)('retires delivered Window clicks after %s changes', async change => {
+  const { instances } = setup();
+  const open = vi.fn(); let enabled = true, policy: { mode: 'window' | 'bot'; lifetime: object } = { mode: 'window', lifetime: {} };
+  const notifier = new SessionAttentionNotifications('window-fences', () => enabled, open, () => policy);
+  notifier.setEligible([session]); await notifier.observe(session, value('running', 1)); await notifier.observe(session, value('idle', 2));
+  if (change === 'access' || change === 'access renewal') { enabled = false; policy = { ...policy, lifetime: {} }; }
+  else if (change === 'disposal') notifier.dispose();
+  else policy = { mode: change === 'mode' || change === 'mode round trip' ? 'bot' : 'window', lifetime: {} };
+  notifier.setEligible([session]);
+  if (change === 'mode round trip') policy = { mode: 'window', lifetime: {} };
+  if (change === 'access renewal') { enabled = true; policy = { ...policy, lifetime: {} }; }
+  notifier.setEligible([session]); instances[0]!.onclick!(); expect(open).not.toHaveBeenCalled();
+  notifier.dispose();
+});
+
+it.each(['mode', 'access'] as const)('does not deliver a delayed Window result after a %s round trip', async change => {
+  const { instances } = setup();
+  let policy: { mode: 'window' | 'bot'; lifetime: object } = { mode: 'window', lifetime: {} };
+  const notifier = new SessionAttentionNotifications('delayed-window', () => true, () => {}, () => policy);
+  let finish!: (buffer: ArrayBuffer) => void;
+  vi.stubGlobal('crypto', { subtle: { digest: () => new Promise<ArrayBuffer>(resolve => { finish = resolve; }) } });
+  notifier.setEligible([session]); await notifier.observe(session, value('running', 1));
+  const pending = notifier.observe(session, value('idle', 2));
+  policy = { mode: change === 'mode' ? 'bot' : 'window', lifetime: {} }; notifier.setEligible([session]);
+  policy = { mode: 'window', lifetime: {} }; notifier.setEligible([session]);
+  finish(new Uint8Array([1, 2, 3]).buffer); await pending;
+  expect(instances).toHaveLength(0); notifier.dispose();
+});
+
 it.each([false, true])('fences async fingerprinting after eligibility changes (reenter: %s)', async reenter => {
   const { notifier, instances } = setup();
   let finish!: (buffer: ArrayBuffer) => void;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, createWindowView, type WindowGroup, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceStore } from './window-workspace.js';
 const initial = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'window-test', title: 'Test', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] });
 describe('Window shared store', () => {
@@ -121,4 +121,61 @@ it('restores a pending import mapping without claiming owners before creation se
   restoreImportedWindowComposition(document, other, [[source.id, 'main'], ['missing', 'main']]);
   commitImportedWindowComposition(document, other);
   expect(document.windowBindings).toHaveLength(1);
+});
+
+const bound = (): WorkspaceWindow => ({ ...initial(), views: [createWindowView('main', { hostId: 'mac', providerId: 'claude', nativeSessionId: 'one', title: 'One' }, 'primary')] });
+const offline = { async mutate() { throw new Error('Offline'); }, async operation() { throw new Error('Offline'); } } as any;
+
+it('applies a group edit at once and sends it with the next revision', async () => {
+  const store = new WindowWorkspaceStore(bound());
+  await store.operate({ type: 'bots.add', rank: 'm' });
+  expect(store.getGroup().bots).toEqual({ rank: 'm', members: {} });
+  expect(store.getSnapshot().revision).toBe(1);
+  await store.operate({ type: 'bot.update', viewId: 'main', details: { label: 'Release' } });
+  expect(store.getGroup().bots?.members).toEqual({ main: { label: 'Release' } });
+  expect(store.getCommittedGroup()).toEqual(store.getGroup());
+});
+
+it('keeps a Window reading of a group it holds', async () => {
+  const group: WindowGroup = { window: bound(), bots: { rank: 'm', members: { main: { pinned: true } } } };
+  const store = new WindowWorkspaceStore(group);
+  expect(store.getSnapshot()).toEqual(group.window);
+  await store.operate({ type: 'rename', title: 'Renamed' });
+  expect(store.getSnapshot().title).toBe('Renamed');
+  expect(store.getGroup().bots).toEqual(group.bots);
+});
+
+it('adopts the appearances a snapshot carries and ignores an older one', () => {
+  const store = new WindowWorkspaceStore(bound());
+  const window = applyGroupOperation({ window: bound() }, { type: 'rename', title: 'Remote' }).window;
+  store.accept({ window, bots: { rank: 'n', members: {} }, manager: { session: window.views[0]!.binding!, generation: 1 } });
+  expect(store.getGroup()).toEqual({ window, bots: { rank: 'n', members: {} } });
+  store.accept(bound());
+  expect(store.getSnapshot().title).toBe('Remote');
+});
+
+it('recovers a journal written before groups and one written with them', async () => {
+  const legacy = new WindowWorkspaceStore(bound(), undefined, undefined, undefined,
+    { recovery: { version: 1, committed: bound(), edits: [{ operation: { type: 'rename', title: 'Pending' }, revision: 0 }] } });
+  expect(legacy.getSnapshot().title).toBe('Pending');
+  expect(legacy.getGroup().bots).toBeUndefined();
+  let saved: unknown;
+  const store = new WindowWorkspaceStore({ window: bound(), bots: { rank: 'm', members: {} } }, offline,
+    undefined, undefined, { persist: value => { saved = value; } });
+  void store.operate({ type: 'bot.update', viewId: 'main', details: { pinned: true } });
+  await store.retry();
+  expect(saved).toMatchObject({ version: 2, committed: { bots: { rank: 'm' } } });
+  const restored = new WindowWorkspaceStore(bound(), undefined, undefined, undefined, { recovery: saved });
+  expect(restored.getGroup().bots?.members).toEqual({ main: { pinned: true } });
+  store.dispose();
+});
+
+it('keeps showing an appearance an echo already applied and settles the edit against it', async () => {
+  const store = new WindowWorkspaceStore(bound());
+  const pending = store.operate({ type: 'bots.add', rank: 'm' });
+  store.accept({ window: store.getCommittedSnapshot(), bots: { rank: 'm', members: {} } });
+  expect(store.getGroup().bots).toEqual({ rank: 'm', members: {} });
+  expect(store.getSnapshot().revision).toBe(1);
+  await expect(pending).rejects.toThrow('already a section');
+  expect(store.getGroup()).toEqual({ window: store.getCommittedSnapshot(), bots: { rank: 'm', members: {} } });
 });

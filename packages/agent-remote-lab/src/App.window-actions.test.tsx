@@ -119,7 +119,7 @@ it('gathers Team members locally before saving and keeps them out of a subsequen
   await act(async () => { await release(); await pending; });
   expect(test.read().window!.views.filter(view => parseWindowFeature(view.feature)?.kind === 'team')).toHaveLength(0);
   expect(test.read().window).toEqual(test.second);
-  const storedFirst = JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:first`)!);
+  const storedFirst = JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:first`)!).window;
   expect(storedFirst.selectedViewId).toBe('leader-view');
   expect(storedFirst.views).toHaveLength(3);
 }, 10000);

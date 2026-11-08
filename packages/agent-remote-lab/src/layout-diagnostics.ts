@@ -1,4 +1,4 @@
-import type { WindowOperation } from '@orchardworks/agent-remote-protocol';
+import type { WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 
 // Diagnostics are opt-in and page-local. Never read text, URLs, session IDs or storage.
 const limits = { maxSamples: 800, frameWindowMs: 3000, recordingMs: 600_000 };
@@ -20,7 +20,7 @@ let paneIds = new WeakMap<Element, number>();
 let windowIds = new WeakMap<object, number>();
 let nextPaneId = 0, nextWindowId = 0;
 const paneSelector = '.lab-session-family-pane, .lab-primary-conversation, .lab-side-conversation';
-type WindowSelectionDiagnostic = { source: 'local' | 'remote' | 'settled' | 'rejected' | 'discarded' | 'conflict'; previous: number; selected: number; revision: number; pending: number; bindingChanged?: true; operation?: WindowOperation['type'] };
+type WindowSelectionDiagnostic = { source: 'local' | 'remote' | 'settled' | 'rejected' | 'discarded' | 'conflict'; previous: number; selected: number; revision: number; pending: number; bindingChanged?: true; operation?: WindowGroupOperation['type'] };
 function paneId(pane: Element) {
   let id = paneIds.get(pane);
   if (id === undefined) { id = ++nextPaneId; paneIds.set(pane, id); }

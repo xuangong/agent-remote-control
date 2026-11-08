@@ -6,6 +6,7 @@ import {
   createWindowView,
   type AgentProviderDescriptor,
   type AgentSessionResponse,
+  type WindowGroupOperation,
   type WindowOperation,
 } from '@orchardworks/agent-remote-protocol';
 import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
@@ -811,7 +812,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 }
 
 it('creates and selects an empty pane with one layout command and opens its session chooser', async () => {
-  const operations: WindowOperation[] = [];
+  const operations: WindowGroupOperation[] = [];
   let workspace!: ReturnType<typeof windowWorkspaceHooks.useWindowWorkspace>;
   const useWorkspace = windowWorkspaceHooks.useWindowWorkspace;
   vi.spyOn(windowWorkspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => {

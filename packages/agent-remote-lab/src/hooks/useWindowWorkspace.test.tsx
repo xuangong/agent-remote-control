@@ -129,7 +129,7 @@ it('keeps the chosen Window when an older Window operation completes', async () 
   expect(read().window!.id).toBe(second);
   expect(new URL(location.href).searchParams.get('window')).toBe(second);
   expect(sessionStorage.getItem('agent-remote:recovery:local-pending:shared-window')).toBe(second);
-  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-pending:shared-window:${first}`)!)).toMatchObject({ title: 'Completed in background' });
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-pending:shared-window:${first}`)!)).toMatchObject({ window: { title: 'Completed in background' } });
 });
 
 it('does not select an uncommitted hosted Window when creation fails', async () => {
@@ -346,7 +346,7 @@ it('rejects deleting the active local Window and preserves its layout', async ()
   expect(read().window).toEqual(before); expect(read().windows).toEqual([before]);
   expect(read().unavailable).toBe(false);
   expect(new URL(location.href).searchParams.get('window')).toBe(before.id);
-  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:${before.id}`)!)).toEqual(before);
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:${before.id}`)!)).toEqual({ window: before });
 }, 10000);
 
 it('keeps a missing explicit Window link as an error without creating a replacement', async () => {
@@ -866,8 +866,8 @@ it('restores a local legacy deep link once through StrictMode without a stale bi
   await vi.waitFor(async () => { await act(async () => {}); expect(current.window?.id).toBe(existing.id); expect(current.window?.views[0]?.binding?.nativeSessionId).toBe('Y'); });
   expect(current.error).toBeUndefined();
   const saved = JSON.parse(localStorage.getItem(`${key}:${existing.id}`)!);
-  expect(saved.views[0].binding.nativeSessionId).toBe('Y');
-  expect(saved.revision).toBe(1);
+  expect(saved.window.views[0].binding.nativeSessionId).toBe('Y');
+  expect(saved.window.revision).toBe(1);
 });
 
 it('renames a hosted Window that is not open without switching to it, and forgets one deleted elsewhere', async () => {
@@ -904,5 +904,5 @@ it('renames a local Window that is not open in this browser storage', async () =
   await act(async () => { ({ saved } = await read().rename(first, 'Local research')); await saved; });
   expect(read().window!.id).toBe(second);
   expect(read().windows.find(window => window.id === first)?.title).toBe('Local research');
-  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-rename-other:shared-window:${first}`)!)).toMatchObject({ title: 'Local research' });
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:local-rename-other:shared-window:${first}`)!)).toMatchObject({ window: { title: 'Local research' } });
 });

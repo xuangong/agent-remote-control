@@ -5,7 +5,7 @@ import type { WindowCreateRequest, WindowOperation, WindowSessionBinding, Worksp
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { captureImportedWindowComposition, restoreImportedWindowComposition, commitImportedWindowComposition, importCompositionWindow, WindowWorkspaceStore } from '../window-workspace.js';
 import type { CompositionDocument } from '../session-composition.js';
-import { applyWindowOperation, createWindowView, decodeWorkspaceWindow, isWindowCreateRequest, windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, isWindowCreateRequest, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
 interface CreatedWindow { candidate: WorkspaceWindow; snapshot: WindowSnapshot }
@@ -66,14 +66,14 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const cache = (window: WorkspaceWindow) => {
     if (selection.deleted.has(window.id)) return;
     try {
-      const previous = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${window.id}`) ?? 'null'));
+      const previous = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${window.id}`) ?? 'null'))?.window;
       if (!previous || previous.revision <= window.revision) conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window));
     } catch { /* The service remains authoritative when cache storage is unavailable. */ }
   };
-  const persistLocal = (window: WorkspaceWindow) => conversationLocalStorage.setItem(`${key}:${window.id}`, JSON.stringify(window));
+  const persistLocal = (group: WindowGroup) => conversationLocalStorage.setItem(`${key}:${group.window.id}`, JSON.stringify(group));
   const choose = (window: WorkspaceWindow, created = false, confirmed = true) => {
     if (!inScope() || selection.deleted.has(window.id) || deletions.get(window.id)?.dispatched) return;
-    if (created && !client) persistLocal(window);
+    if (created && !client) persistLocal({ window });
     const next = makeStore(window);
     if (confirmed) { next.accept(window); confirmedStores.add(next); }
     if (client) cache(next.getCommittedSnapshot());
@@ -89,10 +89,10 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const existing = stores.get(id); if (existing) return existing.getCommittedSnapshot();
     try {
       const journal = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${id}`) ?? 'null');
-      const committed = decodeWorkspaceWindow(journal?.committed);
+      const committed = decodeWindowGroup(journal?.committed)?.window;
       if (committed?.id === id) return committed;
     } catch { /* Fall back to the last confirmed layout. */ }
-    try { const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); return value?.id === id ? value : undefined; }
+    try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null'))?.window; return value?.id === id ? value : undefined; }
     catch { return undefined; }
   };
   const makeStore = (window: WorkspaceWindow) => {
@@ -101,13 +101,13 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     try { recovery = JSON.parse(conversationSessionStorage.getItem(`${key}:pending:${window.id}`) ?? 'null'); } catch { /* Invalid journals do not replace a confirmed layout. */ }
     const next = new WindowWorkspaceStore(window, client, client ? () => cache(next.getCommittedSnapshot()) : undefined, client ? undefined : async (source, operation) => {
       const commit = async () => {
-        const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.id}`) ?? 'null'));
+        const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${source.window.id}`) ?? 'null'));
         if (!value) throw new Error('The local Window is unavailable.');
         const replacesLayout = operation.type === 'layout.apply' || operation.type === 'batch' && operation.operations.some(edit => edit.type === 'layout.apply');
-        if (replacesLayout && value.revision !== source.revision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
-        const result = applyWindowOperation(value, operation); persistLocal(result); return result;
+        if (replacesLayout && value.window.revision !== source.window.revision) throw new Error('The Window changed before applying this layout. Refresh and retry.');
+        const result = applyGroupOperation(value, operation); persistLocal(result); return result;
       };
-      return globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:${source.id}`, commit) : commit();
+      return globalThis.navigator.locks ? globalThis.navigator.locks.request(`${key}:${source.window.id}`, commit) : commit();
     }, {
       recovery, autoRetry: true, paused: !access.current,
       persist: value => {
@@ -237,7 +237,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!client) {
       const local: WorkspaceWindow[] = [];
       for (const entry of conversationLocalStorage.keys().filter(entry => entry.startsWith(`${key}:`))) {
-        try { const value = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null')); if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ }
+        try { const value = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(entry) ?? 'null'))?.window; if (value) local.push(value); } catch { /* A corrupt cache is not a usable Window. */ }
       }
       setWindows(local);
       if (requested && !cached) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
@@ -314,14 +314,14 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       if (!event.key?.startsWith(`${key}:`)) return;
       if (event.newValue === null) { forgetDeletedWindow(event.key.slice(key.length + 1)); return; }
       if (event.key !== `${key}:${store.getSnapshot().id}`) return;
-      try { const value = decodeWorkspaceWindow(JSON.parse(event.newValue)); if (value) store.accept(value); } catch { /* Invalid data never replaces a committed snapshot. */ }
+      try { const value = decodeWindowGroup(JSON.parse(event.newValue)); if (value) store.accept(value); } catch { /* Invalid data never replaces a committed snapshot. */ }
     };
     globalThis.addEventListener('storage', receive); return () => globalThis.removeEventListener('storage', receive);
   }, [store, client, key]);
-  const operate = (operation: Parameters<WindowWorkspaceStore['operate']>[0]): Promise<void> => {
+  const operate = (operation: WindowGroupOperation): Promise<void> => {
     const active = currentStore.current;
     if (!active || currentlyUnavailable.current || !inScope()) throw new Error('Open an available Window before editing its layout.');
-    applyWindowOperation(active.getSnapshot(), operation);
+    applyGroupOperation(active.getGroup(), operation);
     return active.operate(operation).catch(error => {
       if (inScope() && currentStore.current === active) setError(String(error instanceof Error ? error.message : error));
       throw error;
@@ -348,7 +348,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       let next: WorkspaceWindow;
       try {
         if (client) next = (await client.inspect(id)).window;
-        else { const cached = decodeWorkspaceWindow(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null')); if (!cached || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
+        else { const cached = decodeWindowGroup(JSON.parse(conversationLocalStorage.getItem(`${key}:${id}`) ?? 'null'))?.window; if (!cached || cached.id !== id) throw new Error('This local Window is unavailable.'); next = cached; }
       } catch (error) {
         if (generation !== selection.generation) return;
         if (error instanceof WindowRequestError && error.status === 404) forgetDeletedWindow(id);

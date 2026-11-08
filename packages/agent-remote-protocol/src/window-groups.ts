@@ -83,7 +83,7 @@ export const isWindowBots = (value: unknown): value is WindowBots => Value.Check
 export const isWindowPresentation = (value: unknown): value is WindowPresentation => Value.Check(WindowPresentation, value);
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;
 /** The group a Window, a group or a Relay snapshot describes: every Window is a group with only the Window appearance. */
-export function toWindowGroup(value: WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation }): WindowGroup {
+export function toWindowGroup(value: WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation; manager?: unknown }): WindowGroup {
   if (!('window' in value)) return { window: value };
   return { window: value.window, ...(value.bots ? { bots: value.bots } : {}), ...(value.presentation ? { presentation: value.presentation } : {}) };
 }

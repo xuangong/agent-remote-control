@@ -2690,7 +2690,7 @@ it('keeps both primary conversations mounted with separate drafts and creates an
   expect(add).not.toBeNull(); expect(add!.closest('[hidden]')).toBeNull();
   await act(async () => add!.click());
   await settleApp(() => {
-    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:multi-primary-test`)!);
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:multi-primary-test`)!).window;
     expect(saved.views).toHaveLength(3);
     expect(saved.views.filter((view: { placement: string }) => view.placement === 'primary')).toHaveLength(2);
     expect(saved.views.find((view: { id: string }) => view.id === saved.selectedViewId)).toMatchObject({ placement: 'dock' });
@@ -2759,7 +2759,7 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
     expect(f.view.querySelector('[data-primary-group-id="primary-X"]')?.textContent).toContain('Destination D');
   });
   expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).toBe(originalA);
-  const current = navigation === 'Track' || navigation === 'Favorites' ? setup.windowDocument : JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+  const current = navigation === 'Track' || navigation === 'Favorites' ? setup.windowDocument : JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window;
   expect(current.selectedPrimaryViewId).toBe('primary-X');
   expect(current.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
   expect(current.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
@@ -2783,7 +2783,7 @@ it('selects another primary group while a native attachment is pending without r
   try {
     await act(async () => { manager.onOpen({ ...binding('D'), agentId: 'agent-D' }); });
     await settleApp(() => expect(f.requests.some(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'D')).toBe(true));
-    expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).views
+    expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window.views
       .find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
     expect(selectA()!.closest('[hidden]')).toBeNull();
     await act(async () => { selectA()!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
@@ -2792,7 +2792,7 @@ it('selects another primary group while a native attachment is pending without r
   await settleApp(() => expect(f.frames.some(frame => frame.type === 'subscribe' && frame.agentId === 'agent-D')).toBe(true));
   expect(selectA()?.getAttribute('data-selected')).toBe('true');
   await settleApp(() => {
-    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window;
     expect(saved.selectedPrimaryViewId).toBe('primary-A');
     expect(saved.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
   });
@@ -2817,7 +2817,7 @@ it.each([false, true])('binds the global directory selection into a focused ordi
   await settleApp(() => expect(dock()?.getAttribute('data-active')).toBe('true'));
   await act(async () => directory.onSelect({ ...binding('D'), agentId: 'agent-D' }));
   await settleApp(() => {
-    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!);
+    const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window;
     expect(saved.selectedPrimaryViewId).toBe('primary-A');
     expect(saved.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
     expect(saved.views.find((view: { id: string }) => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');

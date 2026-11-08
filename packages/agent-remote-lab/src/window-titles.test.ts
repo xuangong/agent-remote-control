@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { applyWindowOperation, createWindowView, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyGroupOperation, applyWindowOperation, createWindowView, type WindowGroup, type WindowGroupOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from './session-tree.js';
 import { windowTitleEdits } from './window-titles.js';
 import { WindowWorkspaceStore } from './window-workspace.js';
@@ -32,9 +32,9 @@ it('applies a title that arrives while another edit of the Window is still savin
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   let commits = 0;
-  const store = new WindowWorkspaceStore(initial, undefined, undefined, async (source: WorkspaceWindow, operation: WindowOperation) => {
+  const store = new WindowWorkspaceStore(initial, undefined, undefined, async (source: WindowGroup, operation: WindowGroupOperation) => {
     if (commits++ === 0) await held;
-    return applyWindowOperation(source, operation);
+    return applyGroupOperation(source, operation);
   });
   // The page creates a view; the session's title arrives before that edit is saved.
   const created = store.operate({ type: 'view.create', view: createWindowView('dock', binding('docked', 'Notes')) });

@@ -7,7 +7,7 @@ import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-f
 
 for (const engine of [chromium, webkit]) it(`restores sessions and failed input across mobile page lifecycles in ${engine.name()}`, async () => {
   let script = '';
-  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
   const fixture = await previewFixture({ servePage: async (request, response) => {
     const path = new URL(request.url!, 'http://fixture').pathname;
     if (path === '/recovery.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(script); return true; }

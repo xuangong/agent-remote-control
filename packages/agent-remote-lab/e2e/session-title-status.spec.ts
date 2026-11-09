@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 const colors = {
-  running: 'rgb(35, 112, 73)',
+  running: 'rgb(26, 116, 49)',
   waiting: 'oklch(0.52 0.108 87)',
-  idle: 'oklch(0.243 0.024 248.8)',
-  closed: 'oklch(0.485 0.029 246.6)',
+  idle: 'rgb(29, 29, 31)',
+  closed: 'rgb(99, 99, 102)',
 };
 
 test('session titles track work, pending input, idle and closed across surfaces', async ({ page, isMobile }, testInfo) => {

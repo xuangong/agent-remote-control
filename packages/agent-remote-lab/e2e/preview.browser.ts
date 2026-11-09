@@ -118,7 +118,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   onPreviewCleanup(() => vite.close()); await vite.listen();
   const port = (vite.httpServer!.address() as import('node:net').AddressInfo).port;
   let browserScript = '';
-  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
   const f = await previewFixture({ ttlMs: 8000, target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
     if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
     if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }

@@ -3,6 +3,7 @@ import type { AgentReplicaState, RemoteTransportListener } from '@orchardworks/a
 import { PROTOCOL_VERSION, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { App, type LabTransport } from '../../src/App.js';
 import { replicaState } from '../../src/test/fixtures.js';
+import '../../src/ui/tokens.css';
 import '../../src/app.css';
 import '@orchardworks/agent-remote-web/styles.css';
 

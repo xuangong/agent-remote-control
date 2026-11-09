@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 
 it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping actions compact in %s', async name => {
   const engine = name === 'chromium' ? chromium : webkit;
-  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
   const source = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
     import {HostPreviewGroups} from './components/HostPreviewGroups.tsx';

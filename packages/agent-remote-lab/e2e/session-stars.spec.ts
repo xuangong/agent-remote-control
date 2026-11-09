@@ -177,9 +177,9 @@ test('uses consistent status colors for mobile titles and grouped tracking count
     for (const activity of ['running', 'waiting', 'idle']) {
       colors[activity] = await counts.locator(`[data-session-status="${activity}"]`).evaluate(el => getComputedStyle(el).color);
     }
-    expect(colors.running).toBe('rgb(35, 112, 73)');
+    expect(colors.running).toBe('rgb(26, 116, 49)');
     expect(colors.waiting).toBe('oklch(0.52 0.108 87)');
-    expect(colors.idle).toBe('oklch(0.243 0.024 248.8)');
+    expect(colors.idle).toBe('rgb(29, 29, 31)');
     if (mobile) {
       const title = page.locator('.lab-favorites-title');
       await expect(title).toHaveCSS('color', colors[status]!);

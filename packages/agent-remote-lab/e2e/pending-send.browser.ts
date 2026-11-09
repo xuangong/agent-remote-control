@@ -27,7 +27,7 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
     `;
     const bundled = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) },
       bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
-    const css = (await Promise.all(['../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
+    const css = (await Promise.all(['../src/ui/tokens.css', '../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
     const server = createServer((request, response) => {
       response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript' : 'text/html');
       response.end(request.url === '/fixture.js' ? bundled.outputFiles[0]!.text : `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}\n#root { height: 100dvh; }</style><div id="root"></div><script src="/fixture.js"></script>`);

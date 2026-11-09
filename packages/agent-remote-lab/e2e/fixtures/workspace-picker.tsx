@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionConfiguration } from '../../src/components/SessionDirectory.js';
 import { SupportingRail } from '../../src/components/SupportingRail.js';
 import { SessionDirectoryClient, type CreateSessionOptions } from '../../src/directory-client.js';
+import '../../src/ui/tokens.css';
 import '../../src/app.css';
 const directory = new SessionDirectoryClient(window.location.origin);
 function View() {

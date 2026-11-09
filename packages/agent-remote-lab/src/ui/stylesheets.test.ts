@@ -56,6 +56,6 @@ it('gives every shared Session View variable a Lab value and uses no undefined o
   const files = [...stylesheets(lab), shared];
   const defined = new Set([...scripted, ...files.flatMap(path => [...uncommented(path).matchAll(/(--(?:agent|obs|ui)-[\w-]+)\s*:/g)].map(match => match[1]!))]);
   const undefinedUses = files.flatMap(path => uncommented(path).split('\n').flatMap((line, index) =>
-    [...line.matchAll(/var\(\s*(--agent-[\w-]+)/g)].flatMap(match => defined.has(match[1]!) ? [] : [`${path}:${index + 1}: ${match[1]}`])));
-  expect(undefinedUses, 'uses of undefined --agent-* variables').toEqual([]);
+    [...line.matchAll(/var\(\s*(--(?:agent|obs|ui)-[\w-]+)/g)].flatMap(match => defined.has(match[1]!) ? [] : [`${path}:${index + 1}: ${match[1]}`])));
+  expect(undefinedUses, 'uses of undefined --agent-*, --obs-* or --ui-* variables').toEqual([]);
 });

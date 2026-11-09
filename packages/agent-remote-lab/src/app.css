@@ -174,7 +174,7 @@ textarea {
 .lab-preview-groups .lab-host-previews h2 { overflow-wrap: anywhere; }
 .lab-preview-mapping code { font-size: 11px; }
 .lab-preview-pin[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface); }
-.lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-rule); }
+.lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-border); }
 .lab-host-previews ul { display: grid; min-width: 0; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .lab-host-previews li { display: grid; min-width: 0; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }
 .lab-host-previews li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
@@ -919,7 +919,7 @@ textarea {
 .lab-side-title { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .lab-side-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-side-conversation .lab-side-close { order: 3; min-height: 28px; width: 28px; padding: 0; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; line-height: 1; }
-.lab-side-conversation .lab-side-close:hover { background: var(--obs-surface-hover); }
+.lab-side-conversation .lab-side-close:hover { background: var(--ui-fill); }
 .lab-side-back-icon, .lab-side-back-label { display: none; }
 .lab-fork-entries { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; min-width: 0; max-width: 900px; margin: 0 auto 5px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; white-space: nowrap; }
 .lab-fork-entries button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 26px; border: 0; background: transparent; padding: 2px 0; font-size: 11px; color: var(--obs-action); }

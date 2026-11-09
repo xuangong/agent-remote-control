@@ -53,5 +53,6 @@
   border-radius: 50%; color: var(--ui-on-accent); background: var(--ui-avatar-color, var(--ui-accent));
   font: 600 calc(var(--ui-avatar-size, 28px) * 0.43)/1 var(--ui-font); user-select: none;
 }
+.ui-avatar[data-ink="dark"] { color: var(--ui-on-light-fill); }
 .ui-avatar[data-shape="rounded"] { border-radius: 28%; }
 .ui-avatar[data-shape="hexagon"] { border-radius: 0; clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); }

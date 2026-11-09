@@ -20,6 +20,7 @@
   --ui-accent: #0071e3;
   --ui-accent-text: #0066cc;
   --ui-on-accent: #ffffff;
+  --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
   --ui-focus-ring: #0071e3;
 
   --ui-status-attention: #c93400;
@@ -73,6 +74,7 @@
     --ui-accent: #0071e3;
     --ui-accent-text: #409cff;
     --ui-on-accent: #ffffff;
+    --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
     --ui-focus-ring: #409cff;
 
     --ui-status-attention: #ffb340;

@@ -31,3 +31,19 @@
 
 .ui-button:focus-visible, .ui-icon-button:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 1px; }
 @media (pointer: coarse) { .ui-icon-button { width: 44px; height: 44px; } .ui-button { min-height: 44px; } }
+
+/* A gray track of borderless segments; the pressed one is raised. Segments are keyed on [aria-pressed] (0,2,1)
+   and their hover on the pressed state (0,4,1), so neither the bare button rules of app.css nor its hover,
+   active and coarse-pointer rules can restyle them. The track's radius stays concentric with its 2px padding. */
+.ui-segmented { display: flex; gap: 2px; padding: 2px; border-radius: calc(var(--ui-radius-control) + 2px); background: var(--ui-fill); }
+.ui-segmented > button[aria-pressed] {
+  flex: 1; min-width: 0; min-height: 24px; padding: 2px 10px; border: 0; border-radius: var(--ui-radius-control);
+  font: 500 var(--ui-size-callout)/1.2 var(--ui-font); color: var(--ui-label); background: transparent; cursor: pointer;
+  transition: background-color var(--ui-duration-short) var(--ui-ease), box-shadow var(--ui-duration-short) var(--ui-ease);
+}
+.ui-segmented > button[aria-pressed="true"] { background: var(--ui-background-elevated); box-shadow: var(--ui-shadow-pane); }
+.ui-segmented > button[aria-pressed="false"]:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-fill); }
+.ui-segmented > button[aria-pressed="true"]:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-background-elevated); }
+.ui-segmented > button[aria-pressed]:active:not(:disabled) { transform: none; }
+.ui-segmented > button[aria-pressed]:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 1px; }
+@media (pointer: coarse) { .ui-segmented > button[aria-pressed] { min-height: 36px; } }

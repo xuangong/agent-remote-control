@@ -11,7 +11,7 @@
 
   --ui-label: #1d1d1f;
   --ui-label-secondary: #636366;
-  --ui-label-tertiary: #aeaeb2;
+  --ui-label-tertiary: #aeaeb2; /* Below text contrast: only non-text, placeholder and disabled content */
   --ui-separator: rgb(60 60 67 / 0.18);
   --ui-control-border: #7c7c80;
   --ui-fill: rgb(120 120 128 / 0.12);
@@ -20,11 +20,11 @@
   --ui-accent: #0071e3;
   --ui-accent-text: #0066cc;
   --ui-on-accent: #ffffff;
-  --ui-focus-ring: rgb(0 113 227 / 0.5);
+  --ui-focus-ring: #0071e3;
 
   --ui-status-attention: #c93400;
   --ui-on-attention: #ffffff;
-  --ui-status-working: #0071e3;
+  --ui-status-working: #0066cc;
   --ui-status-success: #1a7431;
   --ui-status-failure: #d70015;
 
@@ -36,7 +36,7 @@
 
   --ui-radius-control: 6px;
   --ui-radius-pane: 10px;
-  --ui-radius-input: 18px;
+  --ui-radius-input: 18px; /* Capsule inputs such as the composer */
   --ui-radius-sheet: 16px;
 
   --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
@@ -51,7 +51,7 @@
   --ui-duration-short: 150ms;
   --ui-duration: 220ms;
   --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --ui-ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ui-ease-spring: cubic-bezier(0.16, 1, 0.3, 1); /* An ease-out curve without overshoot, for sheets and panels */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -73,7 +73,7 @@
     --ui-accent: #0071e3;
     --ui-accent-text: #409cff;
     --ui-on-accent: #ffffff;
-    --ui-focus-ring: rgb(64 156 255 / 0.6);
+    --ui-focus-ring: #409cff;
 
     --ui-status-attention: #ffb340;
     --ui-on-attention: #000000;

@@ -121,7 +121,8 @@ textarea {
   resize: vertical;
 }
 
-.lab-shell, .lab-session-view {
+/* The image viewer and preview browser dialogs render under <body>, outside the workbench. */
+.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {
   --agent-canvas: var(--obs-canvas);
   --agent-panel: var(--obs-surface);
   --agent-panel-raised: var(--obs-surface-selected);

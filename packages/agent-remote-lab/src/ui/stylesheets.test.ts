@@ -48,7 +48,7 @@ const scripted = ['--agent-preview-width', '--agent-time-offset', '--agent-time-
 it('gives every shared Session View variable a Lab value and uses no undefined one', () => {
   const defaults = declared(shared, ':root {');
   expect(defaults.length, 'variables in the shared :root block').toBeGreaterThanOrEqual(20);
-  const mapped = new Set(declared(join(lab, 'app.css'), '.lab-shell, .lab-session-view {'));
+  const mapped = new Set(declared(join(lab, 'app.css'), '.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {'));
   // An unmapped variable keeps its light default in the Lab, whatever the appearance.
   expect(defaults.filter(name => !mapped.has(name)), 'shared variables app.css does not map').toEqual([]);
 

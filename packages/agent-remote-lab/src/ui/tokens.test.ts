@@ -88,7 +88,7 @@ it('maps the Lab variables and the Session View code colors onto the tokens', ()
   for (const [, name, value] of lab) {
     expect(value!.trim(), name).toMatch(/^var\(--ui-[\w-]+\)$|^color-mix\(in \w+, var\(--[\w-]+\) \d+%, var\(--[\w-]+\)\)$/);
   }
-  const mapping = appRule('.lab-shell, .lab-session-view {');
+  const mapping = appRule('.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {');
   for (const name of ['--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow', '--agent-running']) {
     expect(mapping, name).toMatch(new RegExp(`${name}\\s*:\\s*var\\(--ui-`));
   }

@@ -114,5 +114,6 @@
   .ui-menu { border: 1px solid CanvasText; }
   .ui-menu .ui-menu-item[role="menuitem"]:not([aria-disabled="true"]):focus { forced-color-adjust: none; color: HighlightText; background: Highlight; }
   .ui-menu-separator { background: CanvasText; }
-  .ui-menu .ui-menu-item[role="menuitem"][aria-disabled="true"] { color: GrayText; }
+  .ui-menu .ui-menu-item[role="menuitem"][aria-disabled="true"],
+  .ui-menu .ui-menu-item[role="menuitem"][aria-disabled="true"]:is(:hover, :active, :focus) { color: GrayText; }
 }

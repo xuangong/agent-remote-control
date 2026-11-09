@@ -133,3 +133,13 @@
 .ui-sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px max(12px, env(safe-area-inset-bottom)); }
 /* Forced colors drop the shadow: keep the sheet's edge visible. */
 @media (forced-colors: active) { .ui-sheet { border: 1px solid CanvasText; border-bottom: 0; } }
+.ui-toolbar {
+  display: flex; align-items: center; gap: 10px; flex: none; min-height: 52px; padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--ui-separator); color: var(--ui-label); background: var(--ui-background);
+}
+.ui-toolbar-leading { flex: none; display: inline-flex; }
+.ui-toolbar-heading { flex: 1; min-width: 0; }
+.ui-toolbar-title, .ui-toolbar-subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-toolbar-title { margin: 0; color: var(--ui-label); font: 600 var(--ui-size-body)/1.25 var(--ui-font); }
+.ui-toolbar-subtitle { color: var(--ui-label-secondary); font-size: var(--ui-size-caption); }
+.ui-toolbar-trailing { display: flex; align-items: center; gap: 4px; flex: none; }

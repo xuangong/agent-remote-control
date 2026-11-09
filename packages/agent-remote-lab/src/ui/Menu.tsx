@@ -58,6 +58,9 @@ export function Menu({ label, icon = 'ellipsis', items }: { label: string; icon?
   useLayoutEffect(() => {
     if (!open || !menu.current) return;
     place();
+    // A host still animating in (a sheet sliding up) is the menu's containing block until it settles: place the menu again then.
+    const settling = open.host.getAnimations?.() ?? [];
+    if (settling.length) void Promise.all(settling.map(animation => animation.finished)).then(place, () => undefined);
     const enabled = menu.current.querySelectorAll<HTMLElement>(ENABLED);
     const target = open.focus === 'first' ? enabled[0] : open.focus === 'last' ? enabled[enabled.length - 1] : undefined;
     (target ?? menu.current).focus();

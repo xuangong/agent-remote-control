@@ -25,6 +25,7 @@
 
   --ui-status-attention: #c93400;
   --ui-on-attention: #ffffff;
+  --ui-on-failure: #ffffff; /* Ink on the failure fill */
   --ui-status-working: #0066cc; /* Used as text (running state), so it shares the accessible accent text color */
   --ui-status-success: #1a7431;
   --ui-status-failure: #d70015;
@@ -79,6 +80,7 @@
 
     --ui-status-attention: #ffb340;
     --ui-on-attention: #000000;
+    --ui-on-failure: #1d1d1f; /* Ink on the failure fill: white is 2.8:1 on the dark failure red */
     --ui-status-working: #409cff;
     --ui-status-success: #30d158;
     --ui-status-failure: #ff6961;

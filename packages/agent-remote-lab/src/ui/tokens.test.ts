@@ -58,6 +58,7 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
   }
   expect(contrast(tokens.get('--ui-on-accent')!, tokens.get('--ui-accent')!)).toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-on-attention')!, tokens.get('--ui-status-attention')!)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(tokens.get('--ui-on-failure')!, tokens.get('--ui-status-failure')!), 'failure ink on failure fill').toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-code-text')!, tokens.get('--ui-code-background')!), 'code text on code background').toBeGreaterThanOrEqual(4.5);
   for (const surface of ['--ui-background', '--ui-background-grouped', '--ui-sidebar']) {
     expect(contrast(tokens.get('--ui-control-border')!, tokens.get(surface)!), `control border on ${surface}`).toBeGreaterThanOrEqual(3);

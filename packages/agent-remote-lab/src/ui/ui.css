@@ -78,7 +78,7 @@
 .ui-list-row.ui-list-row[aria-current="true"], .ui-list-row.ui-list-row[aria-current="true"]:hover:not(:disabled) { background: var(--ui-selection); }
 .ui-list-row.ui-list-row:active:not(:disabled) { transform: none; }
 .ui-list-row.ui-list-row:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: -1px; }
-.ui-list-row.ui-list-row:disabled { color: var(--ui-label-tertiary); background: transparent; cursor: default; opacity: 1; }
+.ui-list-row.ui-list-row:disabled { color: var(--ui-label-tertiary); cursor: default; opacity: 1; }
 .ui-list-row-leading, .ui-list-row-trailing { flex: none; display: inline-flex; align-items: center; }
 .ui-list-row-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 1px; }
 .ui-list-row-title, .ui-list-row-subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

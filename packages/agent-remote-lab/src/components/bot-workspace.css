@@ -19,9 +19,6 @@
 .lab-bot-row[aria-current="true"] { background: var(--obs-canvas); border-color: var(--obs-action); }
 .lab-bot-row-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .lab-bot-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.lab-bot-picture { display: inline-block; flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--bot-picture-color, var(--obs-action)); }
-.lab-bot-picture[data-shape="rounded"] { border-radius: 6px; }
-.lab-bot-picture[data-shape="hexagon"] { border-radius: 0; clip-path: polygon(25% 7%, 75% 7%, 100% 50%, 75% 93%, 25% 93%, 0 50%); }
 .lab-bot-session-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .lab-bot-session-heading > span { display: flex; min-width: 0; flex-direction: column; }
 .lab-bot-session-heading small { font-size: 12px; font-weight: normal; color: var(--obs-text-secondary); }

@@ -47,3 +47,11 @@
 .ui-segmented > button[aria-pressed]:active:not(:disabled) { transform: none; }
 .ui-segmented > button[aria-pressed]:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 1px; }
 @media (pointer: coarse) { .ui-segmented > button[aria-pressed] { min-height: 36px; } }
+
+.ui-avatar {
+  display: inline-grid; place-items: center; flex: none; width: var(--ui-avatar-size, 28px); height: var(--ui-avatar-size, 28px);
+  border-radius: 50%; color: var(--ui-on-accent); background: var(--ui-avatar-color, var(--ui-accent));
+  font: 600 calc(var(--ui-avatar-size, 28px) * 0.43)/1 var(--ui-font); user-select: none;
+}
+.ui-avatar[data-shape="rounded"] { border-radius: 28%; }
+.ui-avatar[data-shape="hexagon"] { border-radius: 0; clip-path: polygon(25% 4%, 75% 4%, 100% 50%, 75% 96%, 25% 96%, 0 50%); }

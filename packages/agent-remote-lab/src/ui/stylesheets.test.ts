@@ -56,8 +56,8 @@ function declared(path: string, opening: string): string[] {
   const { start, end } = block(path, text, opening);
   return [...text.slice(start, end).matchAll(/(--agent-[\w-]+)\s*:/g)].map(match => match[1]!);
 }
-/** Set by the Session View components' inline styles (PreviewWorkspace, TimelineEntry), not by a stylesheet. */
-const scripted = ['--agent-preview-width', '--agent-time-offset', '--agent-time-top'];
+/** Set by components' inline styles (PreviewWorkspace, TimelineEntry, Avatar), not by a stylesheet. */
+const scripted = ['--agent-preview-width', '--agent-time-offset', '--agent-time-top', '--ui-avatar-color', '--ui-avatar-size'];
 
 it('gives every shared Session View variable a Lab value and uses no undefined one', () => {
   const defaults = declared(shared, ':root {');

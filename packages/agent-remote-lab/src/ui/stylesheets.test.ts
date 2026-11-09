@@ -50,6 +50,29 @@ it('keeps the shared Session View colors in its own default variables', () => {
   expect(offenders(shared, [':root {', '.agent-file-html {'])).toEqual([]);
 });
 
+/** Each declaration of the innermost rules in `text`, with the selector of its rule and its offset. */
+function declarations(text: string): { selector: string; property: string; value: string; offset: number }[] {
+  return [...text.matchAll(/([^{}]*)\{([^{}]*)\}/g)].flatMap(rule => {
+    const body = rule.index + rule[1]!.length + 1;
+    return [...rule[2]!.matchAll(/([\w-]+)\s*:([^;]*)/g)].map(declaration => ({
+      selector: rule[1]!.trim(), property: declaration[1]!, value: declaration[2]!.trim(), offset: body + declaration.index,
+    }));
+  });
+}
+const textColor = /var\(\s*--(?:obs-text|ui-label|agent-ink)\s*[,)]/;
+
+it('mixes no shadow or backdrop from a text color, which would glow in dark mode', () => {
+  // Shadows mix from --ui-shadow-ink or --agent-shadow-ink, backdrops use --ui-backdrop or --agent-backdrop.
+  // Defining those from a text color, as the shared :root does for standalone pages, is fine.
+  const found = [...stylesheets(lab), shared].flatMap(path => {
+    const text = uncommented(path);
+    return declarations(text)
+      .filter(({ selector, property, value }) => (property === 'box-shadow' || selector.includes('::backdrop')) && textColor.test(value))
+      .map(({ offset, property, value }) => `${path}:${text.slice(0, offset).split('\n').length}: ${property}: ${value.slice(0, 120)}`);
+  });
+  expect(found).toEqual([]);
+});
+
 /** The `--agent-*` variables the flat rule from `opening` declares. */
 function declared(path: string, opening: string): string[] {
   const text = uncommented(path);

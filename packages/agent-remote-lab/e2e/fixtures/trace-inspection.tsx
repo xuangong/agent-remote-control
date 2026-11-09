@@ -3,9 +3,7 @@ import type { AgentReplicaState, RemoteTransportListener } from '@orchardworks/a
 import { PROTOCOL_VERSION, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { App, type LabTransport } from '../../src/App.js';
 import { replicaState } from '../../src/test/fixtures.js';
-import '../../src/ui/tokens.css';
-import '../../src/app.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '../../src/session-view-styles';
 
 function entry(seq: number): ProjectedTimelineEntry {
   return { providerId: 'recorded', turnId: 'turn-inspect', seqStart: seq, seqEnd: seq, timestamp: '2026-09-17T07:00:00Z',

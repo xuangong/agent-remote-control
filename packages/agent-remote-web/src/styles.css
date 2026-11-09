@@ -7,6 +7,7 @@
   --agent-rule: #d9e2eb;
   --agent-signal: #3390ec;
   --agent-action-text: #1d5f9f;
+  --agent-on-signal: #ffffff; /* Text on the signal and action-text fills */
   --agent-running: #9a5b16;
   --agent-setting-pending: oklch(46% 0.1 85);
   --agent-setting-pending-surface: oklch(96% 0.07 95);
@@ -21,6 +22,9 @@
   --agent-code-block-text: #fbfdff;
   --agent-code-background: #f3f6f9;
   --agent-overlay-shadow: 0 8px 24px oklch(0.2 0.01 248 / 0.1);
+  /* Shadows and backdrops mix from these rather than from --agent-ink, so a host whose ink is light can keep them dark. */
+  --agent-shadow-ink: var(--agent-ink);
+  --agent-backdrop: color-mix(in oklab, var(--agent-ink) 18%, transparent);
 }
 
 .agent-remote-surface {
@@ -434,7 +438,7 @@
 .agent-activity-elapsed { color: var(--agent-muted); font-variant-numeric: tabular-nums; }
 .agent-activity button { min-height: 36px; padding-inline: 12px; margin-left: auto; }
 .agent-activity button:not(:disabled) { color: var(--agent-danger); border-color: var(--agent-danger); }
-.agent-composer-actions > button { color: var(--agent-panel-raised); background: var(--agent-action-text); border-color: var(--agent-action-text); }
+.agent-composer-actions > button { color: var(--agent-on-signal); background: var(--agent-action-text); border-color: var(--agent-action-text); }
 .agent-planning-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; color: var(--agent-muted); font-size: 12px; }
 .agent-planning-control > div { display: flex; align-items: center; gap: 8px; }
 .agent-planning-control button { min-height: 28px; padding-block: 3px; }
@@ -675,7 +679,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 }
 
 .agent-preview-browser { position: fixed; inset: 0 0 0 auto; margin: 0; width: 50vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; padding: 0; border: 0; border-left: 1px solid var(--agent-rule); color: var(--agent-ink); background: var(--agent-panel); font: 14px/1.5 system-ui, sans-serif; box-sizing: border-box; overflow: hidden; }
-.agent-preview-browser::backdrop { background: color-mix(in oklab, var(--agent-ink) 18%, transparent); }
+.agent-preview-browser::backdrop { background: var(--agent-backdrop); }
 .agent-preview-browser-layout { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .agent-preview-browser-toolbar { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: max(6px, env(safe-area-inset-top)) max(6px, env(safe-area-inset-right)) 6px max(6px, env(safe-area-inset-left)); border-bottom: 1px solid var(--agent-rule); background: var(--agent-surface-muted); }
 .agent-preview-browser-toolbar nav { display: flex; gap: 2px; }
@@ -699,7 +703,7 @@ summary.agent-child-heading:focus-visible { outline: 2px solid var(--agent-signa
 .agent-preview-browser::backdrop { opacity: 1; transition: opacity 200ms ease-out; }
 .agent-preview-browser[data-motion="minimizing"]::backdrop { opacity: 0; }
 .agent-preview-dock { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; pointer-events: none; }
-.agent-preview-dock-entry { display: inline-flex; align-items: center; max-width: 180px; border: 1px solid var(--agent-rule); border-radius: 8px; background: var(--agent-panel); box-shadow: 0 2px 8px color-mix(in oklab, var(--agent-ink) 10%, transparent); pointer-events: auto; }
+.agent-preview-dock-entry { display: inline-flex; align-items: center; max-width: 180px; border: 1px solid var(--agent-rule); border-radius: 8px; background: var(--agent-panel); box-shadow: 0 2px 8px color-mix(in oklab, var(--agent-shadow-ink) 10%, transparent); pointer-events: auto; }
 .agent-preview-dock-entry button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 34px; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--agent-action-text); cursor: pointer; }
 .agent-preview-dock-entry button > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
 .agent-preview-dock-entry button > svg { flex: 0 0 auto; }
@@ -838,7 +842,7 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-image-preview-status progress { width: 100%; height: 4px; accent-color: var(--agent-signal); }
 .agent-image-preview-actions { display: flex; align-items: center; gap: 8px; }
 .agent-image-preview .agent-image-preview-remove { margin-right: auto; border-color: transparent; background: transparent; color: var(--agent-danger); }
-.agent-image-preview .agent-image-preview-retry { background: var(--agent-signal); border-color: var(--agent-signal); color: var(--agent-panel-raised); }
+.agent-image-preview .agent-image-preview-retry { background: var(--agent-signal); border-color: var(--agent-signal); color: var(--agent-on-signal); }
 .agent-image-preview .agent-image-preview-retry:hover:not(:disabled) { background: var(--agent-action-text); }
 .agent-message-ordered-content { overflow-wrap: anywhere; }
 .agent-message-part-space { white-space: pre-wrap; }
@@ -886,7 +890,7 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
   .agent-entry-time .agent-edit-prompt { flex: 0 0 44px; width: 44px; height: 44px; }
 }
 
-.agent-session-search { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--agent-rule); border-radius: 8px; color: var(--agent-ink); background: var(--agent-panel); box-shadow: 0 4px 16px color-mix(in oklab, var(--agent-ink) 12%, transparent); font-size: 12px; }
+.agent-session-search { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--agent-rule); border-radius: 8px; color: var(--agent-ink); background: var(--agent-panel); box-shadow: 0 4px 16px color-mix(in oklab, var(--agent-shadow-ink) 12%, transparent); font-size: 12px; }
 .agent-session-search-input { display: flex; align-items: center; gap: 4px; min-width: 0; flex: none; }
 .agent-session-search-input input { flex: 1; min-width: 0; width: 0; min-height: 34px; padding: 6px 8px; border: 1px solid var(--agent-rule); border-radius: 5px; color: inherit; background: var(--agent-panel); font: inherit; font-size: 16px; }
 .agent-session-search-input button { display: inline-grid; place-items: center; flex: none; width: 32px; min-height: 34px; padding: 0; font-size: 18px; }

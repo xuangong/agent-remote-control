@@ -36,6 +36,15 @@ function contrast(a: string, b: string): number {
   const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
   return (high + 0.05) / (low + 0.05);
 }
+/** What `color-mix(in srgb, a <weightOfA>, b)` gives for two #rrggbb colors: each 0–255 channel interpolates linearly. */
+function mix(a: string, b: string, weightOfA: number): string {
+  const channels = (hex: string) => {
+    if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`${hex} is not a #rrggbb color`);
+    return [1, 3, 5].map(start => parseInt(hex.slice(start, start + 2), 16));
+  };
+  const other = channels(b);
+  return `#${channels(a).map((value, index) => Math.round(value * weightOfA + other[index]! * (1 - weightOfA)).toString(16).padStart(2, '0')).join('')}`;
+}
 
 /** The sorted names of the tokens whose value is a literal color. */
 function colorNames(tokens: Map<string, string>): string[] {
@@ -61,6 +70,11 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
   expect(contrast(tokens.get('--ui-on-failure')!, tokens.get('--ui-status-failure')!), 'failure ink on failure fill').toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-code-text')!, tokens.get('--ui-code-background')!), 'code text on code background').toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-label')!, tokens.get('--ui-segment-selected')!), 'label on the selected segment').toBeGreaterThanOrEqual(4.5);
+  // The Send button and the Session View's --agent-on-signal set the surface color on the action fill, --ui-accent-text.
+  expect(contrast(tokens.get('--ui-background')!, tokens.get('--ui-accent-text')!), 'surface ink on the action fill').toBeGreaterThanOrEqual(4.5);
+  // app.css mixes --agent-setting-pending-surface from the attention color at 8% over --obs-surface, which is --ui-background.
+  const pending = mix(tokens.get('--ui-status-attention')!, tokens.get('--ui-background')!, 0.08);
+  expect(contrast(tokens.get('--ui-status-attention')!, pending), `attention text on the pending-setting surface ${pending}`).toBeGreaterThanOrEqual(4.5);
   for (const surface of ['--ui-background', '--ui-background-grouped', '--ui-sidebar']) {
     expect(contrast(tokens.get('--ui-control-border')!, tokens.get(surface)!), `control border on ${surface}`).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens.get('--ui-focus-ring')!, tokens.get(surface)!), `focus ring on ${surface}`).toBeGreaterThanOrEqual(3);
@@ -91,17 +105,25 @@ it('maps the Lab variables and the Session View code colors onto the tokens', ()
     expect(value!.trim(), name).toMatch(/^var\(--ui-[\w-]+\)$|^color-mix\(in \w+, var\(--[\w-]+\) \d+%, var\(--[\w-]+\)\)$/);
   }
   const mapping = appRule('.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {');
-  for (const name of ['--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow', '--agent-running']) {
+  for (const name of ['--agent-panel-raised', '--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow',
+    '--agent-shadow-ink', '--agent-backdrop', '--agent-running']) {
     expect(mapping, name).toMatch(new RegExp(`${name}\\s*:\\s*var\\(--ui-`));
   }
+  // The pairs the WCAG test checks as the surface ink on the action fill and as the pending-setting surface.
+  expect(appRule(':root {')).toContain('--obs-surface: var(--ui-background);');
+  expect(appRule(':root {')).toContain('--obs-action: var(--ui-accent-text);');
+  expect(mapping).toContain('--agent-signal: var(--obs-action);');
+  expect(mapping).toContain('--agent-on-signal: var(--obs-surface);');
+  expect(mapping).toContain('--agent-setting-pending-surface: color-mix(in srgb, var(--ui-status-attention) 8%, var(--obs-surface));');
   expect(shared).toMatch(/\.agent-markdown pre \{[^}]*background: var\(--agent-code-block-background\)/);
   expect(shared).toMatch(/\.agent-markdown pre \{[^}]*color: var\(--agent-code-block-text\)/);
 });
 
-it('gives the browser a theme color for each appearance', () => {
+it('gives the browser a theme color and color scheme for each appearance', () => {
   const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />');
   expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1c1e" />');
+  expect(html).toContain('<meta name="color-scheme" content="light dark" />');
   const manifest = JSON.parse(readFileSync(new URL('../../public/app/manifest.webmanifest', import.meta.url), 'utf8')) as Record<string, unknown>;
   expect(manifest).toMatchObject({ background_color: '#ffffff', theme_color: '#ffffff' });
 });

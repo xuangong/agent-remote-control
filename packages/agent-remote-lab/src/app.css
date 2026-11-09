@@ -125,15 +125,17 @@ textarea {
 .lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {
   --agent-canvas: var(--obs-canvas);
   --agent-panel: var(--obs-surface);
-  --agent-panel-raised: var(--obs-surface-selected);
+  --agent-panel-raised: var(--ui-background-elevated);
   --agent-ink: var(--obs-text);
   --agent-muted: var(--obs-text-secondary);
   --agent-rule: var(--obs-border);
   --agent-signal: var(--obs-action);
   --agent-action-text: var(--obs-action);
+  /* The signal fills are the accent text color, light in dark mode, so text on them takes the surface color, as on the Send button. */
+  --agent-on-signal: var(--obs-surface);
   --agent-running: var(--ui-status-working);
   --agent-setting-pending: var(--ui-status-attention);
-  --agent-setting-pending-surface: color-mix(in srgb, var(--ui-status-attention) 12%, var(--obs-surface));
+  --agent-setting-pending-surface: color-mix(in srgb, var(--ui-status-attention) 8%, var(--obs-surface));
   --agent-success: var(--obs-success);
   --agent-success-text: var(--obs-success-text);
   --agent-danger: var(--obs-danger);
@@ -145,6 +147,8 @@ textarea {
   --agent-code-block-text: var(--ui-code-text);
   --agent-code-background: var(--ui-code-background);
   --agent-overlay-shadow: var(--ui-shadow-overlay);
+  --agent-shadow-ink: var(--ui-shadow-ink);
+  --agent-backdrop: var(--ui-backdrop);
 }
 
 .lab-shell {
@@ -432,7 +436,7 @@ textarea {
 .lab-timeline-scroll { display: flex; flex-direction: column-reverse; flex: 1; min-height: 0; padding: 6px clamp(12px, 2cqw, 24px) 12px; overflow-y: auto; overflow-anchor: auto; overscroll-behavior-y: contain; background: var(--obs-surface); }
 /* --lab-search-inset: room above the oldest entry while the floating search panel shows a result (SessionWorkbench). */
 .lab-conversation-content { flex: none; width: 100%; min-height: 100%; max-width: 900px; margin-inline: auto; padding-top: var(--lab-search-inset, 0px); }
-.lab-back-to-latest { position: absolute; z-index: 6; bottom: 12px; left: 50%; transform: translateX(-50%); min-height: 36px; border-radius: 999px; box-shadow: 0 3px 12px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-back-to-latest { position: absolute; z-index: 6; bottom: 12px; left: 50%; transform: translateX(-50%); min-height: 36px; border-radius: 999px; box-shadow: 0 3px 12px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-back-to-latest:active:not(:disabled) { transform: translateX(-50%); }
 .agent-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -855,7 +859,7 @@ textarea {
 .lab-composer-dock .agent-activity[data-active="false"] { display: none; }
 .lab-composer-dock .agent-activity + button[data-testid="prompt-submit"] { margin-left: auto; }
 .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
-.lab-composer-dock .agent-composer > .agent-composer-note[role="status"] { position: absolute; bottom: calc(100% + 6px); right: 0; max-width: 100%; max-height: 100px; overflow: auto; padding: 5px 9px; border: 1px solid var(--obs-border); border-radius: 6px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 8%, transparent); }
+.lab-composer-dock .agent-composer > .agent-composer-note[role="status"] { position: absolute; bottom: calc(100% + 6px); right: 0; max-width: 100%; max-height: 100px; overflow: auto; padding: 5px 9px; border: 1px solid var(--obs-border); border-radius: 6px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 8%, transparent); }
 .lab-composer-dock .agent-session-panel .agent-composer-note[role="status"] { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
 .lab-composer-dock .agent-planning-control { margin-bottom: 12px; }
 .lab-composer-dock .agent-composer-attachments { padding: 2px 6px; }
@@ -962,7 +966,7 @@ textarea {
 .lab-fork-symbol { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; font-size: 17px; }
 .lab-fork-symbol > span { position: absolute; bottom: -1px; right: -3px; display: flex; background: var(--obs-surface); border-radius: 3px; }
 .lab-fork-symbol svg { width: 11px; height: 11px; }
-.lab-fork-reference-details { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); width: min(320px, 70vw); display: grid; gap: 7px; padding: 12px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-fork-reference-details { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); width: min(320px, 70vw); display: grid; gap: 7px; padding: 12px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-fork-reference-details p { margin: 0; color: var(--obs-text-secondary); }
 .lab-fork-reference-details code, .lab-fork-reference-details small { overflow-wrap: anywhere; color: var(--obs-text-secondary); }
 .lab-fork-reference-details button { justify-self: start; }
@@ -1019,7 +1023,7 @@ textarea {
   .lab-context-rail > .lab-rail-heading { display: none; }
   .lab-session-panel-actions { display: flex; gap: 4px; margin: 8px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); padding: 3px; border-radius: 10px; background: var(--obs-canvas); }
   .lab-session-panel-actions button { flex: 1; min-width: 0; min-height: 44px; padding: 8px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 13px; }
-  .lab-session-panel-actions button[aria-pressed="true"] { background: var(--obs-surface); color: var(--obs-action); box-shadow: 0 1px 3px color-mix(in oklab, var(--obs-text) 10%, transparent); font-weight: 600; }
+  .lab-session-panel-actions button[aria-pressed="true"] { background: var(--obs-surface); color: var(--obs-action); box-shadow: 0 1px 3px color-mix(in oklab, var(--ui-shadow-ink) 10%, transparent); font-weight: 600; }
   .lab-mobile-settings { min-width: 0; overflow-wrap: anywhere; }
   .lab-display-settings { margin-block: 20px; }
   .lab-display-settings h2 { margin: 0 0 12px; font-size: 1rem; }
@@ -1253,7 +1257,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-tracking-floating {
   position: fixed; right: 12px; top: calc(60px + env(safe-area-inset-top, 0px)); z-index: 146; }
 .lab-tracking-floating:has(.lab-session-popover-panel:not([hidden])) { z-index: 148; }
-.lab-tracking-floating button.lab-session-popover-trigger { --tracking-edge-color: var(--obs-control-border); border-color: var(--tracking-edge-color); border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
+.lab-tracking-floating button.lab-session-popover-trigger { --tracking-edge-color: var(--obs-control-border); border-color: var(--tracking-edge-color); border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--ui-shadow-ink) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
 .lab-tracking-floating button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
 .lab-tracking-floating .lab-session-popover-trigger:active { cursor: grabbing; }
 .lab-tracking-floating .lab-session-popover-panel { position: fixed; left: var(--tracking-panel-left); right: auto; top: var(--tracking-panel-top); bottom: var(--tracking-panel-bottom); width: var(--tracking-panel-width); max-height: var(--tracking-panel-height); }
@@ -1522,14 +1526,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-tools-content { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
 .lab-timeline-session-tools { display: contents; }
 .lab-timeline-session-tools > * { background: var(--obs-surface); border-radius: 8px; }
-.lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); }
+.lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 6%, transparent); }
 .lab-timeline-tools:has(.lab-timeline-session-tools:not(:empty)) .lab-timeline-search-trigger { border-color: transparent; }
 .lab-timeline-tools[data-collapsible] { --lab-tools-duration: 220ms; --lab-tools-easing: cubic-bezier(.16, 1, .3, 1); right: max(0px, env(safe-area-inset-right)); transform: translateX(-12px); transition: transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { position: relative; border-right: 0; border-radius: 10px 0 0 10px; transform-origin: right center; transition: opacity 160ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing), visibility 0s; }
 .lab-timeline-tools-toggle { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 10px; color: var(--obs-text-secondary); background: transparent; pointer-events: auto; }
 .lab-timeline-tools-toggle::before, .lab-timeline-tools-toggle::after { content: ''; position: absolute; pointer-events: none; border: 1px solid var(--obs-border); background: var(--obs-surface); transition: opacity var(--lab-tools-duration) var(--lab-tools-easing), transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle::before { inset: 0; border-left: 0; border-radius: 0 10px 10px 0; }
-.lab-timeline-tools-toggle::after { inset: 0 0 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); opacity: 0; transform: translateX(-4px); }
+.lab-timeline-tools-toggle::after { inset: 0 0 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 6%, transparent); opacity: 0; transform: translateX(-4px); }
 .lab-timeline-tools-toggle > svg { position: relative; z-index: 1; transition: transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle :is(.lab-timeline-tools-expand-icon, .lab-timeline-tools-collapse-icon) { transform-origin: center; transition: opacity 140ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-expand-icon { opacity: 0; transform: scale(.8); }
@@ -1585,7 +1589,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-ref-add { position: relative; flex: none; min-width: 24px; height: 18px; min-height: 18px; margin-bottom: 4px; padding: 0 6px; border: 1px dashed var(--obs-control-border); border-radius: 5px; background: transparent; color: var(--obs-text-secondary); font-size: 13px; line-height: 1; }
 .lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 /* The list takes the room left, so the title, filter and Cancel stay in view and the sessions scroll. */
-.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-session-ref-picker > * { flex: none; }
 .lab-session-ref-picker ul { display: grid; flex: 0 1 auto; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
 .lab-session-ref-picker li button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--obs-text); text-align: left; }

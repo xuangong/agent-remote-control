@@ -11,7 +11,7 @@
 .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane { transition: transform 200ms cubic-bezier(.2,.8,.2,1); }
 .lab-session-dock-rail[data-dock-reordering] > .lab-session-dock-pane[data-dragging] {
   z-index: 60; transition: none; cursor: grabbing;
-  box-shadow: 0 4px 20px color-mix(in oklab, var(--obs-text) 16%, transparent), inset 0 0 0 1px var(--obs-action);
+  box-shadow: 0 4px 20px color-mix(in oklab, var(--ui-shadow-ink) 16%, transparent), inset 0 0 0 1px var(--obs-action);
 }
 .lab-session-dock-pane [data-session-title-draggable], .lab-session-dock-pane [data-session-title-draggable] .agent-session-title,
 [data-session-title-draggable] .lab-tpm-title-button { touch-action: none; cursor: grab; user-select: none; }

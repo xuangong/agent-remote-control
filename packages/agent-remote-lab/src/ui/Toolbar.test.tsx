@@ -6,6 +6,7 @@ it('shows the current object as a heading on the left and its actions on the rig
   const container = await render(<Toolbar leading={<span data-testid="avatar" />} title="API caching" subtitle="Backend review · Idle"
     trailing={<button type="button">Threads</button>} />);
   const bar = container.querySelector('header.ui-toolbar')!;
+  expect([...bar.children].map(child => child.className)).toEqual(['ui-toolbar-leading', 'ui-toolbar-heading', 'ui-toolbar-trailing']);
   expect(bar.querySelector('[data-testid="avatar"]')).not.toBeNull();
   expect(bar.querySelector('h2.ui-toolbar-title')?.textContent).toBe('API caching');
   expect(bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('Backend review · Idle');

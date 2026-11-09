@@ -21,6 +21,14 @@
   --agent-code-block-background: #17212b;
   --agent-code-block-text: #fbfdff;
   --agent-code-background: #f3f6f9;
+  /* The read-only source viewer's syntax colors, close to CodeMirror's default highlight style. */
+  --agent-syntax-keyword: #770088;
+  --agent-syntax-string: #aa1111;
+  --agent-syntax-literal: #116644;
+  --agent-syntax-comment: #994400;
+  --agent-syntax-type: #008855;
+  --agent-syntax-definition: #0000ff;
+  --agent-syntax-invalid: #ff0000;
   --agent-overlay-shadow: 0 8px 24px oklch(0.2 0.01 248 / 0.1);
   /* Shadows and backdrops mix from these rather than from --agent-ink, so a host whose ink is light can keep them dark. */
   --agent-shadow-ink: var(--agent-ink);
@@ -613,7 +621,7 @@
 .agent-skill-tag { display: inline-flex; max-width: 100%; align-items: center; border: 1px solid var(--agent-rule); border-radius: 6px; overflow: hidden; background: var(--agent-panel); }
 .agent-composer .agent-skill-tag button { border: 0; border-radius: 0; min-height: 30px; background: transparent; color: var(--agent-ink); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .agent-skill-tag button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.agent-composer .agent-skill-tag button:hover:not(:disabled) { background: var(--agent-panel-raised); color: var(--agent-ink); }
+.agent-composer .agent-skill-tag button:hover:not(:disabled) { background: var(--agent-surface-selected); color: var(--agent-ink); }
 .agent-command-details { min-width: 0; min-height: 0; overflow-wrap: anywhere; display: flex; flex-direction: column; background: var(--agent-panel-raised); color: var(--agent-ink); }
 .agent-command-details > header > div { min-width: 0; }
 .agent-command-details > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--agent-rule); }
@@ -843,7 +851,7 @@ body:has(.agent-image-preview[open]) { overflow: hidden; }
 .agent-image-preview-actions { display: flex; align-items: center; gap: 8px; }
 .agent-image-preview .agent-image-preview-remove { margin-right: auto; border-color: transparent; background: transparent; color: var(--agent-danger); }
 .agent-image-preview .agent-image-preview-retry { background: var(--agent-signal); border-color: var(--agent-signal); color: var(--agent-on-signal); }
-.agent-image-preview .agent-image-preview-retry:hover:not(:disabled) { background: var(--agent-action-text); }
+.agent-image-preview .agent-image-preview-retry:hover:not(:disabled) { background: var(--agent-action-text); color: var(--agent-on-signal); }
 .agent-message-ordered-content { overflow-wrap: anywhere; }
 .agent-message-part-space { white-space: pre-wrap; }
 .agent-message-text-part { display: contents; }

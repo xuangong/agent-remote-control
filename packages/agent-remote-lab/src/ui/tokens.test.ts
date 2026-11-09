@@ -53,6 +53,7 @@ function colorNames(tokens: Map<string, string>): string[] {
 const colorTokens = colorNames(light);
 const surfaces = ['--ui-background', '--ui-background-grouped', '--ui-background-elevated', '--ui-sidebar', '--ui-selection'];
 const texts = ['--ui-label', '--ui-label-secondary', '--ui-accent-text', '--ui-status-failure', '--ui-status-success', '--ui-status-attention', '--ui-status-working'];
+const syntaxColors = ['--ui-syntax-keyword', '--ui-syntax-string', '--ui-syntax-literal', '--ui-syntax-comment', '--ui-syntax-type', '--ui-syntax-definition'];
 
 it('defines every color token for both appearances', () => {
   expect(colorTokens.length).toBeGreaterThan(20);
@@ -69,6 +70,10 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
   expect(contrast(tokens.get('--ui-on-attention')!, tokens.get('--ui-status-attention')!)).toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-on-failure')!, tokens.get('--ui-status-failure')!), 'failure ink on failure fill').toBeGreaterThanOrEqual(4.5);
   expect(contrast(tokens.get('--ui-code-text')!, tokens.get('--ui-code-background')!), 'code text on code background').toBeGreaterThanOrEqual(4.5);
+  // The read-only source viewer sits on the background, or on the elevated background inside a raised panel.
+  for (const syntax of syntaxColors) for (const surface of ['--ui-background', '--ui-background-elevated']) {
+    expect(contrast(tokens.get(syntax)!, tokens.get(surface)!), `${syntax} on ${surface}`).toBeGreaterThanOrEqual(4.5);
+  }
   expect(contrast(tokens.get('--ui-label')!, tokens.get('--ui-segment-selected')!), 'label on the selected segment').toBeGreaterThanOrEqual(4.5);
   // The Send button and the Session View's --agent-on-signal set the surface color on the action fill, --ui-accent-text.
   expect(contrast(tokens.get('--ui-background')!, tokens.get('--ui-accent-text')!), 'surface ink on the action fill').toBeGreaterThanOrEqual(4.5);

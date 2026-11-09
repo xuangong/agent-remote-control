@@ -146,6 +146,13 @@ textarea {
   --agent-code-block-background: var(--ui-code-background);
   --agent-code-block-text: var(--ui-code-text);
   --agent-code-background: var(--ui-code-background);
+  --agent-syntax-keyword: var(--ui-syntax-keyword);
+  --agent-syntax-string: var(--ui-syntax-string);
+  --agent-syntax-literal: var(--ui-syntax-literal);
+  --agent-syntax-comment: var(--ui-syntax-comment);
+  --agent-syntax-type: var(--ui-syntax-type);
+  --agent-syntax-definition: var(--ui-syntax-definition);
+  --agent-syntax-invalid: var(--ui-status-failure);
   --agent-overlay-shadow: var(--ui-shadow-overlay);
   --agent-shadow-ink: var(--ui-shadow-ink);
   --agent-backdrop: var(--ui-backdrop);

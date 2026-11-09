@@ -6,7 +6,7 @@ import { expect, it } from 'vitest';
 
 const lab = fileURLToPath(new URL('..', import.meta.url));
 const shared = fileURLToPath(new URL('../../../agent-remote-web/src/styles.css', import.meta.url));
-const literal = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch)\(|:\s*(?:white|black)\b/;
+const literal = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|oklch|oklab|lab|lch|color)\(|:\s*(?:white|black)\b/g;
 
 function stylesheets(directory: string): string[] {
   return readdirSync(directory).flatMap(name => {
@@ -14,32 +14,46 @@ function stylesheets(directory: string): string[] {
     return statSync(path).isDirectory() ? stylesheets(path) : name.endsWith('.css') ? [path] : [];
   });
 }
-/** The file's text with every comment blanked out, keeping its line numbers. */
+/** The file's text with every comment blanked out, keeping its offsets and line numbers. */
 function uncommented(path: string): string {
   return readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\//g, comment => comment.replace(/[^\n]/g, ' '));
 }
-/** Lines with a literal color, comments removed; `allowed` skips lines a file may keep. */
-function offenders(path: string, allowed: (line: string) => boolean): string[] {
-  return uncommented(path).split('\n').flatMap((line, index) => literal.test(line) && !allowed(line) ? [`${path}:${index + 1}: ${line.trim().slice(0, 120)}`] : []);
+/** The offsets of the flat rule from `opening` through its first `}`; throws when either is missing. */
+function block(path: string, text: string, opening: string): { start: number; end: number } {
+  const start = text.indexOf(opening);
+  if (start < 0) throw new Error(`${path} has no "${opening}"`);
+  const end = text.indexOf('}', start);
+  if (end < 0) throw new Error(`${path} has no "}" after "${opening}"`);
+  return { start, end: end + 1 };
+}
+/** Each literal color as `path:line: text`, comments removed, except inside the rules that start with one of `exempt`. */
+function offenders(path: string, exempt: string[] = []): string[] {
+  const text = uncommented(path);
+  const lines = text.split('\n');
+  const kept = exempt.map(opening => block(path, text, opening));
+  // Matching the whole text also catches a declaration split across lines.
+  return [...new Set([...text.matchAll(literal)]
+    .filter(match => !kept.some(({ start, end }) => match.index >= start && match.index < end))
+    .map(match => {
+      const line = text.slice(0, match.index).split('\n').length;
+      return `${path}:${line}: ${lines[line - 1]!.trim().slice(0, 120)}`;
+    }))];
 }
 
 it('keeps every Lab color in the token stylesheet, so dark mode covers it', () => {
-  const found = stylesheets(lab).filter(path => !path.endsWith(join('ui', 'tokens.css'))).flatMap(path => offenders(path, () => false));
+  const found = stylesheets(lab).filter(path => !path.endsWith(join('ui', 'tokens.css'))).flatMap(path => offenders(path));
   expect(found).toEqual([]);
 });
 
 it('keeps the shared Session View colors in its own default variables', () => {
   // HTML file previews render the file itself on white, whatever the appearance.
-  expect(offenders(shared, line => /^\s*--agent-[\w-]+\s*:/.test(line) || line.includes('.agent-file-html'))).toEqual([]);
+  expect(offenders(shared, [':root {', '.agent-file-html {'])).toEqual([]);
 });
 
-/** The `--agent-*` variables a flat rule declares, from `opening` to its first `}`; throws when either is missing. */
+/** The `--agent-*` variables the flat rule from `opening` declares. */
 function declared(path: string, opening: string): string[] {
   const text = uncommented(path);
-  const start = text.indexOf(opening);
-  if (start < 0) throw new Error(`${path} has no "${opening}"`);
-  const end = text.indexOf('}', start);
-  if (end < 0) throw new Error(`${path} has no "}" after "${opening}"`);
+  const { start, end } = block(path, text, opening);
   return [...text.slice(start, end).matchAll(/(--agent-[\w-]+)\s*:/g)].map(match => match[1]!);
 }
 /** Set by the Session View components' inline styles (PreviewWorkspace, TimelineEntry), not by a stylesheet. */

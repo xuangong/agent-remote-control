@@ -127,6 +127,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (client) cache(next.getCommittedGroup());
     if (confirmed) commitImportedWindowComposition(composition, window);
     if (workspaceNavigation && !confirmed) {
+      // Until the service confirms the cached group (it may since have become a section), the page keeps showing
+      // the Window it has; only a page without one waits on "Opening Window…".
+      if (currentStore.current && confirmedStores.has(currentStore.current) && !currentlyUnavailable.current) return;
       selectStore(next); currentlyUnavailable.current = true; setUnavailable(true); setDeleted(false); return;
     }
     try { conversationSessionStorage.setItem(key, window.id); } catch { /* The URL still identifies the chosen Window. */ }
@@ -460,6 +463,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!enabled || !client) return () => { current = false; };
     const restoreHosted = async () => {
       if (!live()) return;
+      // The requested Window is read beside the list rather than after it, so opening waits for one round trip.
+      const requestedSnapshot = requested && foreground.current ? client.inspect(requested) : undefined;
+      void requestedSnapshot?.catch(() => {});
       const all = (await client.listGroups()).filter(group => !selection.deleted.has(group.window.id)); if (!live()) return;
       for (const group of all) {
         const retained = stores.get(group.window.id);
@@ -477,7 +483,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         });
       }
       if (!foreground.current) return;
-      if (requested) { const next = await client.inspect(requested); if (live()) choose(toWindowGroup(next)); return; }
+      if (requested) { const next = await (requestedSnapshot ?? client.inspect(requested)); if (live()) choose(toWindowGroup(next)); return; }
       if (!pendingCreation()) {
         const ids = [...new Set([...preferredIds(), ...list.map(group => group.window.id)])].filter(id => list.some(group => group.window.id === id));
         for (const id of ids) {

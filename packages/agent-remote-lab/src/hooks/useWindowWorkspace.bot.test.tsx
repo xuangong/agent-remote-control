@@ -27,6 +27,14 @@ function server(...initial: WindowGroup[]) {
   vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => { const next = applyGroupOperation(groups.get(id)!, mutation.operation); groups.set(id, next); return { ...next, result: { operationId: mutation.operationId, status: 'committed' as const, revision: next.window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } }; });
   return { groups, inspect, changes, signals };
 }
+it('keeps the open Window on screen while the next one is confirmed, instead of Opening Window', async () => {
+  const backend = server(group('a'), group('b')); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://switch/', true);
+  await act(async () => { await read().open('b'); }); await act(async () => { await read().open('a'); }); expect(read().window?.id).toBe('a');
+  let finish!: (group: WindowGroup) => void; backend.inspect.mockImplementation(() => new Promise(done => { finish = done; }));
+  let opened!: Promise<void>; await act(async () => { opened = read().open('b'); });
+  expect(read().unavailable).toBe(false); expect(read().window?.id).toBe('a'); expect(read().authority).toBeDefined();
+  await act(async () => { finish(group('b')); await opened; }); expect(read().window?.id).toBe('b'); expect(read().unavailable).toBe(false);
+});
 it('acquires, edits and watches B without choosing it over Window A', async () => {
   const a = group('a'), b = group('b', true); const backend = server(a, b); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://test/', true);
   const key = 'agent-remote:recovery:https://test/:shared-window'; const url = location.href;

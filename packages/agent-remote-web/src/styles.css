@@ -17,6 +17,10 @@
   --agent-surface-muted: #f8fafc;
   --agent-surface-danger: #fff4f5;
   --agent-radius: 8px;
+  --agent-code-block-background: #17212b;
+  --agent-code-block-text: #fbfdff;
+  --agent-code-background: #f3f6f9;
+  --agent-overlay-shadow: 0 8px 24px oklch(0.2 0.01 248 / 0.1);
 }
 
 .agent-remote-surface {
@@ -122,7 +126,7 @@
   font-size: .88em;
 }
 .agent-markdown :not(pre) > code { padding: 1px 4px; background: var(--agent-panel-raised); border: 1px solid var(--agent-rule); }
-.agent-markdown pre { overflow: auto; padding: 12px; color: var(--agent-panel); background: var(--agent-ink); border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); }
+.agent-markdown pre { overflow: auto; padding: 12px; color: var(--agent-code-block-text); background: var(--agent-code-block-background); border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); }
 .agent-markdown blockquote { margin-inline: 0; padding-left: 14px; border-left: 3px solid var(--agent-rule); color: var(--agent-muted); }
 .agent-markdown-table { max-width: 100%; margin-block: 1em; overflow-x: auto; border: 1px solid var(--agent-rule); border-radius: var(--agent-radius); }
 .agent-markdown-table:focus-visible { outline: 2px solid var(--agent-signal); outline-offset: 2px; }
@@ -443,11 +447,11 @@
   .agent-composer button { min-height: 40px; }
 }
 
-.agent-tool-result { margin-top: 12px; border-top: 1px solid var(--agent-border, #dce3eb); padding-top: 10px; min-width: 0; }
+.agent-tool-result { margin-top: 12px; border-top: 1px solid var(--agent-rule); padding-top: 10px; min-width: 0; }
 .agent-tool-result-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; font-size: 12px; }
-.agent-tool-result-header span, .agent-tool-result-block small, .agent-tool-result-note { color: var(--agent-muted, #526372); }
+.agent-tool-result-header span, .agent-tool-result-block small, .agent-tool-result-note { color: var(--agent-muted); }
 .agent-tool-result-block { min-width: 0; margin-top: 8px; }
-.agent-tool-result-block pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; padding: 10px; background: var(--agent-code-bg, #f3f6f9); border-radius: 6px; font-size: 12px; line-height: 1.5; }
+.agent-tool-result-block pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; padding: 10px; background: var(--agent-code-background); border-radius: 6px; font-size: 12px; line-height: 1.5; }
 .agent-tool-result-note { font-size: 12px; }
 
 .agent-file-changes { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 8px; }

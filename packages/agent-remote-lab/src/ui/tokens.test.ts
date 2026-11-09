@@ -69,3 +69,25 @@ it('turns motion off when the system asks for reduced motion', () => {
   const reduced = block(reducedAt, source.length);
   expect(Object.fromEntries(reduced)).toMatchObject({ '--ui-duration-short': '0ms', '--ui-duration': '0ms' });
 });
+
+const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
+const shared = readFileSync(new URL('../../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+
+it('derives every Lab and Session View variable from the tokens', () => {
+  const root = app.slice(app.indexOf(':root'), app.indexOf('}', app.indexOf(':root')));
+  for (const [, name, value] of root.matchAll(/(--obs-[\w-]+)\s*:\s*([^;]+);/g)) {
+    expect(value, `${name}`).toMatch(/var\(--ui-|color-mix\(/);
+  }
+  const mapping = app.slice(app.indexOf('.lab-shell, .lab-session-view {'), app.indexOf('}', app.indexOf('.lab-shell, .lab-session-view {')));
+  for (const name of ['--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow', '--agent-running']) {
+    expect(mapping, name).toMatch(new RegExp(`${name}\\s*:\\s*var\\(--ui-`));
+  }
+  expect(shared).toMatch(/\.agent-markdown pre \{[^}]*background: var\(--agent-code-block-background\)/);
+  expect(shared).toMatch(/\.agent-markdown pre \{[^}]*color: var\(--agent-code-block-text\)/);
+});
+
+it('gives the browser a theme color for each appearance', () => {
+  const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
+  expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />');
+  expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1c1e" />');
+});

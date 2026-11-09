@@ -1,0 +1,28 @@
+/* Primitives of src/ui. Colors come from ui/tokens.css only. */
+.ui-icon { flex: none; display: block; }
+
+.ui-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 28px; padding: 4px 12px; border: 0; border-radius: var(--ui-radius-control);
+  font: 500 var(--ui-size-callout)/1.2 var(--ui-font); color: var(--ui-label); background: var(--ui-fill);
+  cursor: pointer; transition: background-color var(--ui-duration-short) var(--ui-ease), opacity var(--ui-duration-short) var(--ui-ease);
+}
+.ui-button[data-size="small"] { min-height: 22px; padding: 2px 8px; font-size: var(--ui-size-caption); }
+.ui-button:hover:not(:disabled) { background: var(--ui-fill-strong); }
+.ui-button[data-variant="primary"] { color: var(--ui-on-accent); background: var(--ui-accent); }
+.ui-button[data-variant="primary"]:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-accent) 88%, var(--ui-label)); }
+.ui-button[data-variant="plain"] { color: var(--ui-accent-text); background: transparent; }
+.ui-button[data-variant="plain"]:hover:not(:disabled) { background: var(--ui-fill); }
+.ui-button[data-variant="destructive"] { color: var(--ui-status-failure); background: var(--ui-fill); }
+.ui-button:disabled { opacity: 0.45; cursor: default; }
+
+.ui-icon-button {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0;
+  border-radius: var(--ui-radius-control); color: var(--ui-label-secondary); background: transparent; cursor: pointer;
+  transition: background-color var(--ui-duration-short) var(--ui-ease), color var(--ui-duration-short) var(--ui-ease);
+}
+.ui-icon-button:hover:not(:disabled), .ui-icon-button[aria-expanded="true"] { color: var(--ui-label); background: var(--ui-fill); }
+.ui-icon-button:disabled { opacity: 0.45; cursor: default; }
+
+:where(.ui-button, .ui-icon-button):focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 1px; }
+@media (pointer: coarse) { .ui-icon-button { width: 44px; height: 44px; } .ui-button { min-height: 44px; } }

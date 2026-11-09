@@ -73,12 +73,22 @@ it('turns motion off when the system asks for reduced motion', () => {
 const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
 const shared = readFileSync(new URL('../../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
 
-it('derives every Lab and Session View variable from the tokens', () => {
-  const root = app.slice(app.indexOf(':root'), app.indexOf('}', app.indexOf(':root')));
-  for (const [, name, value] of root.matchAll(/(--obs-[\w-]+)\s*:\s*([^;]+);/g)) {
-    expect(value, `${name}`).toMatch(/var\(--ui-|color-mix\(/);
+/** The app.css text from `opening` up to the first `}` after it; throws when either is missing. */
+function appRule(opening: string): string {
+  const start = app.indexOf(opening);
+  if (start < 0) throw new Error(`app.css has no "${opening}"`);
+  const end = app.indexOf('}', start);
+  if (end < 0) throw new Error(`app.css has no "}" after "${opening}"`);
+  return app.slice(start, end);
+}
+
+it('maps the Lab variables and the Session View code colors onto the tokens', () => {
+  const lab = [...appRule(':root {').matchAll(/(--obs-[\w-]+)\s*:\s*([^;]+);/g)];
+  expect(lab.length, '--obs-* variables in the app.css :root block').toBeGreaterThanOrEqual(20);
+  for (const [, name, value] of lab) {
+    expect(value!.trim(), name).toMatch(/^var\(--ui-[\w-]+\)$|^color-mix\(in \w+, var\(--[\w-]+\) \d+%, var\(--[\w-]+\)\)$/);
   }
-  const mapping = app.slice(app.indexOf('.lab-shell, .lab-session-view {'), app.indexOf('}', app.indexOf('.lab-shell, .lab-session-view {')));
+  const mapping = appRule('.lab-shell, .lab-session-view {');
   for (const name of ['--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow', '--agent-running']) {
     expect(mapping, name).toMatch(new RegExp(`${name}\\s*:\\s*var\\(--ui-`));
   }
@@ -90,4 +100,6 @@ it('gives the browser a theme color for each appearance', () => {
   const html = readFileSync(new URL('../../index.html', import.meta.url), 'utf8');
   expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />');
   expect(html).toContain('<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1c1c1e" />');
+  const manifest = JSON.parse(readFileSync(new URL('../../public/app/manifest.webmanifest', import.meta.url), 'utf8')) as Record<string, unknown>;
+  expect(manifest).toMatchObject({ background_color: '#ffffff', theme_color: '#ffffff' });
 });

@@ -104,6 +104,15 @@ profiles with the user's own Controller.
   rename any other session. Claude Code sessions are sandboxed in the instance;
   Codex and Copilot sessions run with their own permissions and are confined only
   by their working directory, so keep their prompts inside the workspace.
+- **Release your Codex sessions.** Codex sessions run in the user's own shared
+  Codex daemon, and each loaded one keeps its MCP servers running there. When you
+  are done with a Codex session you created, run
+  `agent-remote-controller-dev session release <address>`; the daemon unloads it
+  and stops its MCP servers about a minute later.
+- **Sessions follow the user's own instructions.** They load the user's global
+  `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which may add to every reply
+  (a translation, for example). Check that a reply contains what you expect,
+  never that it equals it.
 - **The user's own Controller.** Never stop, update, re-pair or reconfigure it
   (`~/.agent-remote-control/agents-cloud-cli`, its launchd service), and never
   touch the production site. Operate this instance only through `pnpm local` and

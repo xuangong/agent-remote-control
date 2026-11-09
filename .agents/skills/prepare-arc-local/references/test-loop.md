@@ -32,6 +32,9 @@ Repeat it after every fix: change, `up`, check, until the check passes.
    access), it is not a failure: handle it as the provider row of
    [Stop and ask the user](../SKILL.md#stop-and-ask-the-user) (stop and ask; the
    Model turn is not exercised).
+   A Codex session stays loaded in the user's shared Codex daemon with its MCP
+   servers; release each one you created when the test no longer needs it
+   ([Release your Codex sessions](../SKILL.md#safety-rules)).
 4. When the change shows in the page, open the session there:
    `session link <address>` gives its URL for `pnpm local screenshot` (see
    [command line](cli.md#see-it-in-the-page)); read the image. When the change is in
@@ -46,7 +49,9 @@ Repeat it after every fix: change, `up`, check, until the check passes.
    opens a new session there, sends the `LOCAL-OK` prompt and waits up to two
    minutes for the reply in an assistant message (`.agent-message-assistant`) of
    that view only. It saves `session-created.png` and `turn-reply.png` (or
-   `turn-timeout.png`) under `.tmp/local/`; read them.
+   `turn-timeout.png`) under `.tmp/local/`; read them. The reply screenshot is
+   taken as soon as the reply appears, so its composer may still show
+   `Working`; the reply in the view is the evidence.
 
    When you write your own page steps (see [browser](browser.md)), keep that
    script's two safeguards. A Window can hold several views, and another view may
@@ -55,8 +60,8 @@ Repeat it after every fix: change, `up`, check, until the check passes.
    change (such as "no messages yet") stops matching once you act. And the
    expected answer must not appear in the prompt, or your own message satisfies
    the check.
-5. Exercise the behaviour under change through the page controls — Window, Side,
-   Team, references and so on — with a screenshot of each state your conclusion
+5. Exercise the behaviour under change through the page controls — Window, Bot
+   mode, Side, Team, references and so on — with a screenshot of each state your conclusion
    rests on and a DOM assertion for each text or state change. Command line
    calls may prepare the state and read the result; they do not replace the page
    control under test.

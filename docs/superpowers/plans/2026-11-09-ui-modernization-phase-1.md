@@ -1665,3 +1665,16 @@ git commit -m "chore: update compatibility for the UI tokens and primitives
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+---
+
+## Changes made during execution
+
+Tasks 9–12 above are the plan as written. Reviews and checks in headless Chromium (and WebKit for the sheet) changed the committed primitives as follows:
+
+- **ListRow.** The doubled class `.ui-list-row.ui-list-row` outranks the Lab's global `button` rules (padding, border, hover colors, the 1px press offset, focus ring, coarse-pointer minimums). The accessible name is the title (`aria-labelledby`); the subtitle and the trailing accessory are its description, so tests and assistive technology find a row by the bot's name. `leading` and `trailing` must not contain interactive elements. A disabled selected row keeps its selection.
+- **Menu.** Item rules start with `.ui-menu .ui-menu-item[role="menuitem"]` to outrank the global button rules. Hovering an item focuses it, so exactly one item is highlighted; a pointer opens the menu without a highlight, the keyboard on the first or last item. Escape and the handled navigation keys stop propagation; Escape, Tab and choosing an item return focus to the button before the action runs. Only a scroll that moves the button closes the menu (streaming timelines elsewhere scroll constantly); a resize places it again; the window losing focus closes it. The menu portals into the dialog that holds its button, so a modal dialog does not make it inert. `placeMenu` puts it below or above the button inside the viewport, before focus moves, and again once a host's entry animation ends. Items are keyed by label, and focus stays in the menu when its items change. The `trigger` prop was dropped. Forced colors keep the focused item, separators and disabled items visible.
+- **Sheet.** Detents are heights (`50dvh`, `100dvh - 44px`), not caps. Only a press that starts on the backdrop, outside the sheet's box and with no menu open, dismisses it. The native `close` event reports a close the browser makes on its own and is ignored once the sheet is open again; a layout-effect cleanup closes the dialog when the sheet unmounts open, so the browser returns focus. The sheet is named by its heading and its close button is "Close". `overflow: clip`; forced colors keep its edge.
+- **Toolbar.** The title is an `<h2>`: existing Playwright tests find the bot's name as a heading.
+- **Segmented control and buttons.** The `--ui-segment-selected` token (`#ffffff` / `#636366`) raises the selected segment in dark mode, where the elevated background was darker than the track. `.ui-button` and `.ui-icon-button` no longer take the global 1px press offset.
+- **Verification.** The local instance remembers Bot mode, so the screenshot script opens Window mode with `/?mode=window`; it also captures a 390×844 phone viewport.

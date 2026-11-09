@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const colors = {
   running: 'rgb(26, 116, 49)',
-  waiting: 'oklch(0.52 0.108 87)',
+  waiting: 'rgb(201, 52, 0)',
   idle: 'rgb(29, 29, 31)',
   closed: 'rgb(99, 99, 102)',
 };

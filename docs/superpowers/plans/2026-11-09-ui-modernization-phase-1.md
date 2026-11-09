@@ -51,9 +51,10 @@ Spec: `docs/superpowers/specs/2026-11-09-ui-modernization-design.md` (phase 1).
 
 - [ ] **Step 1: Write the failing test**
 
-`packages/agent-remote-lab/src/ui/tokens.test.ts`:
+`packages/agent-remote-lab/src/ui/tokens.test.ts` (it reads files through `import.meta.url`; under the package's default jsdom environment Vite rewrites that URL to http, so it runs in the node environment):
 
 ```ts
+// @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 
@@ -138,11 +139,11 @@ Expected: FAIL with `ENOENT: no such file or directory, open '…/src/ui/tokens.
   --ui-accent: #0071e3;
   --ui-accent-text: #0066cc;
   --ui-on-accent: #ffffff;
-  --ui-focus-ring: rgb(0 113 227 / 0.5);
+  --ui-focus-ring: #0071e3;
 
   --ui-status-attention: #c93400;
   --ui-on-attention: #ffffff;
-  --ui-status-working: #0071e3;
+  --ui-status-working: #0066cc;
   --ui-status-success: #1a7431;
   --ui-status-failure: #d70015;
 
@@ -191,7 +192,7 @@ Expected: FAIL with `ENOENT: no such file or directory, open '…/src/ui/tokens.
     --ui-accent: #0071e3;
     --ui-accent-text: #409cff;
     --ui-on-accent: #ffffff;
-    --ui-focus-ring: rgb(64 156 255 / 0.6);
+    --ui-focus-ring: #409cff;
 
     --ui-status-attention: #ffb340;
     --ui-on-attention: #000000;
@@ -412,9 +413,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing test**
 
-`packages/agent-remote-lab/src/ui/stylesheets.test.ts`:
+`packages/agent-remote-lab/src/ui/stylesheets.test.ts` (it reads files through `import.meta.url`, so it runs in the node environment like `tokens.test.ts`):
 
 ```ts
+// @vitest-environment node
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -109,3 +109,8 @@
 .ui-menu-item-spacer { width: 16px; flex: none; }
 .ui-menu-separator { height: 1px; margin: 4px 8px; background: var(--ui-separator); }
 @media (pointer: coarse) { .ui-menu .ui-menu-item[role="menuitem"] { min-height: 44px; font-size: 15px; } }
+/* Forced colors drop backgrounds and shadows: keep the focused item and the menu's edge visible. */
+@media (forced-colors: active) {
+  .ui-menu { border: 1px solid CanvasText; }
+  .ui-menu .ui-menu-item[role="menuitem"]:not([aria-disabled="true"]):focus { forced-color-adjust: none; color: HighlightText; background: Highlight; }
+}

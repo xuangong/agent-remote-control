@@ -263,10 +263,10 @@ const shared = readFileSync(new URL('../../../agent-remote-web/src/styles.css', 
 
 it('derives every Lab and Session View variable from the tokens', () => {
   const root = app.slice(app.indexOf(':root'), app.indexOf('}', app.indexOf(':root')));
-  for (const [name, value] of root.matchAll(/(--obs-[\w-]+)\s*:\s*([^;]+);/g)) {
+  for (const [, name, value] of root.matchAll(/(--obs-[\w-]+)\s*:\s*([^;]+);/g)) {
     expect(value, `${name}`).toMatch(/var\(--ui-|color-mix\(/);
   }
-  const mapping = app.slice(app.indexOf('.lab-shell, .lab-session-view {'), app.indexOf('}', app.indexOf('.lab-shell, .lab-session-view {')));
+  const mapping = app.slice(app.indexOf('.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {'), app.indexOf('}', app.indexOf('.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {')));
   for (const name of ['--agent-code-block-background', '--agent-code-block-text', '--agent-code-background', '--agent-overlay-shadow', '--agent-running']) {
     expect(mapping, name).toMatch(new RegExp(`${name}\\s*:\\s*var\\(--ui-`));
   }
@@ -326,10 +326,10 @@ In `packages/agent-remote-lab/src/app.css`, replace lines 14–43 (from `:root {
 
 - [ ] **Step 4: Map the Session View variables in the Lab**
 
-In `packages/agent-remote-lab/src/app.css`, replace the `.lab-shell, .lab-session-view { … }` block with:
+In `packages/agent-remote-lab/src/app.css`, replace the `.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser { … }` block with:
 
 ```css
-.lab-shell, .lab-session-view {
+.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {
   --agent-canvas: var(--obs-canvas);
   --agent-panel: var(--obs-surface);
   --agent-panel-raised: var(--obs-surface-selected);

@@ -24,7 +24,7 @@
 
   --ui-status-attention: #c93400;
   --ui-on-attention: #ffffff;
-  --ui-status-working: #0066cc;
+  --ui-status-working: #0066cc; /* Used as text (running state), so it shares the accessible accent text color */
   --ui-status-success: #1a7431;
   --ui-status-failure: #d70015;
 

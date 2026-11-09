@@ -11,15 +11,18 @@ function find(text: string, from = 0): number {
   return index;
 }
 
-/** The declarations of the first `:root` block after `start` in the token stylesheet. */
-function block(start: number): Map<string, string> {
-  const open = find(':root', start);
-  // Assumes a flat `:root` block: the body ends at the first `}`.
-  const body = source.slice(find('{', open) + 1, find('}', open));
+/** The declarations of the first `:root` block in the token stylesheet; throws unless it lies wholly between `from` and `to`. */
+function block(from: number, to: number): Map<string, string> {
+  const open = find(':root', from);
+  const close = find('}', open); // Assumes a flat `:root` block: it ends at the first `}`.
+  if (close >= to) throw new Error(`tokens.css has no :root block between offsets ${from} and ${to}`);
+  const body = source.slice(find('{', open) + 1, close);
   return new Map([...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(match => [match[1]!, match[2]!.trim()]));
 }
-const light = block(0);
-const dark = block(find('@media (prefers-color-scheme: dark)'));
+const darkAt = find('@media (prefers-color-scheme: dark)');
+const reducedAt = find('@media (prefers-reduced-motion: reduce)');
+const light = block(0, darkAt);
+const dark = block(darkAt, reducedAt);
 
 function luminance(hex: string): number {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`${hex} is not a #rrggbb color`);
@@ -63,6 +66,6 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
 });
 
 it('turns motion off when the system asks for reduced motion', () => {
-  const reduced = block(find('@media (prefers-reduced-motion: reduce)'));
+  const reduced = block(reducedAt, source.length);
   expect(Object.fromEntries(reduced)).toMatchObject({ '--ui-duration-short': '0ms', '--ui-duration': '0ms' });
 });

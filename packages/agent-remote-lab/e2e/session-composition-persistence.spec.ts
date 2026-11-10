@@ -17,6 +17,12 @@ async function send(pane: Locator, text: string) {
   await pane.getByTestId('prompt-input').press('Enter');
 }
 
+/** The composer accepts a draft while a new session opens, then hides for a moment as it attaches, which drops focus and typed text; wait until the session is ready. */
+async function expectReady(pane: Locator) {
+  await expect(pane.getByTestId('prompt-input')).toBeEnabled();
+  await expect(pane.getByLabel('Agent activity', { exact: true })).toContainText('Ready');
+}
+
 async function expectDraft(input: Locator, text: string) {
   await expect(input).toHaveCount(1);
   if (await input.evaluate(element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) await expect(input).toHaveValue(text);
@@ -63,7 +69,7 @@ for (const source of ['primary', 'side'] as const) {
     await page.getByTestId('session-create').click();
     const primaryIdentity = await primaryCreated;
     const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
-    await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+    await expectReady(primary);
     await send(primary, primaryHistory);
     await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
 
@@ -135,7 +141,7 @@ async function openSideFixture(page: Page, isMobile: boolean) {
   await page.getByTestId('session-create').click();
   const primaryIdentity = await creation;
   const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
-  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+  await expectReady(primary);
   await send(primary, primaryHistory);
   await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
   const sideCreation = createdSession();
@@ -202,12 +208,15 @@ test('a delayed Side snapshot does not block restoring its saved Ask native sess
 test('reload does not reopen a Side that was closed before leaving the page', async ({ page, isMobile }) => {
   const fixture = await openSideFixture(page, isMobile);
   const sideId = (await savedWindow(page)).views.find(view => view.binding?.nativeSessionId === fixture.sideIdentity.nativeSessionId)!.id;
+  // A visible desktop sidebar lists this Window's views itself; otherwise the floating Windows panel does.
+  const sidebar = page.locator('#lab-context');
+  const inSidebar = !isMobile && await sidebar.isVisible();
   const windowMode = page.locator('[data-workbench-mode="window"]');
-  await windowMode.getByRole('button', { name: 'Windows', exact: true }).click();
-  const menu = windowMode.getByRole('region', { name: 'Windows', exact: true });
+  if (!inSidebar) await windowMode.getByRole('button', { name: 'Windows', exact: true }).click();
+  const menu = inSidebar ? sidebar.locator('.lab-window-workspaces') : windowMode.getByRole('region', { name: 'Windows', exact: true });
   await menu.locator(`[data-window-view-close=${JSON.stringify(sideId)}]`).click();
   await expect.poll(async () => (await savedWindow(page)).views.some(view => view.id === sideId)).toBe(false);
-  await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
+  if (!inSidebar) await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
   await expect(fixture.side).toBeHidden();
   await page.reload();
   await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
@@ -244,6 +253,8 @@ for (const choice of ['primary', 'another session'] as const) {
       await fixture.primary.locator('.agent-message-assistant').last().click();
       await expect(page).toHaveURL(url => url.searchParams.get('session') === fixture.primaryIdentity.nativeSessionId);
     } else {
+      // Opening a session binds the selected view, which the fixture left on the Side; select the main view so the chosen session replaces the composition.
+      await fixture.primary.getByTestId('prompt-input').click();
       const directory = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions', exact: true });
       const refresh = directory.getByRole('button', { name: 'Refresh', exact: true });
       const welcome = directory.locator('.lab-session-row').filter({ has: page.getByText('Recorded welcome session', { exact: true }) });
@@ -288,9 +299,10 @@ test('refresh during an unavailable Side restoration retains its composition and
     } else await route.continue();
   });
   await page.reload();
-  await expect(page.getByRole('alert')).toContainText('Recorded Side temporarily unavailable');
+  // A Side is an attached Window pane: it keeps its place and shows why it could not reopen.
+  await expect(fixture.side.getByRole('alert')).toContainText('Recorded Side temporarily unavailable');
   await expectDraft(fixture.primary.getByTestId('prompt-input'), primaryDraft);
-  await expect(fixture.side).toHaveCount(0);
+  await expect(fixture.side).toHaveCount(1);
   expect(fixture.attachments.filter(id => id === fixture.sideIdentity.nativeSessionId)).toHaveLength(1);
   unavailable = false;
   await page.reload();
@@ -322,10 +334,11 @@ test('a terminal nested Side failure preserves the saved path without moving foc
     } else await route.continue();
   });
   await page.reload();
-  await expect(page.getByRole('alert')).toContainText('Recorded nested Side is unavailable');
+  // The nested Side keeps its pane and shows why it could not reopen.
+  await expect(nested.getByRole('alert')).toContainText('Recorded nested Side is unavailable');
   await expect(middle.locator('.agent-message-assistant').last()).toContainText(sideHistory);
   await expect(page).toHaveURL(location);
-  await expect(nested).toHaveCount(0);
+  await expect(nested).toHaveCount(1);
   unavailable = false;
   await page.reload();
   await expect(nested).toBeVisible();
@@ -338,27 +351,16 @@ test('a terminal nested Side failure preserves the saved path without moving foc
 for (const keepOpened of [false, true]) {
   test(`restored native bindings keep their drafts when the opened list is ${keepOpened ? 'stale' : 'absent'}`, async ({ page, isMobile }) => {
     const fixture = await openSideFixture(page, isMobile);
+    // The legacy path-shaped composition is imported once (session-composition.test.ts). Today the Window and composition
+    // documents bind views by native session and key drafts by view, so the opened list's agent ids are only a catalogue
+    // that may be missing or stale after the Host gave the sessions new agents.
     await page.evaluate(keepOpened => {
       window.dispatchEvent(new PageTransitionEvent('pagehide'));
-      const compositionKey = Object.keys(sessionStorage).find(key => key.endsWith(':composition'))!;
-      const composition = JSON.parse(sessionStorage.getItem(compositionKey)!);
-      const draftKey = Object.keys(sessionStorage).find(key => key.endsWith(':drafts') && !key.endsWith(':ask:drafts'))!;
-      const drafts = JSON.parse(sessionStorage.getItem(draftKey)!);
-      const oldIds = new Map<string, string>();
-      for (const [index, item] of composition.path.entries()) {
-        const oldId = `previous-binding-${index}`;
-        oldIds.set(item.agentId, oldId);
-        drafts[oldId] = drafts[item.agentId];
-        delete drafts[item.agentId];
-        item.agentId = oldId;
-      }
-      sessionStorage.setItem(draftKey, JSON.stringify(drafts));
-      sessionStorage.setItem(compositionKey, JSON.stringify(composition));
       const openedKey = Object.keys(localStorage).find(key => key.startsWith('agent-remote-opened:'))!;
       if (!keepOpened) localStorage.removeItem(openedKey);
       else {
-        const opened = JSON.parse(localStorage.getItem(openedKey)!);
-        for (const item of opened) item.agentId = oldIds.get(item.agentId) ?? item.agentId;
+        const opened = JSON.parse(localStorage.getItem(openedKey)!) as Array<{ agentId: string }>;
+        for (const [index, item] of opened.entries()) item.agentId = `previous-binding-${index}`;
         localStorage.setItem(openedKey, JSON.stringify(opened));
       }
     }, keepOpened);
@@ -387,7 +389,7 @@ for (const action of ['focus', 'Ask'] as const) {
       await page.getByTestId('session-create').click();
       const identity = await (await created).json() as { nativeSessionId: string };
       const primary = page.locator('[data-workbench-mode="window"] .lab-primary-conversation .lab-session-view');
-      await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+      await expectReady(primary);
       await send(primary, primaryHistory);
       await expect(primary.locator('.agent-message-assistant').last()).toContainText(primaryHistory);
       await send(primary, '/ask');

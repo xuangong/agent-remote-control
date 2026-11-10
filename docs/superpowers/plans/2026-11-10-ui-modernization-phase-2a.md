@@ -840,3 +840,41 @@ git commit -m "feat(lab): give the Window sidebar the sidebar colors"
 - [ ] **Step 4:** From the worktree root: `pnpm compatibility:update` then `pnpm compatibility:check` → `Compatibility verified`; commit `packages/agent-remote-lab/compatibility.json` with "chore: update compatibility for the shell frame".
 - [ ] **Step 5: Real sessions.** On the worktree's local instance (`prepare-arc-local`), run one Claude Code turn from the command line and one through the page in each mode, switch modes with the sidebar switch and with ⌥⌘1 / ⌥⌘2, collapse and restore each sidebar with ⌘\ and with the Bot toolbar button, create a section from the **+** button and a session from the **New** menu, and screenshot desktop and phone in light and dark. Report per the skill's verification layers.
 - [ ] **Step 6:** Record any deviation from this plan at the end of this file under "Changes made during execution" and commit it.
+
+---
+
+## Changes made during execution
+
+- **Tasks 1–4.** Review follow-ups (5d724a70):
+  - In forced colors, a current row's subtitle inherits HighlightText.
+  - Focus rings on the current row and on the selected segment use system colors.
+  - Disabled buttons get a GrayText edge.
+- **Task 6.** The browser test found three places where the Lab containers still beat the primitives, all fixed in `ui.css` with `button.`-prefixed (0,2,1) rules (028eca9c, b190e4fd):
+  - border color;
+  - the IconButton's font inside the composer;
+  - on a coarse pointer, the minimum sizes. Rows were 44px instead of 52px, and buttons got `min-width: 44px`.
+  The test compares about 13 properties per primitive, on fine and coarse pointers.
+- **Task 7.** The toolbar title's focus rule is `.ui-toolbar .ui-toolbar-title:focus` (0,3,0), so it wins over `.lab-bot-workspace :focus-visible` whatever order the stylesheets load in.
+- **Task 8.** `applePlatform()` moved to `src/platform.ts`. The shortcuts:
+  - ignore key repeats and open dialogs;
+  - skip AltGraph only on platforms other than Apple, where they also require `key` to be the digit, because left Ctrl+Alt acts as AltGr on Windows (4285d660).
+- **Task 9.** New session paths are unified:
+  - One `openNewSessionPanel()` serves the + menu, the sidebar tab and both empty-view buttons. As a result, the sidebar tab now also leaves the Trace view.
+  - "New Window" in the menu is disabled while a create is running.
+  - A later success clears an earlier error toast (89a63b57).
+- **Task 10.** Bots heading and roster focus (4993c42e):
+  - The "Bots" h1 sits outside the collapsible roster, so Bot mode always has a top heading. It is visually hidden except above the compact roster.
+  - Collapsing the roster moves focus that was inside it to the toggle.
+  - Switching to compact moves focus from the toggle to Back.
+- **Task 11.**
+  - On desktop, rail children that painted white or black became transparent; fields and bordered boxes keep their surfaces.
+  - Row, tab and favorite hovers use `--ui-row-hover`, because `--obs-canvas` equals the light sidebar.
+  - Bot rows use `--ui-row-hover` on hover and `--ui-selection` when current. Before this, any hovered Bot row looked selected through the global `button:hover` rule (62a5ef19).
+- **Task 12** (local instance checks):
+  - The mode switch now shows "Window" / "Bot" and keeps "Window mode" / "Bot mode" as its accessible names and text content. The full labels were truncated in the 260px Bot sidebar (3fc72bf3).
+  - Segments in a toolbar size to their labels.
+  - The Bot workspace's own focus rule now draws the shared 3px `--ui-focus-ring` (c328f9c3).
+- **Not changed, found on the way:**
+  - The `e2e/*.browser.ts` files that bundle `SessionSuccessionDialog` (session-letters, session-search, session-recovery, pending-send) have failed to build since 41a6661a. That component imports CSS, and their esbuild call has no output path.
+  - `e2e/mobile.spec.ts:247` and `:258` fail on main as well (two "New session" buttons).
+  - In the Bot conversation, the toolbar title repeats the Session View's own header; phase 3 owns that header.

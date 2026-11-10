@@ -1174,7 +1174,7 @@ function AppContent({
   const currentSession = windowSession.empty ? undefined : sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
   const askView = useAskVisibility();
   const askSurfaceVisible = windowMode && askView.visible && activeView === 'workbench' && !supportingRailOpen;
-  // Expanded Ask windows give way to the desktop sessions page; the Ask entry itself stays in the sidebar.
+  // Expanded Ask windows give way to the desktop sessions page, staying mounted underneath; the Ask entry itself stays in the sidebar.
   const askWindowsVisible = askSurfaceVisible && !pageOpen;
   function presentedSelection(current: typeof sharedWindow) {
     const hiddenAsk = compactLayout && !askView.visible
@@ -2323,7 +2323,7 @@ function AppContent({
       && agent.providerId === source.providerId && agent.runtimeInfo.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId
       && !!sourceState?.timeline.initialized && !!sourceState.timeline.epoch && !!native?.synchronized && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
     return <SessionAsk compact={compactLayout} key={associationOwner} associationOwner={associationOwner} imageRecipient={target ? succession.recipientFor(target, associationOwner) : undefined} source={source} ask={ask} storageScope={baseUrl}
-      visible={askWindowsVisible} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
+      visible={askSurfaceVisible} covered={pageOpen} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
       canRestore={accessReady && (!!target && !compositionProtected || available && (!compositionProtected || independentRestore))} synchronize={refreshRelations}
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;

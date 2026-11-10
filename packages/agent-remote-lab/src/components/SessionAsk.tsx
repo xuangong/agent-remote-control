@@ -11,9 +11,12 @@ import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser
 import { resolveAskPresentation } from '../ask-presentation.js';
 
 /** Each source association retains its Ask conversation in the global surface. */
-export function SessionAsk({ source, ask, visible, canRestore, storageScope, synchronize, onOpen, onToggleEnabled, triggerRef, replicaFor, transport, navigation, associationOwner, imageRecipient, compact = false }: {
+export function SessionAsk({ source, ask, visible, covered = false, canRestore, storageScope, synchronize, onOpen, onToggleEnabled, triggerRef, replicaFor, transport, navigation, associationOwner, imageRecipient, compact = false }: {
   source: OpenedSession; ask: ReturnType<typeof useAskConversations>;
-  visible: boolean; canRestore: boolean; storageScope: string;
+  visible: boolean;
+  /** Another page covers the Window: the Ask stays mounted, with its draft, scroll and connection, but is hidden. */
+  covered?: boolean;
+  canRestore: boolean; storageScope: string;
   synchronize(): Promise<void>; onOpen(clean?: boolean): void; onToggleEnabled(): void;
   triggerRef: RefObject<HTMLButtonElement>;
   replicaFor(id: string): AgentReplica; transport: RemoteAgentTransport;
@@ -41,7 +44,7 @@ export function SessionAsk({ source, ask, visible, canRestore, storageScope, syn
     return ask.restore(source, synchronize, associationOwner);
   }, [storageScope, ask.store, transport, key, source.agentId, shown, canRestore, synchronize, sharedTarget]);
   if (!shown) return null;
-  return <div className="lab-session-ask-surface" data-ask-source={sessionKey(source)} data-ask-owner={associationOwner}
+  return <div className="lab-session-ask-surface" hidden={covered} data-ask-source={sessionKey(source)} data-ask-owner={associationOwner}
     style={{ zIndex: selected ? 2 : 1 }} onPointerDownCapture={focus} onFocusCapture={focus}>
     <FilePreviewScope resourceScope={JSON.stringify([associationOwner, participant])}><AskConversation baseUrl={storageScope} viewId={sharedView?.id} compact={compact} entry={entry} storageScope={geometryScope}
       transport={transport} replica={attached && entry.record?.target ? replicaFor(entry.record.target.agentId) : undefined}

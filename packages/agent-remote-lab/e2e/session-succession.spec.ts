@@ -158,6 +158,12 @@ async function fixture() {
   };
 }
 
+/** Waits for the workbench after a navigation. A Window keeps a long-poll for its changes open, so the page never reaches `networkidle`. */
+async function settled(page: Page) {
+  await page.waitForLoadState('load');
+  await expect(page.locator('.lab-shell')).toBeVisible();
+}
+
 function observeInputs(page: Page) {
   const inputs: string[] = [];
   page.on('websocket', socket => socket.on('framesent', ({ payload }) => {
@@ -202,7 +208,7 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
   try {
     await f.seed(context, 'Legacy A draft');
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=D`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     await expect(page.locator('.lab-has-agent')).toBeVisible();
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await page.getByTestId('prompt-input').fill('/ask');
@@ -216,7 +222,8 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
       const slot = document.slots.find((slot: { intent: { target: { native: { nativeSessionId: string } } } }) => slot.intent.target.native.nativeSessionId === 'D');
       return { slot, ask: document.asks.find((owner: { sourceSlot: string }) => owner.sourceSlot === slot.id) };
     }, f.scope);
-    expect(owners.ask.enabled).toBe(true);
+    // /ask toggles the global Ask view preference (fd548154); it no longer enables the source's Ask owner.
+    expect(await page.evaluate(() => localStorage.getItem('agent-remote:ask-view'))).toBe('true');
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', 'base64');
     await page.evaluate(async ({ scope, key, bytes }) => {
       await new Promise<void>((resolve, reject) => {
@@ -244,7 +251,7 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
     current = await context.newPage();
     const newInputs = observeInputs(current);
     await current.goto(`${f.origin}/?host=browser-host&provider=recorded&session=D`);
-    await current.waitForLoadState('networkidle');
+    await settled(current);
     await expect(current.locator('.lab-has-agent')).toBeVisible();
     if (await current.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await current.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(current.locator('[data-image-id="fresh-D-image"]')).toHaveCount(1);
@@ -258,7 +265,8 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
       return { slot, ask: document.asks.find((owner: { sourceSlot: string }) => owner.sourceSlot === slot.id) };
     }, f.scope);
     expect(restored.slot.id).toBe(owners.slot.id); expect(restored.slot.owners).toEqual(owners.slot.owners);
-    expect(restored.ask).toMatchObject({ id: owners.ask.id, input: owners.ask.input, text: owners.ask.text, image: owners.ask.image, display: owners.ask.display, enabled: true, open: false });
+    expect(restored.ask).toMatchObject({ id: owners.ask.id, input: owners.ask.input, text: owners.ask.text, image: owners.ask.image, display: owners.ask.display, open: false });
+    expect(await current.evaluate(() => localStorage.getItem('agent-remote:ask-view'))).toBe('true');
     expect(await storedImageBytes(current)).toEqual(images);
     expect(inputs).toEqual([]); expect(newInputs).toEqual([]);
     await testInfo.attach('fresh-view-owners.json', { contentType: 'application/json', body: Buffer.from(JSON.stringify({ owners, restored, images }, null, 2)) });
@@ -311,7 +319,7 @@ test('authorized B failure survives reload with an editable local draft and expl
   try {
     await f.seed(context, 'Device draft before succession');
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
     await expect(page.getByTestId('prompt-input')).toHaveText('Device draft before succession');
@@ -321,7 +329,7 @@ test('authorized B failure survives reload with an editable local draft and expl
     await expect(page).toHaveURL(/session=B/);
     await expect.poll(() => page.evaluate(scope => Object.values(JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:drafts`) ?? '{}')), f.scope)).toContain('Edit while B is offline');
     await page.reload();
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
     await expect(page.getByTestId('prompt-input')).toHaveText('Edit while B is offline');
@@ -391,7 +399,7 @@ test('opaque image bytes survive failed-primary reload and stay with the same ed
   try {
     await f.seed(context, 'Image owner draft');
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
     const chooser = page.waitForEvent('filechooser');
@@ -411,7 +419,7 @@ test('opaque image bytes survive failed-primary reload and stay with the same ed
     const imageId = await page.locator('[data-image-id]').getAttribute('data-image-id');
     const originalBytes = await storedImageBytes(page);
     expect(originalBytes).toEqual([{ imageId, bytes: [...bytes], sha256: createHash('sha256').update(bytes).digest('hex') }]);
-    await page.reload(); await page.waitForLoadState('networkidle');
+    await page.reload(); await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.locator('[data-image-id]')).toHaveAttribute('data-image-id', imageId!);
     expect(await storedImageBytes(page)).toEqual(originalBytes);
@@ -481,12 +489,12 @@ test('explicit A history remains concrete across reload on the current device', 
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
     await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A&intent=history`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.locator('.lab-has-agent')).toBeVisible(); await expect(page.getByTestId('prompt-input')).toHaveText('');
     await page.getByTestId('prompt-input').fill('A history only');
     await expect.poll(() => page.evaluate(scope => Object.values(JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:drafts`) ?? '{}')), f.scope)).toContain('A history only');
-    await page.reload(); await page.waitForLoadState('networkidle');
+    await page.reload(); await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByTestId('prompt-input')).toHaveText('A history only');
     await expect(page).toHaveURL(/session=A&intent=history/);
@@ -510,7 +518,7 @@ test('failed composition storage retains desired B and edits until explicit sync
       };
     });
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Retry synchronization', exact: true })).toBeVisible();
     await expect(page).toHaveURL(/session=B/); await expect(page.getByTestId('prompt-input')).toHaveText('Draft before storage failure');
@@ -557,7 +565,7 @@ test('Ask payload retention failure recovers from the single view document after
       };
     });
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     const primary = page.locator('.lab-primary-conversation');
     const independent = page.locator('.lab-side-conversation').filter({ has: page.getByText('Independent B', { exact: true }) });
@@ -727,13 +735,13 @@ for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery 
   try {
     await f.seed(context, 'Primary role draft', 'nested-ask');
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
-    await page.waitForLoadState('networkidle');
+    await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     const side = page.locator('.lab-side-conversation').filter({ has: page.locator('.lab-side-title-text', { hasText: 'Independent Side' }) });
     const ask = side.getByRole('dialog', { name: 'Ask', exact: true });
     await expect(ask).toBeVisible(); await expect(ask.getByTestId('prompt-input')).toHaveText('Independent Ask draft');
     await expect(ask.getByText('Recorded history 2', { exact: true })).toBeVisible();
-    await expect(side.locator(':scope > .lab-session-view').getByTestId('prompt-input')).toHaveText('Side local draft');
+    await expect(side.locator('.lab-session-view:not([role="dialog"] .lab-session-view)').getByTestId('prompt-input')).toHaveText('Side local draft');
     const primary = page.locator('.lab-primary-conversation');
     await expect(primary).toBeHidden();
     await expect(page.getByRole('button', { name: 'Expand window 1: Original primary', exact: true })).toBeVisible();

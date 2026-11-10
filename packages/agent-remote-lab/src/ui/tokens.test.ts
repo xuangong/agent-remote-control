@@ -106,8 +106,8 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s state colors read
   const hoveredRow = over(t('--ui-row-hover'), t('--ui-sidebar'));
   expect(contrast(t('--ui-label'), hoveredRow), 'row title on a hovered row').toBeGreaterThanOrEqual(4.5);
   expect(contrast(t('--ui-label-secondary'), hoveredRow), 'row subtitle on a hovered row').toBeGreaterThanOrEqual(4.5);
-  for (const surface of ['--ui-sidebar', '--ui-background', '--ui-selection']) {
-    expect(contrast(t('--ui-accent-text'), t(surface)), `unread dot on ${surface}`).toBeGreaterThanOrEqual(3);
+  for (const [name, surface] of [...['--ui-sidebar', '--ui-background', '--ui-selection'].map(name => [name, t(name)]), ['a hovered row', hoveredRow]]) {
+    expect(contrast(t('--ui-accent-text'), surface!), `unread dot on ${name}`).toBeGreaterThanOrEqual(3);
   }
 });
 

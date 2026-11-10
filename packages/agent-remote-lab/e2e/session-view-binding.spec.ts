@@ -7,6 +7,8 @@ async function setup(page: Page) {
   await page.setViewportSize({ width: 1680, height: 1000 });
   await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
   await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeEnabled();
+  // The composer accepts a draft while the session opens, then hides for a moment as it attaches; wait until it is ready.
+  await expect(page.locator('.lab-primary-conversation').getByLabel('Agent activity', { exact: true })).toContainText('Ready');
   await expect(page).toHaveURL(/[?&]session=/);
   const address = page.url(), providerId = new URL(address).searchParams.get('provider')!;
   const targets = await page.evaluate(async providerId => {
@@ -158,7 +160,8 @@ test('a restored bound view shows cached content and keeps its draft before atta
   await expect(view.getByTestId('prompt-input')).toContainText('Draft while reconnecting');
 });
 
-test('two ordinary views of the same session reuse its draft owner and live connection', async ({ page, isMobile }) => {
+// Since Windows (976f29f0, docs/superpowers/specs/2026-10-15-window-workspaces-design.md), an additional view of a session gets its own draft owner.
+test('two ordinary views of the same session keep their own drafts and reuse its live connection', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Independent views require the wide workspace.');
   const { address, targets } = await setup(page);
   const nativeSessionId = new URL(address).searchParams.get('session')!;
@@ -169,9 +172,11 @@ test('two ordinary views of the same session reuse its draft owner and live conn
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/attach')) attachments.push(request.url()); });
   await page.locator('.lab-session-dock-add').click(); await choose(page, 'New session');
   const view = page.locator('.lab-bindable-session-window[data-view-id]');
-  await expect(view.getByTestId('prompt-input')).toContainText('Shared session draft');
+  await expect(view.getByTestId('prompt-input')).toBeEnabled();
+  await expect(view.getByTestId('prompt-input')).toHaveText('');
   await view.getByTestId('prompt-input').fill('Changed from the second view');
-  await expect(main.getByTestId('prompt-input')).toContainText('Changed from the second view');
+  await expect(view.getByTestId('prompt-input')).toHaveText('Changed from the second view');
+  await expect(main.getByTestId('prompt-input')).toHaveText('Shared session draft');
   expect(attachments).toEqual([]);
   await view.getByRole('button', { name: 'Close New session', exact: true }).click();
   await expect(main.getByTestId('prompt-input')).toBeEnabled();

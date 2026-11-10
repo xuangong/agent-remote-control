@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon, type IconName } from './Icon.js';
+import { IconButton } from './IconButton.js';
 
 export type MenuEntry =
   | { kind?: 'item'; label: string; icon?: IconName; destructive?: boolean; disabled?: boolean; onSelect(): void }
@@ -115,15 +116,13 @@ export function Menu({ label, icon = 'ellipsis', items }: { label: string; icon?
   const toggle = (detail: number) => (open ? close(false) : show(detail === 0 ? 'first' : 'menu'));
 
   return <>
-    <button ref={button} type="button" className="ui-icon-button" aria-label={label} title={label} aria-haspopup="menu"
+    <IconButton ref={button} icon={icon} label={label} aria-haspopup="menu"
       aria-expanded={Boolean(open)} aria-controls={open ? id : undefined} onClick={event => toggle(event.detail)}
       onKeyDown={event => {
         if (open || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
         event.preventDefault();
         show(event.key === 'ArrowDown' ? 'first' : 'last');
-      }}>
-      <Icon name={icon} />
-    </button>
+      }} />
     {open ? createPortal(<div ref={menu} id={id} role="menu" aria-label={label} tabIndex={-1} className="ui-menu"
       onKeyDown={onKeyDown} onPointerLeave={() => follow(menu.current)}>
       {items.map((item, index) => item.kind === 'separator'

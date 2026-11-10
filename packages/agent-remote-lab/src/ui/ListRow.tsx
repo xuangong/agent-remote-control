@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { forwardRef, useId } from 'react';
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 /**
@@ -7,13 +7,12 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
  * `leading` and `trailing` must not contain interactive elements: the whole row is one button,
  * so put row actions next to the row, never inside it.
  */
-export function ListRow({ leading, title, subtitle, trailing, selected, className, type = 'button', ...props }:
-  Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title' | 'children'> & {
-    leading?: ReactNode; title: ReactNode; subtitle?: ReactNode; trailing?: ReactNode; selected?: boolean;
-  }) {
+export const ListRow = forwardRef<HTMLButtonElement, Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title' | 'children'> & {
+  leading?: ReactNode; title: ReactNode; subtitle?: ReactNode; trailing?: ReactNode; selected?: boolean;
+}>(function ListRow({ leading, title, subtitle, trailing, selected, className, type = 'button', ...props }, ref) {
   const id = useId();
   const describedBy = [subtitle ? `${id}-subtitle` : null, trailing ? `${id}-trailing` : null].filter(Boolean).join(' ');
-  return <button aria-labelledby={`${id}-title`} aria-describedby={describedBy || undefined} {...props} type={type}
+  return <button aria-labelledby={`${id}-title`} aria-describedby={describedBy || undefined} {...props} ref={ref} type={type}
     className={className ? `ui-list-row ${className}` : 'ui-list-row'} aria-current={selected || undefined}>
     {leading ? <span className="ui-list-row-leading">{leading}</span> : null}
     <span className="ui-list-row-text">
@@ -22,4 +21,4 @@ export function ListRow({ leading, title, subtitle, trailing, selected, classNam
     </span>
     {trailing ? <span id={`${id}-trailing`} className="ui-list-row-trailing">{trailing}</span> : null}
   </button>;
-}
+});

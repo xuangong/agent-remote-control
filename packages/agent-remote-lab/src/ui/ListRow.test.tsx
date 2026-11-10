@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { ListRow } from './ListRow.js';
@@ -40,4 +40,10 @@ it('keeps the caller class and sends no clicks while disabled', async () => {
   expect(row.className).toBe('ui-list-row extra');
   await act(async () => row.click());
   expect(onClick).not.toHaveBeenCalled();
+});
+
+it('forwards its ref to the row button', async () => {
+  const row = createRef<HTMLButtonElement>();
+  await render(<ListRow ref={row} title="Pinned" />);
+  expect(row.current?.className).toBe('ui-list-row');
 });

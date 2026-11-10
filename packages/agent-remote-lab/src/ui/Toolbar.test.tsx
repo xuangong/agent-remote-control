@@ -1,3 +1,4 @@
+import { createRef } from 'react';
 import { expect, it } from 'vitest';
 import { render } from '../test/setup.js';
 import { Toolbar } from './Toolbar.js';
@@ -18,4 +19,12 @@ it('leaves out what a toolbar does not have', async () => {
   expect(container.querySelector('.ui-toolbar-subtitle')).toBeNull();
   expect(container.querySelector('.ui-toolbar-leading')).toBeNull();
   expect(container.querySelector('.ui-toolbar-trailing')).toBeNull();
+});
+
+it('can carry a class and a focusable heading for its owner', async () => {
+  const heading = createRef<HTMLHeadingElement>();
+  const container = await render(<Toolbar className="lab-bot-conversation-toolbar" title="API caching" titleRef={heading} titleFocusable />);
+  expect(container.querySelector('header')?.className).toBe('ui-toolbar lab-bot-conversation-toolbar');
+  expect(heading.current?.textContent).toBe('API caching');
+  expect(heading.current?.tabIndex).toBe(-1);
 });

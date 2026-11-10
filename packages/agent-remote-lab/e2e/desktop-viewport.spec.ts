@@ -6,18 +6,14 @@ import { openSessionsPage } from './all-sessions';
 test('long sessions page content never scrolls the desktop workspace away from the viewport', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop sidebar scrolling');
   await page.setViewportSize({ width: 2048, height: 920 });
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: Array.from({ length: 18 }, (_, index) => ({
-    hostId: 'host', providerId: 'recorded', nativeSessionId: `favorite-${index}`, title: `Saved conversation ${index}`,
-    starredAt: 1, hostName: 'Work Mac', available: true, online: true,
-  })) } }));
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
-  await page.goto('/e2e/fixtures/session-stars.html');
+  // Favorites have their own page now, so the long content is the fixture's 24 discovered sessions.
+  await page.goto('/e2e/fixtures/session-stars.html?sidebar');
   const sessions = await openSessionsPage(page);
   const scroller = sessions.locator('.lab-sessions-page-body');
-  await expect(sessions.locator('.lab-favorite-list > li')).toHaveCount(18);
   const discovery = sessions.getByRole('region', { name: 'Discover sessions' });
-  await expect(discovery.locator('.lab-session-row')).toHaveCount(1);
+  await expect(discovery.locator('.lab-session-row')).toHaveCount(24);
   const fitsViewport = (bottomOf: string) => page.evaluate(bottomOf => ({
     scrollY, overflow: document.documentElement.scrollHeight - innerHeight,
     top: document.querySelector('.lab-shell')!.getBoundingClientRect().top,
@@ -30,8 +26,8 @@ test('long sessions page content never scrolls the desktop workspace away from t
       await scroller.evaluate(element => { element.scrollTop = 0; });
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
       await expect.poll(() => fitsViewport('#lab-sessions-page')).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });
-      await discovery.getByRole('button', { name: 'Refresh', exact: true }).focus();
-      await expect(discovery.getByRole('button', { name: 'Refresh', exact: true })).toBeInViewport();
+      await discovery.locator('.lab-session-row').last().focus();
+      await expect(discovery.locator('.lab-session-row').last()).toBeInViewport();
       expect(await scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
       await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
       await expect.poll(() => fitsViewport('.lab-composer-dock')).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });

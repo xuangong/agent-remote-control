@@ -3,9 +3,9 @@
    (0,1,1), `button:hover:not(:disabled)` (0,2,1), `button:focus-visible` and `button:disabled` (0,1,1). Every Button,
    IconButton and ListRow root rule therefore doubles its class (0,2,0) and its states reach (0,3,0) or more. A phase
    that places a primitive inside a container with stronger rules (for example `:is(.lab-shell, .lab-session-view) .agent-remote-surface button`,
-   (0,2,1)) removes those rules for it; only that container's border color is outranked here. Focus rings read
-   --ui-focus-ring and the primitive's --ui-focus-offset, like the global rule in app.css, so whichever rule wins draws
-   the same ring. */
+   (0,2,1)) removes those rules for it; only that container's border color and coarse-pointer minimum sizes are
+   outranked here. Focus rings read --ui-focus-ring and the primitive's --ui-focus-offset, like the global rule in
+   app.css, so whichever rule wins draws the same ring. */
 .ui-icon { flex: none; display: block; }
 
 .ui-button.ui-button {
@@ -99,6 +99,12 @@
 /* `:is(.lab-shell, .lab-session-view) .agent-remote-surface button` (0,2,1) colors every button's border. The element
    type lifts these rules to (0,2,1) and source order does the rest, so a primitive's border stays its own there too. */
 button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, button.ui-list-row.ui-list-row { border-color: currentColor; }
+/* On a coarse pointer the same container gives every button a 44px minimum width and height (0,2,1): keep the
+   primitives' own minimums, so a small Button stays narrow and a ListRow keeps its 52px height. */
+@media (pointer: coarse) {
+  button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, button.ui-list-row.ui-list-row { min-width: 0; }
+  button.ui-list-row.ui-list-row { min-height: 52px; }
+}
 /* Menus portal to the body, or into the dialog that holds their button. Items are buttons, so every item rule starts
    with `.ui-menu .ui-menu-item[role="menuitem"]` (0,3,0) to outrank the Lab's global button rules, including the session
    surface's (0,3,1) focus ring. Hovering an item focuses it, so only the focused item is highlighted. */

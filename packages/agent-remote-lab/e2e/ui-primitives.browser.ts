@@ -53,7 +53,7 @@ const styles = (page: Page, scope: string, primitive: Primitive) => page.$eval(`
     // The segmented track holds no text of its own: its font is inherited from where it sits; its segments set theirs.
     ...(primitive === 'segmented' ? {} : { font: s.font }),
     padding: s.padding, margin: s.margin, border: `${s.borderTopWidth} ${s.borderTopStyle} ${s.borderTopColor}`, radius: s.borderRadius,
-    minHeight: s.minHeight, height: s.height, width: s.width, color: s.color, background: s.backgroundColor,
+    minWidth: s.minWidth, minHeight: s.minHeight, height: s.height, width: s.width, color: s.color, background: s.backgroundColor,
     boxShadow: s.boxShadow, opacity: s.opacity, transform: s.transform };
 }, primitive);
 
@@ -89,6 +89,7 @@ it('draws a 3px focus ring with a 1px offset on the buttons inside and outside t
       rings.push(await ring(page, selector));
     }
     expect(rings[0], primitive).toEqual({ focused: true, width: '3px', style: 'solid', offset: '1px', color: rings[0]!.color });
+    expect(rings[0]!.color, `${primitive} ring color`).not.toBe('rgba(0, 0, 0, 0)');
     expect(rings[1], primitive).toEqual(rings[0]);
   }
   await page.close();
@@ -99,6 +100,9 @@ it('keeps 44px touch targets in the containers on a coarse pointer', async () =>
   const page = await context.newPage();
   await open(page);
   expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), 'a coarse pointer').toBe(true);
+  for (const primitive of Object.keys(PRIMITIVES) as Primitive[]) {
+    expect.soft(await styles(page, '#contained', primitive), `coarse ${primitive}`).toEqual(await styles(page, '#plain', primitive));
+  }
   for (const scope of ['#plain', '#contained']) {
     for (const primitive of ['secondary', 'primary', 'small', 'icon', 'pressed', 'unpressed', 'row'] as const) {
       const box = await page.locator(`${scope} ${PRIMITIVES[primitive]}`).boundingBox();

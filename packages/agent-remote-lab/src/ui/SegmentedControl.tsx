@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
 export type SegmentedActivation = 'automatic' | 'manual';
 
@@ -9,7 +9,7 @@ export type SegmentedActivation = 'automatic' | 'manual';
  *  `onChange` is a function property, not a method: a method's parameter is bivariant, so a state setter
  *  passed to it would widen T to string. */
 export function SegmentedControl<T extends string>({ label, options, value, onChange, activation = 'automatic', className, landmark = false }: {
-  label: string; options: readonly { value: T; label: string }[]; value: T; onChange: (value: T) => void;
+  label: string; options: readonly { value: T; label: ReactNode }[]; value: T; onChange: (value: T) => void;
   activation?: SegmentedActivation; className?: string; landmark?: boolean;
 }) {
   const buttons = useRef(new Map<T, HTMLButtonElement>());

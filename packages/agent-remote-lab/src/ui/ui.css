@@ -46,7 +46,7 @@
    so neither the bare button rules of app.css nor its hover, active and coarse-pointer rules can restyle them.
    The track's radius stays concentric with its 2px padding. */
 .ui-segmented { display: flex; gap: 2px; padding: 2px; border-radius: calc(var(--ui-radius-control) + 2px); background: var(--ui-fill); }
-.ui-segmented > button[aria-pressed] {
+.ui-segmented > button[aria-pressed] { position: relative;
   flex: 1; min-width: 0; min-height: 24px; padding: 2px 8px; border: 0; border-radius: var(--ui-radius-control);
   font: 500 var(--ui-size-callout)/1.2 var(--ui-font); color: var(--ui-label); background: transparent; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; --ui-focus-offset: 1px;

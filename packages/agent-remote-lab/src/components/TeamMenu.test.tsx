@@ -13,6 +13,7 @@ vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="st
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { WindowLayoutContext } from '../window-workspace-context.js';
 import { TeamMenu } from './TeamMenu.js';
+import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import { SessionTrackingMenu } from './SessionTrackingMenu.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 const team:Team={id:'team',operationId:'create',revision:1,title:'Cross-platform diagnosis',status:'active',source:{hostId:'mac',providerId:'fixture',nativeSessionId:'source',title:'Main project'},members:[
@@ -314,4 +315,23 @@ it('retries an uncertain Team creation with its original source and operation id
   expect(requests).toHaveLength(2); expect(requests[1]).toEqual(requests[0]);
   expect(requests[1]).toEqual({ operationId: expect.any(String), source: team.source });
   expect(opened).toHaveBeenCalledWith(team, 'origin/b');
+});
+
+it('renders Teams as a sidebar row whose panel stays open for clicks inside it', async () => {
+  fixture.teams = [structuredClone(team)];
+  const view = await render(<ShortcutPlacement.Provider value="sidebar"><App /></ShortcutPlacement.Provider>);
+  const row = view.querySelector('.lab-sidebar-shortcut.lab-sidebar-shortcut-team')!;
+  expect(row).not.toBeNull();
+  expect(row.matches('.lab-tracking-floating, .lab-team-floating')).toBe(false);
+  expect(row.getAttribute('style')).toBeNull();
+  const trigger = row.querySelector<HTMLButtonElement>(':scope > .lab-session-popover-trigger')!;
+  expect(trigger.getAttribute('aria-label')).toBe('Teams');
+  await act(async () => trigger.click());
+  const panel = row.querySelector('section.lab-session-popover-panel')!;
+  expect(panel).not.toBeNull();
+  await act(async () => { panel.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(row.querySelector('section.lab-session-popover-panel')).not.toBeNull();
+  await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
+  expect(row.querySelector('section.lab-session-popover-panel')).toBeNull();
+  await unmount(view);
 });

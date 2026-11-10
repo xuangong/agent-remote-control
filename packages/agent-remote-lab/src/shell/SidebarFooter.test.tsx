@@ -8,6 +8,9 @@ it('summarizes Hosts', () => {
   expect(hostSummary([], false)).toBe('Checking Hosts…');
   expect(hostSummary([{ online: true }, { online: false }], true)).toBe('1 of 2 Hosts online');
   expect(hostSummary([{ online: true }], true)).toBe('1 Host online');
+  expect(hostSummary([{ online: true }, { online: true }], true)).toBe('2 Hosts online');
+  expect(hostSummary([{ online: false }], true)).toBe('All Hosts offline');
+  expect(hostSummary([{ online: false }, { online: false }], true)).toBe('All Hosts offline');
 });
 
 it('opens the Hosts and Settings pages', async () => {

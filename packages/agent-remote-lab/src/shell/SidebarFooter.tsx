@@ -3,7 +3,9 @@ import { IconButton } from '../ui/IconButton.js';
 export function hostSummary(hosts: readonly { online: boolean }[], loaded: boolean): string {
   if (!hosts.length) return loaded ? 'No Hosts paired' : 'Checking Hosts…';
   const online = hosts.filter(host => host.online).length;
-  return online === hosts.length ? `${online} ${online === 1 ? 'Host' : 'Hosts'} online` : `${online} of ${hosts.length} Hosts online`;
+  const noun = hosts.length === 1 ? 'Host' : 'Hosts';
+  if (!online) return 'All Hosts offline';
+  return online === hosts.length ? `${online} ${noun} online` : `${online} of ${hosts.length} ${noun} online`;
 }
 
 /** The bottom of the desktop Window sidebar: how many Hosts are online (opening All sessions, where Hosts are chosen) and Settings. */

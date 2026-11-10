@@ -1262,7 +1262,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-chevron { color: var(--obs-text-secondary); font-size: 11px; }
 .lab-favorites-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-ask-floating,
-.lab-tracking-floating {
+.lab-tracking-floating,
+.lab-sidebar-shortcut {
   --tracking-working-surface: color-mix(in oklab, var(--obs-success) 24%, var(--obs-surface));
   --tracking-pending-surface: color-mix(in oklab, var(--ui-status-attention) 22%, var(--obs-surface));
   --tracking-idle-surface: color-mix(in oklab, var(--obs-text-secondary) 24%, var(--obs-surface));
@@ -1283,12 +1284,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-tracking-badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--obs-surface); border-radius: 50%; background: var(--obs-text); }
 .lab-tracking-attention { position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--obs-warning); }
-.lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
-.lab-tracking-floating[data-alert="pending"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="pending"] .lab-session-popover-trigger {
   animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-pending-surface); --tracking-edge-color: var(--ui-status-attention);
 }
-.lab-tracking-floating[data-alert="idle"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="idle"] .lab-session-popover-trigger {
   animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-idle-surface); --tracking-edge-color: var(--obs-text-secondary);
 }
@@ -1301,7 +1302,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   50% { background-color: var(--tracking-idle-surface); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lab-tracking-floating[data-alert] .lab-session-popover-trigger { animation: none; }
+  :is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert] .lab-session-popover-trigger { animation: none; }
 }
 .lab-tracked-change { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 36px; padding: 6px; border-color: transparent; background: transparent; font-size: 11px; color: var(--obs-text-secondary); }
 .lab-tracked-change > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

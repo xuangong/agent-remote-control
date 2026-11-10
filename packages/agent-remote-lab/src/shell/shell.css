@@ -10,11 +10,17 @@
 .lab-sidebar-shortcut[data-hidden="true"] { display: none; }
 .lab-sidebar-shortcut > .lab-session-popover-trigger, .lab-sidebar-shortcut .lab-session-popover > .lab-session-popover-trigger {
   position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-height: 30px; padding: 4px 10px;
-  border: 0; border-radius: var(--ui-radius-control); color: var(--ui-label); background: transparent; box-shadow: none;
+  border: 0; border-radius: var(--ui-radius-control); color: var(--ui-label); box-shadow: none;
   font: var(--ui-size-body)/1.2 var(--ui-font); text-align: start;
 }
+/* (0,1,0), so the Ask and Track status and alert surfaces, (0,3,0), still show on the row. */
+.lab-sidebar-shortcut :where(.lab-session-popover-trigger) { background: transparent; }
 .lab-sidebar-shortcut > .lab-session-popover-trigger:hover:not(:disabled), .lab-sidebar-shortcut .lab-session-popover > .lab-session-popover-trigger:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
-.lab-sidebar-shortcut .lab-session-popover-trigger > :last-child:not(:first-child) { margin-inline-start: auto; color: var(--ui-label-secondary); }
+/* Counts sit at the end of the row; badges keep their own colors. */
+.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count, .lab-tracking-counts) { margin-inline-start: auto; }
+.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count) { color: var(--ui-label-secondary); }
+.lab-sidebar-shortcut .lab-tracking-count { font-size: var(--ui-size-callout); }
+.lab-sidebar-shortcut .lab-tracking-badge { border-color: var(--ui-sidebar); }
 .lab-sidebar-shortcut .lab-session-popover-panel {
   position: fixed; top: 12px; right: auto; bottom: auto; left: calc(var(--lab-sidebar-width, 260px) + 8px);
   width: min(420px, calc(100vw - var(--lab-sidebar-width, 260px) - 24px)); max-height: calc(100dvh - 24px); overflow: auto; z-index: 148;

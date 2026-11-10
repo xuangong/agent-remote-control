@@ -160,7 +160,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
           title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable}
           onClick={() => edit({ type: 'view.close', viewId: view.id })}>×</button>
       </div>; })}</nav>
-      {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open a session from the sidebar.</p> : null}
+      {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open one from All sessions.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
           <button type="button" onClick={() => void run(async () => {

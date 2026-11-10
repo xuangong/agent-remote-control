@@ -32,6 +32,8 @@ it.each([{ bound: true, selected: true }, { bound: true, selected: false }, { bo
     navigation={() => ({ childrenFor: () => [], resolveSessionLink: () => undefined })} onFocus={focus} onClose={() => {}} />
   </WindowLayoutContext.Provider></WorkspaceReady.Provider>);
   const shell = view.querySelector<HTMLElement>('.lab-bindable-session-window')!;
+  // Compact layouts still choose sessions in the sidebar drawer.
+  if (!bound) expect([...view.querySelectorAll('button')].map(button => button.textContent)).toContain('Open sidebar');
   await act(async () => shell.focus());
   expect(document.activeElement).toBe(shell);
   expect(focus).toHaveBeenCalledTimes(bound && selected ? 0 : 1);
@@ -83,8 +85,11 @@ it.each([
   await act(async () => placementAction.click());
   expect(operate).toHaveBeenCalledWith({ type: 'view.place', viewId: pane.id, placement: placement === 'dock' ? 'float' : 'dock' });
   const changeAction = bound ? menu.querySelector<HTMLButtonElement>('[aria-label="Change session"]')
-    : [...view.querySelectorAll('button')].find(button => button.textContent === 'Open sidebar');
+    : [...view.querySelectorAll('button')].find(button => button.textContent === 'Choose session');
   expect(changeAction).toBeDefined();
+  // On desktop sessions are chosen on the All sessions page, not in the sidebar.
+  if (bound) expect(changeAction!.title).toBe('Choose a session from All sessions');
+  else expect(view.textContent).toContain('Choose a session from All sessions');
   await act(async () => changeAction!.click());
   expect(change).toHaveBeenCalledOnce();
   await act(async () => closeAction.click());

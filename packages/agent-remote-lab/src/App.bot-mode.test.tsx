@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';
+import * as trackingHooks from './hooks/useSessionTracking.js';
 import { promptText, setPromptText } from './test/setup.js';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
@@ -164,7 +165,7 @@ it('creates one Window at a time from the New menu and clears its error toast af
     const hook = vi.mocked(workspaceHooks.useWindowWorkspace), original = hook.getMockImplementation()!;
     hook.mockImplementation((...args) => ({ ...original(...args), create }));
     await until(() => expect(app.workspace().window?.id).toBe('A'));
-    // Re-render App so its handlers read the stubbed create.
+    // Re-render App so its handlers read the stubbed create. Opening All sessions is only a convenient state change here; the page plays no part in this test.
     await act(async () => app.button('All sessions').click());
     const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
     const item = async () => {
@@ -287,5 +288,84 @@ it('opens New session from the New menu as a page with the provider controls', a
     expect(page?.hidden).toBe(false);
     expect(page!.querySelector('.lab-provider-controls')?.closest('[hidden]')).toBeNull();
     expect(app.container.querySelector('#lab-context .lab-provider-controls')).toBeNull();
+  } finally { await app.close(); }
+});
+
+it('keeps the desktop sidebar when a session opens from the sessions page, and closes the page', async () => {
+  const scope = 'http://localhost/window-page-open/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    const context = () => app.container.querySelector<HTMLElement>('#lab-context')!;
+    await until(() => expect(context().querySelector('nav[aria-label="Shortcuts"]')).not.toBeNull());
+    expect(context().hidden).toBe(false);
+    await act(async () => app.button('All sessions').click());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    await until(() => expect(page.querySelector('[aria-label="Discover sessions"] .lab-session-row')).not.toBeNull());
+    await act(async () => page.querySelector<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row')!.click());
+    await until(() => expect(page.hidden).toBe(true));
+    expect(context().hidden).toBe(false);
+    expect(app.container.querySelector('.lab-shell')!.classList.contains('lab-context-hidden')).toBe(false);
+  } finally { await app.close(); }
+});
+
+it('does not count the hidden Window as seen while the sessions page is open', async () => {
+  // Acknowledgement is driven by the visible sessions passed to useSessionTracking; the test reads that input.
+  const useTracking = trackingHooks.useSessionTracking;
+  let visible: readonly unknown[] = [];
+  vi.spyOn(trackingHooks, 'useSessionTracking').mockImplementation((...args) => { visible = args[7] ?? []; return useTracking(...args); });
+  const scope = 'http://localhost/window-page-seen/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(visible.length).toBeGreaterThan(0));
+    await act(async () => app.button('All sessions').click());
+    expect(visible).toEqual([]);
+    await act(async () => app.button('Back to Window').click());
+    await until(() => expect(visible.length).toBeGreaterThan(0));
+  } finally { await app.close(); }
+});
+
+it('returns focus to the Window when the sessions page closes, and leaves Escape to fields', async () => {
+  const scope = 'http://localhost/window-page-focus/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')).not.toBeNull());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    const workbench = app.container.querySelector<HTMLElement>('#lab-workbench')!;
+    await act(async () => app.button('All sessions').click());
+    const back = app.button('Back to Window');
+    back.focus();
+    await act(async () => back.click());
+    expect(page.hidden).toBe(true);
+    expect(document.activeElement).toBe(workbench);
+
+    await act(async () => app.button('All sessions').click());
+    await until(() => expect(page.querySelector('.lab-session-search input')).not.toBeNull());
+    const search = page.querySelector<HTMLInputElement>('.lab-session-search input')!;
+    search.focus();
+    await act(async () => { search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(page.hidden).toBe(false);
+    const backAgain = app.button('Back to Window');
+    backAgain.focus();
+    await act(async () => { backAgain.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    expect(page.hidden).toBe(true);
+    expect(document.activeElement).toBe(workbench);
+  } finally { await app.close(); }
+});
+
+it('closes the sessions page when the Trace view is chosen', async () => {
+  const scope = 'http://localhost/window-page-trace/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')).not.toBeNull());
+    await act(async () => app.button('All sessions').click());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    expect(page.hidden).toBe(false);
+    await act(async () => app.container.querySelector<HTMLButtonElement>('#lab-trace-tab')!.click());
+    expect(page.hidden).toBe(true);
+    expect(app.container.querySelector<HTMLElement>('#lab-trace')!.hidden).toBe(false);
   } finally { await app.close(); }
 });

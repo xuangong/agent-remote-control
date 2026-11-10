@@ -972,6 +972,8 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
     expect(row?.textContent).toContain(target.title);
     await act(async () => row!.click());
     expect(attach).toHaveBeenCalledOnce();
+    // Opening returns to the Window; the sidebar, hidden since the ?agent= start, stays as it was.
+    expect(container.querySelector<HTMLElement>('#lab-workbench')?.hidden).toBe(false);
     expect(container.querySelector('.lab-shell')?.classList.contains('lab-context-hidden')).toBe(true);
     await act(async () => receiveTitle({ hostId: 'local', providerId: target.providerId,
       nativeSessionId: target.nativeSessionId, title: 'Confirmed target title', revision: 1 }));

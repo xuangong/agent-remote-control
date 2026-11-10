@@ -52,7 +52,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
     if (shared && event.target instanceof Element && event.target.closest('.lab-session-family-pane')) return;
     onFocus();
   };
-  const menuActions = controls || onChangeSession && target ? <>{controls}{onChangeSession && target ? <button type="button" aria-label="Change session" title="Choose a session from the sidebar" onClick={onChangeSession}>↔</button> : null}</> : undefined;
+  const menuActions = controls || onChangeSession && target ? <>{controls}{onChangeSession && target ? <button type="button" aria-label="Change session" title={compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'} onClick={onChangeSession}>↔</button> : null}</> : undefined;
   const windowControls = <>{actions}<button type="button" aria-label={`Close ${title}`} title="Close session view" onClick={onClose}>×</button></>;
   return <>
     <span ref={anchor} />
@@ -72,8 +72,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
           <header className="lab-empty-session-heading"><SessionDockHeadingStart /><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
-          <div className="lab-empty-session-body">{entry.target ? <MissingSessionNote title={entry.target.title} host={hostLabel} /> : null}<p>Choose a session from the sidebar</p>
-            <button type="button" onClick={onChangeSession}>Open sidebar</button></div>
+          <div className="lab-empty-session-body">{entry.target ? <MissingSessionNote title={entry.target.title} host={hostLabel} /> : null}<p>{compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'}</p>
+            <button type="button" onClick={onChangeSession}>{compact ? 'Open sidebar' : 'Choose session'}</button></div>
         </>}
         <AskResize label={title} />
       </section>

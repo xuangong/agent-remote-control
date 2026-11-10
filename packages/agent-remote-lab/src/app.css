@@ -290,20 +290,14 @@ textarea {
 .lab-sidebar-resize:is(:hover, :focus-visible, [data-resizing])::before { background: var(--obs-action); }
 .lab-sidebar-resize:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }
 .lab-sidebar-resize[data-resizing]::after { content: ''; position: fixed; inset: 0; cursor: col-resize; user-select: none; }
-.lab-sidebar-tabs { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--obs-border); }
-.lab-sidebar-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 34px; padding: 6px 9px; border-color: transparent; background: transparent; color: var(--obs-text-secondary); white-space: nowrap; font-size: 12px; }
-.lab-sidebar-tabs button:nth-child(2) { margin-left: auto; }
-.lab-sidebar-tabs button[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-sidebar-tabs button:hover { background: var(--obs-canvas); }
 @media (min-width: 1181px) {
   /* The desktop sidebar takes the sidebar color; the compact rail stays a white sheet. Containers inside it are
      transparent or sidebar-colored, fields and push buttons stay white, and hovered rows use the row-hover fill
      because the canvas color equals the sidebar color in light mode. */
   .lab-context-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--ui-sidebar); }
-  .lab-sidebar-tabs button:not([aria-pressed="true"]):hover:not(:disabled) { background: var(--ui-row-hover); }
   .lab-context-rail .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover, .lab-sessions-page .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover { background: var(--ui-row-hover); }
   .lab-context-rail .lab-vscode-authorization, .lab-context-rail .lab-controller-updates li { background: transparent; }
-  .lab-context-rail > .lab-rail-heading, .lab-sidebar-tabs { flex-shrink: 0; }
+  .lab-context-rail > .lab-rail-heading { flex-shrink: 0; }
   /* On desktop the panel content is on the All sessions page, whose body scrolls (shell.css); keep absolutely positioned accessibility text inside it. */
   .lab-sidebar-content { position: relative; }
   .lab-sidebar-content .lab-host-pairing { gap: 7px; margin: 0 0 16px; padding-bottom: 14px; }
@@ -1405,9 +1399,6 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-controller-updates a { display: block; margin: 8px 0; }
 
 /* Account favorites use compact bookmark rows, independent of session discovery. */
-.lab-sidebar-tabs button:nth-child(2) { margin-left: 0; }
-.lab-sidebar-tabs .lab-sidebar-new { margin-left: auto; }
-.lab-sidebar-tabs { flex-wrap: wrap; }
 .lab-session-panel-actions button[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 .lab-favorites-filter-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .lab-favorites-filter-group button.lab-favorites-filter { border: 1px solid var(--obs-border); border-radius: 999px; background: transparent; color: var(--obs-text-secondary); padding: 3px 9px; min-height: 28px; font-size: 11px; }

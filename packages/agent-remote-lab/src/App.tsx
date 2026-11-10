@@ -535,8 +535,16 @@ function AppContent({
   // Desktop: the sidebar's All sessions, Favorites, New session and Settings entries open their panel as a page in place of the Window.
   const [sessionsPage, setSessionsPage] = useState(false);
   const pageOpen = windowMode && !compactLayout && sessionsPage;
-  // Every path that returns to the Window (opening, creating or resuming a session) closes the sidebar, and with it the page.
-  const closeContext = useCallback(() => { setContextOpen(false); setDesktopContextVisible(false); setSessionsPage(false); }, []);
+  // Leaving the page hides it under the focus; focus then returns to the Window (see the layout effect below).
+  const pageFocusReturn = useRef(false);
+  const closePage = useCallback(() => {
+    if (document.activeElement?.closest('#lab-sessions-page')) pageFocusReturn.current = true;
+    setSessionsPage(false);
+  }, []);
+  // Every path that returns to the Window (opening, creating or resuming a session) closes the compact drawer and the desktop page; the desktop sidebar stays.
+  const closeContext = useCallback(() => { setContextOpen(false); closePage(); }, [closePage]);
+  // Compact layouts have no page; the page does not reappear when the window widens again.
+  useEffect(() => { if (compactLayout) setSessionsPage(false); }, [compactLayout]);
   const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
   const contextFocusHidden = useRef(false);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
@@ -652,6 +660,12 @@ function AppContent({
     if (sessionPanel === 'new') panel.querySelector<HTMLElement>('#provider-select')?.focus({ preventScroll: true });
     else if (compactLayout) panel.querySelector<HTMLElement>('.lab-rail-close')?.focus({ preventScroll: true });
   }, [compactLayout, contextOpen, pageOpen, sessionPanel, windowMode]);
+  // Focus inside the page would fall to the document once the page hides; it returns to the Window instead.
+  useLayoutEffect(() => {
+    if (pageOpen || !pageFocusReturn.current) return;
+    pageFocusReturn.current = false;
+    if (document.activeElement === document.body || document.activeElement?.closest('#lab-sessions-page')) workbenchPanelRef.current?.focus({ preventScroll: true });
+  }, [pageOpen]);
 
   useEffect(() => {
     if (restoredHostSelection.current || remoteHosts.length === 0) return;
@@ -1068,6 +1082,7 @@ function AppContent({
     if (!next) return;
     event.preventDefault();
     setActiveView(next);
+    if (next === 'trace') setSessionsPage(false);
     (next === 'workbench' ? workbenchTabRef : traceTabRef).current?.focus();
   }
 
@@ -1142,6 +1157,8 @@ function AppContent({
   const currentSession = windowSession.empty ? undefined : sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
   const askView = useAskVisibility();
   const askSurfaceVisible = windowMode && askView.visible && activeView === 'workbench' && !supportingRailOpen;
+  // Expanded Ask windows give way to the desktop sessions page; the Ask entry itself stays in the sidebar.
+  const askWindowsVisible = askSurfaceVisible && !pageOpen;
   function presentedSelection(current: typeof sharedWindow) {
     const hiddenAsk = compactLayout && !askView.visible
       ? current?.views.find(view => parseWindowFeature(view.feature)?.kind === 'ask' && isAskSelected(current, view)) : undefined;
@@ -1165,8 +1182,8 @@ function AppContent({
     sessionWindows.focus(id); showWindowSessionChooser();
   }
   function showWindowSessionChooser() {
-    setActiveView('workbench'); setSessionPanel('list'); setDesktopContextVisible(true); setContextOpen(true);
-    if (!compactLayout) setSessionsPage(true);
+    setActiveView('workbench'); setSessionPanel('list');
+    if (compactLayout) setContextOpen(true); else setSessionsPage(true);
   }
   /** Desktop: shows a sidebar panel as a page in place of the Window. */
   function openPage(panel: typeof sessionPanel) {
@@ -1596,9 +1613,9 @@ function AppContent({
     const expanded = ask.isOpen(source, owner);
     if (!ask.isEnabled(source, owner) || !entry.record?.target || expanded && !entry.attached) return [];
     return [{ session: entry.record.target,
-      visible: resolveAskPresentation({ window: sharedWindow, view: ask.sharedView(owner), visible: askSurfaceVisible, expanded, compact: compactLayout }).shown,
+      visible: resolveAskPresentation({ window: sharedWindow, view: ask.sharedView(owner), visible: askWindowsVisible, expanded, compact: compactLayout }).shown,
       liveAgentId: entry.attached ? entry.record.target.agentId : undefined }];
-  }), [askSources, ask.revision, askSurfaceVisible, sharedWindow, compactLayout]);
+  }), [askSources, ask.revision, askWindowsVisible, sharedWindow, compactLayout]);
   useEffect(() => {
     replicas.retain([
       ...connections.agentIds,
@@ -1608,7 +1625,8 @@ function AppContent({
       ...(addressSession ? [addressSession.agentId] : []),
     ]);
   });
-  const visibleWindows = openWindows.filter(session => windowMode && activeView === 'workbench' && !supportingRailOpen && isViewVisible(viewKey(session)));
+  // A session under the desktop sessions page is not seen, so it is not acknowledged as read.
+  const visibleWindows = openWindows.filter(session => windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen && isViewVisible(viewKey(session)));
   const botTargets = !windowMode && activated && accessReady
     ? projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections.flatMap(section => section.rows.map(({ binding }) => {
       const { role: _role, ...session } = binding;
@@ -2287,7 +2305,7 @@ function AppContent({
       && agent.providerId === source.providerId && agent.runtimeInfo.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId
       && !!sourceState?.timeline.initialized && !!sourceState.timeline.epoch && !!native?.synchronized && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
     return <SessionAsk compact={compactLayout} key={associationOwner} associationOwner={associationOwner} imageRecipient={target ? succession.recipientFor(target, associationOwner) : undefined} source={source} ask={ask} storageScope={baseUrl}
-      visible={askSurfaceVisible} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
+      visible={askWindowsVisible} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
       canRestore={accessReady && (!!target && !compositionProtected || available && (!compositionProtected || independentRestore))} synchronize={refreshRelations}
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;
@@ -2715,7 +2733,7 @@ function AppContent({
           aria-selected={activeView === 'trace'}
           aria-controls="lab-trace"
           tabIndex={activeView === 'trace' ? 0 : -1}
-          onClick={() => setActiveView('trace')}
+          onClick={() => { setActiveView('trace'); closePage(); }}
           onKeyDown={handleViewKeyDown}
         >Trace</button>
       </nav>
@@ -2747,7 +2765,7 @@ function AppContent({
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
             <WindowWorkspaces workspace={windowWorkspace} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
-              onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={() => setSessionsPage(false)} />
+              onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
             <h2 className="lab-sidebar-section-title">Shortcuts</h2>
@@ -2763,9 +2781,13 @@ function AppContent({
     {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       {!compactLayout ? <section id="lab-sessions-page" className="lab-sessions-page" aria-label={sessionsPageTitle} hidden={!pageOpen}
-        onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); setSessionsPage(false); } }}>
+        onKeyDown={event => {
+          // Fields keep Escape for themselves (a search field clears on Escape).
+          if (event.key !== 'Escape' || event.defaultPrevented || (event.target as Element).closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+          event.preventDefault(); closePage();
+        }}>
         <Toolbar className="lab-sessions-page-toolbar" title={sessionsPageTitle}
-          leading={<IconButton icon="chevron-left" label="Back to Window" onClick={() => setSessionsPage(false)} />} />
+          leading={<IconButton icon="chevron-left" label="Back to Window" onClick={closePage} />} />
         {sessionPanel !== 'settings' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? 'Main session')}</strong></div> : null}
         <div className="lab-sessions-page-body">{sessionPanelContent}</div>
       </section> : null}
@@ -2838,7 +2860,7 @@ function AppContent({
                   </header><div className="lab-empty-session-body">
                     {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
                     <div className="lab-empty-session-actions">
-                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); if (!compactLayout) setSessionsPage(true); }}>Choose session</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); showWindowSessionChooser(); }}>Choose session</button>
                       <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>New session</button>
                     </div></div></div>,
             };

@@ -898,7 +898,7 @@ textarea {
 .lab-view-options-trigger { display: flex; align-items: center; justify-content: center; gap: 6px; width: 68px; min-height: 32px; padding: 0 6px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
 .lab-view-options-trigger:active:not(:disabled) { transform: none; }
 .lab-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-view-options-panel { position: absolute; top: 100%; left: 0; width: 220px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 80px); overflow-y: auto; overscroll-behavior: contain; margin-top: 6px; padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
+.lab-view-options-panel { position: absolute; top: 100%; left: 0; width: 240px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 80px); overflow-y: auto; overscroll-behavior: contain; margin-top: 6px; padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
 .lab-view-options-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .lab-view-options-actions { display: flex; gap: 2px; }
 .lab-view-options-actions button { min-height: 28px; padding: 4px 6px; border-color: transparent; background: transparent; color: var(--obs-text-secondary); font-size: 11px; }

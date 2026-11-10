@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { showAllSessions, selectConnectedHost } from './all-sessions';
 import { showNewSession, showSessions } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
@@ -243,9 +244,7 @@ for (const choice of ['primary', 'another session'] as const) {
       await fixture.primary.locator('.agent-message-assistant').last().click();
       await expect(page).toHaveURL(url => url.searchParams.get('session') === fixture.primaryIdentity.nativeSessionId);
     } else {
-      await showSessions(page);
-      await page.getByRole('navigation', { name: 'Sidebar sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
-      const directory = page.getByRole('region', { name: 'Discover sessions', exact: true });
+      const directory = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions', exact: true });
       const refresh = directory.getByRole('button', { name: 'Refresh', exact: true });
       const welcome = directory.locator('.lab-session-row').filter({ has: page.getByText('Recorded welcome session', { exact: true }) });
       await refresh.click();
@@ -382,7 +381,7 @@ for (const action of ['focus', 'Ask'] as const) {
     try {
       await page.goto(fixture.url);
       await page.getByRole('link', { name: 'Sign in' }).click();
-      await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+      await selectConnectedHost(page, fixture.hostId);
       await showNewSession(page);
       const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
       await page.getByTestId('session-create').click();

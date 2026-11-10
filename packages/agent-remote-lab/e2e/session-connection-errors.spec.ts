@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 
 for (const scenario of [
   { code: 'session_attach_timeout', status: 504, role: 'status', text: 'may still be opening' },
@@ -16,7 +17,9 @@ for (const scenario of [
       }) });
     });
     await page.goto('/');
-    const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+    const compact = testInfo.project.name === 'chromium-mobile';
+    // Desktop lists sessions on the All sessions page; compact layouts show the Context dialog at load.
+    const context = compact ? page.getByRole('dialog', { name: 'Context' }) : await openSessionsPage(page);
     const session = context.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row').first();
     await session.click();
     const notice = page.locator('.lab-session-notice');
@@ -34,7 +37,7 @@ for (const scenario of [
     await expect(notice).toContainText(String(scenario.status));
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('connection-details.png'), fullPage: true });
-    await showSessions(page);
+    if (compact) await showSessions(page); else await openSessionsPage(page);
     await session.click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
     await expect(notice).toHaveCount(0);
@@ -53,7 +56,7 @@ test('offers immediate native takeover in the chatbox for a cold session',async(
     expect(body.takeOver).toBe(generation);await route.continue();
   });
   await page.goto('/');
-  const context=testInfo.project.name==='chromium-mobile'?page.getByRole('dialog',{name:'Context'}):page.locator('#lab-context');
+  const context=testInfo.project.name==='chromium-mobile'?page.getByRole('dialog',{name:'Context'}):await openSessionsPage(page);
   await context.getByRole('region',{name:'Discover sessions'}).locator('.lab-session-row').first().click();
   const composer=page.getByRole('region',{name:'Live provider controls'});
   await expect(composer).toBeVisible();await expect(composer.locator('[data-testid="prompt-input"]')).toBeHidden();
@@ -82,7 +85,7 @@ test('checks an unconfirmed native takeover before allowing another interruption
     await route.continue();
   });
   await page.goto('/');
-  const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', {name:'Context'}) : page.locator('#lab-context');
+  const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', {name:'Context'}) : await openSessionsPage(page);
   await context.getByRole('region', {name:'Discover sessions'}).locator('.lab-session-row').first().click();
   const composer = page.getByRole('region', {name:'Live provider controls'});
   await composer.getByRole('button', {name:'Interrupt and take control', exact:true}).click();

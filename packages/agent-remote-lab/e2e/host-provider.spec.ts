@@ -50,7 +50,7 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     await page.goto('/');
     await showNewSession(page);
     const compact = testInfo.project.name === 'chromium-mobile';
-    const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+    const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
     const provider = () => context().getByTestId('provider-select');
     const label = `${selected.name} · Browser DSH ${testInfo.project.name} · Online`;
     await expect(provider().getByRole('option', { name: label, exact: true })).toHaveCount(1);

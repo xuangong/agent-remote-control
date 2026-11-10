@@ -1,4 +1,5 @@
 import { expect, test, devices } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import { showNewSession } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
 
@@ -9,7 +10,7 @@ test('a clean mobile browser finds desktop Side and Ask from their source withou
   try {
     await page.goto(f.url + '/auth/login');
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await expect(page.getByTestId('session-create')).toBeEnabled();
     await page.getByTestId('session-create').click();

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 import { toggleViewPanel } from './view-options';
 
 test('resizes the desktop sidebar, retains its width, and supports keyboard reset', async ({ page }, info) => {
@@ -42,8 +43,14 @@ test('resizes the desktop sidebar, retains its width, and supports keyboard rese
 
 test('keeps discovery, creation and management easy to reach while retaining form drafts', async ({ page }, info) => {
   await page.goto('/');
-  const rail = page.locator('#lab-context');
   const desktop = info.project.name === 'chromium-desktop';
+  // Desktop opens the session panels as pages from the sidebar; compact layouts keep them in the Context drawer's tabs.
+  const rail = desktop ? page.locator('#lab-sessions-page') : page.locator('#lab-context');
+  const show = async (entry: 'Sessions' | 'Settings') => {
+    if (desktop) await openSessionsPage(page, entry === 'Sessions' ? 'All sessions' : 'Settings');
+    else await rail.getByRole('button', { name: entry, exact: true }).click();
+  };
+  if (desktop) await show('Sessions');
   const discover = rail.getByRole('region', { name: 'Discover sessions' });
   await expect(discover.locator('.lab-session-row').first()).toBeVisible();
   await expect(rail.getByTestId('session-create')).toBeHidden();
@@ -57,17 +64,17 @@ test('keeps discovery, creation and management easy to reach while retaining for
   await expect(rail.getByTestId('session-create')).toBeVisible();
   await expect(discover).toBeHidden();
   await rail.getByLabel('Working directory', { exact: true }).fill('/tmp/sidebar-draft');
-  await rail.getByRole('button', { name: desktop ? 'Sidebar settings' : 'Settings', exact: true }).click();
+  await show('Settings');
   await expect(rail.getByRole('button', { name: 'Pair Agent Host' })).toBeVisible();
   await expect(rail.getByTestId('session-create')).toBeHidden();
-  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await show('Sessions');
   await showNewSession(page);
   await expect(rail.getByLabel('Working directory', { exact: true })).toHaveValue('/tmp/sidebar-draft');
   await rail.getByRole('button', { name: 'Browse…' }).click();
   await expect(page.getByRole('dialog', { name: 'Choose a workspace folder' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(rail.getByTestId('session-create')).toBeVisible();
-  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await show('Sessions');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
   expect(overflow).toBe(false);
   await page.screenshot({ path: info.outputPath('sidebar.png') });
@@ -87,19 +94,20 @@ test('keeps long session lists in one scroll area and reveals each panel from it
   } }));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/');
-  const rail = page.locator('#lab-context');
+  // The long list is on the All sessions page, which scrolls as one area below its toolbar.
+  const rail = await openSessionsPage(page);
   await expect(rail.locator('.lab-session-row')).toHaveCount(25);
-  const scroll = rail.locator('.lab-sidebar-content');
+  const scroll = rail.locator('.lab-sessions-page-body');
   await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
   expect(await scroll.evaluate(element => element.scrollTop)).toBeGreaterThan(400);
   await showNewSession(page);
   await expect(rail.getByTestId('provider-select')).toBeInViewport();
   expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
-  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await openSessionsPage(page);
   await scroll.evaluate(element => { element.scrollTop = element.scrollHeight; });
-  await rail.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
+  await openSessionsPage(page, 'Settings');
   expect(await scroll.evaluate(element => element.scrollTop)).toBe(0);
-  await rail.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await openSessionsPage(page);
   const list = rail.locator('.lab-session-list');
   expect(await list.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: info.outputPath('sidebar-long-sessions.png') });

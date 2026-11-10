@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { toggleViewPanel } from './view-options';
-import { showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 
-test('long sidebar content never scrolls the desktop workspace away from the viewport', async ({ page, isMobile }, info) => {
+// The long session lists live on the All sessions page, which takes the Window's place in the main area.
+test('long sessions page content never scrolls the desktop workspace away from the viewport', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop sidebar scrolling');
   await page.setViewportSize({ width: 2048, height: 920 });
   await page.route('**/v1/stars', route => route.fulfill({ json: { stars: Array.from({ length: 18 }, (_, index) => ({
@@ -12,28 +13,32 @@ test('long sidebar content never scrolls the desktop workspace away from the vie
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
   await page.goto('/e2e/fixtures/session-stars.html');
-  await showSessions(page);
-  const sidebar = page.locator('.lab-sidebar-content');
-  await expect(sidebar.locator('.lab-favorite-list > li')).toHaveCount(18);
-  const discovery = sidebar.getByRole('region', { name: 'Discover sessions' });
+  const sessions = await openSessionsPage(page);
+  const scroller = sessions.locator('.lab-sessions-page-body');
+  await expect(sessions.locator('.lab-favorite-list > li')).toHaveCount(18);
+  const discovery = sessions.getByRole('region', { name: 'Discover sessions' });
   await expect(discovery.locator('.lab-session-row')).toHaveCount(1);
+  const fitsViewport = (bottomOf: string) => page.evaluate(bottomOf => ({
+    scrollY, overflow: document.documentElement.scrollHeight - innerHeight,
+    top: document.querySelector('.lab-shell')!.getBoundingClientRect().top,
+    bottom: document.querySelector(bottomOf)!.getBoundingClientRect().bottom - innerHeight,
+  }), bottomOf);
   for (const size of [{ width: 2048, height: 920 }, { width: 1440, height: 700 }, { width: 1181, height: 800 }]) {
     await page.setViewportSize(size);
     for (const showHeader of [false, true]) {
       if (showHeader) await toggleViewPanel(page, 'Header');
-      await sidebar.evaluate(element => { element.scrollTop = 0; });
+      await scroller.evaluate(element => { element.scrollTop = 0; });
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-      await expect.poll(() => page.evaluate(() => ({
-        scrollY, overflow: document.documentElement.scrollHeight - innerHeight,
-        top: document.querySelector('.lab-shell')!.getBoundingClientRect().top,
-        bottom: document.querySelector('.lab-composer-dock')!.getBoundingClientRect().bottom - innerHeight,
-      }))).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });
+      await expect.poll(() => fitsViewport('#lab-sessions-page')).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });
       await discovery.getByRole('button', { name: 'Refresh', exact: true }).focus();
       await expect(discovery.getByRole('button', { name: 'Refresh', exact: true })).toBeInViewport();
-      expect(await sidebar.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+      expect(await scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+      await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
+      await expect.poll(() => fitsViewport('.lab-composer-dock')).toEqual({ scrollY: 0, overflow: 0, top: 0, bottom: 0 });
       await page.getByTestId('prompt-input').focus();
       expect(await page.evaluate(() => scrollY)).toBe(0);
       if (showHeader) await toggleViewPanel(page, 'Header');
+      await openSessionsPage(page);
     }
   }
   await page.screenshot({ path: info.outputPath('desktop-viewport.png') });

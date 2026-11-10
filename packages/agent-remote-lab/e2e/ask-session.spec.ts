@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
+import { showAllSessions } from './all-sessions';
 
 async function start(page: Page, enableAsk = true) {
   await page.goto('/');
@@ -99,9 +100,7 @@ test('/ask sends its question once and stays attached to the source when session
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
   await expect(ask.getByTestId('timeline')).not.toContainText('Why was this approach chosen?');
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
-  await showSessions(page);
-  await page.locator('#lab-context').getByRole('button', { name: 'Sessions', exact: true }).click();
-  await page.getByRole('region', { name: 'Discover sessions', exact: true }).getByRole('button', { name: 'Refresh', exact: true }).click();
+  await (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions', exact: true }).getByRole('button', { name: 'Refresh', exact: true }).click();
   const sourceKey = JSON.stringify(['local', 'recorded', source.nativeSessionId]);
   await page.locator(`.lab-session-directory [data-session-key=${JSON.stringify(sourceKey)}] > .lab-session-branch > button.lab-session-row`).click();
   await primary.getByTestId('prompt-input').focus();
@@ -496,7 +495,8 @@ test('desktop Ask opens within the global surface and leaves navigation availabl
   expect(box.y).toBeGreaterThanOrEqual(source.y + 12);
   expect(box.x + box.width).toBeLessThanOrEqual(source.x + source.width - 12);
   expect(box.y + box.height).toBeLessThanOrEqual(source.y + source.height - 12);
-  await expect(page.getByRole('navigation', { name: 'Sidebar sections' })).toBeVisible();
+  // The desktop sidebar keeps its Shortcuts (it no longer has Sidebar sections tabs).
+  await expect(page.locator('#lab-context').getByRole('navigation', { name: 'Shortcuts' })).toBeVisible();
 });
 
 

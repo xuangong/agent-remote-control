@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectConnectedHost, addSessionView } from './all-sessions';
 import { showNewSession } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
 
@@ -85,7 +86,7 @@ test('reload keeps a minimized Ask closed and reopens its saved conversation and
 async function remoteSource(page: Page, fixture: Awaited<ReturnType<typeof sessionLinkFixture>>) {
   await page.goto(fixture.url + '/auth/login');
   await page.getByRole('link', { name: 'Sign in as alice', exact: true }).click();
-  await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+  await selectConnectedHost(page, fixture.hostId);
   await showNewSession(page);
   const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
@@ -218,7 +219,7 @@ test('Ask opens for a session shown in a Window dock', async ({ page, isMobile }
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     const primary = page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input');
     await expect(primary).toBeEnabled();
@@ -226,7 +227,7 @@ test('Ask opens for a session shown in a Window dock', async ({ page, isMobile }
     await primary.press('Enter');
     const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
     await expect(trigger).toBeEnabled();
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dock = page.locator('[data-dock-id]').first();
     await dock.click();
     await showNewSession(page);

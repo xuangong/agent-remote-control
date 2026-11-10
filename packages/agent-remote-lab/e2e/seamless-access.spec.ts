@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
@@ -19,7 +20,7 @@ for (const signal of ['visibility', 'pageshow'] as const) {
     try {
       await page.goto(f.url);
       await page.getByRole('link', { name: 'Sign in' }).click();
-      await page.getByLabel('Connected Host').selectOption(f.hostId);
+      await selectConnectedHost(page, f.hostId);
       await showNewSession(page);
       await page.getByTestId('session-create').click();
       const input = page.getByTestId('prompt-input');
@@ -65,7 +66,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await page.goto(f.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     const input = page.getByTestId('prompt-input');
@@ -130,7 +131,7 @@ test('confirmed device protection clears disk copies across tabs without interru
   try {
     await page.goto(f.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     const input = page.getByTestId('prompt-input');

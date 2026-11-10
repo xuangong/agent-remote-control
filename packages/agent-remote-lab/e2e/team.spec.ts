@@ -62,7 +62,7 @@ for (const navigation of ['team', 'create'] as const) {
   const primary = page.locator('.lab-primary-conversation');
   const openTracked = async () => {
    await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-   await page.locator('.lab-tracking-floating .lab-session-row').filter({ hasText: tracked.title }).click();
+   await page.getByRole('region', { name: 'Tracked sessions', exact: true }).locator('.lab-session-row').filter({ hasText: tracked.title }).click();
    await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe(tracked.nativeSessionId);
    await expect(primary).toBeVisible();
    await expect(primary.locator('.agent-message-assistant')).toContainText('Conversation for tracked');

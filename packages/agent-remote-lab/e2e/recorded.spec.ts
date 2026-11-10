@@ -1,5 +1,6 @@
 import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
+import { openSessionsPage } from './all-sessions';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
@@ -150,14 +151,14 @@ function isCompact(testInfo: TestInfo): boolean {
 }
 
 function contextRail(page: Page, testInfo: TestInfo): Locator {
-  return isCompact(testInfo) ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+  return isCompact(testInfo) ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
 }
 
 async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Locator> {
-  await showSessions(page);
   if (isCompact(testInfo)) {
+    await showSessions(page);
     await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  } else await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
+  } else await openSessionsPage(page, 'Settings');
   return contextRail(page, testInfo);
 }
 

@@ -1,10 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
-import { showNewSession, showSessions } from './session-navigation';
+import { showNewSession } from './session-navigation';
+import { showAllSessions } from './all-sessions';
 
 async function showDirectory(page: Page) {
-  await showSessions(page);
-  await page.getByRole('navigation', { name: 'Sidebar sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
-  const directory = page.getByRole('region', { name: 'Discover sessions', exact: true });
+  const directory = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions', exact: true });
   await directory.getByRole('button', { name: 'Refresh', exact: true }).click();
   return directory;
 }

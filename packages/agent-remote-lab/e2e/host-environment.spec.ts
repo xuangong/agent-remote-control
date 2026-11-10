@@ -18,7 +18,7 @@ test('filters execution environments without confusing same-name Hosts or overfl
   });
   await page.goto('/');
   await showNewSession(page);
-  const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+  const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
   const search = context.getByRole('searchbox', { name: 'Find an execution environment' });
   await search.fill('linux chromium');
   const selector = context.getByLabel('Connected Host');

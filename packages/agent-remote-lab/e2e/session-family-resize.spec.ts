@@ -243,7 +243,7 @@ test('empty pane selection uses the same visible treatment and clears the previo
   await page.goto(`${fixture}?selection&empty`);
   await expectSelectedPane(page, 'Primary');
   const empty = page.getByRole('region', { name: 'Session: Select session', exact: true });
-  await empty.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+  await empty.getByRole('button', { name: 'Choose session', exact: true }).click();
   await expect(empty).toHaveAttribute('aria-current', 'true');
   await expect(page.locator('.lab-session-family-pane[data-selected="true"]')).toHaveCount(0);
   await page.evaluate(() => { document.documentElement.dataset.inputModality = 'pointer'; });

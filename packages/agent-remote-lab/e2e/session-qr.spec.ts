@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import jsQR from 'jsqr';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
@@ -10,7 +11,7 @@ test('shares a decodable QR without fetching more scripts from an older open pag
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();

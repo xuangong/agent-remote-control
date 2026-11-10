@@ -1,6 +1,7 @@
 import { clickSessionAction, showSessionAction } from './session-actions';
 import { expect, test, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
+import { openSessionsPage, addSessionView } from './all-sessions';
 
 async function setup(page: Page) {
   await page.setViewportSize({ width: 1680, height: 1000 });
@@ -20,9 +21,7 @@ async function setup(page: Page) {
   return { address, targets };
 }
 async function choose(page: Page, name: string) {
-  await showSessions(page);
-  await page.locator('.lab-sidebar-tabs').getByRole('button', { name: 'Sessions', exact: true }).click();
-  const list = page.getByRole('region', { name: 'Discover sessions', exact: true });
+  const list = (await openSessionsPage(page)).getByRole('region', { name: 'Discover sessions', exact: true });
   await list.getByRole('button', { name: 'Refresh', exact: true }).click();
   await list.locator('.lab-session-row').filter({ hasText: name }).click();
 }
@@ -33,9 +32,9 @@ test('empty views bind and replace sessions without changing main, placement or 
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   const nativeRequests: string[] = [];
   page.on('request', request => { if (/\/(attach|create)$/.test(new URL(request.url()).pathname)) nativeRequests.push(request.url()); });
-  await page.locator('.lab-session-dock-add').click();
+  await addSessionView(page);
   const view = page.locator('.lab-bindable-session-window[data-view-id]');
-  await expect(view).toHaveCount(1); await expect(view.getByText('Choose a session from the sidebar')).toBeVisible();
+  await expect(view).toHaveCount(1); await expect(view.getByText('Choose a session from All sessions')).toBeVisible();
   const id = await view.getAttribute('data-view-id');
   expect(nativeRequests).toEqual([]);
   await expect(page.locator('.lab-session-open-target')).toContainText('Empty session view');
@@ -122,17 +121,16 @@ test('favorites target the focused view, while Track and explicit main navigatio
     localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 }]));
   });
   await page.goto('/e2e/fixtures/session-stars.html?switching=1');
-  await page.locator('.lab-session-dock-add').click();
+  await addSessionView(page);
   const view = page.locator('.lab-bindable-session-window[data-view-id]');
-  await expect(view.getByText('Choose a session from the sidebar')).toBeVisible();
+  await expect(view.getByText('Choose a session from All sessions')).toBeVisible();
   const address = page.url();
-  await page.locator('.lab-sidebar-tabs').getByRole('button', { name: 'Favorites', exact: true }).click();
-  await page.locator('.lab-favorites-section .lab-session-row').filter({ hasText: 'Build checks' }).click();
+  await (await openSessionsPage(page, 'Favorites')).locator('.lab-favorites-section .lab-session-row').filter({ hasText: 'Build checks' }).click();
   await expect(view.locator('.agent-message-assistant')).toContainText('Conversation for background-session');
   await expect(page).toHaveURL(address);
   const id = await view.getAttribute('data-view-id');
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await page.locator('.lab-tracking-floating .lab-session-row').filter({ hasText: 'Build checks' }).click();
+  await page.getByRole('region', { name: 'Tracked sessions', exact: true }).locator('.lab-session-row').filter({ hasText: 'Build checks' }).click();
   await expect(page).toHaveURL(/session=background-session/);
   await expect(view).toHaveAttribute('data-view-id', id!);
   await expect(view.locator('.agent-message-assistant')).toContainText('Conversation for background-session');

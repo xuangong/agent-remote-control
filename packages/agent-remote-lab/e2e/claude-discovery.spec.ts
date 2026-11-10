@@ -77,7 +77,7 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
     await host.ready;
     await page.goto('/');
     await showNewSession(page);
-    const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+    const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
     const providerSelect = context.getByTestId('provider-select');
     await expect(providerSelect.getByRole('option', { name: 'Claude Code · Claude Discovery · Online', exact: true })).toHaveCount(1);
     await providerSelect.selectOption({ label: 'Claude Code · Claude Discovery · Online' });

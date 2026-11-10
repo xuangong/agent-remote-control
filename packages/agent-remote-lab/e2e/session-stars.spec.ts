@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -109,11 +109,11 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await expect(page.getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
   await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Working');
   await page.getByTestId('prompt-input').fill('Keep my draft');
-  if (!mobile) await showSessions(page);
+  if (!mobile) await openSessionsPage(page);
   const title = page.getByRole('button', { name: 'Favorites', exact: true });
   if (mobile) await title.click();
   await page.getByRole('button', { name: 'Star Research notes', exact: true }).last().click();
-  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-context [aria-label="Favorites"]');
+  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-sessions-page [aria-label="Favorites"]');
   await expect(favorites.getByText('Research notes', { exact: true })).toBeVisible();
   await favorites.getByRole('button', { name: 'Track Research notes', exact: true }).click();
   if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }

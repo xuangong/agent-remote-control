@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import jsQR from 'jsqr';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
@@ -18,7 +19,7 @@ test('QR and copied URLs open the same session across authenticated devices with
   try {
     await page.goto(f.url);
     await signIn(page);
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();

@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+import { toggleViewPanel } from './view-options';
 
 test.describe.configure({ timeout: 45_000 });
 
@@ -18,6 +19,9 @@ async function openAsk(page: Page) {
   let creations = 0;
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/create')) creations++; });
   const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  // While the desktop sidebar is visible, Ask and the other global controls are its rows; these tests size Ask against the floating ones.
+  await expect(trigger).toBeVisible();
+  if (await trigger.evaluate(element => !!element.closest('#lab-context'))) await toggleViewPanel(page, 'Sidebar');
   await trigger.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();

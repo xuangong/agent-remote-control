@@ -16,7 +16,6 @@
 .lab-window-list small { display: block; margin-top: 2px; color: var(--obs-text-secondary); font-size: 11px; }
 .lab-window-list [aria-current="true"] { background: var(--obs-surface-selected); }
 .lab-window-selected { flex: none; color: var(--obs-action); }
-.lab-window-views > [data-attached="true"] { padding-left: 20px; }
 .lab-window-options { margin-top: 12px; border-top: 1px solid var(--obs-border); }
 .lab-window-options summary { cursor: pointer; padding: 12px 4px; min-height: 44px; }
 .lab-window-options > summary { color: var(--obs-text-secondary); }
@@ -43,3 +42,6 @@
   .lab-window-workspaces button { min-height: 44px; }
 }
 .lab-window-panel .lab-window-overview-trigger { margin-left: auto; min-height: 32px; padding: 4px 8px; border-color: transparent; color: var(--obs-action); font-size: 12px; }
+
+.lab-window-row[data-depth="1"] { padding-left: 16px; }
+.lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }

@@ -4,6 +4,7 @@ import { createWindowView, hasWindowAppearance, type WindowOperation, type Windo
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
+import { windowOutline } from '../window-outline.js';
 
 export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
@@ -19,10 +20,14 @@ function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
+  /** Shows all Windows; with it the Windows heading offers an "All Windows" button. */
+  onOverview?(): void;
+  /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
+  onNavigate?(): void;
 }) {
   const [notice, setNotice] = useState<string>();
   // The Window whose title is being edited in the list, and the scope it belongs to.
@@ -70,10 +75,18 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
     setOpeningId(id); setNotice(undefined);
-    try { await workspace.open(id); }
+    try { await workspace.open(id); onNavigate?.(); }
     catch (error) {
       if (generation === navigation.current && currentScope.current.client === client) setNotice(error instanceof Error ? error.message : String(error));
     } finally { if (generation === navigation.current) setOpeningId(undefined); }
+  }
+  function chooseView(view: WindowView) {
+    const select: WindowOperation = { type: 'view.select', viewId: view.id };
+    edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select);
+    // The pane may render or expand on the next frame; bring it into view then.
+    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-view-id]')].find(element => element.dataset.viewId === view.id)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    onNavigate?.();
   }
   function startRename(window: { id: string; title: string }) {
     renameReturn.current = window.id; setTitle(window.title); setNotice(undefined); setRenaming({ id: window.id, client: workspace.client });
@@ -100,7 +113,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     finally { setSaving(false); }
   }
   return <div ref={root} className="lab-window-workspaces">
-    <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
+    <div className="lab-window-section-heading"><span>Windows</span>{onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp" onClick={onOverview}>All Windows</button> : null}<button type="button" disabled={busy} onClick={() => void run(workspace.create)}>New Window</button></div>
     <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => { const status = sessionStatus && windowStatus(window, sessionStatus); return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={`Rename Window: ${window.title}`} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
@@ -131,14 +144,15 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         {workspace.saveState.state === 'error' && workspace.saveState.pending > 0 ? <button type="button" title="Discard unsaved local layout edits; changes already saved remain." onClick={() => background(workspace.discardLocalChanges)}>Use saved layout</button> : null}</p> : null}
     {!catalog.length ? <p className="lab-window-note">Create a Window to organize session views.</p> : null}
     {workspace.window ? <>
-      <div className="lab-window-section-heading"><span>Session views</span><button type="button" disabled={busy || workspace.unavailable} onClick={() => {
+      <div className="lab-window-section-heading"><span>In this Window</span><button type="button" disabled={busy || workspace.unavailable} onClick={() => {
         const view = createWindowView(crypto.randomUUID());
         edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
       }}>New session view</button></div>
-      <nav className="lab-window-list lab-window-views" aria-label="Session views">{workspace.window.views.map(view => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}>
+      <nav className="lab-window-list lab-window-views" aria-label="Session views">{windowOutline(workspace.window.views).map(({ view, depth }) => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}
+        data-depth={depth || undefined} data-collapsed={view.collapsed || undefined}>
         <button type="button" className="lab-window-open" data-window-view-id={view.id} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}
-        onClick={() => edit({ type: 'view.select', viewId: view.id })}>
+        onClick={() => chooseView(view)}>
         <span><strong className="agent-session-title" data-session-status={shown}>{viewTitle(view)}</strong><small className="agent-session-title" data-session-status={shown}>{statusPrefix(status)}{viewRole(view)}</small></span>
         {view.id === workspace.window!.selectedViewId ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
         </button>

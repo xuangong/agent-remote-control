@@ -31,5 +31,5 @@
 .lab-bot-workspace[data-compact] > .lab-bot-roster, .lab-bot-workspace[data-compact] > .lab-bot-conversation { grid-row: 2; }
 .lab-bot-workspace[data-compact] .lab-bot-roster { border-right: 0; }
 .lab-session-conversation-host { min-width: 0; min-height: 0; height: 100%; }
-.lab-bot-workspace :focus-visible, .lab-workbench-mode :focus-visible { outline: 2px solid var(--obs-action); outline-offset: 2px; }
+.lab-bot-workspace :focus-visible, .lab-workbench-mode :focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset, 2px); }
 @media (prefers-reduced-motion: reduce) { .lab-bot-workspace * { scroll-behavior: auto; } }

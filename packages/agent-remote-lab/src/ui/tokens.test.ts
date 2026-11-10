@@ -46,6 +46,14 @@ function mix(a: string, b: string, weightOfA: number): string {
   return `#${channels(a).map((value, index) => Math.round(value * weightOfA + other[index]! * (1 - weightOfA)).toString(16).padStart(2, '0')).join('')}`;
 }
 
+/** A token such as `rgb(120 120 128 / 0.12)` painted over a #rrggbb surface. */
+function over(token: string, surface: string): string {
+  const match = /^rgb\((\d+) (\d+) (\d+) \/ ([\d.]+)\)$/.exec(token);
+  if (!match) throw new Error(`${token} is not an rgb(r g b / a) color`);
+  const hex = `#${[match[1], match[2], match[3]].map(value => Number(value).toString(16).padStart(2, '0')).join('')}`;
+  return mix(hex, surface, Number(match[4]));
+}
+
 /** The sorted names of the tokens whose value is a literal color. */
 function colorNames(tokens: Map<string, string>): string[] {
   return [...tokens].filter(([, value]) => /^#|^rgb/.test(value)).map(([name]) => name).sort();
@@ -83,6 +91,23 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on 
   for (const surface of ['--ui-background', '--ui-background-grouped', '--ui-sidebar']) {
     expect(contrast(tokens.get('--ui-control-border')!, tokens.get(surface)!), `control border on ${surface}`).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens.get('--ui-focus-ring')!, tokens.get(surface)!), `focus ring on ${surface}`).toBeGreaterThanOrEqual(3);
+  }
+});
+
+it.each([['light', light], ['dark', dark]] as const)('keeps %s state colors readable on their fills', (_appearance, tokens) => {
+  const t = (name: string) => tokens.get(name)!;
+  expect(contrast(t('--ui-on-accent'), t('--ui-accent-hover')), 'primary hover').toBeGreaterThanOrEqual(4.5);
+  for (const surface of ['--ui-background', '--ui-background-grouped', '--ui-background-elevated', '--ui-sidebar']) {
+    for (const fill of ['--ui-fill', '--ui-fill-strong']) {
+      expect(contrast(t('--ui-failure-on-fill'), over(t(fill), t(surface))), `destructive on ${fill} over ${surface}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t('--ui-label'), over(t(fill), t(surface))), `label on ${fill} over ${surface}`).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  const hoveredRow = over(t('--ui-row-hover'), t('--ui-sidebar'));
+  expect(contrast(t('--ui-label'), hoveredRow), 'row title on a hovered row').toBeGreaterThanOrEqual(4.5);
+  expect(contrast(t('--ui-label-secondary'), hoveredRow), 'row subtitle on a hovered row').toBeGreaterThanOrEqual(4.5);
+  for (const surface of ['--ui-sidebar', '--ui-background', '--ui-selection']) {
+    expect(contrast(t('--ui-accent-text'), t(surface)), `unread dot on ${surface}`).toBeGreaterThanOrEqual(3);
   }
 });
 

@@ -90,8 +90,8 @@ textarea:focus-visible,
 :is(.lab-shell, .lab-session-view) .agent-remote-surface button:focus-visible,
 :is(.lab-shell, .lab-session-view) .agent-remote-surface input:focus-visible,
 :is(.lab-shell, .lab-session-view) .agent-remote-surface a:focus-visible {
-  outline: 3px solid var(--obs-action);
-  outline-offset: 2px;
+  outline: 3px solid var(--ui-focus-ring);
+  outline-offset: var(--ui-focus-offset, 2px);
 }
 
 button:disabled,

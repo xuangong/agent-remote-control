@@ -24,16 +24,17 @@ test('sends a multiline conversation through the Relay and returns focus to an e
   await input.press('Shift+Enter');
   await input.press('Shift+Enter');
   await input.pressSequentially('Keep the **shared React components**, and make protocol details easy to inspect.');
-  await expect(input).toHaveValue('Help me improve the conversation experience.\n\nKeep the **shared React components**, and make protocol details easy to inspect.');
+  // The composer is a ProseMirror editor: Shift+Enter inserts a newline into its text.
+  await expect.poll(() => input.textContent()).toBe('Help me improve the conversation experience.\n\nKeep the **shared React components**, and make protocol details easy to inspect.');
   await input.press('Enter');
-  await expect(input).toHaveValue('');
+  await expect(input).toHaveText('');
   await expect(input).toBeFocused();
   await expect(page.locator('.agent-message-user').filter({ hasText: 'Help me improve the conversation experience.' })).toContainText('shared React components');
   await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Help me improve' })).toContainText('shared React components');
   await expectLatest();
   await input.fill('Keep the conversation readable while the Agent works.\n\nShow concise tool summaries, preserve my place when I read earlier messages, and let me return to the latest reply.');
   await input.press('Enter');
-  await expect(input).toHaveValue('');
+  await expect(input).toHaveText('');
   await expect(input).toBeFocused();
   await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Keep the conversation readable' })).toContainText('return to the latest reply.');
   await expectLatest();
@@ -60,7 +61,8 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await expect(summary).toContainText('Recorded semantic Provider');
   await expect(summary).toContainText('Ready');
   await expect(summary.locator('code')).toHaveText(new URL(page.url()).searchParams.get('agent')!);
-  await expect(page.getByRole('heading', { name: 'Conversation', exact: true })).toBeVisible();
+  // A Window pane titles its conversation with the session title instead of a generic heading.
+  await expect(page.getByRole('region', { name: 'New session', exact: true }).locator('.agent-session-title:visible')).toHaveText('New session');
   await expect(page.getByLabel('Agent timeline')).toBeVisible();
   await expect(page.getByLabel('Live provider controls')).toBeVisible();
   await expect(page.getByTestId('prompt-input')).toBeVisible();
@@ -90,7 +92,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   }
   const fixtureControls = await openContextForFixture(page, testInfo);
   await expect(fixtureControls.getByLabel('Lab scenario controls')).toBeVisible();
-  if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
+  await closeContextForFixture(page, testInfo);
 
   await expect(page.getByTestId('timeline').locator('.agent-timeline-entry')).toHaveCount(6);
   await expect(page.getByTestId('timeline').getByText('Recorded history 1')).toBeVisible();
@@ -105,7 +107,7 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
 
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-advance').click();
   await expect(page.getByText('Recorded observation advanced.')).toBeVisible();
-  if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
+  await closeContextForFixture(page, testInfo);
   await expect(page.getByTestId('timeline').getByText('Live recorded output.')).toBeVisible();
   await expect(page.locator('article.agent-tool').filter({ hasText: 'read' }).filter({ hasText: 'Completed' })).toBeVisible();
   await expect(page.locator('article.agent-todo').filter({ hasText: 'Report result' })).toBeVisible();
@@ -121,14 +123,14 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
 
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-rehydrate').click();
   await expect(page.getByText('Recorded Timeline rehydrated.')).toBeVisible();
-  if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
+  await closeContextForFixture(page, testInfo);
   await expect(page.getByTestId('timeline').getByText('Authoritative rehydrated Timeline.')).toBeVisible();
   await expect(page.getByTestId('timeline').getByText('Recorded history 1')).toHaveCount(0);
   await expect(resourceRow(page, 'artifacts/lab-proof.txt')).toContainText('Available');
 
   await (await openContextForFixture(page, testInfo)).getByTestId('playback-stop-reader').click();
   await expect(page.getByText('Provider resource reader stopped.')).toBeVisible();
-  if (isCompact(testInfo)) await page.getByRole('button', { name: 'Close Context' }).click();
+  await closeContextForFixture(page, testInfo);
   await page.reload();
   await expect(page.getByTestId('connection-summary')).toContainText('Ready');
   const reloadedResource = resourceRow(page, 'artifacts/lab-proof.txt');
@@ -142,8 +144,9 @@ test('covers recorded Snapshot, Timeline, interactions, replacement, and durable
   await page.screenshot({ path: testInfo.outputPath('recorded-visible.png'), fullPage: true });
 });
 
+/** Resource cards show the file name rather than the full locator (54cc2377). */
 function resourceRow(page: Page, locator: string) {
-  return page.locator('.agent-resources li').filter({ hasText: locator });
+  return page.locator('.agent-resources li').filter({ has: page.locator('code').getByText(locator.split('/').pop()!, { exact: true }) });
 }
 
 function isCompact(testInfo: TestInfo): boolean {
@@ -162,6 +165,14 @@ async function openContextForFixture(page: Page, testInfo: TestInfo): Promise<Lo
   return contextRail(page, testInfo);
 }
 
+/** Returns to the conversation: compact layouts close the Context dialog; desktop leaves the Settings page that covers the Window. */
+async function closeContextForFixture(page: Page, testInfo: TestInfo): Promise<void> {
+  if (isCompact(testInfo)) { await page.getByRole('button', { name: 'Close Context' }).click(); return; }
+  const sessions = page.locator('#lab-sessions-page');
+  await sessions.getByRole('button', { name: 'Back to Window', exact: true }).click();
+  await expect(sessions).toBeHidden();
+}
+
 async function openInspector(page: Page, testInfo: TestInfo): Promise<Locator> {
   await toggleViewPanel(page, 'Replica Inspector');
   return isCompact(testInfo) ? page.getByRole('dialog', { name: 'Replica Inspector' }) : page.locator('#lab-inspector');
@@ -171,5 +182,7 @@ function collectBrowserErrors(page: Page): { console: string[]; page: string[] }
   const errors = { console: [] as string[], page: [] as string[] };
   page.on('console', (message) => { if (message.type() === 'error') errors.console.push(`${message.text()} (${message.location().url})`); });
   page.on('pageerror', (error) => errors.page.push(error.message));
+  // The workbench probes each Host for TPM works; the recorded Relay has none, which the probe treats as unsupported.
+  void page.route('**/v1/remote/hosts/*/tpm', route => route.fulfill({ json: { supported: false, works: [] } }));
   return errors;
 }

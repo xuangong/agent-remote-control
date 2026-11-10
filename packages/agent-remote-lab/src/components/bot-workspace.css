@@ -16,8 +16,10 @@
 .lab-bot-section h2 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
 .lab-bot-section small, .lab-bot-empty, .lab-bot-row-text > span { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-bot-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 8px; text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-.lab-bot-row:hover { background: var(--obs-canvas); }
-.lab-bot-row[aria-current="true"] { background: var(--obs-canvas); border-color: var(--obs-action); }
+/* The canvas color equals the sidebar color in light mode, so rows use the row-hover fill and the Window rail's selection color.
+   The hover rule outranks the global button:hover, which would otherwise paint any hovered row as selected. */
+.lab-bot-row:not([aria-current="true"]):hover:not(:disabled) { border-color: transparent; color: inherit; background: var(--ui-row-hover); }
+.lab-bot-row[aria-current="true"] { background: var(--ui-selection); border-color: var(--obs-action); }
 .lab-bot-row-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .lab-bot-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .lab-bot-session-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }

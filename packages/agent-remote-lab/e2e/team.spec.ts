@@ -361,14 +361,18 @@ test('Dock child navigation uses the live channel without replacing the main ses
  await expect(parent.getByTestId('prompt-input')).toBeEnabled();
  await parent.getByTestId('prompt-input').fill('Keep Team draft');
  await parent.locator('.agent-child-sessions > summary').click();
- await parent.locator(`[data-child-session-id="${child!.nativeSessionId}"]`).click();
+ const childRow = parent.locator(`[data-child-session-id="${child!.nativeSessionId}"]`);
+ await childRow.click();
+ // Since b7f70fea a subagent pane is created only after the Host attaches it; a failure stays in the parent's subagent list.
  const childPane = page.getByRole('region', { name: 'Live child', exact: true });
- await expect(childPane.getByRole('alert')).toContainText('Child temporarily unavailable');
+ await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toContainText('Child temporarily unavailable');
+ await expect(childPane).toHaveCount(0);
  await expect(page).toHaveURL(address);
  fail = false;
  const attemptsBeforeRetry = requests.length;
- await childPane.getByRole('button', { name: 'Retry', exact: true }).click();
+ await childRow.click();
  await expect(childPane.getByTestId('prompt-input')).toBeEnabled();
+ await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toHaveCount(0);
  expect(requests).toHaveLength(attemptsBeforeRetry + 1);
  expect(requests).toEqual(Array(requests.length).fill({ providerId: provider, parentNativeSessionId: leader!.nativeSessionId, nativeSessionId: child!.nativeSessionId }));
  await childPane.getByRole('button', { name: isMobile ? 'Back to Leader' : 'Close subagent', exact: true }).click();

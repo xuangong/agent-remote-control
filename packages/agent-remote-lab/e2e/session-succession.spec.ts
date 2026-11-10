@@ -14,7 +14,7 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const native = (nativeSessionId: string) => ({ controllerId: 'browser-installation', providerId: 'recorded', nativeSessionId });
 
 /** Fixture-owned Gateway, authority, uplink and recorded native sessions. */
-async function fixture() {
+async function fixture(options: { materializedContext?: boolean } = {}) {
   let denied = false;
   const authority = createServer(async (request, response) => {
     let body = ''; for await (const chunk of request) body += String(chunk);
@@ -49,7 +49,7 @@ async function fixture() {
   expect(initial.version).toBe(11);
   expect(initial.tenants[0]!.broker.associations?.version).toBe(6);
   let saved: HostedRelayState = initial;
-  const gateway = createHostedRelay({ ...auth, storage: { initial, async commit(value) { saved = value; } }, scheduler: { schedule() {}, cancel() {} } });
+  const gateway = createHostedRelay({ ...auth, ...(options.materializedContext ? { successionEnrollment: true as const } : {}), storage: { initial, async commit(value) { saved = value; } }, scheduler: { schedule() {}, cancel() {} } });
   const serve = await createGatewayStaticPages(resolve('dist'), { origin });
   const reads: string[] = [];
   server.on('request', (incoming, outgoing) => { void (async () => {
@@ -74,6 +74,13 @@ async function fixture() {
   const controls: Array<{ path: string; body: Record<string, unknown> }> = [];
   const uplink = createRemoteHostUplinkClient({ relay, url: origin.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: credential,
     installationId: 'browser-installation', name: 'Succession fixture', providers: [{ providerId: 'recorded', displayName: 'Recorded fixture' }],
+    // Only the Host can report that B received A's history; until then the first message may hold only text.
+    ...(options.materializedContext ? { successionEnrollment: { control(control: { body?: string }) {
+      const body = JSON.parse(control.body ?? '{}');
+      if (body.action === 'status' && body.freeze) return { status: 200, body: JSON.stringify({ freeze: body.freeze, record: projection.receipt,
+        ...(body.includeContext ? { context: { operationId: request.operationId, target: native('B'), state: 'materialized' } } : {}) }) };
+      return { status: 404, body: JSON.stringify({ code: 'fixture_unsupported', error: 'Fixture enrollment action unavailable.' }) };
+    } } } : {}),
     resolveSession: id => nativeIds.some(nativeId => id === `agent-${nativeId}`) ? relay.requireAgent(id) : undefined,
     async control(control) {
       const body = JSON.parse(control.body ?? '{}'); controls.push({ path: control.path, body });
@@ -395,7 +402,7 @@ test('separate devices retain distinct drafts and explicit A history owns a sepa
 
 test('opaque image bytes survive failed-primary reload and stay with the same editor on B confirmation', async ({ page, context }, testInfo) => {
   test.setTimeout(60000);
-  const f = await fixture(), inputs = observeInputs(page);
+  const f = await fixture({ materializedContext: true }), inputs = observeInputs(page);
   try {
     await f.seed(context, 'Image owner draft');
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);

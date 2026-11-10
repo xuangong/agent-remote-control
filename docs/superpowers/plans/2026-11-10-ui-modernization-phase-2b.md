@@ -683,3 +683,39 @@ For each file, look at the projects it runs in (`playwright.config.ts` maps spec
 
   Take screenshots in light and dark, plus the phone layout (390×844, unchanged from 2a apart from what the shared components changed). Read each image.
 - [ ] **Step 6:** Record deviations under "Changes made during execution" at the end of this file, and commit.
+
+---
+
+## Changes made during execution
+
+- **Task 1.** A saved width outside 220–360 is clamped instead of discarded. On desktop the viewport term of the maximum never binds: the handle exists only above 1180px, and the term reaches 360 only below 1160px with the Inspector open. A unit test covers the term instead.
+- **Task 2.** `windowOutline` walks recursively with a visited set, so Asks on Sides, nested Sides and (invalid) cycles keep every view; children stay at one indent.
+- **Task 3.** The test's views follow the protocol rule that an attached view comes after its source. `chooseView` navigates only when the edit applies. The old `data-attached` indent rule and attribute are gone.
+- **Task 4.**
+  - `useTrackingPosition` gained `{ enabled }`. A sidebar root must keep its `ref`, because Team and TPM close their panels with `root.current.contains`.
+  - Ask and Track status styles also apply to the sidebar rows.
+  - Count and badge rules target the count elements.
+  - The Track row has a visible "Track" label.
+- **Task 5.** The status tokens are `--ui-status-success`, `--ui-status-attention` and `--ui-status-failure`. The footer counts the Lab server when local providers exist, as the Hosts select does. "All Hosts offline" replaces "0 of N".
+- **Task 6.**
+  - **Closing the page.** The page closes in `closeContext()`, which every open, create, resume, attach and Track path calls. `closeContext` no longer hides the desktop sidebar: the sidebar is no longer just a session picker.
+  - **Opening the page.** "Choose session", "Change session" and the dock **+** open the page. Focus moves to the page heading (or `#provider-select` for New session).
+  - **Leaving the page.** Leaving it returns focus to the workbench. Escape leaves the page except from text fields.
+  - **The Trace tab.** It closes the page.
+  - **The covered Window.**
+    - Its sessions are not counted as seen (`visibleWindows`), and expanded Ask windows are hidden.
+    - `SessionWindow.visible` and the primary group's `active` still ignore the page: hiding them undocks views or detaches their connections.
+    - The page hides `#lab-workbench` instead.
+  - **Shortcut entries.** They render once into stable containers (`src/shell/movable-host.tsx`) that move between the sidebar and the floating slots, so toggling the sidebar does not remount Team, TPM, Track or Ask.
+  - **View options.** When the sidebar is hidden while a page is open, View options sits in the page toolbar.
+  - **Favorites page.** The page's title is the Favorites heading.
+- **Sidebar Windows section.** `WindowWorkspaces` has `placement: 'sidebar'`:
+  - Headings use the sidebar section title, with icon buttons that keep their names ("Show all Windows", "New Window", "New session view").
+  - Rows are flat, without ✓, and their actions show on hover or focus.
+  - The delete note is not shown.
+  - The floating panel is unchanged, except that its unused "All Windows" branch was removed.
+- **Task 7.**
+  - **The comparison.** The first sweep reported 187 chromium-desktop failures, mostly because the Lab `dist` was stale. Rebuilt and compared by test title against main, the branch has no chromium-desktop failure of its own.
+  - **Test changes.** Four tests were changed to reach controls at their new places, or to hide the sidebar when they test floating capsules.
+  - **The page turn script.** `prepare-arc-local`'s `session-turn.mjs` opens the New session page from the sidebar's New menu.
+- **Found, failing on main as well (handled separately):** the tests that wait for `.lab-primary-conversation > .lab-session-view`, most of `ask-session`, `session-composition-persistence`, three `team` tests, five `window-workspaces` tests and others.

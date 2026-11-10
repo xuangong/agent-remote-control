@@ -11,7 +11,7 @@ import { projectBotRoster } from './bot-roster.js';
 import { parseWorkbenchRoute, type BotPlace } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
-import { BotPicture } from './components/BotRoster.js';
+import { BotPicture, botDisplayName } from './components/BotRoster.js';
 import { WorkbenchModeSwitch } from './components/WorkbenchModeSwitch.js';
 import { SessionConversationSurfaces, SessionConversationMount, type SessionSurfaceDescriptor } from './components/SessionConversationSurfaces.js';
 import { useWindowWorkspace } from './hooks/useWindowWorkspace.js';
@@ -2446,7 +2446,7 @@ function AppContent({
           {quoteView && context.state && quoteSelection?.viewId !== quoteView
             ? <QuoteMessagesButton onClick={() => quoteEntrySelection(quoteView, context.state!.timeline.epoch).select([], true)} /> : null}
         </SessionHeadingActions></>,
-      conversationPath: botPresentation ? <span className="lab-bot-session-heading">{options.bot ? <BotPicture picture={botGroup?.bots?.members[options.bot.viewId]?.picture} /> : null}<span><strong>{source.title}</strong>{options.bot && botGroup?.bots?.members[options.bot.viewId]?.label ? <small>{botGroup.bots.members[options.bot.viewId]!.label}</small> : null}<small>{context.offline ? 'Host offline' : context.state?.agent?.status === 'waiting' || context.state?.agent?.status === 'starting' ? 'Needs you' : context.state?.agent?.status === 'running' ? 'Working' : context.state?.agent?.status === 'failed' ? 'Failed' : context.status === 'ready' ? 'Idle' : 'Status unavailable'}</small></span></span> : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
+      conversationPath: botPresentation ? <span className="lab-bot-session-heading">{options.bot ? <BotPicture picture={botGroup?.bots?.members[options.bot.viewId]?.picture} name={view?.binding ? botDisplayName(view.binding) : source.title} /> : null}<span><strong>{source.title}</strong>{options.bot && botGroup?.bots?.members[options.bot.viewId]?.label ? <small>{botGroup.bots.members[options.bot.viewId]!.label}</small> : null}<small>{context.offline ? 'Host offline' : context.state?.agent?.status === 'waiting' || context.state?.agent?.status === 'starting' ? 'Needs you' : context.state?.agent?.status === 'running' ? 'Working' : context.state?.agent?.status === 'failed' ? 'Failed' : context.status === 'ready' ? 'Idle' : 'Status unavailable'}</small></span></span> : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
     };
   }

@@ -10,7 +10,7 @@ it.each(['chromium', 'webkit'] as const)('reaches the last favorite within the p
     const favorites = {enabled:true,scope:'scroll-test',folders:[],stars:Array.from({length:20},(_,i)=>({hostId:'host',providerId:'codex',nativeSessionId:String(i),favoriteId:'favorite-'+i,folderId:null,order:i,title:'Favorite '+i,hostName:'Work Mac',available:true,online:true})),refresh:async()=>{}};
     createRoot(document.getElementById('root')).render(<FavoritesMenu title="Current session" currentSession={{hostId:'host',providerId:'codex',nativeSessionId:'0',title:'Current session'}} favorites={favorites} tracking={{sessions:[],toggle(){}}} busy={false} onScan={()=>{}} onOpen={item=>document.body.dataset.open=item.nativeSessionId}/>);`;
   const script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
-  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
   const server = createServer((req, res) => {
     res.setHeader('content-type', req.url === '/app.js' ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8');
     res.end(req.url === '/app.js' ? script : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}body{margin:0}#root{width:360px;max-width:100%;margin:0 auto}</style><div id="root"></div><script src="/app.js"></script>`);

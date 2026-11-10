@@ -173,7 +173,7 @@ export function ImageViewport({ src, label, onClose, onDismissMotion }: {
           width, height,
           transform: `translate(-50%, -50%) translate(${view.x + dismiss.motion.x}px, ${view.y + dismiss.motion.y - (height * view.zoom > bounds.height ? height * view.zoom * (1 - dismiss.motion.scale) / 2 : 0)}px) scale(${view.zoom * dismiss.motion.scale})`,
           borderRadius: Math.min(14, dismiss.motion.progress * 56),
-          boxShadow: dismiss.motion.progress ? `0 12px 40px oklch(0.18 0.01 250 / ${Math.min(.24, dismiss.motion.progress)})` : undefined,
+          boxShadow: dismiss.motion.progress ? `0 12px 40px rgb(0 0 0 / ${Math.min(.24, dismiss.motion.progress)})` : undefined,
         } : { visibility: 'hidden' }}
         onLoad={event => {
           const image = event.currentTarget;

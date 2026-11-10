@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionLink, SessionWorkspaceContext } from '../../src/components/SessionLink.js';
 import { SessionConnectionNotice, sessionConnectionFailure } from '../../src/components/SessionConnectionNotice.js';
 import { DirectoryError } from '../../src/directory-client.js';
+import '../../src/ui/tokens.css';
 import '@orchardworks/agent-remote-web/styles.css';
 import '../../src/app.css';
 

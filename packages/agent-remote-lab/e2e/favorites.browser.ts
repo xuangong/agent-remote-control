@@ -28,7 +28,7 @@ it.each(['chromium','webkit'] as const)('organizes favorites over HTTP with desk
  const tracking={sessions:[],toggle(){}};
  function App(){const favorites=useSessionStars(location.origin+'/',true);return <><h1>Favorites</h1><div className="lab-sidebar-content"><FavoritesList favorites={favorites} tracking={tracking} busy={false} onOpen={s=>document.body.dataset.open=s.nativeSessionId}/></div><FavoritesMenu title="Current session" currentSession={{hostId:'mac',providerId:'codex',nativeSessionId:'1',title:'Current session'}} favorites={favorites} tracking={tracking} busy={false} onOpen={()=>{}}/><StarButton favorites={favorites} session={{hostId:'mac',providerId:'codex',nativeSessionId:'1',title:'Current session'}}/><StarButton favorites={favorites} session={{hostId:'mac',providerId:'codex',nativeSessionId:'fresh',title:'New research'}}/></>};createRoot(document.getElementById('root')).render(<App/>);`;
  const script=(await build({stdin:{contents:source,loader:'tsx',resolveDir:fileURLToPath(new URL('../src/',import.meta.url))},bundle:true,write:false,format:'iife',platform:'browser',define:{'process.env.NODE_ENV':'"production"'}})).outputFiles[0]!.text;
- const css=await readFile(new URL('../src/app.css',import.meta.url),'utf8');
+ const css=await readFile(new URL('../src/ui/tokens.css',import.meta.url),'utf8')+await readFile(new URL('../src/app.css',import.meta.url),'utf8');
  const server=createServer(async(req,res)=>{
   if(req.url==='/v1/remote/hosts/mac/session/rename' && req.method==='POST') {
    let body='';for await(const chunk of req)body+=chunk;

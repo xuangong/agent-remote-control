@@ -12,35 +12,35 @@
 }
 
 :root {
-  color: oklch(0.243 0.024 248.8);
+  color: var(--ui-label);
   background: var(--obs-surface);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  font-size: 14px;
+  font-family: var(--ui-font);
+  font-size: var(--ui-size-body);
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --obs-canvas: oklch(0.975 0.006 255.5);
-  /* Keep browser theme and manifest colors aligned with this surface (#fbfdff). */
-  --obs-surface: oklch(0.993 0.003 247.9);
-  --obs-surface-selected: oklch(0.959 0.018 245.4);
-  --obs-text: oklch(0.243 0.024 248.8);
-  --obs-text-secondary: oklch(0.485 0.029 246.6);
-  --obs-border: oklch(0.909 0.016 248.0);
-  --obs-signal: oklch(0.644 0.162 251.8);
-  --obs-action: oklch(0.533 0.137 250.7);
-  --obs-success: oklch(0.582 0.113 159.8);
-  --obs-success-text: #237049;
-  --obs-warning: oklch(0.532 0.113 62.0);
-  --obs-danger: oklch(0.562 0.170 20.8);
-  --obs-control-border: oklch(0.565 0.018 248.0);
+  /* The Lab's names for the semantic tokens in ui/tokens.css. */
+  --obs-canvas: var(--ui-background-grouped);
+  --obs-surface: var(--ui-background);
+  --obs-surface-selected: var(--ui-selection);
+  --obs-text: var(--ui-label);
+  --obs-text-secondary: var(--ui-label-secondary);
+  --obs-border: var(--ui-separator);
+  --obs-signal: var(--ui-accent);
+  --obs-action: var(--ui-accent-text);
+  --obs-success: var(--ui-status-success);
+  --obs-success-text: var(--ui-status-success);
+  --obs-warning: var(--ui-status-attention);
+  --obs-danger: var(--ui-status-failure);
+  --obs-control-border: var(--ui-control-border);
   --obs-border-strong: color-mix(in oklab, var(--obs-text-secondary) 48%, var(--obs-surface));
   --obs-danger-soft: color-mix(in oklab, var(--obs-danger) 9%, var(--obs-surface));
   --obs-warning-soft: color-mix(in oklab, var(--obs-warning) 9%, var(--obs-surface));
-  --obs-overlay-shadow: 0 18px 48px color-mix(in oklab, var(--obs-text) 17%, transparent);
-  --obs-radius-sm: 8px;
-  --obs-radius-md: 12px;
-  --obs-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --obs-overlay-shadow: var(--ui-shadow-overlay);
+  --obs-radius-sm: var(--ui-radius-control);
+  --obs-radius-md: var(--ui-radius-pane);
+  --obs-mono: var(--ui-font-mono);
 }
 
 * { box-sizing: border-box; }
@@ -121,16 +121,21 @@ textarea {
   resize: vertical;
 }
 
-.lab-shell, .lab-session-view {
+/* The image viewer and preview browser dialogs render under <body>, outside the workbench. */
+.lab-shell, .lab-session-view, .agent-image-preview, .agent-preview-browser {
   --agent-canvas: var(--obs-canvas);
   --agent-panel: var(--obs-surface);
-  --agent-panel-raised: var(--obs-surface-selected);
+  --agent-panel-raised: var(--ui-background-elevated);
   --agent-ink: var(--obs-text);
   --agent-muted: var(--obs-text-secondary);
   --agent-rule: var(--obs-border);
   --agent-signal: var(--obs-action);
   --agent-action-text: var(--obs-action);
-  --agent-running: var(--obs-warning);
+  /* The signal fills are the accent text color, light in dark mode, so text on them takes the surface color, as on the Send button. */
+  --agent-on-signal: var(--obs-surface);
+  --agent-running: var(--ui-status-working);
+  --agent-setting-pending: var(--ui-status-attention);
+  --agent-setting-pending-surface: color-mix(in srgb, var(--ui-status-attention) 8%, var(--obs-surface));
   --agent-success: var(--obs-success);
   --agent-success-text: var(--obs-success-text);
   --agent-danger: var(--obs-danger);
@@ -138,6 +143,19 @@ textarea {
   --agent-surface-muted: var(--obs-canvas);
   --agent-surface-danger: var(--obs-danger-soft);
   --agent-radius: var(--obs-radius-sm);
+  --agent-code-block-background: var(--ui-code-background);
+  --agent-code-block-text: var(--ui-code-text);
+  --agent-code-background: var(--ui-code-background);
+  --agent-syntax-keyword: var(--ui-syntax-keyword);
+  --agent-syntax-string: var(--ui-syntax-string);
+  --agent-syntax-literal: var(--ui-syntax-literal);
+  --agent-syntax-comment: var(--ui-syntax-comment);
+  --agent-syntax-type: var(--ui-syntax-type);
+  --agent-syntax-definition: var(--ui-syntax-definition);
+  --agent-syntax-invalid: var(--ui-status-failure);
+  --agent-overlay-shadow: var(--ui-shadow-overlay);
+  --agent-shadow-ink: var(--ui-shadow-ink);
+  --agent-backdrop: var(--ui-backdrop);
 }
 
 .lab-shell {
@@ -168,7 +186,7 @@ textarea {
 .lab-preview-groups .lab-host-previews h2 { overflow-wrap: anywhere; }
 .lab-preview-mapping code { font-size: 11px; }
 .lab-preview-pin[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface); }
-.lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-rule); }
+.lab-host-previews { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--obs-border); }
 .lab-host-previews ul { display: grid; min-width: 0; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .lab-host-previews li { display: grid; min-width: 0; gap: 7px; padding: 10px; border: 1px solid var(--obs-control-border); border-radius: 8px; }
 .lab-host-previews li > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
@@ -241,7 +259,7 @@ textarea {
 .lab-session-summary > span:not(.lab-status-dot) { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-session-summary code { max-width: 180px; overflow: hidden; color: var(--obs-text-secondary); font-family: var(--obs-mono); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .lab-status-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--obs-text-secondary); }
-.lab-status-running { background: var(--obs-warning); }
+.lab-status-running { background: var(--ui-status-working); }
 .lab-status-idle { background: var(--obs-success); }
 .lab-status-failed { background: var(--obs-danger); }
 
@@ -425,7 +443,7 @@ textarea {
 .lab-timeline-scroll { display: flex; flex-direction: column-reverse; flex: 1; min-height: 0; padding: 6px clamp(12px, 2cqw, 24px) 12px; overflow-y: auto; overflow-anchor: auto; overscroll-behavior-y: contain; background: var(--obs-surface); }
 /* --lab-search-inset: room above the oldest entry while the floating search panel shows a result (SessionWorkbench). */
 .lab-conversation-content { flex: none; width: 100%; min-height: 100%; max-width: 900px; margin-inline: auto; padding-top: var(--lab-search-inset, 0px); }
-.lab-back-to-latest { position: absolute; z-index: 6; bottom: 12px; left: 50%; transform: translateX(-50%); min-height: 36px; border-radius: 999px; box-shadow: 0 3px 12px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-back-to-latest { position: absolute; z-index: 6; bottom: 12px; left: 50%; transform: translateX(-50%); min-height: 36px; border-radius: 999px; box-shadow: 0 3px 12px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-back-to-latest:active:not(:disabled) { transform: translateX(-50%); }
 .agent-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
@@ -545,7 +563,7 @@ textarea {
 .lab-timeline-scroll .agent-markdown a { color: var(--obs-action); }
 .lab-timeline-scroll .agent-markdown :not(pre) > code,
 .lab-timeline-scroll .agent-tool-detail code { border-color: var(--obs-border); color: var(--obs-text); background: var(--obs-canvas); }
-.lab-timeline-scroll .agent-markdown pre { border-color: var(--obs-border-strong); border-radius: var(--obs-radius-sm); color: var(--obs-surface); background: var(--obs-text); }
+.lab-timeline-scroll .agent-markdown pre { border-color: var(--obs-border-strong); border-radius: var(--obs-radius-sm); color: var(--agent-code-block-text); background: var(--agent-code-block-background); }
 .lab-timeline-scroll .agent-reasoning { color: var(--obs-text-secondary); background: transparent; }
 .lab-timeline-scroll .agent-reasoning-content { padding: 10px 12px; border: 1px solid var(--obs-border); border-radius: var(--obs-radius-sm); color: var(--obs-text-secondary); background: var(--obs-canvas); }
 .lab-timeline-scroll .agent-tool,
@@ -848,7 +866,7 @@ textarea {
 .lab-composer-dock .agent-activity[data-active="false"] { display: none; }
 .lab-composer-dock .agent-activity + button[data-testid="prompt-submit"] { margin-left: auto; }
 .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
-.lab-composer-dock .agent-composer > .agent-composer-note[role="status"] { position: absolute; bottom: calc(100% + 6px); right: 0; max-width: 100%; max-height: 100px; overflow: auto; padding: 5px 9px; border: 1px solid var(--obs-border); border-radius: 6px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 8%, transparent); }
+.lab-composer-dock .agent-composer > .agent-composer-note[role="status"] { position: absolute; bottom: calc(100% + 6px); right: 0; max-width: 100%; max-height: 100px; overflow: auto; padding: 5px 9px; border: 1px solid var(--obs-border); border-radius: 6px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 8%, transparent); }
 .lab-composer-dock .agent-session-panel .agent-composer-note[role="status"] { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
 .lab-composer-dock .agent-planning-control { margin-bottom: 12px; }
 .lab-composer-dock .agent-composer-attachments { padding: 2px 6px; }
@@ -880,7 +898,7 @@ textarea {
 .lab-view-options-trigger { display: flex; align-items: center; justify-content: center; gap: 6px; width: 68px; min-height: 32px; padding: 0 6px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
 .lab-view-options-trigger:active:not(:disabled) { transform: none; }
 .lab-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-view-options-panel { position: absolute; top: 100%; left: 0; width: 220px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 80px); overflow-y: auto; overscroll-behavior: contain; margin-top: 6px; padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
+.lab-view-options-panel { position: absolute; top: 100%; left: 0; width: 240px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 80px); overflow-y: auto; overscroll-behavior: contain; margin-top: 6px; padding: 6px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); }
 .lab-view-options-heading { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .lab-view-options-actions { display: flex; gap: 2px; }
 .lab-view-options-actions button { min-height: 28px; padding: 4px 6px; border-color: transparent; background: transparent; color: var(--obs-text-secondary); font-size: 11px; }
@@ -913,7 +931,7 @@ textarea {
 .lab-side-title { display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
 .lab-side-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-side-conversation .lab-side-close { order: 3; min-height: 28px; width: 28px; padding: 0; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 22px; line-height: 1; }
-.lab-side-conversation .lab-side-close:hover { background: var(--obs-surface-hover); }
+.lab-side-conversation .lab-side-close:hover { background: var(--ui-fill); }
 .lab-side-back-icon, .lab-side-back-label { display: none; }
 .lab-fork-entries { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; width: 100%; min-width: 0; max-width: 900px; margin: 0 auto 5px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; white-space: nowrap; }
 .lab-fork-entries button { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; min-height: 26px; border: 0; background: transparent; padding: 2px 0; font-size: 11px; color: var(--obs-action); }
@@ -955,7 +973,7 @@ textarea {
 .lab-fork-symbol { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; font-size: 17px; }
 .lab-fork-symbol > span { position: absolute; bottom: -1px; right: -3px; display: flex; background: var(--obs-surface); border-radius: 3px; }
 .lab-fork-symbol svg { width: 11px; height: 11px; }
-.lab-fork-reference-details { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); width: min(320px, 70vw); display: grid; gap: 7px; padding: 12px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-fork-reference-details { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); width: min(320px, 70vw); display: grid; gap: 7px; padding: 12px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-fork-reference-details p { margin: 0; color: var(--obs-text-secondary); }
 .lab-fork-reference-details code, .lab-fork-reference-details small { overflow-wrap: anywhere; color: var(--obs-text-secondary); }
 .lab-fork-reference-details button { justify-self: start; }
@@ -1012,7 +1030,7 @@ textarea {
   .lab-context-rail > .lab-rail-heading { display: none; }
   .lab-session-panel-actions { display: flex; gap: 4px; margin: 8px max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); padding: 3px; border-radius: 10px; background: var(--obs-canvas); }
   .lab-session-panel-actions button { flex: 1; min-width: 0; min-height: 44px; padding: 8px; border: 0; background: transparent; color: var(--obs-text-secondary); font-size: 13px; }
-  .lab-session-panel-actions button[aria-pressed="true"] { background: var(--obs-surface); color: var(--obs-action); box-shadow: 0 1px 3px color-mix(in oklab, var(--obs-text) 10%, transparent); font-weight: 600; }
+  .lab-session-panel-actions button[aria-pressed="true"] { background: var(--obs-surface); color: var(--obs-action); box-shadow: 0 1px 3px color-mix(in oklab, var(--ui-shadow-ink) 10%, transparent); font-weight: 600; }
   .lab-mobile-settings { min-width: 0; overflow-wrap: anywhere; }
   .lab-display-settings { margin-block: 20px; }
   .lab-display-settings h2 { margin: 0 0 12px; font-size: 1rem; }
@@ -1021,7 +1039,8 @@ textarea {
   .lab-display-settings [role="alert"] { color: var(--obs-danger); }
   .lab-mobile-settings p { line-height: 1.6; color: var(--obs-text-secondary); }
   .lab-session-panel-footer { padding: 12px max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: var(--obs-surface); border-top: 1px solid var(--obs-border); }
-  .lab-session-panel-footer button { width: 100%; min-height: 48px; background: var(--obs-action); color: white; border-color: var(--obs-action); }
+  /* Text on an --obs-action fill uses --obs-surface: the accent text color is light in dark mode. */
+  .lab-session-panel-footer button { width: 100%; min-height: 48px; background: var(--obs-action); color: var(--obs-surface); border-color: var(--obs-action); }
   .lab-context-rail .lab-session-row { min-height: 56px; }
   .lab-context-rail .lab-session-close { min-width: 44px; min-height: 44px; }
 }
@@ -1044,7 +1063,7 @@ textarea {
 .lab-session-link-trigger { display: inline-grid; place-items: center; flex: 0 0 32px; width: 32px; min-height: 32px; padding: 0; border-color: transparent; background: transparent; }
 .lab-session-link-dialog { width: min(380px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 1px solid var(--obs-border); border-radius: 14px; color: var(--obs-text); background: var(--obs-surface); box-shadow: var(--obs-overlay-shadow); overflow: hidden; font-size: 14px; }
 .lab-session-link-dialog[open] { display: flex; flex-direction: column; }
-.lab-session-link-dialog::backdrop { background: rgb(15 25 40 / 35%); }
+.lab-session-link-dialog::backdrop { background: var(--ui-backdrop); }
 .lab-session-link-dialog header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--obs-border); }
 .lab-session-link-dialog h2 { margin: 0; font-size: 16px; }
 .lab-session-link-dialog header button { min-width: 40px; min-height: 40px; padding: 0; border-color: transparent; background: transparent; font-size: 22px; }
@@ -1135,9 +1154,9 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-workspace-field { display: flex; gap: 6px; min-width: 0; }
 .lab-workspace-field select { flex: 1; min-width: 0; }
 .lab-workspace-field button { flex: none; }
-.lab-folder-dialog { box-sizing: border-box; width: min(640px, calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 32px)); padding: 20px; border: 1px solid var(--obs-border); border-radius: 14px; color: var(--obs-text); background: var(--obs-surface); box-shadow: 0 18px 60px oklch(20% 0.02 250 / 0.2); }
+.lab-folder-dialog { box-sizing: border-box; width: min(640px, calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 32px)); padding: 20px; border: 1px solid var(--obs-border); border-radius: 14px; color: var(--obs-text); background: var(--obs-surface); box-shadow: var(--ui-shadow-overlay); }
 .lab-folder-dialog[open] { display: flex; flex-direction: column; gap: 14px; }
-.lab-folder-dialog::backdrop { background: oklch(20% 0.02 250 / 0.35); }
+.lab-folder-dialog::backdrop { background: var(--ui-backdrop); }
 .lab-folder-dialog header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .lab-folder-dialog h2 { margin: 0 0 4px; font-size: 1.15rem; }
 .lab-folder-dialog p { margin: 0; color: var(--obs-text-secondary); }
@@ -1239,13 +1258,13 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-ask-floating,
 .lab-tracking-floating {
   --tracking-working-surface: color-mix(in oklab, var(--obs-success) 24%, var(--obs-surface));
-  --tracking-pending-surface: color-mix(in oklab, oklch(0.8 0.16 87) 40%, var(--obs-surface));
+  --tracking-pending-surface: color-mix(in oklab, var(--ui-status-attention) 22%, var(--obs-surface));
   --tracking-idle-surface: color-mix(in oklab, var(--obs-text-secondary) 24%, var(--obs-surface));
 }
 .lab-tracking-floating {
   position: fixed; right: 12px; top: calc(60px + env(safe-area-inset-top, 0px)); z-index: 146; }
 .lab-tracking-floating:has(.lab-session-popover-panel:not([hidden])) { z-index: 148; }
-.lab-tracking-floating button.lab-session-popover-trigger { --tracking-edge-color: var(--obs-control-border); border-color: var(--tracking-edge-color); border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--obs-text) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
+.lab-tracking-floating button.lab-session-popover-trigger { --tracking-edge-color: var(--obs-control-border); border-color: var(--tracking-edge-color); border-radius: 24px; box-shadow: 0 2px 10px color-mix(in oklab, var(--ui-shadow-ink) 10%, transparent); padding: 8px 12px; touch-action: none; user-select: none; cursor: grab; }
 .lab-tracking-floating button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
 .lab-tracking-floating .lab-session-popover-trigger:active { cursor: grabbing; }
 .lab-tracking-floating .lab-session-popover-panel { position: fixed; left: var(--tracking-panel-left); right: auto; top: var(--tracking-panel-top); bottom: var(--tracking-panel-bottom); width: var(--tracking-panel-width); max-height: var(--tracking-panel-height); }
@@ -1261,7 +1280,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
 .lab-tracking-floating[data-alert="pending"] .lab-session-popover-trigger {
   animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite;
-  background: var(--tracking-pending-surface); --tracking-edge-color: oklch(0.52 0.108 87);
+  background: var(--tracking-pending-surface); --tracking-edge-color: var(--ui-status-attention);
 }
 .lab-tracking-floating[data-alert="idle"] .lab-session-popover-trigger {
   animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite;
@@ -1280,7 +1299,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-tracked-change { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 36px; padding: 6px; border-color: transparent; background: transparent; font-size: 11px; color: var(--obs-text-secondary); }
 .lab-tracked-change > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.lab-tracked-change[data-attention="pending"] { color: oklch(0.52 0.108 87); }
+.lab-tracked-change[data-attention="pending"] { color: var(--ui-status-attention); }
 .lab-tracked-change[data-attention="idle"] { color: var(--obs-text); }
 .lab-tracked-row { display: flex; align-items: center; gap: 6px; }
 .lab-tracked-row > .lab-session-row { display: flex; flex-direction: row; align-items: center; gap: 6px; flex: 1; min-width: 0; min-height: 48px; width: 100%; padding: 8px; text-align: left; user-select: none; -webkit-user-select: none; }
@@ -1374,8 +1393,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-controller-health { display: grid; gap: 3px; }
 .lab-controller-health ul { gap: 3px; }
 .lab-controller-health li { padding: 0; background: none; }
-.lab-controller-health li[data-severity="warning"] small { color: var(--agent-danger, #b42318); }
-.lab-controller-updates [role="group"] { padding: 8px; border: 1px solid var(--agent-border); border-radius: 8px; }
+.lab-controller-health li[data-severity="warning"] small { color: var(--obs-danger); }
+.lab-controller-updates [role="group"] { padding: 8px; border: 1px solid var(--obs-border); border-radius: 8px; }
 .lab-controller-updates a { display: block; margin: 8px 0; }
 
 /* Account favorites use compact bookmark rows, independent of session discovery. */
@@ -1420,11 +1439,11 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorite-node[data-drop="after"]::after { bottom: 0; }
 .lab-favorite-drag-status { margin: 0; font-size: 11px; color: var(--obs-text-secondary); }
 .lab-favorite-drag-status:empty { display: none; }
-.lab-favorite-menu { position: fixed; z-index: 1500; max-height: calc(100dvh - 16px); overflow-y: auto; display: grid; min-width: 145px; padding: 4px; border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-surface); box-shadow: 0 4px 16px rgb(20 35 50 / .12); }
+.lab-favorite-menu { position: fixed; z-index: 1500; max-height: calc(100dvh - 16px); overflow-y: auto; display: grid; min-width: 145px; padding: 4px; border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-surface); box-shadow: var(--ui-shadow-overlay); }
 .lab-favorite-menu button { text-align: left; border: 0; background: transparent; font-size: 12px; min-height: 32px; padding: 6px 10px; }
 .lab-favorite-menu button:hover { background: var(--obs-canvas); }
-.lab-favorite-dialog { width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--obs-border); border-radius: 12px; background: var(--obs-surface); color: var(--obs-text); box-shadow: 0 10px 40px rgb(20 35 50 / .18); overflow: auto; }
-.lab-favorite-dialog::backdrop { background: rgb(20 35 50 / .22); }
+.lab-favorite-dialog { width: min(380px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid var(--obs-border); border-radius: 12px; background: var(--obs-surface); color: var(--obs-text); box-shadow: var(--ui-shadow-overlay); overflow: auto; }
+.lab-favorite-dialog::backdrop { background: var(--ui-backdrop); }
 .lab-favorite-dialog header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--obs-border); }
 .lab-favorite-dialog h2 { margin: 0; font-size: 16px; }
 .lab-favorite-dialog header button { min-height: 32px; min-width: 32px; padding: 0; border: 0; background: transparent; font-size: 20px; }
@@ -1453,7 +1472,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   position: fixed; z-index: 45; top: calc(env(safe-area-inset-top) + 44px); left: 50%; transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; max-width: calc(100vw - 32px); padding: 4px 10px;
   border: 1px solid var(--obs-border); border-radius: 8px; background: var(--obs-surface); color: var(--obs-text-secondary);
-  font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px #0000000c;
+  font-size: 12px; white-space: nowrap; box-shadow: var(--ui-shadow-pane);
 }
 .gateway-recovery button, .gateway-recovery a { min-height: 32px; padding: 4px; font-size: inherit; }
 .gateway-workspace-shell { height: 100dvh; display: grid; grid-template-rows: 42px 1fr 68px; background: var(--obs-canvas); }
@@ -1464,7 +1483,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-cache-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
 .lab-cache-setting [role="switch"] { flex: 0 0 44px; width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; position: relative; }
 .lab-cache-setting [role="switch"]::before { content: ''; position: absolute; inset: 10px 0; border-radius: 14px; background: var(--obs-border); }
-.lab-cache-setting [role="switch"] span { position: absolute; width: 18px; height: 18px; top: 13px; left: 3px; border-radius: 50%; background: var(--obs-surface); box-shadow: 0 1px 3px rgb(0 0 0 / .2); }
+.lab-cache-setting [role="switch"] span { position: absolute; width: 18px; height: 18px; top: 13px; left: 3px; border-radius: 50%; background: var(--obs-surface); box-shadow: var(--ui-shadow-pane); }
 .lab-cache-setting [role="switch"][aria-checked="true"]::before { background: var(--obs-action); }
 .lab-cache-setting [role="switch"][aria-checked="true"] span { left: 23px; }
 .lab-cache-confirmation { box-sizing: border-box; width: min(440px, calc(100vw - 32px)); }
@@ -1514,14 +1533,14 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-tools-content { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
 .lab-timeline-session-tools { display: contents; }
 .lab-timeline-session-tools > * { background: var(--obs-surface); border-radius: 8px; }
-.lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); }
+.lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 6%, transparent); }
 .lab-timeline-tools:has(.lab-timeline-session-tools:not(:empty)) .lab-timeline-search-trigger { border-color: transparent; }
 .lab-timeline-tools[data-collapsible] { --lab-tools-duration: 220ms; --lab-tools-easing: cubic-bezier(.16, 1, .3, 1); right: max(0px, env(safe-area-inset-right)); transform: translateX(-12px); transition: transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { position: relative; border-right: 0; border-radius: 10px 0 0 10px; transform-origin: right center; transition: opacity 160ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing), visibility 0s; }
 .lab-timeline-tools-toggle { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: 10px; color: var(--obs-text-secondary); background: transparent; pointer-events: auto; }
 .lab-timeline-tools-toggle::before, .lab-timeline-tools-toggle::after { content: ''; position: absolute; pointer-events: none; border: 1px solid var(--obs-border); background: var(--obs-surface); transition: opacity var(--lab-tools-duration) var(--lab-tools-easing), transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle::before { inset: 0; border-left: 0; border-radius: 0 10px 10px 0; }
-.lab-timeline-tools-toggle::after { inset: 0 0 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--obs-text) 6%, transparent); opacity: 0; transform: translateX(-4px); }
+.lab-timeline-tools-toggle::after { inset: 0 0 0 13px; border-radius: 12px 0 0 12px; box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 6%, transparent); opacity: 0; transform: translateX(-4px); }
 .lab-timeline-tools-toggle > svg { position: relative; z-index: 1; transition: transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-toggle :is(.lab-timeline-tools-expand-icon, .lab-timeline-tools-collapse-icon) { transform-origin: center; transition: opacity 140ms ease-out, transform var(--lab-tools-duration) var(--lab-tools-easing); }
 .lab-timeline-tools-expand-icon { opacity: 0; transform: scale(.8); }
@@ -1577,7 +1596,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-session-ref-add { position: relative; flex: none; min-width: 24px; height: 18px; min-height: 18px; margin-bottom: 4px; padding: 0 6px; border: 1px dashed var(--obs-control-border); border-radius: 5px; background: transparent; color: var(--obs-text-secondary); font-size: 13px; line-height: 1; }
 .lab-session-ref-add:hover, .lab-session-ref-add[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 /* The list takes the room left, so the title, filter and Cancel stay in view and the sessions scroll. */
-.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--obs-text) 12%, transparent); font-size: 12px; }
+.lab-session-ref-picker { position: absolute; z-index: 20; left: 0; bottom: calc(100% + 8px); display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); max-height: min(420px, 60vh); padding: 12px; overflow: hidden; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 6px 24px color-mix(in oklab, var(--ui-shadow-ink) 12%, transparent); font-size: 12px; }
 .lab-session-ref-picker > * { flex: none; }
 .lab-session-ref-picker ul { display: grid; flex: 0 1 auto; align-content: start; gap: 2px; min-height: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; list-style: none; }
 .lab-session-ref-picker li button { display: grid; gap: 2px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--obs-text); text-align: left; }

@@ -1,0 +1,115 @@
+/* Semantic design tokens. Light by default, dark with the system appearance.
+   Every literal color of the Lab lives in this file; stylesheets.test.ts enforces it. */
+:root {
+  color-scheme: light dark;
+
+  --ui-background: #ffffff;
+  --ui-background-grouped: #f2f2f7;
+  --ui-background-elevated: #ffffff;
+  --ui-sidebar: #f2f2f7;
+  --ui-selection: #e8f0fc;
+
+  --ui-label: #1d1d1f;
+  --ui-label-secondary: #636366;
+  --ui-label-tertiary: #aeaeb2; /* Below text contrast: only non-text, placeholder and disabled content */
+  --ui-separator: rgb(60 60 67 / 0.18);
+  --ui-control-border: #7c7c80;
+  --ui-fill: rgb(120 120 128 / 0.12);
+  --ui-fill-strong: rgb(120 120 128 / 0.2);
+  --ui-segment-selected: #ffffff; /* The raised segment of a segmented control, lighter than its track */
+
+  --ui-accent: #0071e3;
+  --ui-accent-text: #0066cc;
+  --ui-on-accent: #ffffff;
+  --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
+  --ui-focus-ring: #0071e3;
+
+  --ui-status-attention: #c93400;
+  --ui-on-attention: #ffffff;
+  --ui-on-failure: #ffffff; /* Ink on the failure fill */
+  --ui-status-working: #0066cc; /* Used as text (running state), so it shares the accessible accent text color */
+  --ui-status-success: #1a7431;
+  --ui-status-failure: #d70015;
+
+  --ui-code-background: #f5f5f7;
+  --ui-code-text: #1d1d1f;
+  /* Syntax colors of the read-only source viewer, after Xcode's default themes */
+  --ui-syntax-keyword: #9b2393;
+  --ui-syntax-string: #c41a16;
+  --ui-syntax-literal: #1c00cf;
+  --ui-syntax-comment: #5d6c79;
+  --ui-syntax-type: #0b4f79;
+  --ui-syntax-definition: #0f68a0;
+  --ui-backdrop: rgb(0 0 0 / 0.25);
+  --ui-shadow-ink: #1d1d1f; /* The color custom shadows mix from: a text color would turn them into a glow in dark mode */
+  --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.1);
+
+  --ui-radius-control: 6px;
+  --ui-radius-pane: 10px;
+  --ui-radius-input: 18px; /* Capsule inputs such as the composer */
+  --ui-radius-sheet: 16px;
+
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --ui-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --ui-size-large-title: 26px;
+  --ui-size-title: 20px;
+  --ui-size-headline: 15px;
+  --ui-size-body: 14px;
+  --ui-size-callout: 13px;
+  --ui-size-caption: 11px;
+
+  --ui-duration-short: 150ms;
+  --ui-duration: 220ms;
+  --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ui-ease-spring: cubic-bezier(0.16, 1, 0.3, 1); /* An ease-out curve without overshoot, for sheets and panels */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ui-background: #1c1c1e;
+    --ui-background-grouped: #000000;
+    --ui-background-elevated: #2c2c2e;
+    --ui-sidebar: #2c2c2e;
+    --ui-selection: #16304d;
+
+    --ui-label: #f5f5f7;
+    --ui-label-secondary: #98989d;
+    --ui-label-tertiary: #636366;
+    --ui-separator: rgb(255 255 255 / 0.15);
+    --ui-control-border: #8e8e93;
+    --ui-fill: rgb(118 118 128 / 0.24);
+    --ui-fill-strong: rgb(118 118 128 / 0.36);
+    --ui-segment-selected: #636366;
+
+    --ui-accent: #0071e3;
+    --ui-accent-text: #409cff;
+    --ui-on-accent: #ffffff;
+    --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
+    --ui-focus-ring: #409cff;
+
+    --ui-status-attention: #ffb340;
+    --ui-on-attention: #000000;
+    --ui-on-failure: #1d1d1f; /* Ink on the failure fill: white is 2.8:1 on the dark failure red */
+    --ui-status-working: #409cff;
+    --ui-status-success: #30d158;
+    --ui-status-failure: #ff6961;
+
+    --ui-code-background: #2c2c2e;
+    --ui-code-text: #f5f5f7;
+    --ui-syntax-keyword: #fc5fa3;
+    --ui-syntax-string: #fc6a5d;
+    --ui-syntax-literal: #d0bf69;
+    --ui-syntax-comment: #8e99a6;
+    --ui-syntax-type: #5dd8ff;
+    --ui-syntax-definition: #41a1c0;
+    --ui-backdrop: rgb(0 0 0 / 0.5);
+    --ui-shadow-ink: #000000; /* Black, so shadows stay shadows on dark surfaces */
+    --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.08);
+    --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.5), 0 0 0 0.5px rgb(255 255 255 / 0.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --ui-duration-short: 0ms; --ui-duration: 0ms; }
+}

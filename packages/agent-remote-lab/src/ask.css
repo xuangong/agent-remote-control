@@ -31,7 +31,7 @@
   inset: auto; left: var(--ask-left, 12px); top: var(--ask-top, 12px);
   width: var(--ask-width, 440px); height: var(--ask-height, 560px);
   border: 1px solid var(--obs-border-strong); border-radius: 14px;
-  box-shadow: 0 8px 28px color-mix(in oklab, var(--obs-text) 16%, transparent);
+  box-shadow: 0 8px 28px color-mix(in oklab, var(--ui-shadow-ink) 16%, transparent);
 }
 .lab-ask-window > .lab-session-view { flex: 1; min-height: 0; width: 100%; }
 .lab-ask-heading {

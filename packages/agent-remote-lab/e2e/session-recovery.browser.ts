@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
@@ -6,8 +5,7 @@ import { expect, it } from 'vitest';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
 for (const engine of [chromium, webkit]) it(`restores sessions and failed input across mobile page lifecycles in ${engine.name()}`, async () => {
-  let script = '';
-  const css = await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  let script = '', css = '';
   const fixture = await previewFixture({ servePage: async (request, response) => {
     const path = new URL(request.url!, 'http://fixture').pathname;
     if (path === '/recovery.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(script); return true; }
@@ -17,6 +15,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   const baseUrl = fixture.url + fixture.alice.basePath;
   const source = `
     import React from 'react'; import { createRoot } from 'react-dom/client';
+    import './session-view-styles.ts';
     import { App } from './App.tsx';
     import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
     import { SessionDirectoryClient } from './directory-client.ts';
@@ -41,7 +40,11 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     }});
     createRoot(document.getElementById('root')).render(<App baseUrl={base} transport={transport} directory={new SessionDirectoryClient(base)} />);
   `;
-  script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
+  // The page gets the product's styles, including those the components import, from the bundle.
+  const bundle = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
+    outfile: 'recovery.js', loader: { '.woff2': 'dataurl' }, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
+  script = bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text;
+  css = bundle.outputFiles.find(file => file.path.endsWith('.css'))!.text;
   const browser = await engine.launch({ headless: true }); onPreviewCleanup(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   page.setDefaultTimeout(10000);

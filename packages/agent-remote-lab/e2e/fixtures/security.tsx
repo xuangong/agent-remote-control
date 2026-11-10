@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { GatewayController } from '../../src/GatewayController.js';
 import { HostPairing } from '../../src/components/HostPairing.js';
 import { RemoteHostClient } from '../../src/directory-client.js';
+import '../../src/ui/tokens.css';
 import '../../src/app.css';
 
 function Conversation({ accountAction, baseUrl }: { accountAction: ReactNode; baseUrl: string }) {

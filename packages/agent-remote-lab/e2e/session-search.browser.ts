@@ -66,7 +66,7 @@ beforeAll(async () => {
   `;
   script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
     format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
-  css = (await Promise.all(['../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
+  css = (await Promise.all(['../src/ui/tokens.css', '../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });

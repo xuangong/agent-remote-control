@@ -165,7 +165,7 @@ import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';
-import { SupportingRail } from './components/SupportingRail.js';
+import { focusableElements, SupportingRail } from './components/SupportingRail.js';
 import { SidebarHeader } from './shell/SidebarHeader.js';
 import { Menu } from './ui/Menu.js';
 import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
@@ -530,11 +530,24 @@ function AppContent({
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
   const closeContext = useCallback(() => { setContextOpen(false); setDesktopContextVisible(false); }, []);
   const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
+  const contextFocusHidden = useRef(false);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
   useShellShortcuts({
     setMode: navigation.setMode,
-    toggleSidebar: compactLayout ? undefined : windowMode ? () => setDesktopContextVisible(value => !value) : () => setBotRosterCollapsed(value => !value),
+    toggleSidebar: compactLayout ? undefined : windowMode ? () => {
+      contextFocusHidden.current = focusWithinContext();
+      setDesktopContextVisible(value => !value);
+    } : () => setBotRosterCollapsed(value => !value),
   });
+  // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
+  useLayoutEffect(() => {
+    const lost = contextFocusHidden.current;
+    contextFocusHidden.current = false;
+    if (!lost || desktopContextVisible || !(document.activeElement === document.body || focusWithinContext())) return;
+    const trigger = viewTriggerRef.current;
+    if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
+    if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
+  }, [desktopContextVisible]);
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
@@ -2900,6 +2913,15 @@ function AppContent({
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
   const enabled = !!host && host.access !== 'shared';
   return <PreviewProvider client={client} hostId={host?.id ?? ''} enabled={enabled} canManage={enabled} polling={polling}>{children}</PreviewProvider>;
+}
+
+/** Whether focus is in the Window sidebar, or in a Menu (portalled outside it) whose trigger is in it. */
+function focusWithinContext(): boolean {
+  const context = document.getElementById('lab-context'), active = document.activeElement;
+  if (!context || !active) return false;
+  if (context.contains(active)) return true;
+  const menu = active.closest('[role="menu"]');
+  return !!menu?.id && [...context.querySelectorAll('[aria-controls]')].some(control => control.getAttribute('aria-controls') === menu.id);
 }
 
 function createAgentId(): string {

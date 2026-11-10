@@ -3,7 +3,6 @@
 .lab-bot-roster, .lab-bot-conversation { min-width: 0; min-height: 0; }
 .lab-bot-roster { overflow: auto; background: var(--ui-sidebar); border-right: 1px solid var(--ui-separator); }
 .lab-bot-conversation { display: flex; flex-direction: column; overflow: hidden; }
-.lab-bot-roster-heading { padding: 0; border-bottom: 0; }
 /* The Bot main's h1: a large title above the compact roster (the navigation stack); elsewhere visually hidden (agent-visually-hidden) for assistive technology. */
 .lab-bot-title:not(.agent-visually-hidden) { margin: 0; padding: 12px 12px 0; background: var(--ui-sidebar); font: 700 var(--ui-size-large-title)/1.15 var(--ui-font); }
 .lab-bot-directory-controls, .lab-bot-new-section { padding: 12px; }
@@ -31,5 +30,5 @@
 .lab-bot-workspace[data-compact] > .lab-bot-roster, .lab-bot-workspace[data-compact] > .lab-bot-conversation { grid-row: 2; }
 .lab-bot-workspace[data-compact] .lab-bot-roster { border-right: 0; }
 .lab-session-conversation-host { min-width: 0; min-height: 0; height: 100%; }
-.lab-bot-workspace :focus-visible, .lab-workbench-mode :focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset, 2px); }
+.lab-bot-workspace :focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset, 2px); }
 @media (prefers-reduced-motion: reduce) { .lab-bot-workspace * { scroll-behavior: auto; } }

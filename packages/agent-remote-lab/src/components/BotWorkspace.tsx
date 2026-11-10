@@ -82,9 +82,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     }}>
     <h1 className={compact && !showConversation ? 'lab-bot-title' : 'lab-bot-title agent-visually-hidden'}>Bots</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster" hidden={(compact && showConversation) || rosterHidden}>
-      <header className="lab-bot-roster-heading">
-        <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
-      </header>
+      <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
       {unavailable ? availabilityNotice : null}
       {creating ? <form className="lab-bot-new-section" aria-label="New section" onSubmit={event => { event.preventDefault(); void save(); }}
         onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreating(false); } }}>

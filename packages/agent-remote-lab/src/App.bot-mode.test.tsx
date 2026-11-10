@@ -189,3 +189,31 @@ it('creates one Window at a time from the New menu and clears its error toast af
     await until(() => expect(toast()).toBeUndefined());
   } finally { await app.close(); }
 });
+
+it('moves focus out of the Window sidebar, and closes its open New menu, when Command-Backslash hides it', async () => {
+  const scope = 'http://localhost/window-shell-focus/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/');
+  const app = await mountBotApp(scope);
+  const backslash = () => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+  try {
+    await until(() => expect(app.container.querySelector<HTMLElement>('#lab-context')?.hidden).toBe(false));
+    const context = app.container.querySelector<HTMLElement>('#lab-context')!;
+    context.querySelector<HTMLButtonElement>('.lab-sidebar-header button[aria-label="New"]')!.focus();
+    await backslash();
+    expect(context.hidden).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(context.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('View options');
+
+    await backslash();
+    expect(context.hidden).toBe(false);
+    const newButton = context.querySelector<HTMLButtonElement>('.lab-sidebar-header button[aria-label="New"]')!;
+    await act(async () => newButton.click());
+    expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull();
+    await backslash();
+    expect(context.hidden).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(newButton.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('View options');
+  } finally { await app.close(); }
+});

@@ -31,7 +31,7 @@
   font: var(--ui-size-body)/1 var(--ui-font); opacity: 1; transform: none; --ui-focus-offset: 1px;
   transition: background-color var(--ui-duration-short) var(--ui-ease), color var(--ui-duration-short) var(--ui-ease);
 }
-.ui-icon-button.ui-icon-button:hover:not(:disabled), .ui-icon-button.ui-icon-button[aria-expanded="true"]:not(:disabled) { color: var(--ui-label); background: var(--ui-fill); }
+.ui-icon-button.ui-icon-button:hover:not(:disabled), .ui-icon-button.ui-icon-button[aria-haspopup][aria-expanded="true"]:not(:disabled) { color: var(--ui-label); background: var(--ui-fill); }
 .ui-icon-button.ui-icon-button:disabled { color: var(--ui-label-secondary); background: transparent; opacity: 0.45; cursor: default; }
 
 .ui-button.ui-button:focus-visible, .ui-icon-button.ui-icon-button:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }

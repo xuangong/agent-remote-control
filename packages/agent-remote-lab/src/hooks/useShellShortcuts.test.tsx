@@ -89,6 +89,26 @@ it('does nothing while a dialog is open', async () => {
   expect(toggleSidebar).toHaveBeenCalledOnce();
 });
 
+it('does nothing while a modal sheet such as the compact Sessions & Hosts rail is open', async () => {
+  onPlatform('MacIntel');
+  const toggleSidebar = vi.fn(), setMode = vi.fn();
+  await render(<Harness toggleSidebar={toggleSidebar} setMode={setMode} />);
+  const sheet = document.createElement('aside');
+  sheet.setAttribute('role', 'dialog');
+  sheet.setAttribute('aria-modal', 'true');
+  document.body.append(sheet);
+  try {
+    const event = await press({ key: '\\', code: 'Backslash', metaKey: true });
+    await press({ key: '™', code: 'Digit2', metaKey: true, altKey: true });
+    expect(event.defaultPrevented).toBe(false);
+    expect(toggleSidebar).not.toHaveBeenCalled();
+    expect(setMode).not.toHaveBeenCalled();
+    sheet.setAttribute('aria-modal', 'false');
+    await press({ key: '\\', code: 'Backslash', metaKey: true });
+    expect(toggleSidebar).toHaveBeenCalledOnce();
+  } finally { sheet.remove(); }
+});
+
 it('stops listening once unmounted', async () => {
   onPlatform('MacIntel');
   const toggleSidebar = vi.fn(), setMode = vi.fn();

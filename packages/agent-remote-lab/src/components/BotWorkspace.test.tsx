@@ -100,3 +100,37 @@ it('retains an uncertain section request after Cancel and recovers that same cre
   expect(app.workspace().readGroup(original.window.id)?.window.title).toBe('Retained');
   await app.close();
 });
+
+it('shows the shared sidebar header, a toolbar above the conversation, and collapses the roster', async () => {
+  const scope = 'http://localhost/bot-shell-frame/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
+    expect(roster.querySelector('.lab-sidebar-header nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Bot mode');
+    expect(roster.querySelector('.lab-sidebar-header-actions button[aria-label="New section"]')).not.toBeNull();
+    expect(app.container.querySelector('header.ui-toolbar.lab-bot-conversation-toolbar h2.ui-toolbar-title')).not.toBeNull();
+    await act(async () => app.button('Hide sidebar').click());
+    expect(roster.hidden).toBe(true);
+    expect(app.container.querySelector('.lab-bot-workspace')?.hasAttribute('data-roster-collapsed')).toBe(true);
+    await act(async () => app.button('Show sidebar').click());
+    expect(roster.hidden).toBe(false);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+    expect(roster.hidden).toBe(true);
+  } finally { await app.close(); }
+});
+
+it('moves focus from a collapsing roster to the sidebar button', async () => {
+  const scope = 'http://localhost/bot-shell-focus/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
+    roster.querySelector<HTMLButtonElement>('button[aria-label="New section"]')!.focus();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+    expect(roster.hidden).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Show sidebar');
+  } finally { await app.close(); }
+});

@@ -174,6 +174,7 @@ import { HostPreviewGroups } from './components/HostPreviewGroups.js';
 import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 import { useDeploymentUpdate } from './hooks/useDeploymentUpdate.js';
+import { useShellShortcuts } from './hooks/useShellShortcuts.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -528,6 +529,12 @@ function AppContent({
   const [desktopContextVisible, setDesktopContextVisible] = useState(() => !opensSession);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
   const closeContext = useCallback(() => { setContextOpen(false); setDesktopContextVisible(false); }, []);
+  const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
+  // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
+  useShellShortcuts({
+    setMode: navigation.setMode,
+    toggleSidebar: compactLayout ? undefined : windowMode ? () => setDesktopContextVisible(value => !value) : () => setBotRosterCollapsed(value => !value),
+  });
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
@@ -2887,7 +2894,7 @@ function AppContent({
     </SupportingRail>
     </WindowPresentationContext.Provider>
     </> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
+  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

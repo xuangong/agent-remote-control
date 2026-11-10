@@ -10,7 +10,7 @@ it('renders accessible metadata and fallback Host identity without hidden member
   const group = botGroup('A'); group.bots!.members = { A1: { label: 'Reviewer', picture: { shape: 'hexagon', color: '#123456' } }, A2: { hidden: true } };
   const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], () => 'offline');
   let selected: BotPlace | undefined;
-  const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} onNewSection={() => {}} directoryControls={<button>Refresh</button>} />);
+  const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} directoryControls={<button>Refresh</button>} />);
   expect(container.querySelector('nav[aria-label="Bots"]')).not.toBeNull();
   expect(container.textContent).toContain('Reviewer'); expect(container.textContent).not.toContain('A2');
   expect(container.textContent).not.toMatch(/Failed|New result/);

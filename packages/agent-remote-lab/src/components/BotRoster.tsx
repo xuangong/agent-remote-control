@@ -15,11 +15,10 @@ export function BotPicture({ picture, name }: Pick<WindowBotDetails, 'picture'> 
 export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
 }
-export function BotRoster({ model, place, onSelect, onNewSection, directoryControls }: {
-  model: BotRosterModel; place?: BotPlace; onSelect(place: BotPlace): void; onNewSection(): void; directoryControls: ReactNode;
+export function BotRoster({ model, place, onSelect, directoryControls }: {
+  model: BotRosterModel; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
 }) {
   return <nav aria-label="Bots" className="lab-bot-roster-list">
-    <div className="lab-bot-roster-actions"><button type="button" onClick={onNewSection}>New section</button></div>
     {model.sections.map(section => <section key={section.groupId} className="lab-bot-section" aria-labelledby={`bot-section-${section.groupId}`}>
       <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
         {section.status ? <small>{section.status}</small> : null}</h2>

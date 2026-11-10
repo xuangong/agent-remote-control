@@ -301,17 +301,17 @@ textarea {
      because the canvas color equals the sidebar color in light mode. */
   .lab-context-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--ui-sidebar); }
   .lab-sidebar-tabs button:not([aria-pressed="true"]):hover:not(:disabled) { background: var(--ui-row-hover); }
-  .lab-context-rail .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover { background: var(--ui-row-hover); }
+  .lab-context-rail .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover, .lab-sessions-page .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover { background: var(--ui-row-hover); }
   .lab-context-rail .lab-vscode-authorization, .lab-context-rail .lab-controller-updates li { background: transparent; }
   .lab-context-rail > .lab-rail-heading, .lab-sidebar-tabs { flex-shrink: 0; }
-  /* Keep absolutely positioned accessibility text inside the sidebar scrollport. */
-  .lab-sidebar-content { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px; scrollbar-gutter: stable; }
+  /* On desktop the panel content is on the All sessions page, whose body scrolls (shell.css); keep absolutely positioned accessibility text inside it. */
+  .lab-sidebar-content { position: relative; }
   .lab-sidebar-content .lab-host-pairing { gap: 7px; margin: 0 0 16px; padding-bottom: 14px; }
   .lab-sidebar-content .lab-host-pairing .lab-directory-heading { margin-bottom: 0; }
   .lab-sidebar-content .lab-directory-heading h2 { font-size: 12px; color: var(--obs-text-secondary); font-weight: 600; }
   .lab-sidebar-content .lab-host-pairing > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .lab-sidebar-content .lab-browse-provider { margin-top: 0; font-size: 12px; }
-  .lab-sidebar-content .lab-session-search { position: sticky; top: -16px; z-index: 2; margin: 0 -2px 16px; padding: 8px 2px; background: var(--ui-sidebar); font-size: 12px; }
+  .lab-sidebar-content .lab-session-search { position: sticky; top: 0; z-index: 2; margin: 0 -2px 16px; padding: 8px 2px; background: var(--ui-background); font-size: 12px; }
   .lab-sidebar-content .lab-session-search input { min-height: 36px; font-size: 13px; }
   .lab-sidebar-content .lab-session-list { max-height: none; overflow: visible; margin-block: 6px 0; }
   .lab-sidebar-content .lab-session-directory { margin: 0 0 22px; }
@@ -327,9 +327,9 @@ textarea {
   .lab-sidebar-content .lab-display-settings h2 { font-size: 14px; }
   .lab-sidebar-content .lab-display-settings summary { padding-block: 10px; cursor: pointer; }
 }
-.lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea { min-width: 0; max-width: 100%; }
-.lab-context-rail select { overflow: hidden; text-overflow: ellipsis; }
-.lab-context-rail .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
+.lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea, .lab-sessions-page input, .lab-sessions-page select, .lab-sessions-page textarea { min-width: 0; max-width: 100%; }
+.lab-context-rail select, .lab-sessions-page select { overflow: hidden; text-overflow: ellipsis; }
+.lab-context-rail .lab-session-list, .lab-sessions-page .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
 .lab-inspector-rail { display: grid; align-content: start; border-left: 1px solid var(--obs-border); }
 
 .lab-rail-mobile-heading {

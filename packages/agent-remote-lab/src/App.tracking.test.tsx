@@ -291,7 +291,7 @@ it('retains opened tracked content across switches without preconnecting unopene
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
   expect(f.container.querySelector('[aria-label^="Untrack "]')).toBeNull();
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Close Tracked sessions"]')!.click());
-  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-sidebar-tabs button, .lab-session-panel-actions button')].find(button => button.textContent === 'Favorites')!.click());
+  await act(async () => [...f.container.querySelectorAll<HTMLButtonElement>('.lab-sidebar-shortcuts .lab-sidebar-link, .lab-session-panel-actions button')].find(button => button.textContent === 'Favorites')!.click());
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Filter tracked favorites"]')!.click());
   await act(async () => f.container.querySelector<HTMLButtonElement>(`[aria-label="Actions for ${other.title}"]`)!.click());
   await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.lab-favorite-menu button')].find(button => button.textContent === 'Untrack')!.click());

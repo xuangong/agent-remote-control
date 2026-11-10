@@ -314,6 +314,9 @@ function AppContent({
   const [detachedSideRoot, setDetachedSideRoot] = useState<string>();
   const appliedUnlinks = useMemo(() => new Map<string, number>(), [forkStore]);
   const toast = useToast(windowMode);
+  // One Window create at a time from the sidebar's New menu; the item is disabled until it settles.
+  const creatingWindowRef = useRef(false);
+  const [creatingWindow, setCreatingWindow] = useState(false);
   function navigateSide(key: string | undefined): void {
     setSideAnchor(key);
     setSideFocus(key);
@@ -1134,6 +1137,18 @@ function AppContent({
   }
   function showWindowSessionChooser() {
     setActiveView('workbench'); setSessionPanel('list'); setDesktopContextVisible(true); setContextOpen(true);
+  }
+  /** Shows the new-session form: the sidebar on desktop, the drawer (instead of the inspector) on compact layouts. */
+  function openNewSessionPanel() {
+    setActiveView('workbench'); setSessionPanel('new');
+    if (compactLayout) { setInspectorOpen(false); setContextOpen(true); } else setDesktopContextVisible(true);
+  }
+  function createWindowFromMenu() {
+    if (creatingWindowRef.current) return;
+    creatingWindowRef.current = true; setCreatingWindow(true);
+    void windowWorkspace.create().then(() => toast?.dismiss('new-window'),
+      (error: unknown) => toast?.show('new-window', 'Window not created', error instanceof Error ? error.message : String(error), 'error'))
+      .finally(() => { creatingWindowRef.current = false; setCreatingWindow(false); });
   }
   function editWindow(operation: Parameters<typeof windowWorkspace.operate>[0]) {
     void windowWorkspace.operate(operation).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
@@ -2621,10 +2636,8 @@ function AppContent({
       onClose={() => setContextOpen(false)}
     >
       {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<Menu label="New" icon="plus" items={[
-        { label: 'New session', onSelect: () => { setActiveView('workbench'); setSessionPanel('new'); setDesktopContextVisible(true); } },
-        { label: 'New Window', onSelect: () => {
-          void windowWorkspace.create().catch((error: unknown) => toast?.show('new-window', 'Window not created', error instanceof Error ? error.message : String(error), 'error'));
-        } },
+        { label: 'New session', onSelect: openNewSessionPanel },
+        { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
       ]} />} /> : null}
       <div className="lab-rail-heading">
         {!compactLayout ? <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
@@ -2633,7 +2646,7 @@ function AppContent({
       {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
-        <button type="button" className="lab-sidebar-new" aria-pressed={sessionPanel === 'new'} onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button>
+        <button type="button" className="lab-sidebar-new" aria-pressed={sessionPanel === 'new'} onClick={openNewSessionPanel}><span aria-hidden="true">＋</span> New session</button>
         <button type="button" aria-label="Sidebar settings" title="Settings" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" /></svg>
         </button>
@@ -2765,13 +2778,13 @@ function AppContent({
                     {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
                     <div className="lab-empty-session-actions">
                       <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); }}>Choose session</button>
-                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>New session</button>
                     </div></div></div>,
             };
           })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
-        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={() => { setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={openNewSessionPanel}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
           sessionIdentity={stackRoot ?? succession.selected ?? activeOpened}
           operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}

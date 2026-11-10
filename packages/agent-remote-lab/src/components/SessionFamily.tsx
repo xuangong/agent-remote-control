@@ -1,4 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
 import { isBotView } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
@@ -8,6 +9,7 @@ import { DockResize, useSessionDockHeadingStart } from './SessionDock.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
+import { windowSessionBinding } from '../window-workspace.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
 import { allowsWindowPaneSelection, SessionConversationMount } from './SessionConversationSurfaces.js';
@@ -168,8 +170,10 @@ export function SessionFamily(props: Props) {
     });
     if (!sourceCurrent()) throw new Error('The source session changed while its subagent was opening.');
     if (value.nativeSessionId && value.nativeSessionId !== destinationTarget.nativeSessionId) throw new Error('The Host returned a different child session.');
-    setOpenedChildren(current => ({ ...current, [sessionKey(destinationTarget)]: { ...destinationTarget, agentId: value.agentId } }));
+    const opened = (current: Record<string, OpenedSession>) => ({ ...current, [sessionKey(destinationTarget)]: { ...destinationTarget, agentId: value.agentId } });
     if (shared && sourceViewId) {
+      // The Window store renders the new pane synchronously; it must already see the attached session, or it attaches again.
+      flushSync(() => setOpenedChildren(opened));
       // The source keeps the views it already shows; panes showing the start of the route are reused.
       const window = shared.readWindow?.() ?? shared.window;
       const operations: import('@orchardworks/agent-remote-protocol').WindowEdit[] = [];
@@ -182,12 +186,14 @@ export function SessionFamily(props: Props) {
       }
       for (const binding of remaining) {
         const id = `child-${crypto.randomUUID()}`;
-        operations.push({ type: 'view.create', view: { id, binding, attachedTo: parent, placement: 'attached', width: 440, collapsed: false, display: { mode: 'content', lettersVisible: true } } });
+        // A Team family's targets carry Team fields that a Window binding does not accept.
+        operations.push({ type: 'view.create', view: { id, binding: windowSessionBinding(binding), attachedTo: parent, placement: 'attached', width: 440, collapsed: false, display: { mode: 'content', lettersVisible: true } } });
         parent = id;
       }
       operations.push({ type: 'view.select', viewId: parent });
       shared.operate({ type: 'batch', operations }); setReveal({ viewId: parent }); return;
     }
+    setOpenedChildren(opened);
     const children = [...path.slice(1, index + 1), ...descendants];
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }

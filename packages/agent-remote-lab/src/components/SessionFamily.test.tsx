@@ -217,6 +217,42 @@ it('opens a subagent beside the views its source already shows and reuses the pa
   expect([...view.querySelectorAll('.lab-session-family-pane')].map(pane => pane.getAttribute('aria-label'))).toEqual(['Root', 'Side', '/root/reviewer', '/root/reviewer/evidence']);
 });
 
+it('opens a Team member subagent with a Window binding that leaves out Team fields', async () => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Leader' };
+  const { agentId: _, ...binding } = session;
+  const target = { ...binding, teamId: 'team', teamMemberId: 'leader' };
+  const reviewer = { nativeSessionId: 'reviewer', title: 'Reviewer', createdAt: 'now', status: 'idle' as const, observation: 'live' as const };
+  const replica = new AgentReplica();
+  replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: 'agent',
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: 'native', childSessions: [reviewer] } } });
+  replica.applyHistory({ protocolVersion: '1.8.0', type: 'timeline_page', payload: { requestId: 'history', agentId: 'agent', epoch: 'epoch', direction: 'tail', reset: false, staleCursor: false, gap: false, error: null,
+    window: { minSeq: 0, maxSeq: 0, nextSeq: 1 }, startCursor: null, endCursor: null, hasOlder: false, hasNewer: false, entries: [] } });
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'team-subagents', title: 'Window', revision: 0, selectedPrimaryViewId: 'root', selectedViewId: 'root', views: [
+    createWindowView('root', binding, 'primary'),
+  ] };
+  const attachChild = vi.fn(async (_providerId: string, _parent: string, nativeSessionId: string) => ({ agentId: `agent-${nativeSessionId}`, nativeSessionId }));
+  const directory = { attachChild, attach: vi.fn(() => new Promise(() => {})) } as unknown as DirectoryClient;
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const failures: unknown[] = [];
+  function Harness() {
+    const [, renderAgain] = useState(0);
+    const authority = { window, readWindow: () => window, operate(operation: Parameters<typeof applyWindowOperation>[1]) {
+      try { window = applyWindowOperation(window, operation); } catch (error) { failures.push(error); throw error; }
+      renderAgain(value => value + 1);
+    } };
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={authority}>
+      <SessionFamily attachedSession={session} target={target} viewId="root" replica={replica} directoryFor={() => directory}
+        navigation={(_source, _state, actions) => ({ childrenFor: () => [], resolveSessionLink: () => undefined, onOpenChildSession: actions?.openChildSession })}
+        storageScope="family-team-subagents" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline={false} transport={transport} draftStore={new DraftStore('family-team-subagents')} />
+    </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  await act(async () => view.querySelector<HTMLButtonElement>('[data-child-session-id="reviewer"]')!.click());
+  await vi.waitFor(() => expect(window.views.map(view => view.binding?.nativeSessionId)).toEqual(['native', 'reviewer']));
+  expect(failures).toEqual([]);
+  expect(window.views[1]!.binding).toEqual({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'reviewer', title: 'Reviewer', parentNativeSessionId: 'native' });
+});
+
 it('marks the presented compact pane without changing the shared selection', async () => {
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
   const root = createWindowView('root', session, 'primary');

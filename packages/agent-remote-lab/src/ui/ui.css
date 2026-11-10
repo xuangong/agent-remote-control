@@ -153,3 +153,15 @@
 .ui-toolbar-title { margin: 0; color: var(--ui-label); font: 600 var(--ui-size-body)/1.25 var(--ui-font); }
 .ui-toolbar-subtitle { color: var(--ui-label-secondary); font: var(--ui-size-caption)/1.3 var(--ui-font); }
 .ui-toolbar-trailing { display: flex; align-items: center; gap: 4px; flex: none; }
+/* Forced colors drop fills and shadows: buttons keep an edge, the chosen segment and the current row stay highlighted,
+   and badges keep their shape. */
+@media (forced-colors: active) {
+  .ui-button.ui-button, .ui-icon-button.ui-icon-button, .ui-segmented { border: 1px solid ButtonText; }
+  .ui-segmented > button[aria-pressed="true"], .ui-segmented > button[aria-pressed="true"]:hover:not(:disabled),
+  .ui-list-row.ui-list-row[aria-current="true"], .ui-list-row.ui-list-row[aria-current="true"]:hover:not(:disabled) {
+    forced-color-adjust: none; color: HighlightText; background: Highlight;
+  }
+  .ui-status[data-kind="unread"] { forced-color-adjust: none; background: CanvasText; }
+  .ui-status[data-kind="attention"], .ui-status[data-kind="failed"] { border: 1px solid CanvasText; }
+  .ui-status[data-kind="working"] { border-color: CanvasText; border-top-color: Highlight; }
+}

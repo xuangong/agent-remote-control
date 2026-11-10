@@ -92,6 +92,8 @@ test('browser navigation restores the selected main and Side composition after r
   await primary.getByTestId('prompt-input').press('Enter');
   const side = page.locator('.lab-side-conversation:visible .agent-message-assistant').last();
   await expect(side).toContainText('Restore this selected child');
+  // New session binds the selected view, which is the Side after /side; select the main view so the new session replaces the composition.
+  if (await primary.getByTestId('prompt-input').isVisible()) await primary.getByTestId('prompt-input').click();
   await showNewSession(page);
   const selected = new URL(page.url()).searchParams.get('session');
   const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));

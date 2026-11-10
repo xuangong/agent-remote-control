@@ -10,7 +10,7 @@ async function openAsk(page: Page) {
   await page.getByTestId('session-create').click();
   expect((await created).ok()).toBe(true);
   await expect(page).toHaveTitle('New session · Agent Remote Control');
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/ask');
   await expect(primary.getByTestId('prompt-submit')).toBeEnabled();

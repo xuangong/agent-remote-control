@@ -18,7 +18,7 @@ test('main navigation, reload and browser history retain an independent docked A
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/create')) creations.push(request.postDataJSON()); });
   await page.goto('/');
   await showNewSession(page); await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   const input = primary.getByTestId('prompt-input');
   await expect(input).toBeEnabled();
   const first = new URL(page.url()).searchParams.get('session');
@@ -86,7 +86,7 @@ test('main navigation, reload and browser history retain an independent docked A
 test('browser navigation restores the selected main and Side composition after refresh', async ({ page }) => {
   await page.goto('/'); await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('/side Restore this selected child');
   await primary.getByTestId('prompt-input').press('Enter');
@@ -113,7 +113,7 @@ test('global View stays usable while the main composition is minimized', async (
   test.skip(isMobile, 'Minimization applies to wide dock layouts.');
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   const input = primary.getByTestId('prompt-input');
   await expect(input).toBeEnabled();
   await input.fill('/ask Keep working in the dock'); await expect(primary.getByTestId('prompt-submit')).toBeEnabled(); await input.press('Enter');

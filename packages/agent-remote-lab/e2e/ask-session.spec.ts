@@ -8,7 +8,7 @@ async function start(page: Page, enableAsk = true) {
   const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
   expect((await created).ok()).toBe(true);
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await expect(page).toHaveTitle('New session · Agent Remote Control');
   if (enableAsk) {

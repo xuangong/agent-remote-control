@@ -148,7 +148,7 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
  }));
  const {showNewSession}=await import('./session-navigation');
  await page.goto('/');await showNewSession(page);await page.getByTestId('session-create').click();
- const primary=page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary=page.locator('.lab-primary-conversation .lab-session-view');
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
  await expect(page).toHaveURL(/[?&]provider=[^&]+/);
  const url=new URL(page.url()),provider=url.searchParams.get('provider')!;
@@ -198,7 +198,7 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
 test('Team command and View switch share a retained presentation preference', async ({ page }) => {
  const { showNewSession } = await import('./session-navigation');
  await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary = page.locator('.lab-primary-conversation .lab-session-view');
  const input = primary.getByTestId('prompt-input');
  await expect(input).toBeEnabled();
  const entry = page.getByRole('button', { name: 'Teams', exact: true });
@@ -334,7 +334,7 @@ test('Dock child navigation uses the live channel without replacing the main ses
   });
  });
  await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary = page.locator('.lab-primary-conversation .lab-session-view');
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
  await primary.getByTestId('prompt-input').fill('Keep primary draft');
  await expect(page).toHaveURL(/[?&]provider=[^&]+/);

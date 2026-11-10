@@ -10,10 +10,10 @@ async function openAsk(page: Page) {
   await page.getByTestId('session-create').click();
   expect((await sourceCreated).ok()).toBe(true);
   await expect(page).toHaveTitle('New session · Agent Remote Control');
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-input');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view').getByTestId('prompt-input');
   await expect(primary).toBeEnabled();
   await primary.fill('/ask');
-  await expect(page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-submit')).toBeEnabled();
+  await expect(page.locator('.lab-primary-conversation .lab-session-view').getByTestId('prompt-submit')).toBeEnabled();
   await primary.press('Enter');
   const creations: unknown[] = [];
   const attachments: { nativeSessionId: string }[] = [];
@@ -91,7 +91,7 @@ async function remoteSource(page: Page, fixture: Awaited<ReturnType<typeof sessi
   const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
   const identity = await (await created).json() as { nativeSessionId: string };
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   const nativeSessionId = identity.nativeSessionId;
   await primary.getByTestId('prompt-input').fill('/ask');

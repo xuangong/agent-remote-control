@@ -8,7 +8,7 @@ async function createSourceAndOpenAsk(page: Page) {
   await page.getByTestId('session-create').click();
   expect((await created).ok()).toBe(true);
   await expect(page).toHaveTitle('New session · Agent Remote Control');
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   const input = primary.getByTestId('prompt-input');
   await expect(input).toBeEnabled();
   await input.fill('/ask');

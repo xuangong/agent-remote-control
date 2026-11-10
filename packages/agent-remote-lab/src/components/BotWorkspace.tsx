@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
 import type { useBotWorkspace } from '../hooks/useBotWorkspace.js';
@@ -29,7 +29,13 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [creating, setCreating] = useState(false), [title, setTitle] = useState(''), [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
-  const rosterElement = useRef<HTMLElement>(null), rosterToggle = useRef<HTMLButtonElement>(null), rosterFocused = useRef(false);
+  const rosterId = useId(), rosterElement = useRef<HTMLElement>(null), rosterToggle = useRef<HTMLButtonElement | null>(null);
+  const backButton = useRef<HTMLButtonElement>(null), toggleHadFocus = useRef(false);
+  // React detaches the ref before it removes the node, so this sees whether the toggle had focus when a compact layout replaces it.
+  const toggleRef = useCallback((node: HTMLButtonElement | null) => {
+    if (!node && rosterToggle.current && rosterToggle.current === document.activeElement) toggleHadFocus.current = true;
+    rosterToggle.current = node;
+  }, []);
   const rosterHidden = !compact && rosterCollapsed;
   const place = navigation.place, key = place && botPlaceKey(place);
   const conversation = !!place && place.kind !== 'section';
@@ -49,11 +55,14 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   }, [visible, key, showConversation, navigation.rosterVisible]);
   // Hiding the roster (by its button or the shell shortcut) must not drop focus to the page: move it to the sidebar button.
   useLayoutEffect(() => {
-    if (!rosterHidden) return;
-    const active = document.activeElement;
-    if (rosterElement.current?.contains(active) || rosterFocused.current && (!active || active === document.body)) rosterToggle.current?.focus({ preventScroll: true });
-    rosterFocused.current = false;
+    if (rosterHidden && rosterElement.current?.contains(document.activeElement)) rosterToggle.current?.focus({ preventScroll: true });
   }, [rosterHidden]);
+  // A compact layout replaces the sidebar button with Back: keep focus on the conversation's toolbar.
+  useLayoutEffect(() => {
+    if (!compact || !toggleHadFocus.current) return;
+    toggleHadFocus.current = false;
+    if (showConversation) (backButton.current ?? heading.current)?.focus({ preventScroll: true });
+  }, [compact]);
   function startSection() { setCreating(true); setError(undefined); }
   function back() { returning.current = true; navigation.back(); }
   async function save(retry = false) {
@@ -71,9 +80,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       if (creating) { event.preventDefault(); setCreating(false); }
       else if (compact && showConversation) { event.preventDefault(); back(); }
     }}>
-    <aside ref={rosterElement} className="lab-bot-roster" hidden={(compact && showConversation) || rosterHidden}
-      onFocus={() => { rosterFocused.current = true; }} onBlur={event => { if (event.relatedTarget) rosterFocused.current = event.currentTarget.contains(event.relatedTarget as Node); }}>
-      <header className="lab-bot-roster-heading"><h1>Bots</h1>
+    <h1 className={compact && !showConversation ? 'lab-bot-title' : 'lab-bot-title agent-visually-hidden'}>Bots</h1>
+    <aside ref={rosterElement} id={rosterId} className="lab-bot-roster" hidden={(compact && showConversation) || rosterHidden}>
+      <header className="lab-bot-roster-heading">
         <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
       </header>
       {unavailable ? availabilityNotice : null}
@@ -97,8 +106,8 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     </aside>
     <section className="lab-bot-conversation" aria-label="Bot conversation" hidden={compact && !showConversation}>
       <Toolbar className="lab-bot-conversation-toolbar" titleRef={heading} titleFocusable
-        leading={compact ? <Button variant="plain" aria-label="Back to bots" onClick={back}>Back</Button>
-          : <IconButton ref={rosterToggle} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} onClick={onToggleRoster} />}
+        leading={compact ? <Button ref={backButton} variant="plain" aria-label="Back to bots" onClick={back}>Back</Button>
+          : <IconButton ref={toggleRef} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} aria-controls={rosterId} onClick={onToggleRoster} />}
         title={place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}
         trailing={compact ? <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /> : undefined} />
       {!unavailable ? availabilityNotice : null}

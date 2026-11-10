@@ -23,6 +23,7 @@ test('resizes the desktop sidebar, retains its width, and supports keyboard rese
   await page.keyboard.press('Home'); await expect(handle).toHaveAttribute('aria-valuenow', '220');
   await page.keyboard.press('End'); await expect(handle).toHaveAttribute('aria-valuenow', '360');
   await page.setViewportSize({ width: 1181, height: 800 });
+  // The two inspector steps check the layout (the main stage keeps its room), not the width cap, which does not bind here.
   await toggleViewPanel(page, 'Replica Inspector');
   await expect(handle).toHaveAttribute('aria-valuenow', '360');
   expect((await page.locator('.lab-main-stage').boundingBox())!.width).toBeGreaterThanOrEqual(479);

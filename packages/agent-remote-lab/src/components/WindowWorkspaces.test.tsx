@@ -229,3 +229,13 @@ it('shows no All Windows button without an overview', async () => {
   const test = await fixture();
   expect(test.container.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
 });
+
+it('neither scrolls nor navigates when choosing a view is refused', async () => {
+  const navigate = vi.fn(), frame = vi.spyOn(window, 'requestAnimationFrame');
+  const test = await fixture({ onNavigate: navigate });
+  test.rejectLocal();
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-id="main"]')!.click());
+  expect(test.container.textContent).toContain('This Window cannot be edited.');
+  expect(frame).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+});

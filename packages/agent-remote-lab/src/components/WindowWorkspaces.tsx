@@ -75,14 +75,14 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
     setOpeningId(id); setNotice(undefined);
-    try { await workspace.open(id); onNavigate?.(); }
+    try { await workspace.open(id); if (generation === navigation.current) onNavigate?.(); }
     catch (error) {
       if (generation === navigation.current && currentScope.current.client === client) setNotice(error instanceof Error ? error.message : String(error));
     } finally { if (generation === navigation.current) setOpeningId(undefined); }
   }
   function chooseView(view: WindowView) {
     const select: WindowOperation = { type: 'view.select', viewId: view.id };
-    edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select);
+    if (!edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select)) return;
     // The pane may render or expand on the next frame; bring it into view then.
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-view-id]')].find(element => element.dataset.viewId === view.id)
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
@@ -148,7 +148,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         const view = createWindowView(crypto.randomUUID());
         edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
       }}>New session view</button></div>
-      <nav className="lab-window-list lab-window-views" aria-label="Session views">{windowOutline(workspace.window.views).map(({ view, depth }) => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id} data-attached={!!view.attachedTo || undefined}
+      <nav className="lab-window-list lab-window-views" aria-label="Session views">{windowOutline(workspace.window.views).map(({ view, depth }) => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id}
         data-depth={depth || undefined} data-collapsed={view.collapsed || undefined}>
         <button type="button" className="lab-window-open" data-window-view-id={view.id} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}

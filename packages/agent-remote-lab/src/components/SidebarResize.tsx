@@ -24,6 +24,8 @@ export function useSidebarWidth(inspectorOpen: boolean) {
   useEffect(() => {
     try { localStorage.setItem(storageKey, String(preferredWidth)); } catch { /* Resizing remains available without browser storage. */ }
   }, [preferredWidth]);
+  // The viewport term never binds on desktop today (the sidebar shows only above 1180px, which leaves room for 360px
+  // beside the inspector); it is kept as a guard should those widths change.
   const maximum = Math.max(minWidth, Math.min(maxWidth, viewport - 480 - (inspectorOpen ? 320 : 0)));
   const width = Math.min(preferredWidth, maximum);
   return { width, maximum, setWidth,

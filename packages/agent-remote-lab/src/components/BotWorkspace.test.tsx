@@ -100,3 +100,74 @@ it('retains an uncertain section request after Cancel and recovers that same cre
   expect(app.workspace().readGroup(original.window.id)?.window.title).toBe('Retained');
   await app.close();
 });
+
+it('shows the shared sidebar header, a toolbar above the conversation, and collapses the roster', async () => {
+  const scope = 'http://localhost/bot-shell-frame/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
+    expect(roster.querySelector('.lab-sidebar-header nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Bot mode');
+    expect(roster.querySelector('.lab-sidebar-header-actions button[aria-label="New section"]')).not.toBeNull();
+    expect(app.container.querySelector('header.ui-toolbar.lab-bot-conversation-toolbar h2.ui-toolbar-title')).not.toBeNull();
+    await act(async () => app.button('Hide sidebar').click());
+    expect(roster.hidden).toBe(true);
+    expect(app.container.querySelector('.lab-bot-workspace')?.hasAttribute('data-roster-collapsed')).toBe(true);
+    await act(async () => app.button('Show sidebar').click());
+    expect(roster.hidden).toBe(false);
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+    expect(roster.hidden).toBe(true);
+  } finally { await app.close(); }
+});
+
+it('moves focus from a collapsing roster to the sidebar button', async () => {
+  const scope = 'http://localhost/bot-shell-focus/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
+    roster.querySelector<HTMLButtonElement>('button[aria-label="New section"]')!.focus();
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+    expect(roster.hidden).toBe(true);
+    const toggle = document.activeElement as HTMLElement;
+    expect(toggle.getAttribute('aria-label')).toBe('Show sidebar');
+    expect(toggle.getAttribute('aria-controls')).toBe(roster.id);
+    expect(roster.id).not.toBe('');
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+    expect(roster.hidden).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute('aria-label')).toBe('Hide sidebar');
+  } finally { await app.close(); }
+});
+
+it('keeps the Bots heading outside the collapsible roster: hidden on desktop, a large title above the compact roster only', async () => {
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  let compact = false;
+  vi.stubGlobal('matchMedia', (query: string) => ({ get matches() { return compact && query === '(max-width: 1180px)'; }, media: query,
+    addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => { listeners.add(listener); }, removeEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => { listeners.delete(listener); } }));
+  const scope = 'http://localhost/bot-shell-title/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const main = app.container.querySelector<HTMLElement>('.lab-bot-workspace')!;
+    const title = () => main.firstElementChild as HTMLElement;
+    expect(title().tagName).toBe('H1'); expect(title().textContent).toBe('Bots');
+    expect(title().classList.contains('agent-visually-hidden')).toBe(true);
+    expect(main.querySelector('.lab-bot-roster h1')).toBeNull();
+    app.button('Hide sidebar').focus();
+    await act(async () => app.button('Hide sidebar').click());
+    expect(title().tagName).toBe('H1');
+    await act(async () => app.button('Show sidebar').click());
+    await act(async () => { compact = true; listeners.forEach(listener => listener({ matches: true } as MediaQueryListEvent)); });
+    const conversation = main.querySelector<HTMLElement>('.lab-bot-conversation')!;
+    expect(conversation.hidden).toBe(false);
+    expect(document.activeElement).toBe(app.button('Back to bots'));
+    expect(title().classList.contains('agent-visually-hidden')).toBe(true);
+    await act(async () => app.button('Back to bots').click());
+    expect(conversation.hidden).toBe(true);
+    expect(title().classList.contains('agent-visually-hidden')).toBe(false);
+  } finally { await app.close(); }
+});

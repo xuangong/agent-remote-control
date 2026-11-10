@@ -96,3 +96,19 @@ it('gives every shared Session View variable a Lab value and uses no undefined o
     [...line.matchAll(/var\(\s*(--(?:agent|obs|ui)-[\w-]+)/g)].flatMap(match => defined.has(match[1]!) ? [] : [`${path}:${index + 1}: ${match[1]}`])));
   expect(undefinedUses, 'uses of undefined --agent-*, --obs-* or --ui-* variables').toEqual([]);
 });
+
+it('draws one focus ring: the global rule reads the token and the primitive offset', () => {
+  const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
+  const start = app.indexOf('button:focus-visible,\ninput:focus-visible');
+  expect(start, 'the global focus rule').toBeGreaterThanOrEqual(0);
+  const body = app.slice(app.indexOf('{', start) + 1, app.indexOf('}', start));
+  expect(body).toContain('outline: 3px solid var(--ui-focus-ring);');
+  expect(body).toContain('outline-offset: var(--ui-focus-offset, 2px);');
+  const ui = readFileSync(new URL('./ui.css', import.meta.url), 'utf8');
+  for (const [selector, offset] of [['.ui-button.ui-button {', '1px'], ['.ui-icon-button.ui-icon-button {', '1px'],
+    ['.ui-segmented > button[aria-pressed] {', '1px'], ['.ui-list-row.ui-list-row {', '-1px']] as const) {
+    const at = ui.indexOf(selector);
+    expect(at, selector).toBeGreaterThanOrEqual(0);
+    expect(ui.slice(at, ui.indexOf('}', at)), selector).toContain(`--ui-focus-offset: ${offset};`);
+  }
+});

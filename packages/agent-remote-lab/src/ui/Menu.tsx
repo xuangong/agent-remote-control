@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon, type IconName } from './Icon.js';
+import { IconButton } from './IconButton.js';
 
 export type MenuEntry =
   | { kind?: 'item'; label: string; icon?: IconName; destructive?: boolean; disabled?: boolean; onSelect(): void }
@@ -31,7 +32,7 @@ type Opening = { host: HTMLElement; focus: 'first' | 'last' | 'menu' };
  * A ⋯ button that opens a menu of actions. The keyboard opens it on an item, a pointer on the menu itself; the item under
  * the pointer takes focus, so only the focused item is highlighted. Escape, Tab and choosing an item close it and return
  * focus to the button (before the action runs). A press outside, a scroll that moves the button, or the window losing
- * focus closes it; a resize moves it. It portals into the dialog holding the button, if any, so a modal dialog does not
+ * focus closes it, and so does hiding the button; a resize moves it. It portals into the dialog holding the button, if any, so a modal dialog does not
  * make it inert.
  */
 export function Menu({ label, icon = 'ellipsis', items }: { label: string; icon?: IconName; items: readonly MenuEntry[] }) {
@@ -65,6 +66,11 @@ export function Menu({ label, icon = 'ellipsis', items }: { label: string; icon?
     const target = open.focus === 'first' ? enabled[0] : open.focus === 'last' ? enabled[enabled.length - 1] : undefined;
     (target ?? menu.current).focus();
   }, [open]);
+  // A button hidden with its container (a collapsed sidebar) takes its menu with it; focus is left for that container's owner to move.
+  useLayoutEffect(() => {
+    const anchor = button.current;
+    if (open && (!anchor?.isConnected || anchor.closest('[hidden]'))) close(false);
+  });
   // Items may change while the menu is open; keep focus in it so the keyboard still works.
   useLayoutEffect(() => {
     if (open && menu.current && !menu.current.contains(document.activeElement)) menu.current.focus();
@@ -115,15 +121,13 @@ export function Menu({ label, icon = 'ellipsis', items }: { label: string; icon?
   const toggle = (detail: number) => (open ? close(false) : show(detail === 0 ? 'first' : 'menu'));
 
   return <>
-    <button ref={button} type="button" className="ui-icon-button" aria-label={label} title={label} aria-haspopup="menu"
+    <IconButton ref={button} icon={icon} label={label} aria-haspopup="menu"
       aria-expanded={Boolean(open)} aria-controls={open ? id : undefined} onClick={event => toggle(event.detail)}
       onKeyDown={event => {
         if (open || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp')) return;
         event.preventDefault();
         show(event.key === 'ArrowDown' ? 'first' : 'last');
-      }}>
-      <Icon name={icon} />
-    </button>
+      }} />
     {open ? createPortal(<div ref={menu} id={id} role="menu" aria-label={label} tabIndex={-1} className="ui-menu"
       onKeyDown={onKeyDown} onPointerLeave={() => follow(menu.current)}>
       {items.map((item, index) => item.kind === 'separator'

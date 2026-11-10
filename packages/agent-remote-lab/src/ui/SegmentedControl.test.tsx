@@ -12,7 +12,8 @@ function Harness() {
 it('marks the chosen segment and changes on click', async () => {
   const container = await render(<Harness />);
   const [bots, windows] = [...container.querySelectorAll('button')];
-  expect(container.querySelector('nav')?.getAttribute('aria-label')).toBe('Mode');
+  expect(container.querySelector('nav')).toBeNull();
+  expect(container.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Mode');
   expect(bots!.getAttribute('aria-pressed')).toBe('true');
   await act(async () => windows!.click());
   expect(windows!.getAttribute('aria-pressed')).toBe('true');

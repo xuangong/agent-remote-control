@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import * as workspaceHooks from './hooks/useWindowWorkspace.js';
 import { promptText, setPromptText } from './test/setup.js';
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
@@ -124,5 +125,95 @@ it.each(['deleted', 'rebound', 'attached', 'managed', 'scope'] as const)('does n
     }
     await until(() => expect(editor.isConnected).toBe(false));
     expect(app.sendMessages).toEqual([]);
+  } finally { await app.close(); }
+});
+
+it('puts the mode switch and the New menu at the top of the Window sidebar, not in the app bar', async () => {
+  const scope = 'http://localhost/sidebar-header/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.container.querySelector('#lab-context .lab-sidebar-header')).not.toBeNull());
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
+    expect(header.querySelector('nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Window mode');
+    expect(app.container.querySelector('.lab-app-bar nav[aria-label="Workbench mode"]')).toBeNull();
+    const newSessionPanel = () => app.container.querySelector('#lab-context .lab-provider-controls')!;
+    expect(newSessionPanel().closest('[hidden]')).not.toBeNull();
+    const open = async () => act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
+    const item = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === label)!;
+    await open();
+    expect([...document.querySelectorAll('[role="menu"][aria-label="New"] [role="menuitem"]')].map(entry => entry.textContent)).toEqual(['New session', 'New Window']);
+    await act(async () => item('New session').click());
+    expect(newSessionPanel().closest('[hidden]')).toBeNull();
+    expect(app.container.querySelector('.lab-sidebar-new')?.getAttribute('aria-pressed')).toBe('true');
+    await open();
+    await act(async () => item('New Window').click());
+    await until(() => expect(app.workspace().window?.id).toMatch(/^(?!A$)/));
+    expect(app.workspace().windows.map(window => window.id)).toContain('A');
+  } finally { await app.close(); }
+});
+
+it('creates one Window at a time from the New menu and clears its error toast after a success', async () => {
+  const scope = 'http://localhost/sidebar-new-window/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    const pending: { resolve(): void; reject(error: Error): void }[] = [];
+    const create = vi.fn(() => new Promise<void>((resolve, reject) => pending.push({ resolve, reject })));
+    const hook = vi.mocked(workspaceHooks.useWindowWorkspace), original = hook.getMockImplementation()!;
+    hook.mockImplementation((...args) => ({ ...original(...args), create }));
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    // Re-render App so its handlers read the stubbed create.
+    await act(async () => app.container.querySelector<HTMLButtonElement>('.lab-sidebar-new')!.click());
+    const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
+    const item = async () => {
+      if (!document.querySelector('[role="menu"][aria-label="New"]')) await act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
+      return [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === 'New Window')!;
+    };
+    const toast = () => [...document.querySelectorAll('.lab-toast')].find(node => node.textContent?.includes('Window not created'));
+    const first = await item();
+    await act(async () => first.click());
+    expect(create).toHaveBeenCalledTimes(1);
+    const repeat = await item();
+    expect(repeat.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => repeat.click());
+    expect(create).toHaveBeenCalledTimes(1);
+    await act(async () => pending[0]!.reject(new Error('Relay offline')));
+    await until(() => expect(toast()?.textContent).toContain('Relay offline'));
+    const again = await item();
+    expect(again.getAttribute('aria-disabled')).toBeNull();
+    await act(async () => again.click());
+    expect(create).toHaveBeenCalledTimes(2);
+    await act(async () => pending[1]!.resolve());
+    await until(() => expect(toast()).toBeUndefined());
+  } finally { await app.close(); }
+});
+
+it('moves focus out of the Window sidebar, and closes its open New menu, when Command-Backslash hides it', async () => {
+  const scope = 'http://localhost/window-shell-focus/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/');
+  const app = await mountBotApp(scope);
+  const backslash = () => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
+  try {
+    await until(() => expect(app.container.querySelector<HTMLElement>('#lab-context')?.hidden).toBe(false));
+    const context = app.container.querySelector<HTMLElement>('#lab-context')!;
+    context.querySelector<HTMLButtonElement>('.lab-sidebar-header button[aria-label="New"]')!.focus();
+    await backslash();
+    expect(context.hidden).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(context.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('View options');
+
+    await backslash();
+    expect(context.hidden).toBe(false);
+    const newButton = context.querySelector<HTMLButtonElement>('.lab-sidebar-header button[aria-label="New"]')!;
+    await act(async () => newButton.click());
+    expect(document.activeElement?.closest('[role="menu"]')).not.toBeNull();
+    await backslash();
+    expect(context.hidden).toBe(true);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(newButton.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('View options');
   } finally { await app.close(); }
 });

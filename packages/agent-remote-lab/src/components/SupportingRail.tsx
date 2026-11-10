@@ -94,7 +94,7 @@ export function SupportingRail({ id, label, className, compact, collapsible = fa
   </aside>;
 }
 
-function focusableElements(container: HTMLElement | null): HTMLElement[] {
+export function focusableElements(container: HTMLElement | null): HTMLElement[] {
   if (!container) return [];
   return Array.from(container.querySelectorAll<HTMLElement>(focusableSelector)).filter((element) => {
     if (element.hidden || element.closest('[hidden]')) return false;

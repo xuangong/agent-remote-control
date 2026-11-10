@@ -165,13 +165,16 @@ import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';
-import { SupportingRail } from './components/SupportingRail.js';
+import { focusableElements, SupportingRail } from './components/SupportingRail.js';
+import { SidebarHeader } from './shell/SidebarHeader.js';
+import { Menu } from './ui/Menu.js';
 import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
 import { TraceView } from './components/TraceView.js';
 import { HostPreviewGroups } from './components/HostPreviewGroups.js';
 import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 import { useDeploymentUpdate } from './hooks/useDeploymentUpdate.js';
+import { useShellShortcuts } from './hooks/useShellShortcuts.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -312,6 +315,9 @@ function AppContent({
   const [detachedSideRoot, setDetachedSideRoot] = useState<string>();
   const appliedUnlinks = useMemo(() => new Map<string, number>(), [forkStore]);
   const toast = useToast(windowMode);
+  // One Window create at a time from the sidebar's New menu; the item is disabled until it settles.
+  const creatingWindowRef = useRef(false);
+  const [creatingWindow, setCreatingWindow] = useState(false);
   function navigateSide(key: string | undefined): void {
     setSideAnchor(key);
     setSideFocus(key);
@@ -523,6 +529,25 @@ function AppContent({
   const [desktopContextVisible, setDesktopContextVisible] = useState(() => !opensSession);
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
   const closeContext = useCallback(() => { setContextOpen(false); setDesktopContextVisible(false); }, []);
+  const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
+  const contextFocusHidden = useRef(false);
+  // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
+  useShellShortcuts({
+    setMode: navigation.setMode,
+    toggleSidebar: compactLayout ? undefined : windowMode ? () => {
+      contextFocusHidden.current = focusWithinContext();
+      setDesktopContextVisible(value => !value);
+    } : () => setBotRosterCollapsed(value => !value),
+  });
+  // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
+  useLayoutEffect(() => {
+    const lost = contextFocusHidden.current;
+    contextFocusHidden.current = false;
+    if (!lost || desktopContextVisible || !(document.activeElement === document.body || focusWithinContext())) return;
+    const trigger = viewTriggerRef.current;
+    if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
+    if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
+  }, [desktopContextVisible]);
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
@@ -1132,6 +1157,18 @@ function AppContent({
   }
   function showWindowSessionChooser() {
     setActiveView('workbench'); setSessionPanel('list'); setDesktopContextVisible(true); setContextOpen(true);
+  }
+  /** Shows the new-session form: the sidebar on desktop, the drawer (instead of the inspector) on compact layouts. */
+  function openNewSessionPanel() {
+    setActiveView('workbench'); setSessionPanel('new');
+    if (compactLayout) { setInspectorOpen(false); setContextOpen(true); } else setDesktopContextVisible(true);
+  }
+  function createWindowFromMenu() {
+    if (creatingWindowRef.current) return;
+    creatingWindowRef.current = true; setCreatingWindow(true);
+    void windowWorkspace.create().then(() => toast?.dismiss('new-window'),
+      (error: unknown) => toast?.show('new-window', 'Window not created', error instanceof Error ? error.message : String(error), 'error'))
+      .finally(() => { creatingWindowRef.current = false; setCreatingWindow(false); });
   }
   function editWindow(operation: Parameters<typeof windowWorkspace.operate>[0]) {
     void windowWorkspace.operate(operation).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
@@ -2557,7 +2594,6 @@ function AppContent({
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden || windowWorkspace.unavailable}>
-      <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />
       <div className="lab-brand">
         <div ref={setHeaderViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
         <div>
@@ -2619,6 +2655,10 @@ function AppContent({
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
+      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<Menu label="New" icon="plus" items={[
+        { label: 'New session', onSelect: openNewSessionPanel },
+        { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
+      ]} />} /> : null}
       <div className="lab-rail-heading">
         {!compactLayout ? <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
         <p className="lab-eyebrow" title={baseUrl}>Window</p>
@@ -2626,7 +2666,7 @@ function AppContent({
       {!compactLayout ? <nav className="lab-sidebar-tabs" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
-        <button type="button" className="lab-sidebar-new" aria-pressed={sessionPanel === 'new'} onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button>
+        <button type="button" className="lab-sidebar-new" aria-pressed={sessionPanel === 'new'} onClick={openNewSessionPanel}><span aria-hidden="true">＋</span> New session</button>
         <button type="button" aria-label="Sidebar settings" title="Settings" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" fill="currentColor" stroke="none" /><circle cx="15" cy="17" r="3" fill="currentColor" stroke="none" /></svg>
         </button>
@@ -2758,13 +2798,13 @@ function AppContent({
                     {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
                     <div className="lab-empty-session-actions">
                       <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('list'); setContextOpen(true); setDesktopContextVisible(true); }}>Choose session</button>
-                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>
+                      <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>New session</button>
                     </div></div></div>,
             };
           })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
-        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={() => { setSessionPanel('new'); setContextOpen(true); setDesktopContextVisible(true); }}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={openNewSessionPanel}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
           sessionIdentity={stackRoot ?? succession.selected ?? activeOpened}
           operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}
@@ -2867,12 +2907,21 @@ function AppContent({
     </SupportingRail>
     </WindowPresentationContext.Provider>
     </> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
+  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
   const enabled = !!host && host.access !== 'shared';
   return <PreviewProvider client={client} hostId={host?.id ?? ''} enabled={enabled} canManage={enabled} polling={polling}>{children}</PreviewProvider>;
+}
+
+/** Whether focus is in the Window sidebar, or in a Menu (portalled outside it) whose trigger is in it. */
+function focusWithinContext(): boolean {
+  const context = document.getElementById('lab-context'), active = document.activeElement;
+  if (!context || !active) return false;
+  if (context.contains(active)) return true;
+  const menu = active.closest('[role="menu"]');
+  return !!menu?.id && [...context.querySelectorAll('[aria-controls]')].some(control => control.getAttribute('aria-controls') === menu.id);
 }
 
 function createAgentId(): string {

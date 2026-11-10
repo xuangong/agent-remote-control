@@ -20,6 +20,9 @@
 
   --ui-accent: #0071e3;
   --ui-accent-text: #0066cc;
+  --ui-accent-hover: #0064c8; /* Primary buttons under the pointer: the accent moved toward black */
+  --ui-failure-on-fill: #b8000e; /* Destructive text on a gray fill */
+  --ui-row-hover: rgb(120 120 128 / 0.12); /* A hovered sidebar or list row */
   --ui-on-accent: #ffffff;
   --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
   --ui-focus-ring: #0071e3;
@@ -84,6 +87,9 @@
 
     --ui-accent: #0071e3;
     --ui-accent-text: #409cff;
+    --ui-accent-hover: #0064c8;
+    --ui-failure-on-fill: #ffa39e;
+    --ui-row-hover: rgb(118 118 128 / 0.06);
     --ui-on-accent: #ffffff;
     --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
     --ui-focus-ring: #409cff;

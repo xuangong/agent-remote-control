@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { Button } from './Button.js';
@@ -30,4 +30,11 @@ it('names an icon button by its label', async () => {
   expect(button.getAttribute('aria-label')).toBe('New Bot');
   expect(button.title).toBe('New Bot');
   expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+});
+
+it('forwards refs to the button element', async () => {
+  const button = createRef<HTMLButtonElement>(), icon = createRef<HTMLButtonElement>();
+  await render(<><Button ref={button}>Save</Button><IconButton ref={icon} icon="gear" label="Settings" /></>);
+  expect(button.current?.textContent).toBe('Save');
+  expect(icon.current?.getAttribute('aria-label')).toBe('Settings');
 });

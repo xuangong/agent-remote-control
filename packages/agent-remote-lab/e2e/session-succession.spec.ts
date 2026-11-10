@@ -402,8 +402,9 @@ test('separate devices share one Window while explicit A history and each device
     f.available();
     await a.getByRole('button', { name: 'Retry session', exact: true }).click();
     await expect(a.locator('.lab-has-agent')).toBeVisible();
-    // The second device retries its own attachment automatically, with backoff.
-    await expect(b.locator('.lab-has-agent')).toBeVisible({ timeout: 20000 });
+    // A Host that could not open the session is not a transient failure: each device retries its own attachment explicitly.
+    await b.getByRole('button', { name: 'Retry session', exact: true }).click();
+    await expect(b.locator('.lab-has-agent')).toBeVisible();
     await expect(firstPrimary).toHaveText('First device draft'); await expect(secondPrimary).toHaveText('');
     for (const page of [a, b]) await expect.poll(() => page.evaluate(scope => {
       const document = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');

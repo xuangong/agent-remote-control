@@ -1,0 +1,21 @@
+import { act } from 'react';
+import { expect, it, vi } from 'vitest';
+import { render } from '../test/setup.js';
+import { SidebarFooter, hostSummary } from './SidebarFooter.js';
+
+it('summarizes Hosts', () => {
+  expect(hostSummary([], true)).toBe('No Hosts paired');
+  expect(hostSummary([], false)).toBe('Checking Hosts…');
+  expect(hostSummary([{ online: true }, { online: false }], true)).toBe('1 of 2 Hosts online');
+  expect(hostSummary([{ online: true }], true)).toBe('1 Host online');
+});
+
+it('opens the Hosts and Settings pages', async () => {
+  const onHosts = vi.fn(), onSettings = vi.fn();
+  const container = await render(<SidebarFooter hosts={[{ online: false }]} loaded onHosts={onHosts} onSettings={onSettings} settingsPressed={false} />);
+  const footer = container.querySelector('footer.lab-sidebar-footer')!;
+  expect(footer.querySelector('[data-host-state]')?.getAttribute('data-host-state')).toBe('offline');
+  await act(async () => (footer.querySelector('.lab-sidebar-hosts') as HTMLButtonElement).click());
+  await act(async () => (footer.querySelector('button[aria-label="Sidebar settings"]') as HTMLButtonElement).click());
+  expect(onHosts).toHaveBeenCalledOnce(); expect(onSettings).toHaveBeenCalledOnce();
+});

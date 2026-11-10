@@ -4,6 +4,7 @@ import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remo
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 import { openSessionsPage, selectConnectedHost, addSessionView } from './all-sessions';
+import { toggleViewPanel } from './view-options';
 import { compositionMetadataKey, createAskOwner, createCompositionDocument, createCompositionSlot, type CompositionDocument } from '../src/session-composition.js';
 import { bindWindowCompositionSlot } from '../src/window-composition.js';
 
@@ -472,7 +473,12 @@ test('session panes preserve independent drafts and mobile Window navigation sel
     await alphaRoot.getByTestId('prompt-input').fill('Alpha independent draft');
     await betaRoot.getByTestId('prompt-input').fill('Beta independent draft');
     await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['beta', 'beta']);
-    // Global controls live in the first pane but must preserve the active conversation.
+    // The desktop sidebar stays after a session opens and holds the global controls; hiding it must preserve the active conversation too.
+    await expect(page.locator('#lab-context')).toBeVisible();
+    await toggleViewPanel(page, 'Sidebar');
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
+    // Without the sidebar, global controls live in the first pane but must preserve the active conversation.
     await group('alpha').getByRole('button', { name: 'View options', exact: true }).click();
     const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
     await expect(globalOptions).toBeVisible();
@@ -575,9 +581,7 @@ test('ordinary dock creation captures its selected view and directory opening re
     await page.unroute('**/v1/remote/hosts/*/create');
     await operate({ type: 'view.select', viewId: dockId });
     await expect(dock.getByTestId('prompt-input')).toBeEnabled();
-    const { showSessions } = await import('./session-navigation');
-    await showSessions(page);
-    const discover = page.getByRole('region', { name: 'Discover sessions' });
+    const discover = (await openSessionsPage(page)).getByRole('region', { name: 'Discover sessions' });
     await discover.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(discover.locator('.lab-session-row').first()).toBeVisible();
     // Choose the original primary session from the actual directory.
@@ -843,9 +847,12 @@ test('the Window overview shows every Window by recent use and switches with the
     await page.keyboard.press('Escape');
     await expect(overview).toBeHidden();
     expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Third);
-    // Focus returns where it was.
-    await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Windows', exact: true })).toBeFocused();
+    // Focus returns where it was: to the sidebar's Windows section, which stays, or to the floating capsule, whose panel closed.
+    if (await sidebarWindows(page)) await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toBeFocused();
+    else {
+      await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Windows', exact: true })).toBeFocused();
+    }
     // Ctrl+Shift+Up opens it from the keyboard, arrows move, and Enter opens the focused Window.
     await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
     await page.keyboard.press('Control+Shift+ArrowUp');

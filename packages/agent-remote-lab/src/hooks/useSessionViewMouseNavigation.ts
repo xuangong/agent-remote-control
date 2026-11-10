@@ -1,4 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
+import { applePlatform } from '../platform.js';
 
 /** Mouse buttons that browsers use for history navigation. */
 const BACK = 3, FORWARD = 4;
@@ -61,12 +62,6 @@ export function useSessionRailWheel(rail: RefObject<HTMLElement>) {
     element.addEventListener('wheel', wheel, { passive: false });
     return () => element.removeEventListener('wheel', wheel);
   }, [rail]);
-}
-
-/** Whether the page runs on Apple systems, where Ctrl+Shift+Arrow does not edit text. */
-export function applePlatform() {
-  const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform;
-  return /mac|iphone|ipad/i.test(platform);
 }
 
 /**

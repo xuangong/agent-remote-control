@@ -281,7 +281,7 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
   } finally { if (!current.isClosed()) await current.goto('about:blank'); await f.close(); }
 });
 
-test('two tabs retain independent layout, address and focus while sharing durable owners', async ({ page, context }, testInfo) => {
+test('two tabs share one Window layout and address while keeping tab-local drafts', async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Checks a visible desktop Side beside the primary.');
   test.setTimeout(60000);
   const f = await fixture(); f.available();
@@ -292,31 +292,32 @@ test('two tabs retain independent layout, address and focus while sharing durabl
     await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('First tab draft');
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
     await expect(page.locator('.lab-side-conversation')).toHaveCount(1);
+    await expect(page).toHaveURL(/[?&]window=/);
+    const windowId = new URL(page.url()).searchParams.get('window');
+    // Since 976f29f0 the server shares a Window: a link carrying only a session opens in the restored Window, and every tab shows it.
     other = await context.newPage();
     await other.goto(`${f.origin}/?host=browser-host&provider=recorded&session=D`);
     await expect(other.locator('.lab-has-agent')).toBeVisible();
-    await expect(other.locator('.lab-side-conversation')).toHaveCount(0);
-    const layout = (tab: Page) => tab.evaluate(scope => {
-      const { primary, address, focus, anchor, edges, selectedTrack } = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`)!);
-      return { primary, address, focus, anchor, edges, selectedTrack };
-    }, f.scope);
-    await other.getByTestId('prompt-input').click();
-    await expect.poll(async () => (await layout(other!)).primary).toContain('D');
-    await expect.poll(async () => (await layout(other!)).focus).toContain('D');
-    const secondLayout = await layout(other);
-    const expandSide = page.getByRole('button', { name: 'Expand window 2: Independent Side', exact: true });
-    if (await expandSide.isVisible()) await expandSide.click();
-    await page.locator('.lab-side-conversation').getByTestId('prompt-input').click();
-    await expect.poll(async () => (await layout(page)).focus).toContain('S');
-    expect(await layout(other)).toEqual(secondLayout); await expect(other).toHaveURL(/session=D/);
-    const firstLayout = await layout(page), firstUrl = page.url();
-    await other.getByTestId('prompt-input').fill('/ask'); await other.getByTestId('prompt-input').press('Enter');
-    await expect(other.getByRole('button', { name: 'Ask about this session', exact: true })).toBeVisible();
-    expect(await layout(page)).toEqual(firstLayout); expect(page.url()).toBe(firstUrl);
+    await expect.poll(() => new URL(other!.url()).searchParams.get('window')).toBe(windowId);
+    await expect(other).toHaveURL(/session=D/);
+    await expect(page).toHaveURL(/session=D/);
+    for (const tab of [page, other]) {
+      await expect(tab.locator('.lab-side-conversation')).toHaveCount(0);
+      await expect(tab.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeVisible();
+    }
+    // Drafts stay with the tab that wrote them, for the same shared view.
+    await other.locator('.lab-primary-conversation').getByTestId('prompt-input').fill('Second tab draft');
+    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('');
     await other.reload(); await expect(other.locator('.lab-has-agent')).toBeVisible();
-    expect(await layout(other)).toEqual(secondLayout); await expect(other.locator('.lab-side-conversation')).toHaveCount(0);
-    expect(await layout(page)).toEqual(firstLayout);
-    await testInfo.attach('two-tab-layouts.json', { contentType: 'application/json', body: Buffer.from(JSON.stringify({ firstLayout, secondLayout }, null, 2)) });
+    expect(new URL(other.url()).searchParams.get('window')).toBe(windowId);
+    await expect(other.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('Second tab draft');
+    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('');
+    // Returning the first tab to A, whose role continues in B, shows B in both tabs with the first tab's draft.
+    await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
+    await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('First tab draft');
+    await expect(page).toHaveURL(/session=B/); await expect(other).toHaveURL(/session=B/);
+    await expect(other.locator('.lab-primary-conversation').getByTestId('prompt-input')).toHaveText('');
+    expect(new URL(page.url()).searchParams.get('window')).toBe(windowId);
   } finally { await page.goto('about:blank'); if (other) await other.close(); await f.close(); }
 });
 
@@ -359,7 +360,7 @@ test('authorized B failure survives reload with an editable local draft and expl
   } finally { await page.goto('about:blank'); await f.close(); }
 });
 
-test('separate devices retain distinct drafts and explicit A history owns a separate draft', async ({ browser }, testInfo) => {
+test('separate devices share one Window while explicit A history and each device keep their own drafts', async ({ browser }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Creates two isolated browser contexts.');
   test.setTimeout(60000);
   const f = await fixture(), first = await browser.newContext(), second = await browser.newContext();
@@ -368,30 +369,42 @@ test('separate devices retain distinct drafts and explicit A history owns a sepa
     const a = await first.newPage(), b = await second.newPage();
     const attachments: string[][] = [[], []];
     for (const [index, page] of [a, b].entries()) page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/attach')) attachments[index]!.push(request.postDataJSON().nativeSessionId); });
-    await Promise.all([a.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`), b.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`)]);
-    const firstPrimary = a.locator('.lab-primary-conversation').getByTestId('prompt-input');
+    const firstPrimary = a.locator('.lab-primary-conversation').getByTestId('prompt-input'), secondPrimary = b.locator('.lab-primary-conversation').getByTestId('prompt-input');
+    await a.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
     await expect(firstPrimary).toHaveText('First device draft');
-    await expect(b.getByTestId('prompt-input')).toHaveText('Second device draft');
-    await expect(a).toHaveURL(/session=B/); await expect(b).toHaveURL(/session=B/);
+    await expect(a).toHaveURL(/session=B/);
     await expect(a.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
-    await expect(b.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
+    await expect(a.locator('.lab-side-conversation')).toHaveCount(1);
+    // Since 976f29f0 the server shares a Window: the second device opens the same Window and sees the same views.
+    const windowId = new URL(a.url()).searchParams.get('window')!;
+    await b.goto(`${f.origin}/?window=${windowId}`);
+    await expect(b.locator('.lab-side-conversation')).toHaveCount(1);
+    await expect(b.getByRole('alert').filter({ hasText: 'The Host could not open the native session.' })).toBeVisible();
+    // Drafts belong to the device; the second device has none for this shared view.
+    await expect(secondPrimary).toHaveText('');
     await a.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A&intent=history`);
     await expect(a.locator('.lab-has-agent')).toBeVisible();
     await expect(firstPrimary).toHaveText('');
+    await expect(b).toHaveURL(/session=A&intent=history/); await expect(b.locator('.lab-has-agent')).toBeVisible();
+    // Binding the main view to another session closes the Side attached to it, on both devices.
+    for (const page of [a, b]) await expect(page.locator('.lab-side-conversation')).toHaveCount(0);
     await firstPrimary.fill('Concrete A history draft');
     await expect.poll(() => a.evaluate(scope => Object.values(JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:drafts`) ?? '{}')), f.scope)).toContain('Concrete A history draft');
     await a.reload();
     await expect(firstPrimary).toHaveText('Concrete A history draft');
     await expect(a).toHaveURL(/intent=history/);
-    await expect(b.getByTestId('prompt-input')).toHaveText('Second device draft');
-    expect(attachments[0]!.filter(id => id !== 'S')).toEqual(['B', 'A', 'A']); expect(attachments[1]).toEqual(['B']);
+    expect(new URL(a.url()).searchParams.get('window')).toBe(windowId);
+    await expect(secondPrimary).toHaveText('');
+    expect(attachments[0]!.filter(id => id !== 'S')).toEqual(['B', 'A', 'A']); expect(attachments[1]!.filter(id => id !== 'S')).toEqual(['B', 'A']);
     await a.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
     await expect(a.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
+    await expect(b).toHaveURL(/session=B/);
     f.available();
     await a.getByRole('button', { name: 'Retry session', exact: true }).click();
-    await b.getByRole('button', { name: 'Retry session', exact: true }).click();
-    await expect(firstPrimary).toHaveText('First device draft'); await expect(b.getByTestId('prompt-input')).toHaveText('Second device draft');
-    await expect(a.locator('.lab-side-conversation')).toHaveCount(1); await expect(b.locator('.lab-side-conversation')).toHaveCount(0);
+    await expect(a.locator('.lab-has-agent')).toBeVisible();
+    // The second device retries its own attachment automatically, with backoff.
+    await expect(b.locator('.lab-has-agent')).toBeVisible({ timeout: 20000 });
+    await expect(firstPrimary).toHaveText('First device draft'); await expect(secondPrimary).toHaveText('');
     for (const page of [a, b]) await expect.poll(() => page.evaluate(scope => {
       const document = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');
       return document.roles?.map((role: { roleId: string; appliedRevision: number }) => [role.roleId, role.appliedRevision]);

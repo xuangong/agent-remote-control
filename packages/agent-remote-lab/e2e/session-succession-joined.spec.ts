@@ -225,9 +225,19 @@ test('real joined UI hands A to B, sends deferred context once, reloads and hand
     }), { scope: f.scope, displayKey: retained.owners.display.key });
     expect(retainedPayloads.drafts).toContain('Joined Side local draft');
     expect(retainedPayloads.askDrafts).toContain('Joined Ask draft');
-    expect(retainedPayloads.display.mode).toBe('content');
-    const secondLayout = await other.evaluate(scope => JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`)!).edges, f.scope);
-    expect(secondLayout).toEqual([]);
+    // A shared Window keeps display preferences on the Window view (976f29f0), so both devices see Content.
+    const windowId = new URL(page.url()).searchParams.get('window')!;
+    const shared = (await (await context.request.get(`${f.scope}v1/windows/${encodeURIComponent(windowId)}`)).json()).window;
+    expect(shared.views.find((view: { id: string }) => view.id === shared.selectedPrimaryViewId).display.mode).toBe('content');
+    // The second device shows the same Window, so its layout has the same Side attached to the primary.
+    const sideTargets = (tab: Page) => tab.evaluate(scope => {
+      const document = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`)!);
+      const native = (id: string) => document.slots.find((slot: { id: string }) => slot.id === id).intent.target.native.nativeSessionId;
+      return document.edges.map((edge: { source: string; target: string }) => [native(edge.source), native(edge.target)]);
+    }, f.scope);
+    expect(new URL(other.url()).searchParams.get('window')).toBe(windowId);
+    await expect.poll(() => sideTargets(other)).toEqual(await sideTargets(page));
+    expect(await sideTargets(page)).toEqual([['C', 'S']]);
     await expect(page.locator(`[data-image-id="${imageId}"]`)).toHaveCount(1);
     expect(await storedImage(page, retained.owners.image.key, imageId)).toEqual(expectedImage);
     expect(retained.edges).toEqual(originalOwners.edges);

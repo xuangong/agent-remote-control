@@ -1,5 +1,5 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
-import { act, useState } from 'react';
+import { act, useState, type ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   PROTOCOL_VERSION,
@@ -16,6 +16,7 @@ import { render, unmount, setPromptText, promptText } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
+import * as directoryComponents from './components/SessionDirectory.js';
 
 describe('App', () => {
   it('renders a supplied Session View snapshot without a Window controller', async () => {
@@ -842,6 +843,34 @@ it('creates and selects an empty pane with one layout command and opens its sess
     expect(operations).toEqual([{ type: 'batch', operations: [
       { type: 'view.create', view: pane }, { type: 'view.select', viewId: pane.id },
     ] }]);
+  } finally { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); }
+});
+
+it('binds a directory session into the selected empty view when there is no shared Window', async () => {
+  const realDirectory = directoryComponents.SessionDirectory;
+  let directory!: ComponentProps<typeof realDirectory>;
+  vi.spyOn(directoryComponents, 'SessionDirectory').mockImplementation(props => { directory = props; return realDirectory(props); });
+  const baseUrl = 'http://localhost/local-view-binding/';
+  const client = new SessionDirectoryClient(baseUrl);
+  vi.spyOn(client, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  vi.spyOn(client, 'workspaces').mockResolvedValue({ workspaces: [] });
+  vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Offline binding fixture'));
+  history.replaceState(null, '', '/');
+  try {
+    // A fixture's initial state has no shared Window, so session views are local.
+    const container = await render(<App baseUrl={baseUrl} directory={client} transport={labTransport()} initialState={replicaState} initialSessionStatus="ready"
+      hostService={{ hosts: async () => ({ hosts: [] }), pair: async () => { throw new Error('Pairing is not used'); } }} />);
+    const address = location.href;
+    await act(async () => container.querySelector<HTMLButtonElement>('.lab-session-dock-add')!.click());
+    const view = () => container.querySelectorAll<HTMLElement>('.lab-bindable-session-window[data-view-id]');
+    expect(view()).toHaveLength(1);
+    const id = view()[0]!.getAttribute('data-view-id');
+    expect(container.querySelector('.lab-session-open-target')?.textContent).toBe('Open in: Empty session view');
+    await act(async () => directory.onOpen({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'chosen', title: 'Chosen session', createdAt: 'now', updatedAt: 'now', state: 'idle' }));
+    expect(view()).toHaveLength(1);
+    expect(view()[0]!.getAttribute('data-view-id')).toBe(id);
+    expect(view()[0]!.querySelector('[aria-label="Close Chosen session"]')).not.toBeNull();
+    expect(location.href).toBe(address);
   } finally { vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); }
 });
 

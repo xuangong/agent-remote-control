@@ -1246,7 +1246,14 @@ function AppContent({
   async function openDirectorySession(item: Parameters<typeof openSession>[0]): Promise<boolean> {
     try {
       const destination = directoryDestination();
-      if (!destination) return openSession(item);
+      if (!destination) {
+        // Without a shared Window, a selected local session view on desktop binds in place, as it did before Windows.
+        const local = !sharedWindow && !compactLayoutRef.current ? sessionWindows.activeId : undefined;
+        if (!local) return openSession(item);
+        sessionWindows.bind(local, { ...item, hostId: item.hostId ?? selectedHost.id });
+        void succession.refresh();
+        setActiveView('workbench'); closeContext(); return true;
+      }
       const opened = bindDirectorySession({ ...item, hostId: item.hostId ?? selectedHost.id }, destination);
       setActiveView('workbench'); closeContext(); return await opened;
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); return false; }
@@ -2812,7 +2819,7 @@ function AppContent({
         {/* On the Favorites page the toolbar heading is the Favorites heading, with its loading mark; the panel shows none. */}
         <Toolbar className="lab-sessions-page-toolbar" title={userScoped && sessionPanel === 'favorites' ? <FavoritesHeading loading={favorites.loading} /> : sessionsPageTitle} titleRef={sessionsPageTitleRef} titleFocusable
           leading={<><div ref={setPageViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /><IconButton icon="chevron-left" label="Back to Window" onClick={closePage} /></>} />
-        {sessionPanel !== 'settings' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? 'Main session')}</strong></div> : null}
+        {sessionPanel !== 'settings' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? (sidebarWindow ? 'Empty session view' : 'Main session'))}</strong></div> : null}
         <div className="lab-sessions-page-body">{sessionPanelContent}</div>
       </section> : null}
       <section

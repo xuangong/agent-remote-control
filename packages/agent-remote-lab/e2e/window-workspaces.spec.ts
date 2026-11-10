@@ -24,6 +24,9 @@ async function closeWindows(page: Page) {
   await page.locator('.lab-window-panel').getByRole('button', { name: 'Close Windows', exact: true }).click();
 }
 
+/** The status a page shows once its Window is deleted elsewhere. */
+const windowDeleted = 'Window deleted. Choose another Window or create a new one.';
+
 /** Every Window row offers rename; this starts it for the current Window. */
 async function renameCurrentWindow(panel: ReturnType<Page['locator']>) {
   const id = await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id');
@@ -54,8 +57,9 @@ test('two pages share Window UI edits and external commands across narrow presen
     second = await context.newPage(); second.on('pageerror', error => errors.push(error.message));
     await second.setViewportSize({ width: 1680, height: 1000 });
     await second.goto(address.href);
-    await openWindows(second);
-    await expect(second.locator(`[data-window-id="${windowId}"]`)).toHaveAttribute('aria-current', 'true');
+    // The hidden sidebar keeps its Windows section mounted, so look in the panel that shows.
+    const secondMenu = await openWindows(second);
+    await expect(secondMenu.locator(`[data-window-id="${windowId}"]`)).toHaveAttribute('aria-current', 'true');
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${encodeURIComponent(windowId)}`;
     const inspect = async (): Promise<WorkspaceWindow> => {
@@ -99,11 +103,12 @@ test('two pages share Window UI edits and external commands across narrow presen
     await renameCurrentWindow(menu);
     await menu.getByLabel('Window title').fill('Shared browser workspace');
     await menu.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(second.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
+    await expect(secondMenu.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
     await closeWindows(page);
     await closeWindows(second);
     await addSessionView(page);
-    await expect(second.locator('[data-view-id]')).toHaveCount(1);
+    // The new view reaches the other page as its one dock pane (the primary's pane carries a view id too).
+    await expect(second.locator('[data-dock-id]')).toHaveCount(1);
     const viewId = (await inspect()).views.find(view => view.id !== 'main' && !view.attachedTo)!.id;
     const pane = page.locator(`[data-dock-id="${viewId}"]`);
     const otherPane = second.locator(`[data-dock-id="${viewId}"]`);
@@ -134,7 +139,8 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'collapse', windowId, primaryId, '--value', 'false']);
     await command(['view', 'select', windowId, viewId]);
     await second.setViewportSize({ width: 390, height: 844 });
-    await expect(second.locator(`[data-view-id="${viewId}"]`)).toBeVisible();
+    // The dock's window and the session pane inside it both carry the view id.
+    await expect(second.locator(`.lab-ask-window[data-view-id="${viewId}"]`)).toBeVisible();
     await expect(second.locator('.lab-session-dock-add')).toHaveCount(0);
     await expect(second.locator('.lab-ordinary-workspace')).toBeHidden();
     expect((await inspect()).views.find(view => view.id === viewId)?.width).toBe(620);
@@ -160,7 +166,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(otherPrimary.getByTestId('prompt-input')).toBeEnabled();
     await expect(pane).toBeVisible(); await expect(otherPane).toBeVisible();
     await otherPane.getByRole('button', { name: 'Close Shared dock session', exact: true }).click();
-    await expect(page.locator('[data-view-id]')).toHaveCount(0);
+    await expect(page.locator('[data-dock-id]')).toHaveCount(0);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === viewId)).toBe(false);
     const nativeCreatesBeforeDelete = creations.filter(url => new URL(url).pathname.endsWith('/create')).length;
     await openWindows(page);
@@ -171,7 +177,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     const createsBeforeDelete = creations.length;
     await menu.locator(`[data-window-id="${windowId}"]`).locator('..').getByRole('button', { name: 'Delete Window: Shared browser workspace', exact: true }).click();
     await expect(menu.locator(`[data-window-id="${windowId}"]`)).toHaveCount(0);
-    await expect(second.getByText('Window deleted', { exact: true })).toBeVisible();
+    await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
     expect(new URL(page.url()).searchParams.get('window')).toBe(nextId);
     expect(new URL(second.url()).searchParams.get('window')).toBe(windowId);
     await expect.poll(async () => (await context.request.get(endpoint)).status()).toBe(404);
@@ -279,9 +285,10 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await panel.getByLabel('Window title', { exact: true }).fill(title);
     const bounds = async () => panel.evaluate(element => {
       const box = element.getBoundingClientRect();
-      const controls = Array.from(element.querySelectorAll('[data-window-row], [data-window-id], [data-window-view-id], input')).map(control => {
+      // A view row holds its open button and its close button, so the row is the list item.
+      const controls = Array.from(element.querySelectorAll('[data-window-row], [data-window-view-row], [data-window-id], [data-window-view-id], input')).map(control => {
         const rect = control.getBoundingClientRect();
-        return { label: control.hasAttribute('data-window-row') || control.hasAttribute('data-window-view-id') ? 'list item' : control.getAttribute('aria-label'), left: rect.left, right: rect.right, width: rect.width };
+        return { label: control.hasAttribute('data-window-row') || control.hasAttribute('data-window-view-row') ? 'list item' : control.getAttribute('aria-label'), left: rect.left, right: rect.right, width: rect.width };
       });
       return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, controls, pageWidth: document.documentElement.scrollWidth };
     });
@@ -309,7 +316,7 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await openWindowOptions(panel);
     const agentControl = panel.getByText('Agent control', { exact: true });
     await agentControl.click();
-    const revoke = panel.getByRole('button', { name: 'Revoke manager', exact: true });
+    const revoke = panel.getByRole('button', { name: 'Clear manager', exact: true });
     await revoke.scrollIntoViewIfNeeded();
     await expect(revoke).toBeInViewport();
     if (width === 390) await page.screenshot({ path: `/tmp/window-menu-${test.info().project.name}-390-options.png` });
@@ -389,8 +396,8 @@ test('active Windows cannot be deleted and deleting another Window never creates
     context.on('request', request => { const path = new URL(request.url()).pathname; if (path.includes('/windows') && request.method() !== 'GET') requests.push({ method: request.method(), path }); });
     await panel.getByRole('button', { name: 'Delete Window: Window', exact: true }).click();
     await expect.poll(async () => (await catalog()).map(window => window.id)).toEqual([existingId]);
-    await expect(second.getByText('Window deleted', { exact: true })).toBeVisible();
-    const recoveryDeletes = second.locator('.lab-window-unavailable button[aria-label^="Delete Window:"]');
+    await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
+    const recoveryDeletes = second.locator('.lab-window-recovery button[aria-label^="Delete Window:"]');
     await expect(recoveryDeletes).toHaveCount(1);
     for (const button of await recoveryDeletes.all()) await expect(button).toBeDisabled();
     const recovery = second.locator('.lab-window-recovery[data-deleted="true"]');
@@ -405,10 +412,10 @@ test('active Windows cannot be deleted and deleting another Window never creates
     expect(new URL(second.url()).searchParams.get('window')).toBe(deletedId);
     expect(requests.filter(request => request.method === 'POST')).toEqual([]);
     // A deleted page recovers only after an explicit user choice.
-    await second.locator(`.lab-window-unavailable [data-window-id="${existingId}"]`).click();
+    await second.locator(`.lab-window-recovery [data-window-id="${existingId}"]`).click();
     await openWindows(second);
     await expect(otherPanel.locator('[data-window-id][aria-current="true"]')).toHaveAttribute('data-window-id', existingId);
-    await expect(second.getByText('Window deleted', { exact: true })).toHaveCount(0);
+    await expect(second.getByText(windowDeleted, { exact: true })).toHaveCount(0);
     await expect(otherPanel.getByRole('button', { name: 'Delete Window: Existing workspace', exact: true })).toBeDisabled();
     expect(new URL(second.url()).searchParams.get('window')).toBe(existingId);
     expect(requests.filter(request => request.method === 'POST')).toEqual([]);

@@ -166,6 +166,8 @@ import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';
 import { SupportingRail } from './components/SupportingRail.js';
+import { SidebarHeader } from './shell/SidebarHeader.js';
+import { Menu } from './ui/Menu.js';
 import { SidebarResize, useSidebarWidth } from './components/SidebarResize.js';
 import { TraceView } from './components/TraceView.js';
 import { HostPreviewGroups } from './components/HostPreviewGroups.js';
@@ -2557,7 +2559,6 @@ function AppContent({
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
       onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
     <header className="lab-app-bar" hidden={headerHidden || windowWorkspace.unavailable}>
-      <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />
       <div className="lab-brand">
         <div ref={setHeaderViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
         <div>
@@ -2619,6 +2620,12 @@ function AppContent({
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
+      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<Menu label="New" icon="plus" items={[
+        { label: 'New session', onSelect: () => { setActiveView('workbench'); setSessionPanel('new'); setDesktopContextVisible(true); } },
+        { label: 'New Window', onSelect: () => {
+          void windowWorkspace.create().catch((error: unknown) => toast?.show('new-window', 'Window not created', error instanceof Error ? error.message : String(error), 'error'));
+        } },
+      ]} />} /> : null}
       <div className="lab-rail-heading">
         {!compactLayout ? <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
         <p className="lab-eyebrow" title={baseUrl}>Window</p>

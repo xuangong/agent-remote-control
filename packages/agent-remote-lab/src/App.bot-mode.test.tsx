@@ -126,3 +126,28 @@ it.each(['deleted', 'rebound', 'attached', 'managed', 'scope'] as const)('does n
     expect(app.sendMessages).toEqual([]);
   } finally { await app.close(); }
 });
+
+it('puts the mode switch and the New menu at the top of the Window sidebar, not in the app bar', async () => {
+  const scope = 'http://localhost/sidebar-header/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  await until(() => expect(app.container.querySelector('#lab-context .lab-sidebar-header')).not.toBeNull());
+  await until(() => expect(app.workspace().window?.id).toBe('A'));
+  const header = app.container.querySelector('#lab-context .lab-sidebar-header')!;
+  expect(header.querySelector('nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Window mode');
+  expect(app.container.querySelector('.lab-app-bar nav[aria-label="Workbench mode"]')).toBeNull();
+  const newSessionPanel = () => app.container.querySelector('#lab-context .lab-provider-controls')!;
+  expect(newSessionPanel().closest('[hidden]')).not.toBeNull();
+  const open = async () => act(async () => (header.querySelector('button[aria-label="New"]') as HTMLButtonElement).click());
+  const item = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="New"] [role="menuitem"]')].find(entry => entry.textContent === label)!;
+  await open();
+  expect([...document.querySelectorAll('[role="menu"][aria-label="New"] [role="menuitem"]')].map(entry => entry.textContent)).toEqual(['New session', 'New Window']);
+  await act(async () => item('New session').click());
+  expect(newSessionPanel().closest('[hidden]')).toBeNull();
+  expect(app.container.querySelector('.lab-sidebar-new')?.getAttribute('aria-pressed')).toBe('true');
+  await open();
+  await act(async () => item('New Window').click());
+  await until(() => expect(app.workspace().window?.id).toMatch(/^(?!A$)/));
+  expect(app.workspace().windows.map(window => window.id)).toContain('A');
+  await app.close();
+});

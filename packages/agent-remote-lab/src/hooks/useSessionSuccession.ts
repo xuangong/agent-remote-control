@@ -161,10 +161,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
     return { origin, slot: runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key) ?? slotFor(origin) };
   }
+  /** Before replays load, a role slot is known only by the origin it was created for. */
+  function roleOriginSlot(selection: Selection) {
+    return runtime.document.slots.find(slot => slot.intent.kind === 'role'
+      && sessionKey({ hostId: slot.origin.target.hostId, ...slot.origin.target.native }) === sessionKey(selection));
+  }
   function ensureView(selection: Selection, explicitId = selection.viewId): CompositionSlot {
     if (explicitId) {
       // A predecessor resolves to its role's slot, which already targets the successor; accept that view again.
-      const successor = runtime.document.scope === options.scope ? lineageSlot(selection)?.slot : undefined;
+      const successor = runtime.document.scope === options.scope ? lineageSlot(selection)?.slot ?? roleOriginSlot(selection) : undefined;
       const existing = explicitSlot(selection, explicitId) ?? (successor?.id === explicitId ? successor : undefined);
       if (!existing) throw new Error('The selected session view no longer matches this session.');
       return existing;
@@ -177,7 +182,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
       return slot;
     }
-    const existing = slotFor(selection);
+    const existing = slotFor(selection) ?? roleOriginSlot(selection);
     if (existing) return existing;
     const slot = createCompositionSlot(compositionOriginId(selection), selection, options.scope);
     runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
@@ -640,9 +645,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.result = unavailable('invalid_view'); runtime.error = 'The selected session view no longer matches this session.'; publish(); return true;
     }
     if (intent === 'history') {
-      const request = new AbortController(), sequence = runtime.sequence;
+      const request = new AbortController();
       runtime.navigation = request;
-      const current = () => live() && !request.signal.aborted && runtime.sequence === sequence;
+      // Leaving, clearing or another navigation aborts this request; a discovery refresh while the Host attaches does not.
+      const current = () => live() && !request.signal.aborted;
       const candidate = requestedSlot ?? slotFor(selection, true) ?? createHistorySlot(compositionOriginId(selection, true), {
         hostId: selection.hostId ?? 'local', native: { providerId: selection.providerId, nativeSessionId: selection.nativeSessionId },
       }, options.scope);

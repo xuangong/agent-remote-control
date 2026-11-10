@@ -246,6 +246,34 @@ it('resolves a predecessor to its role view again once that view targets the suc
   expect(() => test.read().ensureView({ ...test.b, viewId: view.id })).toThrow('The selected session view no longer matches this session.');
 }, 10000);
 
+it('reuses the role view of a handed-off origin before replays load after a reload', async () => {
+  const test = await fixture(true);
+  test.commit();
+  await act(async () => { await test.read().refreshCommitted('handoff-a'); });
+  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  test.commitAndHold();
+  await test.remount();
+  await vi.waitFor(() => expect(test.entered()).toBe(true));
+  const role = test.read().document.slots.find(slot => slot.intent.kind === 'role')!;
+  expect(role.intent.target.native.nativeSessionId).toBe('A2');
+  // Rendering resolves the stale origin before the replays arrive; a second slot with the same id would make the document unsavable.
+  expect(test.read().ensureView({ ...test.a, title: 'Group A' }).id).toBe(role.id);
+  expect(test.read().ensureView({ ...test.a, viewId: role.id }).id).toBe(role.id);
+  expect(new Set(test.read().document.slots.map(slot => slot.id)).size).toBe(test.read().document.slots.length);
+  await act(async () => test.release());
+}, 10000);
+
+it('keeps opening explicit history while a discovery refresh runs', async () => {
+  const test = await fixture(true);
+  let opened!: Promise<boolean>;
+  await act(async () => {
+    opened = test.read().open(test.a, 'history');
+    void test.read().refresh();
+  });
+  expect(await opened).toBe(true);
+  expect(test.read().navigationIntent.sessionIntent).toBe('history');
+}, 10000);
+
 it('keeps a shared history group beside a live group through Handoff, selection and reload over HTTP', async () => {
   const test = await fixture(true);
   await act(async () => { expect(await test.bridge().openPrimary(test.a, undefined, false, undefined, undefined, 'a', 'history')).toBe(true); });

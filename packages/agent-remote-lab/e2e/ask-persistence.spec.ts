@@ -111,6 +111,11 @@ test('a hosted global Ask keeps Window, Team, Track and View controls available'
     await view.click();
     const options = page.getByRole('region', { name: 'View options', exact: true });
     await options.getByRole('checkbox', { name: 'Track view', exact: true }).check();
+    // TPM view starts hidden for fine pointers.
+    await options.getByRole('checkbox', { name: 'TPM view', exact: true }).check();
+    // While the desktop sidebar is visible, these controls are its sections and Shortcuts; hidden, they float beside Ask.
+    const sidebar = options.getByRole('checkbox', { name: 'Sidebar', exact: true });
+    if (!isMobile && await sidebar.isChecked()) await sidebar.uncheck();
     await options.press('Escape');
     await trigger.click();
     await expect(ask.getByTestId('prompt-input')).toBeEnabled();

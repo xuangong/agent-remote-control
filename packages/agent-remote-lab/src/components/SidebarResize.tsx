@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 const storageKey = 'agent-remote.sidebar-width';
-const defaultWidth = 320;
-const minWidth = 260;
-const maxWidth = 560;
+const defaultWidth = 260;
+const minWidth = 220;
+const maxWidth = 360;
 
+/** The saved width, clamped to the allowed range so a width saved under an older range survives as the nearest one. */
 function savedWidth(): number {
   try {
     const value = Number(localStorage.getItem(storageKey));
-    return Number.isFinite(value) && value >= minWidth && value <= maxWidth ? value : defaultWidth;
+    return Number.isFinite(value) && value > 0 ? Math.min(maxWidth, Math.max(minWidth, Math.round(value))) : defaultWidth;
   } catch { return defaultWidth; }
 }
 

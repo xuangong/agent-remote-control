@@ -153,20 +153,26 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return runtime.document.scope === options.scope ? runtime.document.slots.find(slot => slot.id === id
       && sessionKey(selectionFor(slot)) === sessionKey(selection)) : undefined;
   }
+  /** The existing slot a session's succession lineage resolves to: its role, else its origin. */
+  function lineageSlot(selection: Selection) {
+    const lineage = runtime.replays.find(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)));
+    if (!lineage) return;
+    const key = compositionRoleKey({ scope: options.scope, hostId: lineage.to.hostId, controllerId: lineage.projection.role.current.controllerId, roleId: lineage.projection.role.id });
+    const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
+    return { origin, slot: runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key) ?? slotFor(origin) };
+  }
   function ensureView(selection: Selection, explicitId = selection.viewId): CompositionSlot {
     if (explicitId) {
-      const existing = explicitSlot(selection, explicitId);
+      // A predecessor resolves to its role's slot, which already targets the successor; accept that view again.
+      const successor = runtime.document.scope === options.scope ? lineageSlot(selection)?.slot : undefined;
+      const existing = explicitSlot(selection, explicitId) ?? (successor?.id === explicitId ? successor : undefined);
       if (!existing) throw new Error('The selected session view no longer matches this session.');
       return existing;
     }
-    const lineage = runtime.replays.find(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)));
+    const lineage = lineageSlot(selection);
     if (lineage) {
-      const key = compositionRoleKey({ scope: options.scope, hostId: lineage.to.hostId, controllerId: lineage.projection.role.current.controllerId, roleId: lineage.projection.role.id });
-      const role = runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
-      if (role) return role;
-      const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
-      const original = slotFor(origin);
-      if (original) return original;
+      if (lineage.slot) return lineage.slot;
+      const { origin } = lineage;
       const slot = createCompositionSlot(compositionOriginId(origin), origin, options.scope);
       runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
       return slot;

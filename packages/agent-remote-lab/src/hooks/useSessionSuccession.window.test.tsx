@@ -234,6 +234,18 @@ it('restores a shared successor only after access and authorized replay resume',
   await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
 }, 10000);
 
+it('resolves a predecessor to its role view again once that view targets the successor', async () => {
+  const test = await fixture(true);
+  test.commit();
+  await act(async () => { await test.read().refreshCommitted('handoff-a'); });
+  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  const view = test.read().ensureView(test.a);
+  expect(view.intent.target.native.nativeSessionId).toBe('A2');
+  // Rendering resolves an already resolved session again; it must not reject the view it chose.
+  expect(test.read().ensureView({ ...test.a, viewId: view.id }).id).toBe(view.id);
+  expect(() => test.read().ensureView({ ...test.b, viewId: view.id })).toThrow('The selected session view no longer matches this session.');
+}, 10000);
+
 it('keeps a shared history group beside a live group through Handoff, selection and reload over HTTP', async () => {
   const test = await fixture(true);
   await act(async () => { expect(await test.bridge().openPrimary(test.a, undefined, false, undefined, undefined, 'a', 'history')).toBe(true); });

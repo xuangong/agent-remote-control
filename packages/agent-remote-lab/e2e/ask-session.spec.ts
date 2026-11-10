@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
 import { showAllSessions } from './all-sessions';
+import { toggleViewPanel } from './view-options';
 
 async function start(page: Page, enableAsk = true) {
   await page.goto('/');
@@ -18,6 +19,14 @@ async function start(page: Page, enableAsk = true) {
     await expect(page.getByRole('button', { name: 'Ask about this session', exact: true })).toBeVisible();
   }
   return primary;
+}
+
+/** While the desktop sidebar is visible, Ask is one of its Shortcuts; hiding the sidebar lets the launcher float. */
+async function floatAsk(page: Page) {
+  const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
+  await expect(button).toBeVisible();
+  if (await button.evaluate(element => !!element.closest('#lab-context'))) await toggleViewPanel(page, 'Sidebar');
+  await expect(page.locator('.lab-ask-floating')).toBeVisible();
 }
 
 async function showAskView(page: Page, visible: boolean) {
@@ -335,6 +344,7 @@ test('Ask uses the same independent display controls as the source Session View'
 
 test('the global Ask launcher stays within the viewport across resizing and reload', async ({ page }) => {
   await start(page);
+  await floatAsk(page);
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   for (const width of [1440, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
@@ -392,19 +402,23 @@ test('Ask observes activity while minimized, signals changes itself, and switche
   const { agentId: primaryAgent } = await (await sourceCreated).json() as { agentId: string };
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   const floating = page.locator('.lab-ask-floating');
+  await floatAsk(page);
   await button.click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  await expect.poll(() => activity.size).toBe(2);
-  const first = [...activity.values()].find(item => item.agentId !== primaryAgent)!;
+  // A shown conversation reports its activity over its own connection, so neither the source nor the open Ask holds an activity subscription.
+  await expect.poll(() => content.size).toBe(2);
+  expect(activity.size).toBe(0);
+  const askAgent = [...content.values()].find(agentId => agentId !== primaryAgent)!;
   const emit = (status: string) => {
-    const subscription = [...activity.values()].find(item => item.agentId === first.agentId);
+    const subscription = [...activity.values()].find(item => item.agentId === askAgent);
     expect(subscription).toBeDefined();
     subscription!.emit(status);
   };
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
-  await expect.poll(() => [...content.values()].includes(first.agentId)).toBe(false);
-  expect([...activity.values()]).toContain(first);
+  // Minimized, Track observes the Ask through activity; its conversation stays retained by recency.
+  await expect.poll(() => [...activity.values()].map(item => item.agentId)).toEqual([askAgent]);
+  const first = [...activity.values()][0]!;
   await expect(floating).toHaveAttribute('data-status', 'idle');
   const idleColor = await button.evaluate(element => getComputedStyle(element).backgroundColor);
   emit('running');
@@ -432,9 +446,13 @@ test('Ask observes activity while minimized, signals changes itself, and switche
   await button.click();
   await cleanAsk(ask);
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  await expect.poll(() => [...activity.values()].some(item => item.agentId === first.agentId)).toBe(false);
-  expect(activity.size).toBe(2); expect(activityChannels).toBe(1);
+  await expect.poll(() => [...content.values()].some(agentId => agentId !== primaryAgent && agentId !== askAgent)).toBe(true);
+  expect([...activity.values()].some(item => item.agentId === askAgent)).toBe(false);
+  expect(activityChannels).toBe(1);
   await ask.getByRole('button', { name: 'Minimize Ask' }).click();
+  // The minimized fresh Ask is observed; the cleaned one is not.
+  await expect.poll(() => [...activity.values()].map(item => item.agentId).filter(agentId => agentId !== primaryAgent)).toHaveLength(1);
+  expect([...activity.values()].some(item => item.agentId === askAgent)).toBe(false);
   await expect(floating).toHaveAttribute('data-status', 'idle');
   await expect(floating).not.toHaveAttribute('data-alert');
   first.emit('waiting');
@@ -526,6 +544,7 @@ test('desktop Ask title dragging keeps its launcher fixed and preserves position
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
   const floating = page.locator('.lab-ask-floating');
+  await floatAsk(page);
   const anchor = (await floating.boundingBox())!;
   await button.click();
   await ask.getByTestId('prompt-input').fill('Keep my question');
@@ -612,7 +631,9 @@ test('/ask is off by default and hiding its view preserves the open conversation
       server.send(message);
     });
   });
+  const sourceCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   const primary = await start(page, false);
+  const { agentId: primaryAgent } = await (await sourceCreated).json() as { agentId: string };
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/create')) creations++; });
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
@@ -624,16 +645,18 @@ test('/ask is off by default and hiding its view preserves the open conversation
   };
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
-  await expect.poll(() => activity.size).toBe(1);
+  // The shown source reports its activity over its own connection.
   await expect.poll(() => content.size).toBe(1);
+  expect(activity.size).toBe(0);
   await toggle();
   await expect(button).toBeVisible();
   await expect(ask).toHaveCount(0);
   expect(creations).toBe(0);
   await button.click();
   await expect(ask.getByTestId('prompt-input')).toBeEnabled();
-  await expect.poll(() => activity.size).toBe(2);
   await expect.poll(() => content.size).toBe(2);
+  expect(activity.size).toBe(0);
+  const askAgent = [...content.values()].find(agentId => agentId !== primaryAgent)!;
   await ask.getByTestId('prompt-input').fill('Remember this answer');
   await expect(ask.getByTestId('prompt-submit')).toBeEnabled();
   await ask.getByTestId('prompt-input').press('Enter');
@@ -642,8 +665,9 @@ test('/ask is off by default and hiding its view preserves the open conversation
   await showAskView(page, false);
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
-  await expect.poll(() => activity.size).toBe(2);
-  await expect.poll(() => content.size).toBe(1);
+  // Hidden, Track observes the Ask through activity; its conversation stays retained by recency.
+  await expect.poll(() => [...activity.values()]).toEqual([askAgent]);
+  expect([...content.values()]).toContain(primaryAgent);
   activity.clear(); content.clear();
   await page.reload();
   // Reload may retain the previous page's control lease; Ask recovery does not bypass it.
@@ -669,8 +693,9 @@ test('/ask is off by default and hiding its view preserves the open conversation
   await ask.getByTestId('prompt-input').press('Enter');
   await expect(button).toHaveCount(0);
   await expect(ask).toHaveCount(0);
-  await expect.poll(() => activity.size).toBe(2);
-  await expect.poll(() => content.size).toBe(1);
+  await expect.poll(() => activity.size).toBe(1);
+  expect(content.size).toBe(2);
+  expect([...content.values()]).toContain([...activity.values()][0]);
 });
 
 for (const reopenEarly of [false, true]) test(`Ask handles hiding its view during creation and reopens ${reopenEarly ? 'before' : 'after'} the response`, async ({ page }) => {

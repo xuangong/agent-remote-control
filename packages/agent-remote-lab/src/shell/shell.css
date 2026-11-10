@@ -4,6 +4,9 @@
 .lab-sidebar-header-actions { display: flex; flex: none; align-items: center; gap: 2px; }
 .lab-sidebar-header-actions:empty { display: none; }
 
+/* The slots and the container that the Team, TPM, Track and Ask entries move between (see movable-host.tsx) add no box. */
+.lab-movable-slot, .lab-movable-host { display: contents; }
+
 /* Shortcuts in the desktop sidebar: the capsules' triggers as full-width rows; their panels open beside the sidebar.
    The rows never carry .lab-tracking-floating, so the capsule rules (fixed position, data-edge panel variables) do
    not reach them; the panel rule below (0,2,0) only has to win over the base .lab-session-popover-panel (0,1,0). */

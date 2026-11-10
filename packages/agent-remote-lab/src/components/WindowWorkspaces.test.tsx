@@ -144,7 +144,7 @@ it('closes every pane locally, including the last one, and can create a view in 
   expect(test.read().views).toHaveLength(1);
   await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-close]')!.click());
   expect(test.read()).toMatchObject({ id: 'window', selectedViewId: null, selectedPrimaryViewId: null, views: [] });
-  expect(test.container.textContent).toContain('No session views');
+  expect(test.container.textContent).toContain('No session views. Add one or open one from Sessions.');
   expect(test.button('New session view').disabled).toBe(false);
   await act(async () => test.button('New session view').click());
   expect(test.read().id).toBe('window');
@@ -216,9 +216,9 @@ it('lists the current Window in layout order and focuses a chosen view', async (
   } finally { pane.remove(); }
 });
 
-it('offers All Windows when an overview is available, and reports opening a Window', async () => {
+it('offers All Windows in the sidebar when an overview is available, and reports opening a Window', async () => {
   const overview = vi.fn(), navigate = vi.fn();
-  const test = await fixture({ onOverview: overview, onNavigate: navigate });
+  const test = await fixture({ placement: 'sidebar', onOverview: overview, onNavigate: navigate });
   await act(async () => test.container.querySelector<HTMLButtonElement>('button[aria-label="Show all Windows"]')!.click());
   expect(overview).toHaveBeenCalledOnce();
   await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-id="other"]')!.click());
@@ -226,8 +226,13 @@ it('offers All Windows when an overview is available, and reports opening a Wind
 });
 
 it('shows no All Windows button without an overview', async () => {
-  const test = await fixture();
+  const test = await fixture({ placement: 'sidebar' });
   expect(test.container.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
+});
+
+it('names All sessions in the sidebar\'s empty-views note', async () => {
+  const test = await fixture({ placement: 'sidebar', views: [] });
+  expect(test.container.textContent).toContain('No session views. Add one or open one from All sessions.');
 });
 
 it('neither scrolls nor navigates when choosing a view is refused', async () => {
@@ -284,11 +289,12 @@ it('shows sidebar headings with icon actions, flat rows without check marks, and
 });
 
 it('keeps the floating panel text buttons, check marks and delete note by default', async () => {
-  const test = await fixture({ onOverview: () => {} });
+  const test = await fixture();
   const root = test.container.querySelector('.lab-window-workspaces')!;
   expect(root.getAttribute('data-placement')).toBe('panel');
   expect(test.button('New Window')).toBeDefined();
-  expect(test.button('All Windows').getAttribute('aria-label')).toBe('Show all Windows');
+  // The floating panel's WindowMenu offers All Windows itself.
+  expect(root.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
   expect(root.querySelector('.lab-window-selected[aria-label="Current Window"]')?.textContent).toBe('✓');
   expect(root.querySelector('.lab-window-selected[aria-label="Selected view"]')?.textContent).toBe('✓');
   expect(root.textContent).toContain('Switch to another Window before deleting the active one.');

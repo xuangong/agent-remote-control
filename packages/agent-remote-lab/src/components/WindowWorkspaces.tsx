@@ -25,7 +25,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
-  /** Shows all Windows; with it the Windows heading offers an "All Windows" button. */
+  /** Shows all Windows; with it the sidebar's Windows heading offers a "Show all Windows" button (the floating panel's WindowMenu has its own). */
   onOverview?(): void;
   /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
   onNavigate?(): void;
@@ -125,7 +125,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     {sidebar ? <div className="lab-window-section-heading"><h2 className="lab-sidebar-section-title">Windows</h2>
       {onOverview ? <IconButton icon="grid" label="Show all Windows" className="lab-window-overview-trigger" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp" onClick={onOverview} /> : null}
       <IconButton icon="plus" label="New Window" disabled={busy} onClick={createWindow} /></div>
-      : <div className="lab-window-section-heading"><span>Windows</span>{onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp" onClick={onOverview}>All Windows</button> : null}<button type="button" disabled={busy} onClick={createWindow}>New Window</button></div>}
+      : <div className="lab-window-section-heading"><span>Windows</span><button type="button" disabled={busy} onClick={createWindow}>New Window</button></div>}
     <nav className="lab-window-list" aria-label="Windows">{catalog.map(window => {
       const status = sessionStatus && windowStatus(window, sessionStatus);
       const renameLabel = `Rename Window: ${window.title}`, deleteLabel = `Delete Window: ${window.title}`;
@@ -183,7 +183,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
           title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable}
           onClick={() => edit({ type: 'view.close', viewId: view.id })}>×</button>}
       </div>; })}</nav>
-      {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open one from All sessions.</p> : null}
+      {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open one from {sidebar ? 'All sessions' : 'Sessions'}.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
           <button type="button" onClick={() => void run(async () => {

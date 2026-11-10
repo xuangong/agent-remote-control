@@ -109,6 +109,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   AgentInteractionResponse,
   AgentPersistenceHandle,
@@ -169,6 +170,7 @@ import { focusableElements, SupportingRail } from './components/SupportingRail.j
 import { SidebarHeader } from './shell/SidebarHeader.js';
 import { SidebarFooter } from './shell/SidebarFooter.js';
 import { ShortcutPlacement } from './shell/shortcut-placement.js';
+import { MovableHostSlot, useMovableHost } from './shell/movable-host.js';
 import { Toolbar } from './ui/Toolbar.js';
 import { IconButton } from './ui/IconButton.js';
 import { Menu } from './ui/Menu.js';
@@ -378,6 +380,7 @@ function AppContent({
   const [dockViewTarget, setDockViewTarget] = useState<HTMLDivElement | null>(null);
   const [mobileViewTarget, setMobileViewTarget] = useState<HTMLDivElement | null>(null);
   const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
+  const [pageViewTarget, setPageViewTarget] = useState<HTMLDivElement | null>(null);
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -534,9 +537,15 @@ function AppContent({
   const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
   // Desktop: the sidebar's All sessions, Favorites, New session and Settings entries open their panel as a page in place of the Window.
   const [sessionsPage, setSessionsPage] = useState(false);
+  // The Team, TPM, Track and Ask entries render once and move between the sidebar's Shortcuts and their floating places,
+  // so hiding or showing the sidebar never remounts them (Team would lose an open panel or a pending creation).
+  const shortcutHost = useMovableHost(), askHost = useMovableHost();
+  const shortcutSidebarSlot = useRef<HTMLDivElement>(null), shortcutFloatingSlot = useRef<HTMLDivElement>(null);
+  const askSidebarSlot = useRef<HTMLDivElement>(null), askFloatingSlot = useRef<HTMLDivElement>(null);
   const pageOpen = windowMode && !compactLayout && sessionsPage;
   // Leaving the page hides it under the focus; focus then returns to the Window (see the layout effect below).
   const pageFocusReturn = useRef(false);
+  const sessionsPageTitleRef = useRef<HTMLHeadingElement>(null);
   const closePage = useCallback(() => {
     if (document.activeElement?.closest('#lab-sessions-page')) pageFocusReturn.current = true;
     setSessionsPage(false);
@@ -659,6 +668,12 @@ function AppContent({
     if (scrollContainer) scrollContainer.scrollTop = 0;
     if (sessionPanel === 'new') panel.querySelector<HTMLElement>('#provider-select')?.focus({ preventScroll: true });
     else if (compactLayout) panel.querySelector<HTMLElement>('.lab-rail-close')?.focus({ preventScroll: true });
+    if (!compactLayout) {
+      // Opened from inside the Window (Choose session, Change session, the dock's +): the Window is hidden now, so focus
+      // would fall to the document; it goes to the page's heading. Opened from the sidebar, focus stays on its entry.
+      const active = document.activeElement;
+      if (!active || active === document.body || active.closest('#lab-workbench')) sessionsPageTitleRef.current?.focus({ preventScroll: true });
+    }
   }, [compactLayout, contextOpen, pageOpen, sessionPanel, windowMode]);
   // Focus inside the page would fall to the document once the page hides; it returns to the Window instead.
   useLayoutEffect(() => {
@@ -1111,6 +1126,8 @@ function AppContent({
     setInspectorOpen(visible && !compactLayout);
   }
   const supportingRailOpen = compactLayout && (contextOpen || inspectorOpen);
+  // The Window's views are on screen: not covered by the Trace view, the desktop sessions page or a compact drawer.
+  const windowStageVisible = windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen;
   // Compact layouts keep only the floating Windows list.
   const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
   const windowOverviewAvailable = windowMode && !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
@@ -1310,14 +1327,15 @@ function AppContent({
   const tpmTriggerRef = useRef<HTMLButtonElement>(null);
   const candidateTpmService = hostClient as Partial<TpmService>;
   const tpmService = candidateTpmService.tpmList && candidateTpmService.tpmWork && candidateTpmService.tpmCreate && candidateTpmService.tpmAction ? candidateTpmService as TpmService : undefined;
-  const tpmHosts = [...(providers.length > 0 ? [{ id: 'local', name: 'Lab server', online: true }] : []), ...remoteHosts];
+  // The Hosts a session can run on: the Lab server itself when it has local providers, then the paired Hosts.
+  const selectableHosts = useMemo(() => providers.length > 0 ? [{ id: 'local', name: 'Lab server', online: true }, ...remoteHosts] : remoteHosts, [providers.length, remoteHosts]);
   const attachTpm = useCallback(async (item: SessionEntry): Promise<OpenedSession> => {
     if (!accessReadyRef.current) throw new Error('Workspace access is restoring.');
     const target = new SessionDirectoryClient(baseUrl, undefined, item.hostId ?? 'local');
     const attached = await target.attach(item.providerId, item.nativeSessionId);
     return { hostId: item.hostId, providerId: item.providerId, nativeSessionId: attached.nativeSessionId ?? item.nativeSessionId, title: item.title, agentId: attached.agentId };
   }, [baseUrl]);
-  const tpm = useTpmWork(tpmService, tpmHosts, accessReady && !!directory, attachTpm, tpmView.visible, baseUrl, windowWorkspace.authority,
+  const tpm = useTpmWork(tpmService, selectableHosts, accessReady && !!directory, attachTpm, tpmView.visible, baseUrl, windowWorkspace.authority,
     sharedWindow && presentedViewId ? { windowId: sharedWindow.id, viewId: presentedViewId } : undefined);
   const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && (tpmListOpen || tpm.expanded), tpm.works, [...favorites.stars, ...sessionEntries], transport);
   const tpmMainState = useRef({ scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works });
@@ -1626,7 +1644,7 @@ function AppContent({
     ]);
   });
   // A session under the desktop sessions page is not seen, so it is not acknowledged as read.
-  const visibleWindows = openWindows.filter(session => windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen && isViewVisible(viewKey(session)));
+  const visibleWindows = openWindows.filter(session => windowStageVisible && isViewVisible(viewKey(session)));
   const botTargets = !windowMode && activated && accessReady
     ? projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections.flatMap(section => section.rows.map(({ binding }) => {
       const { role: _role, ...session } = binding;
@@ -2556,9 +2574,9 @@ function AppContent({
   // One failure gets one notice; the connection notice already explains this succession failure.
   const successionNotice = !!successionFailure && !nativeTakeover && sessionNotice?.successionError === successionFailure;
   // While the desktop sidebar is visible, the Window, Team, TPM, Track and Ask capsules give way to its Windows section and Shortcuts rows.
-  const sidebarShortcuts = windowMode && !compactLayout && desktopContextVisible && !windowWorkspace.unavailable;
+  const sidebarShortcuts = windowMode && !compactLayout && desktopContextVisible;
   const menuCurrentBinding = sharedWindow ? directoryView?.binding : currentSession ? windowSessionBinding(currentSession) : undefined;
-  // Track, Team and TPM; Ask is placed separately because its capsule floats inside .lab-ask-workspaces.
+  // Track, Team and TPM; Ask has its own host because its capsule floats inside .lab-ask-workspaces.
   const trackTeamTpmEntries = <>
     {windowMode && userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
     <TeamMenu visible={windowMode && teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
@@ -2570,9 +2588,9 @@ function AppContent({
         disabled={!canOpenFocusedAsk} sourceTitle={focusedAskSession?.title} unavailable={focusedAskUnavailable}
         observation={focusedAskEntry?.record?.target ? tracking.observations[sessionKey(focusedAskEntry.record.target)] : undefined}
         onOpen={() => { if (canOpenFocusedAsk && focusedAskSession) openAsk(focusedAskSession, focusedAskState); }} /> : null;
-  const shortcutEntries = <>{trackTeamTpmEntries}{askEntry}</>;
+  const shortcutPlacement = sidebarShortcuts ? 'sidebar' : 'floating';
   // The Host, provider, directory and new-session panels: written once, placed in the compact drawer or on the desktop page.
-  // On desktop the page itself is the Favorites region, so the Favorites section inside it carries no second name.
+  // On desktop the page itself is the Favorites region, and its toolbar the Favorites heading: the section inside it carries no second name or heading.
   const sessionPanelContent = <div className="lab-sidebar-content">
       {sessionPanel === 'settings' ? <section className="lab-mobile-settings" aria-label="Controller settings">
         <MobileDisplaySettings />
@@ -2580,8 +2598,8 @@ function AppContent({
         <CallForSupportSettings baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} />
         <LayoutDiagnosticsSettings />
       </section> : null}
-      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}><div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div><FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
-      {directory && sessionPanel !== 'favorites' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={providers.length > 0 ? [{ id: 'local', name: 'Lab server', online: true }, ...remoteHosts] : remoteHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
+      {directory && sessionPanel !== 'favorites' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel key={selectedRemoteHost?.id} />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={windowMode && (compactLayout ? contextOpen : pageOpen)}>
           <HostVscodeTunnel key={selectedRemoteHost?.id} />
@@ -2637,16 +2655,16 @@ function AppContent({
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
     successionContextFor: succession.successionContextFor }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
     leadingControls={sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setDockViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
-    {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} /></div> : null}
+    {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}
     {activated ? tracking.observers : null}
     {!windowWorkspace.unavailable ? <>
     {windowMode && scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     <WindowMenu workspace={windowWorkspace} current={menuCurrentBinding}
       visible={windowMode && windowView.visible && !sidebarShortcuts} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus} />
     <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowMode && windowOverviewOpen} sessionStatus={windowSessionStatus} onOpenChange={setWindowOverviewOpen} />
-    {!sidebarShortcuts ? trackTeamTpmEntries : null}
+    <div ref={shortcutFloatingSlot} className="lab-movable-slot" />
     <div className="lab-ask-workspaces" {...backgroundInert}>
-      {!sidebarShortcuts ? askEntry : null}
+      <div ref={askFloatingSlot} className="lab-movable-slot" />
       {askSources.flatMap(({ source, owner }) => {
         return ask.isOpen(source, owner)
           ? [renderAsk(source, sourceStateFor(source))] : [];
@@ -2681,7 +2699,7 @@ function AppContent({
     <ViewOptions modeControls={<WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />} attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? dockViewTarget ?? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? dockViewTarget ?? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={!windowMode || supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -2771,23 +2789,29 @@ function AppContent({
             <h2 className="lab-sidebar-section-title">Shortcuts</h2>
             <button type="button" className="lab-sidebar-link" aria-current={pageOpen && sessionPanel === 'list' ? 'page' : undefined} onClick={() => openPage('list')}>All sessions</button>
             {userScoped ? <button type="button" className="lab-sidebar-link" aria-current={pageOpen && sessionPanel === 'favorites' ? 'page' : undefined} onClick={() => openPage('favorites')}>Favorites</button> : null}
-            {sidebarShortcuts ? <ShortcutPlacement.Provider value="sidebar">{shortcutEntries}</ShortcutPlacement.Provider> : null}
+            <div ref={shortcutSidebarSlot} className="lab-movable-slot" />
+            <div ref={askSidebarSlot} className="lab-movable-slot" />
           </nav>
         </div>
-        <SidebarFooter hosts={remoteHosts} loaded={hostsLoaded} onHosts={() => openPage('list')} onSettings={() => openPage('settings')} settingsPressed={pageOpen && sessionPanel === 'settings'} />
+        <SidebarFooter hosts={selectableHosts} loaded={hostsLoaded} onHosts={() => openPage('list')} onSettings={() => openPage('settings')} settingsCurrent={pageOpen && sessionPanel === 'settings'} />
       </>}
       {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button></footer> : null}
     </SupportingRail>
+    {/* After both slots, so a slot rendered in this commit is attached before the entries' layout effects run. */}
+    <MovableHostSlot host={shortcutHost} slot={sidebarShortcuts ? shortcutSidebarSlot : shortcutFloatingSlot} />
+    <MovableHostSlot host={askHost} slot={sidebarShortcuts ? askSidebarSlot : askFloatingSlot} />
+    <ShortcutPlacement.Provider value={shortcutPlacement}>{createPortal(trackTeamTpmEntries, shortcutHost)}{createPortal(askEntry, askHost)}</ShortcutPlacement.Provider>
     {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
     <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
       {!compactLayout ? <section id="lab-sessions-page" className="lab-sessions-page" aria-label={sessionsPageTitle} hidden={!pageOpen}
         onKeyDown={event => {
-          // Fields keep Escape for themselves (a search field clears on Escape).
-          if (event.key !== 'Escape' || event.defaultPrevented || (event.target as Element).closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+          // Text fields keep Escape for themselves (a search field clears on Escape); checkboxes, radios and buttons leave the page.
+          if (event.key !== 'Escape' || event.defaultPrevented || keepsEscape(event.target as Element)) return;
           event.preventDefault(); closePage();
         }}>
-        <Toolbar className="lab-sessions-page-toolbar" title={sessionsPageTitle}
-          leading={<IconButton icon="chevron-left" label="Back to Window" onClick={closePage} />} />
+        {/* On the Favorites page the toolbar heading is the Favorites heading, with its loading mark; the panel shows none. */}
+        <Toolbar className="lab-sessions-page-toolbar" title={userScoped && sessionPanel === 'favorites' ? <FavoritesHeading loading={favorites.loading} /> : sessionsPageTitle} titleRef={sessionsPageTitleRef} titleFocusable
+          leading={<><div ref={setPageViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /><IconButton icon="chevron-left" label="Back to Window" onClick={closePage} /></>} />
         {sessionPanel !== 'settings' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? 'Main session')}</strong></div> : null}
         <div className="lab-sessions-page-body">{sessionPanelContent}</div>
       </section> : null}
@@ -2803,6 +2827,8 @@ function AppContent({
       >
         {sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setWindowViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-window-controls" /> : null}
         <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={entry.id} entry={entry} baseUrl={baseUrl}
+          // Not windowStageVisible: `visible` also decides docking (a hidden view leaves the dock) and, through SessionFamily, keeps the
+          // conversation attached. The sessions page hides #lab-workbench instead, and visibleWindows leaves these views unseen.
           visible={windowMode && activeView === 'workbench' && !supportingRailOpen && (!compactLayout || (sharedWindow ? presentedRootView?.id : sessionWindows.selectedId) === entry.id)} compact={compactLayout}
           closeWith={sessionWindows.entries.filter(child => child.closeWith === entry.id).map(child => child.id)}
           selected={sessionWindows.selectedId === entry.id} onFocus={() => sessionWindows.focus(sharedWindow ? entry.id : entry.managed ? undefined : entry.id)}
@@ -2846,6 +2872,8 @@ function AppContent({
                 attachmentNotice={view.id === sharedWindow.selectedPrimaryViewId ? openingControlNotice : undefined}
                 hostLabel={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId}
                 offline={remoteHosts.find(host => host.id === view.binding!.hostId)?.online === false}
+                // Not windowStageVisible: an inactive family parks its conversation and releases its attachment, so
+                // the sessions page, which hides #lab-workbench, would detach every view and reattach them on Back.
                 compact={compactLayout} active={windowMode && activeView === 'workbench' && !supportingRailOpen && (!compactLayout || view.id === (presentedPrimaryViewId ?? sharedWindow.selectedPrimaryViewId))}
                 transport={transport} draftStore={messageDrafts} replicaFor={replicaFor} onSessionBound={receiveViewSession} onSessionUnavailable={markSessionMissing}
                 draftBinding={slot ? draftOwnerBinding(slot.owners.text) : undefined} imageDraftBinding={slot?.owners.image}
@@ -2886,7 +2914,7 @@ function AppContent({
           displayBinding={primaryDisplaySlot?.owners.display}
           onInspectEntry={key => inspectTimelineEntry(key, 'trace')}
           revealEntry={activeAgentId && letterReveals[activeAgentId] || (traceRequest?.view === 'workbench' ? traceRequest : undefined)}
-          state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={windowMode && activeView === 'workbench' && primaryExpanded}
+          state={forkDisplayState(state, boundFork)} sessionStatus={!accessReady ? 'connecting' : hostOffline ? 'disconnected' : status} attachingAgentId={attachingAgentId} actions={forkInputStatus?.pending && forkInputStatus.agentId === activeAgentId ? { deleteMessage: conversationActions.deleteMessage } : availableConversationActions} visible={windowStageVisible && primaryExpanded}
           consoleCommands={[...(status === 'ready' && !hostOffline && directory && state?.agent?.capabilities.sendMessage && state.agent.capabilities.history ? forkCommands : []), ...(canHandoffPrimary ? [handoffCommand] : [])]}
           onExecuteConsoleCommand={executePrimaryCommand}
           nativeTakeover={openingControlNotice}
@@ -2923,7 +2951,7 @@ function AppContent({
           focused={!compositionProtected && focusedWindow !== undefined && viewKey(focusedWindow) === viewKey(session)}
           openSides={openSideKeys(viewKey(session))}
           initialInput={forkInputStatus?.agentId === session.agentId ? forkInputStatus : undefined}
-          visible={windowMode && activeView === 'workbench'} draftBinding={draftBindingFor(session)}
+          visible={windowStageVisible} draftBinding={draftBindingFor(session)}
           imageDraftBinding={succession.document.slots.find(slot => slot.id === viewKey(session))!.owners.image}
           displayBinding={succession.document.slots.find(slot => slot.id === viewKey(session))!.owners.display}
           onFocus={() => focusSession(session)} onClose={() => closeSide(session)} onOpenSource={revealSession} onOpenFork={(fork) => void openFork(fork)} onFork={createFork} />)}
@@ -2976,6 +3004,13 @@ function AppContent({
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
   const enabled = !!host && host.access !== 'shared';
   return <PreviewProvider client={client} hostId={host?.id ?? ''} enabled={enabled} canManage={enabled} polling={polling}>{children}</PreviewProvider>;
+}
+
+const nonTextInputTypes = new Set(['button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit']);
+/** Whether a control uses Escape itself: text fields, selects and editable content. */
+function keepsEscape(target: Element): boolean {
+  const field = target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+  return !!field && !(field instanceof HTMLInputElement && nonTextInputTypes.has(field.type));
 }
 
 /** Whether focus is in the Window sidebar, or in a Menu (portalled outside it) whose trigger is in it. */

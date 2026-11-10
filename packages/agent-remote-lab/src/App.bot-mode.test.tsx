@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
@@ -230,6 +231,8 @@ it('shows Windows, In this Window and Shortcuts in the desktop sidebar, and sess
     expect(rail().querySelector('nav[aria-label="Shortcuts"]')).not.toBeNull();
     expect(rail().querySelector('section[aria-label="Discover sessions"]')).toBeNull();
     expect(rail().querySelector('footer.lab-sidebar-footer')).not.toBeNull();
+    // The footer counts the Lab server, which has local providers here, as the Hosts select does.
+    await until(() => expect(rail().querySelector('.lab-sidebar-hosts')?.textContent).toBe('1 Host online'));
     await act(async () => app.button('All sessions').click());
     const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
     expect(page.hidden).toBe(false);
@@ -272,6 +275,36 @@ it('moves the floating entries into the sidebar while it is visible', async () =
       expect(trigger, label).not.toBeNull();
       expect(trigger!.closest('#lab-context'), label).toBeNull();
     }
+  } finally { await app.close(); }
+});
+
+it('keeps the Team entry mounted, with its panel open, when the sidebar is hidden and shown', async () => {
+  const scope = 'http://localhost/window-shortcuts-mounted/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  const apple = /Mac|iPhone|iPad/.test(navigator.platform);
+  const backslash = () => act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
+  try {
+    const context = () => app.container.querySelector<HTMLElement>('#lab-context')!;
+    await until(() => expect(context().querySelector('nav[aria-label="Shortcuts"] button[aria-label="Teams"]')).not.toBeNull());
+    const trigger = context().querySelector<HTMLButtonElement>('button[aria-label="Teams"]')!;
+    trigger.focus();
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    await backslash();
+    expect(context().hidden).toBe(true);
+    // The same element floats now: a remount would drop the open panel (and a pending Team creation with it).
+    expect(app.container.querySelector('button[aria-label="Teams"]')).toBe(trigger);
+    expect(trigger.closest('#lab-context')).toBeNull();
+    expect(trigger.closest('.lab-team-floating')).not.toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    // The moved control keeps the focus it had.
+    expect(document.activeElement).toBe(trigger);
+    await backslash();
+    expect(context().hidden).toBe(false);
+    expect(context().querySelector('button[aria-label="Teams"]')).toBe(trigger);
+    expect(trigger.closest('.lab-sidebar-shortcut-team')).not.toBeNull();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
   } finally { await app.close(); }
 });
 
@@ -352,6 +385,93 @@ it('returns focus to the Window when the sessions page closes, and leaves Escape
     await act(async () => { backAgain.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
     expect(page.hidden).toBe(true);
     expect(document.activeElement).toBe(workbench);
+
+    // Only text fields keep Escape: a checkbox on the page leaves it.
+    await act(async () => app.button('All sessions').click());
+    const checkbox = Object.assign(document.createElement('input'), { type: 'checkbox' });
+    page.querySelector('.lab-sessions-page-body')!.append(checkbox);
+    try {
+      checkbox.focus();
+      await act(async () => { checkbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+      expect(page.hidden).toBe(true);
+    } finally { checkbox.remove(); }
+  } finally { await app.close(); }
+});
+
+it('focuses the sessions page heading when the page opens from inside the Window', async () => {
+  const scope = 'http://localhost/window-page-choose/';
+  const group = botGroup('A');
+  group.window.views.push(createWindowView('A3', undefined, 'primary'));
+  group.window.selectedPrimaryViewId = 'A3'; group.window.selectedViewId = 'A3';
+  seedGroup(scope, group);
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.button('Choose session')).toBeDefined());
+    const choose = app.button('Choose session');
+    choose.focus();
+    await act(async () => choose.click());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    expect(page.hidden).toBe(false);
+    expect(page.getAttribute('aria-label')).toBe('All sessions');
+    expect(document.activeElement).toBe(page.querySelector('.lab-sessions-page-toolbar h2'));
+
+    // Opened from the sidebar, focus stays on the sidebar's entry.
+    await act(async () => app.button('Back to Window').click());
+    const favorites = app.button('All sessions');
+    favorites.focus();
+    await act(async () => favorites.click());
+    expect(page.hidden).toBe(false);
+    expect(document.activeElement).toBe(favorites);
+  } finally { await app.close(); }
+});
+
+it('keeps View options on the sessions page while the sidebar is hidden', async () => {
+  const scope = 'http://localhost/window-page-view-options/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  const apple = /Mac|iPhone|iPad/.test(navigator.platform);
+  try {
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')).not.toBeNull());
+    await act(async () => app.button('All sessions').click());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
+    expect(app.container.querySelector<HTMLElement>('#lab-context')!.hidden).toBe(true);
+    expect(page.hidden).toBe(false);
+    const trigger = page.querySelector<HTMLButtonElement>('.lab-sessions-page-toolbar .lab-global-view-slot button[aria-label="View options"]');
+    expect(trigger).not.toBeNull();
+    expect(app.button('View options')).toBe(trigger);
+  } finally { await app.close(); }
+});
+
+it('keeps the Window\'s conversations attached while the sessions page covers them', async () => {
+  // The page hides #lab-workbench; the families stay active, since an inactive one parks its conversation and detaches.
+  const scope = 'http://localhost/window-page-covered/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    const families = () => [...app.container.querySelectorAll<HTMLElement>('#lab-workbench .lab-session-family')];
+    await until(() => expect(families().length).toBe(2));
+    await until(() => expect(families().every(family => family.querySelector('[data-testid="prompt-input"]'))).toBe(true));
+    await act(async () => app.button('All sessions').click());
+    expect(app.container.querySelector<HTMLElement>('#lab-workbench')!.hidden).toBe(true);
+    expect(families().every(family => !family.hidden && family.querySelector('[data-testid="prompt-input"]'))).toBe(true);
+    await act(async () => app.button('Back to Window').click());
+    expect(families().every(family => !family.hidden && family.querySelector('[data-testid="prompt-input"]'))).toBe(true);
+  } finally { await app.close(); }
+});
+
+it('names the Favorites page once, in its toolbar', async () => {
+  const scope = 'http://localhost/window-page-favorites/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Shortcuts"]')).not.toBeNull());
+    await until(() => expect(app.button('Favorites')).toBeDefined());
+    await act(async () => app.button('Favorites').click());
+    const page = app.container.querySelector<HTMLElement>('#lab-sessions-page')!;
+    expect(page.getAttribute('aria-label')).toBe('Favorites');
+    expect([...page.querySelectorAll('h1, h2, h3')].filter(heading => heading.textContent === 'Favorites').map(heading => heading.className)).toEqual(['ui-toolbar-title']);
   } finally { await app.close(); }
 });
 

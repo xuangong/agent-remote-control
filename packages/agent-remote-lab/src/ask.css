@@ -5,7 +5,7 @@
   position: absolute; inset: 0; grid-column: 1 / -1; grid-row: 2;
   z-index: 145; pointer-events: none;
 }
-.lab-ask-workspaces > .lab-ask-floating { z-index: 3; }
+.lab-ask-workspaces .lab-ask-floating { z-index: 3; }
 /* Keep page navigation above non-modal conversations and their launchers. */
 .lab-shell:has(> .lab-ask-workspaces .lab-ask-window) > :is(.lab-app-bar, .lab-mobile-navigation) { z-index: 147; }
 @media (max-width: 1180px) { .lab-ask-workspaces { grid-row: 3; } }

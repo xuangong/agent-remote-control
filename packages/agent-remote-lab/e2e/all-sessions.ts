@@ -6,7 +6,7 @@ import { toggleViewPanel } from './view-options';
 export async function openSessionsPage(page: Page, entry: 'All sessions' | 'Favorites' | 'Settings' = 'All sessions'): Promise<Locator> {
   const rail = page.locator('#lab-context');
   await expect(page.locator('.lab-shell')).toBeVisible();
-  // A page that opens a session hides the sidebar once it starts opening it, so check again until the sidebar stays.
+  // The sidebar starts hidden when the page opens with a session (opening one later keeps it); show it, and retry until it is visible.
   await expect(async () => {
     if (!await rail.isVisible()) await toggleViewPanel(page, 'Sidebar');
     await expect(rail).toBeVisible({ timeout: 1000 });

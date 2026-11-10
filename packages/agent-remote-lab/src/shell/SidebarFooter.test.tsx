@@ -15,10 +15,19 @@ it('summarizes Hosts', () => {
 
 it('opens the Hosts and Settings pages', async () => {
   const onHosts = vi.fn(), onSettings = vi.fn();
-  const container = await render(<SidebarFooter hosts={[{ online: false }]} loaded onHosts={onHosts} onSettings={onSettings} settingsPressed={false} />);
+  const container = await render(<SidebarFooter hosts={[{ online: false }]} loaded onHosts={onHosts} onSettings={onSettings} settingsCurrent={false} />);
   const footer = container.querySelector('footer.lab-sidebar-footer')!;
   expect(footer.querySelector('[data-host-state]')?.getAttribute('data-host-state')).toBe('offline');
+  const hosts = footer.querySelector<HTMLButtonElement>('.lab-sidebar-hosts')!;
+  expect([hosts.title, hosts.getAttribute('aria-description')]).toEqual(['Open All sessions to choose a Host', 'Open All sessions to choose a Host']);
+  expect(footer.querySelector('button[aria-label="Sidebar settings"]')?.hasAttribute('aria-current')).toBe(false);
+  expect(footer.querySelector('button[aria-label="Sidebar settings"]')?.hasAttribute('aria-pressed')).toBe(false);
   await act(async () => (footer.querySelector('.lab-sidebar-hosts') as HTMLButtonElement).click());
   await act(async () => (footer.querySelector('button[aria-label="Sidebar settings"]') as HTMLButtonElement).click());
   expect(onHosts).toHaveBeenCalledOnce(); expect(onSettings).toHaveBeenCalledOnce();
+});
+
+it('marks Settings as the current page while it is open', async () => {
+  const container = await render(<SidebarFooter hosts={[]} loaded onHosts={() => {}} onSettings={() => {}} settingsCurrent />);
+  expect(container.querySelector('button[aria-label="Sidebar settings"]')?.getAttribute('aria-current')).toBe('page');
 });

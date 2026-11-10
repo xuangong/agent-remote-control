@@ -45,3 +45,51 @@
 
 .lab-window-row[data-depth="1"] { padding-left: 16px; }
 .lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }
+
+/* The desktop sidebar: headings, Window rows and view rows follow the sidebar's flat rows (.lab-sidebar-link) and icon buttons.
+   Every rule starts with `.lab-window-workspaces[data-placement="sidebar"]` (0,2,0): a row's open button is (0,3,0) and its hover
+   (0,5,0), above the global `button` (0,0,1), `button:disabled` (0,1,1) and `button:hover:not(:disabled)` (0,2,1), and above the
+   panel's own `.lab-window-list [aria-current="true"]` (0,2,0); row actions are (0,4,0) and more, above `.ui-icon-button.ui-icon-button` (0,2,0)
+   and its `:disabled` (0,3,0). Status colors stay on `.agent-session-title[data-session-status]` (0,2,0): no rule here colors those labels. */
+.lab-window-workspaces[data-placement="sidebar"] { color: var(--ui-label); font: var(--ui-size-body)/1.2 var(--ui-font); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-section-heading { gap: 2px; min-height: 28px; padding: 0 0 2px; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-section-heading > .lab-sidebar-section-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-section-heading > .ui-icon-button { flex: none; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-views { margin-bottom: 0; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-section-heading:not(:first-child) { margin-top: 14px; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-list { gap: 1px; }
+/* The row is the visual row, so hover and selection cover its actions too. */
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row { gap: 0; padding-inline-end: 4px; border-radius: var(--ui-radius-control); transition: background-color var(--ui-duration-short) var(--ui-ease); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:hover { background: var(--ui-row-hover); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:has(> .lab-window-open[aria-current="true"]) { background: var(--ui-selection); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-renaming] { padding-inline: 4px; background: transparent; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-depth="1"] { margin-left: 16px; padding-left: 0; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-open {
+  gap: 8px; min-height: 30px; padding: 5px 4px 5px 10px; border: 0; border-radius: var(--ui-radius-control);
+  color: var(--ui-label); background: transparent; font: inherit; opacity: 1; transform: none;
+}
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-open:hover:not(:disabled) { border-color: transparent; color: var(--ui-label); background: transparent; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-open:disabled { cursor: default; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-open:focus-visible { outline-offset: -2px; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-list strong { -webkit-line-clamp: 1; font-size: var(--ui-size-body); font-weight: 400; line-height: 1.3; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-list small { margin-top: 1px; overflow: hidden; font-size: var(--ui-size-caption); text-overflow: ellipsis; white-space: nowrap; }
+/* Row actions show on hover or keyboard focus; they stay in the DOM and in the tab order. */
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row > .ui-icon-button { flex: none; width: 24px; height: 24px; min-height: 24px; opacity: 0; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:is(:hover, :focus-within) > .ui-icon-button { opacity: 1; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row:is(:hover, :focus-within) > .ui-icon-button:disabled { opacity: 0.35; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row > .lab-window-delete:hover:not(:disabled) { color: var(--ui-status-failure); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row > .ui-icon-button .ui-icon { width: 15px; height: 15px; }
+@media (hover: none) { .lab-window-workspaces[data-placement="sidebar"] .lab-window-row > .ui-icon-button:not(:disabled) { opacity: 1; } }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-rename input { min-height: 28px; padding: 3px 8px; font-size: var(--ui-size-body); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-rename > button { min-height: 28px; padding: 3px 8px; font-size: var(--ui-size-caption); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-note { margin: 4px 10px 6px; color: var(--ui-label-secondary); font-size: var(--ui-size-caption); }
+/* Window options: a quiet disclosure row. */
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-options { margin-top: 6px; border-top: 0; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-options summary {
+  min-height: 28px; padding: 5px 10px; border-radius: var(--ui-radius-control); color: var(--ui-label-secondary); font-size: var(--ui-size-callout);
+}
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-options summary:hover { color: var(--ui-label); background: var(--ui-row-hover); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-options .lab-window-actions { padding-inline: 10px; }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-options .lab-window-actions > button { min-height: 28px; padding: 4px 10px; font-size: var(--ui-size-callout); }
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-agent { padding-inline: 10px; }

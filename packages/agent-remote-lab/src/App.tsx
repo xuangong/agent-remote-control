@@ -2765,7 +2765,7 @@ function AppContent({
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
             <WindowWorkspaces workspace={windowWorkspace} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
-              onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} />
+              onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
             <h2 className="lab-sidebar-section-title">Shortcuts</h2>

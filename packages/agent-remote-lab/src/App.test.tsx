@@ -833,7 +833,7 @@ it('creates and selects an empty pane with one layout command and opens its sess
     const viewOptions = container.querySelector<HTMLElement>('#lab-view-options-panel')!;
     expect([...viewOptions.querySelectorAll('button')].map(button => button.textContent)).not.toContain('New session view');
     await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="View options"]')!.click());
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="New session view"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.lab-session-dock-add[aria-label="New session view"]')!.click());
     const pane = workspace.readWindow()!.views.find(view => view.id === workspace.readWindow()!.selectedViewId)!;
     expect(pane.placement).toBe('dock');
     expect(pane.binding).toBeUndefined();

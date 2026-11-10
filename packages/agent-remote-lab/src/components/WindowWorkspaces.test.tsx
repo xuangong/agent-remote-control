@@ -38,7 +38,7 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
   await app.close(); localStorage.clear(); sessionStorage.clear();
 });
 
-async function fixture({ views = [createWindowView('main', undefined, 'primary')], ...props }: { views?: WindowView[] } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview'> = {}) {
+async function fixture({ views = [createWindowView('main', undefined, 'primary')], ...props }: { views?: WindowView[] } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview' | 'placement'> = {}) {
   let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
   let other: WorkspaceWindow = { ...window, id: 'other', title: 'Window' };
   const renamed = vi.fn();
@@ -238,4 +238,59 @@ it('neither scrolls nor navigates when choosing a view is refused', async () => 
   expect(test.container.textContent).toContain('This Window cannot be edited.');
   expect(frame).not.toHaveBeenCalled();
   expect(navigate).not.toHaveBeenCalled();
+});
+
+it('shows sidebar headings with icon actions, flat rows without check marks, and no delete note', async () => {
+  const overview = vi.fn();
+  const test = await fixture({ placement: 'sidebar', onOverview: overview, views: [
+    createWindowView('main', undefined, 'primary'), { ...createWindowView('side', undefined, 'attached'), attachedTo: 'main' },
+  ] });
+  const root = test.container.querySelector('.lab-window-workspaces')!;
+  expect(root.getAttribute('data-placement')).toBe('sidebar');
+  expect([...root.querySelectorAll('.lab-window-section-heading > h2.lab-sidebar-section-title')].map(heading => heading.textContent)).toEqual(['Windows', 'In this Window']);
+  const named = (name: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === name);
+  for (const name of ['New Window', 'Show all Windows', 'New session view']) {
+    const [button, ...others] = named(name);
+    expect(others).toHaveLength(0);
+    expect(button?.classList.contains('ui-icon-button')).toBe(true);
+    expect(button?.textContent).toBe('');
+    expect(button?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  }
+  expect(named('Show all Windows')[0]!.classList.contains('lab-window-overview-trigger')).toBe(true);
+  await act(async () => named('Show all Windows')[0]!.click());
+  expect(overview).toHaveBeenCalledOnce();
+  await act(async () => named('New session view')[0]!.click());
+  expect(test.read().views).toHaveLength(3);
+  expect(root.textContent).not.toContain('✓');
+  expect(root.querySelector('.lab-window-selected')).toBeNull();
+  expect(root.textContent).not.toContain('before deleting');
+  // Current and selected rows keep aria-current, and indented views keep their depth.
+  expect(root.querySelector('[data-window-id="window"]')?.getAttribute('aria-current')).toBe('true');
+  expect(root.querySelector(`[data-window-view-id="${test.read().selectedViewId}"]`)?.getAttribute('aria-current')).toBe('true');
+  expect(root.querySelector('[data-window-view-row="side"]')?.getAttribute('data-depth')).toBe('1');
+  // Row actions keep their classes, names, titles and data attributes.
+  const rename = root.querySelector<HTMLButtonElement>('.lab-window-rename-trigger[data-window-rename="other"]')!;
+  expect([rename.getAttribute('aria-label'), rename.title]).toEqual(['Rename Window: Window', 'Rename this Window']);
+  const deletes = [...root.querySelectorAll<HTMLButtonElement>('.lab-window-delete')];
+  expect(deletes.map(button => [button.getAttribute('aria-label'), button.title, button.disabled])).toEqual([
+    ['Delete Window: Project', 'Switch to another Window before deleting this one.', true],
+    ['Delete Window: Window', 'Delete this layout. Agent sessions keep running.', false],
+  ]);
+  const close = root.querySelector<HTMLButtonElement>('.lab-window-view-close[data-window-view-close="main"]')!;
+  expect([close.getAttribute('aria-label'), close.title, close.textContent]).toEqual(['Close session view: Empty view', 'Close this session view. Agent sessions keep running.', '']);
+  for (const button of [rename, ...deletes, close]) expect(button.classList.contains('ui-icon-button')).toBe(true);
+  await test.rename('other', 'Research');
+  expect(test.renamed).toHaveBeenLastCalledWith('other', 'Research');
+});
+
+it('keeps the floating panel text buttons, check marks and delete note by default', async () => {
+  const test = await fixture({ onOverview: () => {} });
+  const root = test.container.querySelector('.lab-window-workspaces')!;
+  expect(root.getAttribute('data-placement')).toBe('panel');
+  expect(test.button('New Window')).toBeDefined();
+  expect(test.button('All Windows').getAttribute('aria-label')).toBe('Show all Windows');
+  expect(root.querySelector('.lab-window-selected[aria-label="Current Window"]')?.textContent).toBe('✓');
+  expect(root.querySelector('.lab-window-selected[aria-label="Selected view"]')?.textContent).toBe('✓');
+  expect(root.textContent).toContain('Switch to another Window before deleting the active one.');
+  expect(root.querySelector('.ui-icon-button')).toBeNull();
 });

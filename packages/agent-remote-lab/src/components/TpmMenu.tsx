@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type RefObject } from 'react';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
+import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import type { useTpmWork } from '../hooks/useTpmWork.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { groupTpmWorks, type TpmMainSession } from '../tpm-main-sessions.js';
@@ -10,7 +11,10 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
   mainSessions?: ReadonlyMap<string, TpmMainSession>; open: boolean; onOpenChange(open: boolean): void;
   tpm: ReturnType<typeof useTpmWork>; main?: SessionEntry; visible: boolean; triggerRef: RefObject<HTMLButtonElement>; inert: boolean;
 }) {
-  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:tpm-position');
+  const floating = useContext(ShortcutPlacement) === 'floating';
+  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:tpm-position', undefined, { enabled: floating });
+  const rootProps = floating ? { style, ...handlers, 'data-edge': edge, className: 'lab-tracking-floating lab-tpm-floating' }
+    : { className: 'lab-sidebar-shortcut lab-sidebar-shortcut-tpm' };
   const panel = useRef<HTMLElement>(null);
   const id = useId();
   const [failure, setFailure] = useState<string>();
@@ -53,13 +57,13 @@ export function TpmMenu({ tpm, main, mainSessions, visible, triggerRef, inert, o
     </header>
     <ul className="lab-tpm-list">{group.works.map(renderWork)}</ul>
   </section>);
-  return <div ref={root} style={style} {...handlers} className="lab-tracking-floating lab-tpm-floating" data-edge={edge} hidden={!visible} data-attention={needsUser} data-workspace-open={tpm.expanded}
+  return <div ref={root} {...rootProps} hidden={!visible} data-attention={needsUser} data-workspace-open={tpm.expanded}
     {...(inert ? { inert: '' } : {})} onKeyDown={event => {
-      handlers.onKeyDown?.(event);
+      if (floating) handlers.onKeyDown?.(event);
       if (event.key === 'Escape' && open && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); close(); }
     }}>
     <button ref={triggerRef} type="button" className="lab-session-popover-trigger" aria-label="TPM works" aria-expanded={open} aria-controls={id}
-      title="TPM works · Drag to move, or focus and use arrow keys" onClick={() => { onOpenChange(!open); if (!open) void tpm.refresh(); }}>
+      title={floating ? 'TPM works · Drag to move, or focus and use arrow keys' : 'TPM works'} onClick={() => { onOpenChange(!open); if (!open) void tpm.refresh(); }}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2" /><path d="M9 3h6v3H9zM9 11l2 2 4-4M9 17h6" /></svg>
       <span>TPM</span><span className="lab-tpm-count">{activeWorks.length}</span>
       {unread ? <span className="lab-tracking-badge" aria-label={`${unread} works with new activity`} /> : needsUser ? <span className="lab-tracking-attention" aria-label="A TPM needs you" /> : null}

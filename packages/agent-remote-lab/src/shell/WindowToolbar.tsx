@@ -6,8 +6,8 @@ import './shell.css';
 
 /**
  * The toolbar above a desktop Window: its name (renamed in place) and view count, adding views, the dock rail, and
- * Window actions. The title button is named "Window name: …, rename", apart from the sidebar row's "Rename Window: …"
- * control that is on screen with it; the heading keeps the visible name.
+ * Window actions. The title button is named by its text, so the heading reads as the Window name; renaming is its
+ * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
 export function WindowToolbar({ title, viewCount, leading, disabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
   canShowAsSection, onShowAsSection, onCopyLink, onAgentControl, onDelete }: {
@@ -58,7 +58,7 @@ export function WindowToolbar({ title, viewCount, leading, disabled, onRename, o
             else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(false); }
           }}
           onBlur={() => finish(true)} />
-      : <button ref={button} type="button" className="lab-window-toolbar-title" aria-label={`Window name: ${title}, rename`} title="Rename this Window"
+      : <button ref={button} type="button" className="lab-window-toolbar-title" title="Rename this Window" aria-description="Rename this Window"
           disabled={disabled} onClick={start}>{title}</button>}
     subtitle={`${viewCount} ${viewCount === 1 ? 'session view' : 'session views'}`}
     trailing={<>

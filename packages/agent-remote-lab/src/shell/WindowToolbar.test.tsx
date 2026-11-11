@@ -15,7 +15,7 @@ async function toolbar(overrides: Partial<Props> = {}) {
   return { container, props, bar: container.querySelector<HTMLElement>('header.ui-toolbar.lab-window-toolbar')! };
 }
 
-const titleButton = (bar: HTMLElement) => bar.querySelector<HTMLButtonElement>('h2 button')!;
+const titleButton = (bar: HTMLElement) => bar.querySelector<HTMLButtonElement>('h2 > button.lab-window-toolbar-title')!;
 const input = () => document.querySelector<HTMLInputElement>('input[aria-label="Window title"]');
 const press = (target: Element, key: string) => act(async () => {
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -46,11 +46,16 @@ it('shows the Window name as the heading, with its view count', async () => {
   expect(single.bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('1 session view');
 });
 
-it('names the title button apart from the sidebar row’s rename control', async () => {
+it('names the title button by the Window name, so the heading reads as it, and describes renaming', async () => {
   const { bar } = await toolbar();
   const button = titleButton(bar);
-  expect(button.getAttribute('aria-label')).toBe('Window name: Research, rename');
-  expect(button.title).toBe('Rename this Window');
+  // Nothing in the heading overrides its text: no aria-label or aria-labelledby on it or inside it.
+  const heading = bar.querySelector('h2')!;
+  expect(heading.querySelectorAll('[aria-label], [aria-labelledby]')).toHaveLength(0);
+  expect(heading.hasAttribute('aria-label') || heading.hasAttribute('aria-labelledby')).toBe(false);
+  expect(heading.textContent).toBe('Research');
+  expect(button.textContent).toBe('Research');
+  expect([button.title, button.getAttribute('aria-description')]).toEqual(['Rename this Window', 'Rename this Window']);
 });
 
 it('renames in place with the whole title selected, saving on Enter and returning focus', async () => {

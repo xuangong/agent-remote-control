@@ -45,10 +45,17 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions) {
     if (mode !== 'session' && mode !== 'activity') return rejectUpgrade(socket, 400);
     const channelContext = context(request);
     if (!await channelContext.authorize!()) return rejectUpgrade(socket, 401);
+    // The local Relay's per-session endpoint trusts the loopback connections it accepts. A channel admitted by an access
+    // policy (a hosted gateway, for instance) may come from elsewhere, so bridging its subscriptions over loopback would
+    // lend them that trust; only a channel that is itself local reaches local sessions.
+    const localSessions = local(request, origin);
     websockets.handleUpgrade(request, socket, head, client => {
       const stop = acceptSessionChannel(relaySocket(client), mode, async agentId => {
         const target = new URL(`/v1/sessions/${encodeURIComponent(agentId)}/events`, url);
-        if (!broker.handlesUpgrade(target)) return { accept(logical) { bridgeLocalSession(logical, channelContext.serverUrl! + target.pathname, request); } };
+        if (!broker.handlesUpgrade(target)) {
+          if (!localSessions) return sessionSubscriptionRefusal(new Response(null, { status: 403 }));
+          return { accept(logical) { bridgeLocalSession(logical, channelContext.serverUrl! + target.pathname, request); } };
+        }
         // The broker re-checks access for every subscription, as it does for the direct endpoint.
         const prepared = await broker.prepareUpgrade(webRequest(request, target, false), context(request));
         return !prepared || prepared instanceof Response ? sessionSubscriptionRefusal(prepared) : prepared;

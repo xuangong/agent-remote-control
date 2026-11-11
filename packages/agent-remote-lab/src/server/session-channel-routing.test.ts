@@ -7,7 +7,9 @@ import type { Duplex } from 'node:stream';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
+import { createServer } from 'node:http';
 import { createProtocolValidationServer } from '../server.js';
+import { createRemoteHostBroker } from './remote-host-broker.js';
 import { createRecordedLabProvider } from './recorded.js';
 
 const origin = 'http://127.0.0.1:6175';
@@ -149,4 +151,24 @@ it('refuses channels from other browser origins', async () => {
   const [, response] = await once(socket, 'unexpected-response') as [unknown, { statusCode: number; resume(): void }];
   response.resume(); socket.terminate();
   expect(response.statusCode).toBe(401);
+}, 20_000);
+
+it('refuses local subscriptions on a channel admitted by an access policy from a non-local client', async () => {
+  const server = createServer((_, response) => { response.statusCode = 404; response.end(); });
+  const bridged: string[] = [];
+  server.on('upgrade', (request, socket) => { bridged.push(request.url ?? ''); socket.destroy(); });
+  const broker = createRemoteHostBroker({ origin, accessPolicy: { authorize: () => true } });
+  broker.install(server);
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  cleanup.push(async () => { await broker.close(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const { port } = server.address() as import('node:net').AddressInfo;
+  // The policy admits the channel, but its origin is not this Lab's, so it is not a local client.
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/session-channel?observation=session`, { headers: { origin: 'https://gateway.example' } });
+  cleanup.push(() => socket.terminate());
+  const next = inbox(socket);
+  await once(socket, 'open'); await next(value => value.type === 'ready');
+  socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'subscribe', subscriptionId: 1, agentId: 'local-agent', message: { protocolVersion: '1.8.0', type: 'negotiate' } }));
+  const refused = await next(value => value.subscriptionId === 1 && value.type === 'closed');
+  expect(refused.code).toBeGreaterThanOrEqual(1008);
+  expect(bridged).toEqual([]);
 }, 20_000);

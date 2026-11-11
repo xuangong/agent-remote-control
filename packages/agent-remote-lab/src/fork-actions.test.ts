@@ -20,6 +20,21 @@ it('inherits settings once and respects subsequent explicit changes', async () =
   expect(setSessionSetting).toHaveBeenCalledTimes(1);
   expect(sendMessage.mock.calls).toHaveLength(2);
 });
+it('rejects a first input as not sent when its view no longer shows the fork, and sends the next one', async () => {
+  const store = new ForkStore('changed-view');
+  const record = store.prepare({ source, text: '[]', itemCount: 0, capturedAt: new Date().toISOString(), boundary: { epoch: 'one', seq: 0 } });
+  store.bind(record.id, { ...source, agentId: 'target', nativeSessionId: 'native-target' });
+  const sendMessage = vi.fn(async () => {});
+  let showsFork = false;
+  const actions = forkActions({ sendMessage }, store, store.get(record.id), {} as RemoteAgentTransport, () => showsFork);
+  await expect(actions.sendMessage!('delayed')).rejects.toMatchObject({ code: 'session_changed' });
+  expect(sendMessage).not.toHaveBeenCalled();
+  expect(store.getLocal(record.id)?.delivery).toBe('pending');
+  showsFork = true;
+  await actions.sendMessage!('next');
+  expect(sendMessage).toHaveBeenCalledExactlyOnceWith(contextPrefix(record) + 'next', undefined);
+  expect(store.getLocal(record.id)?.delivery).toBe('sent');
+});
 it('hides only the exact attachment in the conversation view while preserving the replica', () => {
   const store = new ForkStore('display');
   const record = store.prepare({ source, text: '[]', itemCount: 0, capturedAt: new Date().toISOString(), boundary: { epoch: 'one', seq: 0 } });

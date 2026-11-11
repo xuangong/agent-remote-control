@@ -87,6 +87,24 @@ it('restores an expanded source-bound Ask and draft without creating another nat
   ]);
 });
 
+it('keeps restoring a saved Ask when its source slot confirms the same session meanwhile', async () => {
+  const fixture = await setup();
+  await fixture.reload();
+  const owner = fixtureOwner(source), requests = fixture.requests.length;
+  const finishAttach = fixture.pauseAttach();
+  await act(async () => { fixture.current().restore(source, async () => {}, owner.id); });
+  expect(fixture.requests.slice(requests).map(request => request.path)).toEqual(['/v1/remote/attach']);
+  // After a reload the source slot is confirmed while its Ask restores. Confirming the same session must not
+  // abandon the restore: nothing would start it again and the Ask would stay on its draft.
+  await act(async () => {
+    const ask = fixture.current();
+    expect(ask.applySourceProjection(owner.id, { ...source }, ask.ownerEditRevision(owner.id), () => true).status).toBe('applied');
+  });
+  await act(async () => { finishAttach(); });
+  expect(fixture.current().entryFor(source, owner.id)).toMatchObject({ attached: true, restoring: false, busy: false, error: undefined });
+  expect(fixture.requests.slice(requests).map(request => request.path)).toEqual(['/v1/remote/attach']);
+});
+
 it('waits while the current locator synchronizes and then restores the saved Ask without its own Retry', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {

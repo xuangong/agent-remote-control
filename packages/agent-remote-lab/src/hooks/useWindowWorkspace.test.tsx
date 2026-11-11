@@ -296,6 +296,36 @@ it('keeps the latest requested Window when an earlier open returns later', async
   expect(new URL(location.href).searchParams.get('window')).toBe(third.id);
 });
 
+it('keeps the selected hosted Window editable when history moves between its sessions', async () => {
+  const active = windowFixture('history-window'), fixture = hostedWindows(active);
+  history.replaceState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=first`);
+  const read = await mount('https://history-window.example/', true);
+  await vi.waitFor(() => expect(read().window?.id).toBe(active.id));
+  await vi.waitFor(() => expect(read().provisional).toBe(false));
+  const reads = fixture.inspect.mock.calls.length;
+  await act(async () => { history.pushState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=second`); dispatchEvent(new PopStateEvent('popstate')); });
+  // The Window is not read again or shown read-only, so a session opened from history can be bound to it at once.
+  expect(read().provisional).toBe(false);
+  expect(fixture.inspect.mock.calls.length).toBe(reads);
+  let saved!: Promise<void>;
+  await act(async () => { saved = read().operate({ type: 'view.bind', viewId: 'main', binding: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'second', title: 'Second' } }); saved.catch(() => {}); });
+  expect(read().readWindow()?.views[0]?.binding?.nativeSessionId).toBe('second');
+});
+
+it('selects a failed Window again when history moves between its sessions', async () => {
+  const active = windowFixture('failed-window'), fixture = hostedWindows(active);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockRejectedValue(new WindowRequestError('Rejected', 400));
+  history.replaceState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=first`);
+  const read = await mount('https://failed-window.example/', true);
+  await vi.waitFor(() => expect(read().provisional).toBe(false));
+  await act(async () => { await read().operate({ type: 'view.resize', viewId: 'main', width: 500 }).catch(() => {}); });
+  await vi.waitFor(() => expect(read().error).toBeTruthy());
+  const reads = fixture.inspect.mock.calls.length;
+  await act(async () => { history.pushState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=second`); dispatchEvent(new PopStateEvent('popstate')); });
+  // The popstate retries the failed Window by reading it again.
+  await vi.waitFor(() => expect(fixture.inspect.mock.calls.length).toBeGreaterThan(reads));
+});
+
 it('does not let initialization replace a Window explicitly opened while its read was pending', async () => {
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'initial-choice', revision: 0, title: 'Initial', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'manual-choice' };
@@ -357,6 +387,21 @@ it('keeps a missing explicit Window link as an error without creating a replacem
   expect(read().unavailable).toBe(true); expect(read().hasActiveWindow).toBe(false);
   expect(read().windows).toHaveLength(0);
   expect(new URL(location.href).searchParams.get('window')).toBe('missing-window');
+}, 10000);
+
+it('opens the session carried by a link to a local Window that this browser does not have in a fresh Window', async () => {
+  const scope = 'missing-window-session-link', existing = { ...windowFixture('existing'), views: [createWindowView('main', { hostId: 'local', providerId: 'recorded', nativeSessionId: 'kept', title: 'Kept' }, 'primary')] };
+  localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:existing`, JSON.stringify(existing));
+  history.replaceState(null, '', '/?window=other-browser&host=local&provider=recorded&session=linked');
+  const read = await mount(scope);
+  expect(read().unavailable).toBe(false); expect(read().error).toBeUndefined();
+  const window = read().window!;
+  expect(['other-browser', 'existing']).not.toContain(window.id);
+  expect(window.views).toHaveLength(1);
+  expect(window.views[0]?.binding).toMatchObject({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'linked' });
+  // The existing Window keeps its layout, and the address names the fresh Window instead of the foreign one.
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:existing`)!).views[0].binding.nativeSessionId).toBe('kept');
+  expect(new URL(location.href).searchParams.get('window')).toBe(window.id);
 }, 10000);
 
 it('deletes a nonactive local Window without changing the current selection', async () => {

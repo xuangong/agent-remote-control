@@ -540,6 +540,11 @@ export function useAskConversations(document: CompositionDocument, transport: Re
 
   function applySourceProjection(key: string, source: OpenedSession, expectedRevision: number, isCurrent: () => boolean) {
     if (!associationOwner(key) || !association.saved || !owners.current.active || association.generation !== recoveryGeneration(baseUrl) || !isCurrent() || ownerEditRevision(key) !== expectedRevision) return { status: 'pending' as const, retention: 'page' as const };
+    const previous = entries.get(key)?.source;
+    // Confirming the session the Ask already follows (after a reload, its source slot is confirmed while the Ask
+    // restores) changes nothing the Ask depends on. Invalidating then would abort that restore, and nothing would
+    // start it again, so the Ask would stay on its draft.
+    if (previous && sessionKey(previous) === sessionKey(source) && previous.agentId === source.agentId) return { status: 'applied' as const, retention: 'page' as const };
     const entry = entryFor(source, key);
     association.epochs.set(key, (association.epochs.get(key) ?? 0) + 1);
     preparations.current.get(key)?.abort(); windows.controllers.get(key)?.abort();

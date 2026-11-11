@@ -19,7 +19,11 @@ async function openReconnectingSession(page: Page, ask = false) {
   await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeVisible();
   if (ask) {
     const primary = page.locator('.lab-primary-conversation');
-    await primary.getByTestId('prompt-input').fill('/ask'); await primary.getByTestId('prompt-input').press('Enter');
+    // The command runs only once the source session is ready to send.
+    await expect(primary.getByTestId('prompt-input')).toBeEnabled();
+    await primary.getByTestId('prompt-input').fill('/ask');
+    await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
+    await primary.getByTestId('prompt-input').press('Enter');
     await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   }
   const toast = page.locator('.lab-toast').filter({ hasText: 'Native runtime is reconnecting' });

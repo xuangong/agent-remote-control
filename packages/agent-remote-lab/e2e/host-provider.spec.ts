@@ -8,9 +8,11 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
   const relayUrl = `http://127.0.0.1:${process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910}`;
   const invitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
   const alternateInvitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
-  const relay = createAgentRemoteRelay({ providers: [createRecordedLabProvider().provider] });
+  // The Host's native runtime reports the selected provider, as a real Codex, Claude or Copilot session would.
+  const relay = createAgentRemoteRelay({ providers: [createRecordedLabProvider({ providerId: selected.id }).provider] });
   const alternateRelay = createAgentRemoteRelay({ providers: [createRecordedLabProvider().provider] });
   const agents = new Set<string>();
+  const natives = new Map<string, string>();
   const creations: Record<string, unknown>[] = [];
   // A deterministic native runtime exercises the production Host transport without model credentials.
   const uplink = createRemoteHostUplinkClient({
@@ -22,14 +24,21 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     async control(control) {
       if (control.path.startsWith('/remote/catalog')) return { status: 200, body: JSON.stringify({ items: [], hasMore: false, revision: '1' }) };
       if (control.path.startsWith('/remote/workspaces')) return { status: 200, body: JSON.stringify({ workspaces: [{ id: 'native-project', name: 'Native project', path: '/native/project' }] }) };
+      // Sides open their created native session by identity, so the Host attaches sessions it created.
+      if (control.path === '/remote/attach') {
+        const { nativeSessionId } = JSON.parse(control.body!);
+        return natives.get(nativeSessionId) === control.sessionId
+          ? { status: 200, body: JSON.stringify({ agentId: control.sessionId, nativeSessionId }) } : { status: 404, body: '{}' };
+      }
       if (control.path !== '/remote/create') return { status: 404, body: '{}' };
       const body = JSON.parse(control.body!);
       creations.push(body);
       const nativeSessionId = `native-${creations.length}`;
       await relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: {
-        requestId: control.sessionId!, operationId: body.operationId, agentId: control.sessionId!, providerId: 'recorded', config: { sessionId: nativeSessionId, cwd: '/native/project' },
+        requestId: control.sessionId!, operationId: body.operationId, agentId: control.sessionId!, providerId: selected.id, config: { sessionId: nativeSessionId, cwd: '/native/project' },
       } });
       agents.add(control.sessionId!);
+      natives.set(nativeSessionId, control.sessionId!);
       return { status: 200, body: JSON.stringify({ agentId: control.sessionId, nativeSessionId }) };
     },
   });

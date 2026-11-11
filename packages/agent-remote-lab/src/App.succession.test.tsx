@@ -18,6 +18,7 @@ import { replicaState } from './test/fixtures.js';
 import { readCompositionDocument, parseComposition, initializeCompositionDocument, saveCompositionDocument, createCompositionDocument, createCompositionSlot, createAskOwner } from './session-composition.js';
 import { TrackedSessionViews } from './tracked-session-views.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
+import { SessionLocatorSynchronizingError } from './session-view-operations.js';
 import { render, unmount } from './test/setup.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
 import * as askHooks from './hooks/useAskConversations.js';
@@ -123,6 +124,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(payload)); return;
     }
     if (url.pathname.includes('/session-successions') && replayGate) await replayGate;
+    if (url.pathname.includes('/session-successions') && replayFailure === 'network') { request.socket.destroy(); return; }
     if (url.pathname.includes('/session-successions') && replayFailure) { response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: replayFailure, error: 'Fixture succession route unavailable.' })); return; }
     let value: unknown;
     if (url.pathname.endsWith('/session-successions/current')) {
@@ -749,6 +751,62 @@ it('allows a manual refresh to confirm the retained source after a native restor
   expect(succession.binding?.client).toBe(binding.client);
   expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'A')).toHaveLength(1);
   expect(f.requests.some(request => /succession\/(prepare|commit)/.test(request.url))).toBe(false);
+}, 10000);
+
+it('keeps the last confirmed locator when a resume refresh cannot reach the Relay', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const binding = succession.binding!, source = binding.session;
+  const reads = () => f.requests.filter(item => item.url.includes('/session-successions')).length, before = reads();
+  f.failReplay('network');
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await settleApp(() => { expect(reads()).toBeGreaterThan(before); expect(succession.discovering).toBe(false); });
+  // The failed refresh restores the confirmed locator without reporting a failure, but marks it stale: views keep
+  // their attachment while input waits for a refresh that reaches the Relay.
+  expect(() => succession.resolveTarget(source, { viewId: source.viewId })).toThrow(SessionLocatorSynchronizingError);
+  expect(succession.error).toBeUndefined();
+  expect(succession.result?.status).toBe('applied');
+  expect(succession.binding?.client).toBe(binding.client);
+  // A retry with backoff refreshes it once the Relay answers.
+  f.failReplay();
+  await vi.waitFor(() => expect(succession.resolveTarget(source, { viewId: source.viewId }).target.nativeSessionId).toBe('B'), { timeout: 4000 });
+  // A Relay answer still applies: a failed replay is reported.
+  await settleApp(() => expect(succession.discovering).toBe(false));
+  f.failReplay('temporary_failure');
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await settleApp(() => expect(succession.error).toContain('Fixture succession route unavailable'));
+  f.failReplay();
+  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
+}, 10000);
+
+it.each(['timeout', 'notification'] as const)('does not restore the confirmed locator after a refresh %s', async reason => {
+  let notify: (() => void) | undefined;
+  const subscribe = HttpWebSocketTransport.prototype.onSessionSuccession;
+  vi.spyOn(HttpWebSocketTransport.prototype, 'onSessionSuccession').mockImplementation(function (this: HttpWebSocketTransport, listener) {
+    notify = () => listener(undefined as never); return subscribe.call(this, listener);
+  });
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const reads = () => f.requests.filter(item => item.url.includes('/session-successions')).length, before = reads();
+  if (reason === 'timeout') {
+    // A slow Relay that is online may be answering with a succession this page has not seen.
+    vi.spyOn(HttpWebSocketTransport.prototype, 'fetchSessionSuccessions').mockRejectedValue(new DOMException('Timed out', 'TimeoutError'));
+    await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  } else {
+    f.failReplay('network');
+    await act(async () => notify!());
+    await settleApp(() => expect(reads()).toBeGreaterThan(before));
+  }
+  // The failure is reported (with its Retry) instead of being hidden behind the old locator.
+  await settleApp(() => expect(succession.error).toBeTruthy());
+  expect(() => succession.resolveTarget(succession.binding?.session ?? { hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'B' })).toThrow();
+  f.failReplay();
 }, 10000);
 
 it('retries a failed metadata refresh without retaining its old error on a healthy native binding', async () => {
@@ -2200,8 +2258,9 @@ it.each(['history', 'control', 'runtime'] as const)('keeps a matching session al
   const initial = connection()!;
   await act(async () => { await new Promise(resolve => nativeSetTimeout(resolve, 300)); });
   expect(succession.error).toBeUndefined();
-  expect(succession.binding).toBeUndefined();
-  expect(succession.sessionState.synchronized).toBe(false);
+  // A restoring runtime does not hide which session this is: the view binds to show it, but grants nothing.
+  if (phase === 'runtime') expect(succession.binding?.client).toBe(initial.client);
+  else { expect(succession.binding).toBeUndefined(); expect(succession.sessionState.synchronized).toBe(false); }
   expect(succession.sessionState.operations.send_message.allowed).toBe(false);
   expect(succession.imageRecipient).toBeUndefined();
   expect(succession.sessionState.connection).toBe(initial.client.getSessionState().connection);

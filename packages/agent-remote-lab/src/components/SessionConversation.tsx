@@ -49,17 +49,20 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   familyRoot: boolean; entries: SessionWindowTarget[];
   onNavigate(destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession): Promise<void>;
 }
+/** How long a view waits for its locator before it reports the wait with a Retry. */
+export const locatorSynchronizingNoticeMs = 30_000;
 export function SessionConversation(props: SessionConversationProps) {
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
   const [inputOwner, setInputOwner] = useState<{ source: SessionWindowTarget; target: SessionWindowTarget; count: number }>();
-  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined, synchronizing = false;
+  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined, synchronizing = false, staleLocator = false;
   try {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
   } catch (error) {
     resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.';
     synchronizing = error instanceof SessionLocatorSynchronizingError;
+    staleLocator = error instanceof SessionLocatorSynchronizingError && error.stale;
   }
   // A discovery refresh briefly withholds every locator. Keep attaching the target this view last resolved, so a refresh
   // does not cancel an attachment in flight and start another; input still waits until the locator is confirmed again.
@@ -76,6 +79,18 @@ export function SessionConversation(props: SessionConversationProps) {
     currentTarget = inputOwner!.target;
     resolutionError ??= 'The previous input is still pending. Check its result before continuing in the replacement session.';
   }
+  // Synchronizing is a wait, not a failure: the view shows it as opening, without an alert and its Retry, unless the
+  // wait lasts long enough to need one.
+  const [synchronizingOverdue, setSynchronizingOverdue] = useState(false);
+  useEffect(() => {
+    setSynchronizingOverdue(false);
+    if (!synchronizing) return;
+    const timer = setTimeout(() => setSynchronizingOverdue(true), locatorSynchronizingNoticeMs);
+    return () => clearTimeout(timer);
+  }, [synchronizing]);
+  const resolutionNotice = synchronizing && !retainingInput && !synchronizingOverdue ? undefined : resolutionError;
+  const retrySynchronizing = synchronizing && synchronizingOverdue && operations?.synchronize
+    ? () => { setSynchronizingOverdue(false); operations.synchronize!(); } : undefined;
   const canAttach = attachmentEnabled && !retainingInput;
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
@@ -123,7 +138,7 @@ export function SessionConversation(props: SessionConversationProps) {
     }
     if (!enabled || !canAttach) return;
     let stopped = false; const abort = new AbortController(); setError('');
-    if (attachmentError) { setError(attachmentError); return; }
+    if (attachmentError) { setError(synchronizing ? '' : attachmentError); return; }
     if (props.attachedSession && sessionKey(props.attachedSession) === sessionKey(currentTarget) && !historyRoleId) { setSession(props.attachedSession); return; }
     if (session && sessionKey(session) === targetKey && !historyRoleId) return;
     const cached = connections?.find(currentTarget);
@@ -147,13 +162,16 @@ export function SessionConversation(props: SessionConversationProps) {
     return () => { stopped = true; abort.abort(); };
   }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, attachmentError, attempt, connections, enabled, canAttach, directory, props.attachedSession?.agentId, props.attachmentManaged]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
-  const pending = !!resolutionError || !displayedSession;
+  // A view whose locator was restored while the Relay is unreachable keeps showing its last resolved target, attached;
+  // only its input waits (it queues) until a discovery confirms the locator again.
+  const locatorWaiting = !!retainedResolution && staleLocator && !retainingInput;
+  const pending = !!resolutionError && !locatorWaiting || !displayedSession;
   return <FamilyChat {...props} onPendingInputChange={count => {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
-    }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionError ?? error} nativeTakeover={nativeTakeover}
-    onRetryAttachment={enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined} />;
+    }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
+    onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined)} />;
 }
 function FamilyChat({ visible = true, fixedDisplayMode, dockHeadingStart, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
@@ -243,3 +261,4 @@ function familyDisplayBinding({ displayBinding, target, entries, viewId, windowV
   return displayBinding && { ...displayBinding, key: target.nativeSessionId === entries[0]?.nativeSessionId
     ? displayBinding.key : (displayBinding.key === viewId || displayBinding.key === windowViewId) ? displayBinding.key : `${displayBinding.key}:${target.nativeSessionId}` };
 }
+

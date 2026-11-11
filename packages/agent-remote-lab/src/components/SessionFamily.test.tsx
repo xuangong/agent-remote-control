@@ -653,6 +653,79 @@ it('keeps an unclaimed leaf from attaching a changed live locator until its dest
   expect(attach).toHaveBeenCalledExactlyOnceWith('recorded', 'new', expect.any(AbortSignal));
 });
 
+it('shows a view whose locator is still synchronizing as opening, without an alert or attaching', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  const attach = vi.spyOn(directory, 'attach').mockImplementation(() => new Promise(() => {}));
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'cached', title: 'Cached' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const container = await render(<SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+    resolveTarget: () => { throw new SessionLocatorSynchronizingError(); }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+    <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+      directoryFor={() => directory} baseUrl="http://fixture" storageScope="synchronizing-locator" hostLabel="Host" compact={false} active offline={false}
+      transport={transport} draftStore={new DraftStore('synchronizing-locator')} />
+  </SessionViewOperationsContext.Provider>);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.textContent).not.toContain('still synchronizing');
+  expect(attach).not.toHaveBeenCalled();
+});
+
+it('reports a locator that stays synchronizing with a Retry that reads it again', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { SessionConversation, locatorSynchronizingNoticeMs } = await import('./SessionConversation.js');
+    const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+    const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'overdue', title: 'Overdue' };
+    const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+    const synchronize = vi.fn();
+    const container = await render(<SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true, synchronize,
+      resolveTarget: () => { throw new SessionLocatorSynchronizingError(); }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+        baseUrl="http://fixture" storageScope="overdue-locator" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={new DraftStore('overdue-locator')} />
+    </SessionViewOperationsContext.Provider>);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(locatorSynchronizingNoticeMs); });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('still synchronizing');
+    await act(async () => alert!.querySelector('button')!.click());
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps showing a view whose locator is stale while its input waits, without attaching again', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  const attach = vi.spyOn(directory, 'attach').mockResolvedValue({ agentId: 'stale-agent', nativeSessionId: 'stale' });
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'stale', title: 'Stale' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  let setStale!: (value: boolean) => void;
+  const ready = vi.fn();
+  function Harness() {
+    const [stale, set] = useState(false); setStale = set;
+    return <SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+      resolveTarget: () => { if (stale) throw new SessionLocatorSynchronizingError(true); return { target }; }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}} onSessionReady={ready}
+        directoryFor={() => directory} baseUrl="http://fixture" storageScope="stale-locator" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={new DraftStore('stale-locator')} />
+    </SessionViewOperationsContext.Provider>;
+  }
+  const container = await render(<Harness />);
+  await act(async () => { await Promise.resolve(); });
+  expect(attach).toHaveBeenCalledOnce();
+  await act(async () => setStale(true));
+  // The view stays on its session (not "Opening session"), and its input cannot be dispatched until the locator is confirmed.
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(ready.mock.calls.at(-1)?.[0]?.sessionState.operations.send_message.allowed).toBe(false);
+  expect(ready.mock.calls.at(-1)?.[0]?.sendQueuedInput).toBeUndefined();
+  expect(ready.mock.calls.at(-1)?.[0]?.operationBinding.source.agentId).toBe('stale-agent');
+  await act(async () => setStale(false));
+  expect(attach).toHaveBeenCalledOnce();
+});
+
 it('keeps an attachment in flight while a discovery refresh withholds the locator and attaches only once', async () => {
   const { SessionConversation } = await import('./SessionConversation.js');
   const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
@@ -796,4 +869,45 @@ it.each(['attach', 'native restoration'] as const)('preserves one pending %s req
   expect(presented.mock.calls.some(call => call[0]?.operationBinding.source.agentId === 'attached-agent')).toBe(true);
   expect(attach).toHaveBeenCalledTimes(expectedCalls);
   await unmount(container);
+});
+
+it('keeps the same editor when an attached pane is unlinked into an independent dock', async () => {
+  const { SessionConversationSurfaces } = await import('./SessionConversationSurfaces.js');
+  const { WindowSessionBridgeContext } = await import('../window-session-bridge-context.js');
+  const { createCompositionSlot } = await import('../session-composition-model.js');
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
+  const { agentId: _, ...binding } = session;
+  const sideBinding = { ...binding, nativeSessionId: 'side', title: 'Side' };
+  const root = createWindowView('root', binding, 'primary');
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'unlink', title: 'Window', revision: 0, selectedPrimaryViewId: 'root', selectedViewId: 'side',
+    views: [root, { ...createWindowView('side', sideBinding, 'attached'), attachedTo: root.id }] };
+  const slots = new Map([['root', createCompositionSlot('slot-root', binding, 'unlink')], ['side', createCompositionSlot('slot-side', sideBinding, 'unlink')]]);
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore('unlink-family');
+  let update!: () => void;
+  function Harness() {
+    const [, renderAgain] = useState(0); update = () => renderAgain(value => value + 1);
+    const authority = { window, readWindow: () => window, operate(operation: Parameters<typeof applyWindowOperation>[1]) { window = applyWindowOperation(window, operation); update(); } };
+    const family = (view: WorkspaceWindow['views'][number], placement: string) => <section key={view.id} data-placement={placement}>
+      <SessionFamily target={{ ...view.binding!, hostId: 'local' }} viewId={view.id} storageScope="unlink-family" baseUrl="http://fixture" hostLabel="Local"
+        compact={false} active offline transport={transport} draftStore={drafts}
+        draftBinding={{ store: drafts, key: slots.get(view.id)!.owners.text.key }} imageDraftBinding={slots.get(view.id)!.owners.image} /></section>;
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={authority}>
+      <WindowSessionBridgeContext.Provider value={{ slotForView: id => slots.get(id) }}>
+        <SessionConversationSurfaces scope="unlink-family" transport={transport} mode="window">
+          {window.views.filter(view => view.placement !== 'attached').map(view => family(view, view.placement))}
+        </SessionConversationSurfaces>
+      </WindowSessionBridgeContext.Provider>
+    </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  const editor = () => view.querySelector('[data-view-id="side"] [data-testid="prompt-input"]');
+  const before = editor();
+  expect(before?.closest('[data-placement="primary"]')).not.toBeNull();
+  // Unlinking keeps the view and moves it out of its source's family into a dock of its own.
+  await act(async () => { window = { ...window, views: window.views.map(item => item.id === 'side' ? { ...item, placement: 'dock', attachedTo: undefined } : item) }; update(); });
+  await act(async () => { await Promise.resolve(); });
+  expect(editor()?.closest('[data-placement="dock"]')).not.toBeNull();
+  expect(editor()).toBe(before);
+  expect(before?.isConnected).toBe(true);
 });

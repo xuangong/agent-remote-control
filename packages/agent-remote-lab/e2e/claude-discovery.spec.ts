@@ -73,6 +73,13 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
   const host = createAgentHost({ registrations: [{ adapter: provider, directory: createClaudeSessionDirectory(provider, [{ id: 'work', name: 'Fixture project', path: process.cwd() }]) }],
     installationId: `claude-discovery-${testInfo.project.name}`, name: 'Claude Discovery',
     uplink: { url: relayUrl.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: invitation.key } });
+  // Native children are listed in the parent's collapsible Session subagents group.
+  const openChild = async () => {
+    const children = page.getByRole('group', { name: 'Session subagents', exact: true }).first();
+    await expect(children).toBeVisible();
+    if (await children.getAttribute('open') === null) await children.locator('summary').click();
+    await children.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
+  };
   try {
     await host.ready;
     await page.goto('/');
@@ -115,30 +122,32 @@ test('uses Claude settings, plan review, skills and a read-only native child thr
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'PARENT_REVIEW_OK' })).toBeVisible();
     expect(inputs).toEqual(['Review the plan', '/review-fixture Check the implementation']);
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toHaveCount(0);
-    await page.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
-    await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toBeVisible();
+    await openChild();
+    // The native child opens as a read-only pane beside its parent in the same session family.
+    const child = page.getByRole('region', { name: 'Review implementation', exact: true });
+    await expect(child.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toBeVisible();
     completeChild();
-    await expect(page.getByText('CHILD_TASK_PROMPT', { exact: true })).toBeVisible();
+    await expect(child.getByText('CHILD_TASK_PROMPT', { exact: true })).toBeVisible();
     continueChild();
-    await expect(page.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toBeVisible();
+    await expect(child.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toBeVisible();
     completeFollowup();
-    await expect(page.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toBeVisible();
-    await expect(page.locator('.agent-message-user, .agent-message-assistant')).toHaveText([
+    await expect(child.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toBeVisible();
+    await expect(child.locator('.agent-message-user, .agent-message-assistant')).toHaveText([
       /CHILD_TASK_PROMPT/, /CHILD_REVIEW_OK/, /CHILD_FOLLOWUP_PROMPT/, /CHILD_FOLLOWUP_OK/,
     ]);
-    await expect(page.getByTestId('prompt-submit')).toBeDisabled();
+    await expect(child.getByTestId('prompt-submit')).toBeDisabled();
     expect(spawned).toBe(1);
     await page.screenshot({ path: testInfo.outputPath('claude-child.png'), fullPage: true });
-    await page.getByRole('button', { name: 'Sessions', exact: true }).click();
-    await page.getByRole('region', { name: 'Chat sessions' }).getByRole('button').filter({ hasText: 'Parent' }).click();
+    await child.getByRole('button', { name: 'Close subagent', exact: true }).click();
+    await expect(child).toHaveCount(0);
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'PARENT_REVIEW_OK' })).toBeVisible();
     const nextInvitation = await (await request.post(`${relayUrl}/v1/remote/pairings`, { data: {} })).json();
     await host.replaceUplink({ url: relayUrl.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: nextInvitation.key });
-    await page.getByRole('button').filter({ hasText: 'Review implementation' }).first().click();
-    await expect(page.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toHaveCount(1);
-    await expect(page.getByText('CHILD_TASK_PROMPT', { exact: true })).toHaveCount(1);
-    await expect(page.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toHaveCount(1);
-    await expect(page.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toHaveCount(1);
+    await openChild();
+    await expect(child.locator('.agent-message-assistant').filter({ hasText: 'CHILD_REVIEW_OK' })).toHaveCount(1);
+    await expect(child.getByText('CHILD_TASK_PROMPT', { exact: true })).toHaveCount(1);
+    await expect(child.getByText('CHILD_FOLLOWUP_PROMPT', { exact: true })).toHaveCount(1);
+    await expect(child.getByText('CHILD_FOLLOWUP_OK', { exact: true })).toHaveCount(1);
     expect(spawned).toBe(1);
   } finally { await host.close(); }
 });

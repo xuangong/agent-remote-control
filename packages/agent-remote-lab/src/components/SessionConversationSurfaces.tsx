@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
@@ -26,6 +26,8 @@ export interface SessionSurfaceDescriptor {
   layout?: WindowLayoutAuthority; bridge?: WindowSessionBridge; presentedViewId?: string;
   titleInteraction: ContextType<typeof SessionTitleInteractionContext>;
   onSelectWindowPane?(): void;
+  /** Keep the conversation in its destination, and attached, while its active registration is not visible. */
+  retainHidden?: boolean;
 }
 export function allowsWindowPaneSelection(target: EventTarget | null): boolean {
   return target instanceof Element && !target.closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize');
@@ -104,6 +106,8 @@ export function SessionConversationSurfaces({ scope, transport, mode, children }
   const enabled = useContext(WorkspaceReady);
   const registry = useMemo(() => new ConversationSurfaces(mode), [scope, transport]);
   const context = useMemo(() => ({ registry }), [registry]);
+  // A stable ref: React detaches a changed ref in the mutation phase, when the surfaces already place their hosts.
+  const parkingRef = useCallback((element: HTMLDivElement | null) => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }, [registry]);
   useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot);
   // Child layout effects publish destinations first; select their mode from that same committed registration set.
   useLayoutEffect(() => registry.selectMode(mode), [registry, mode]);
@@ -112,7 +116,7 @@ export function SessionConversationSurfaces({ scope, transport, mode, children }
     return () => registry.deactivate();
   }, [registry]);
   return <SurfaceScope.Provider value={context}>{children}
-    <div hidden aria-hidden="true" ref={element => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }} />
+    <div hidden aria-hidden="true" ref={parkingRef} />
     {[...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} enabled={enabled} />)}
   </SurfaceScope.Provider>;
 }
@@ -123,18 +127,28 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   const chosen = selected ?? registrations.find(item => item.mode === mode) ?? registrations[0] ?? entry.last;
   const descriptor = chosen.descriptor;
   const shown = !!selected && descriptor.props.visible;
+  const placed = shown || !!selected && !!descriptor.retainHidden;
   entry.last = chosen;
   // The Window still owns attachment of its selected primary view when the same slot is shown as a Bot.
   const window = chosen.mode === 'bot' ? registrations.find(item => item.mode === 'window'
     && sessionKey(item.descriptor.props.target) === sessionKey(descriptor.props.target)) : undefined;
   const attachment = window?.descriptor.props ?? descriptor.props;
-  useLayoutEffect(() => {
-    const destination = shown ? chosen.destination : registry.parking;
+  // Place the host before any layout effect of the conversation runs: those of a view that just became visible
+  // measure, scroll and focus their content (a Trace reveal, a restored reading position), which a parked host cannot.
+  // A layout effect here would run too late: React runs a parent's layout effects after its children's, and the
+  // conversation is a child (through the portal). useInsertionEffect is used for moving DOM because it runs in the
+  // commit's mutation phase: after this commit's DOM changes inside the host (children are committed first), and
+  // before every layout effect and ref attachment of the commit. It relies on that order only; the destination it
+  // moves to is a node from an earlier commit (registered in a layout effect, then published), and the parking element
+  // may still be unset on the first commit, which is why a missing destination is skipped.
+  useInsertionEffect(() => {
+    const destination = placed ? chosen.destination : registry.parking;
     if (destination) moveSessionHost(entry.host, destination);
   });
   useLayoutEffect(() => {
     if (chosen.mode !== 'window' || !shown || !enabled || !descriptor.onSelectWindowPane) return;
-    const select = (event: Event) => { if (allowsWindowPaneSelection(event.target)) descriptor.onSelectWindowPane?.(); };
+    // The listener of a host just parked is removed only after the insertion effect moved it: ignore its events.
+    const select = (event: Event) => { if (allowsWindowPaneSelection(event.target) && !entry.host.closest('[hidden], [inert]')) descriptor.onSelectWindowPane?.(); };
     entry.host.addEventListener('pointerdown', select, true);
     entry.host.addEventListener('focusin', select, true);
     return () => {
@@ -144,8 +158,8 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   }, [entry.host, chosen.mode, shown, enabled, descriptor.onSelectWindowPane]);
   const props: SessionConversationProps = { ...descriptor.props,
     attachmentManaged: attachment.attachmentManaged, attachedSession: attachment.attachedSession, attachmentNotice: attachment.attachmentNotice,
-    visible: shown, mutationBlocked: !enabled || !shown || descriptor.props.mutationBlocked,
-    attachmentEnabled: enabled && shown && descriptor.props.attachmentEnabled !== false,
+    visible: shown, mutationBlocked: !enabled || !placed || descriptor.props.mutationBlocked,
+    attachmentEnabled: enabled && placed && descriptor.props.attachmentEnabled !== false,
     onPendingInputChange(count) {
       if (registry.reportPending(entry, count)) descriptor.props.onPendingInputChange?.(count);
     },

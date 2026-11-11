@@ -1,12 +1,21 @@
-import { showNewSession, showSessions } from './session-navigation';
-import { openSessionsPage } from './all-sessions';
-import { toggleViewPanel } from './view-options';
+import { showNewSession } from './session-navigation';
+import { openSessionsPage, selectConnectedHost, showAllSessions } from './all-sessions';
+import { pairHost, type PairedHost } from './paired-host';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-async function start(page: Page) {
+/** /fork creates its session from a snapshot of the source, which only a paired Host admits (71fcf583). */
+const hosted = test.extend<{ host: PairedHost }>({
+  host: async ({ request }, use, testInfo) => {
+    const host = await pairHost(request, testInfo);
+    try { await use(host); } finally { await host.close(); }
+  },
+});
+
+async function start(page: Page, host?: PairedHost) {
   await page.goto('/');
+  if (host) await selectConnectedHost(page, host.hostId);
   await showNewSession(page);
-  await page.getByTestId('session-create').click();
+  await page.getByTestId('session-create').filter({ visible: true }).click();
   const primary = page.locator('.lab-primary-conversation');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   await primary.getByTestId('prompt-input').fill('Remember the project codename: cobalt orchard.');
@@ -157,18 +166,30 @@ test('selecting an opened side in discovery focuses its existing window', async 
   expect(attachmentRequests).toEqual([]);
 });
 
-test('fork keeps the source chat, side sends independently, and references survive reload', async ({ page }, testInfo) => {
-  const primary = await start(page);
+/** A fork opens from its source's Side list as an attached pane of the Window, beside its source. */
+function forkPane(page: Page): Locator {
+  return page.locator('.lab-side-conversation');
+}
+/** The source's Side list names each fork after its first message once it has one. */
+function forkEntries(primary: Locator): Locator {
+  return primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]');
+}
+
+hosted('fork keeps the source chat, side sends independently, and references survive reload', async ({ page, host }, testInfo) => {
+  const primary = await start(page, host);
   const sourceUrl = page.url();
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
-  const entry = primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]');
+  const entry = forkEntries(primary);
   await expect(entry).toHaveCount(1);
+  await expect(entry).toHaveText('Side 1 · Fork of New session');
+  expect(host.creations.at(-1)).toMatchObject({ creationSource: { providerId: 'recorded', nativeSessionId: 'paired-native-1' } });
   expect(page.url()).toBe(sourceUrl);
-  await expect(page.getByRole('complementary', { name: 'Side conversation' })).toHaveCount(0);
+  // A fork, unlike a Side, does not open by itself.
+  await expect(page.locator('.lab-side-conversation')).toHaveCount(0);
   await entry.click();
-  const side = page.getByRole('complementary', { name: 'Side conversation', includeHidden: true });
-  await expect(side.getByTestId('prompt-input')).toBeEnabled();
+  const side = forkPane(page);
+  await expect(side.getByTestId('prompt-input')).toBeEditable();
   await expect(side.locator('.lab-fork-reference summary')).toContainText('New session');
   const sideComposer = side.locator('.agent-composer');
   const sideBox = await sideComposer.boundingBox();
@@ -190,35 +211,34 @@ test('fork keeps the source chat, side sends independently, and references survi
   await expect(side.getByText('Later source messages are not included.')).toBeVisible();
   expect((await sideComposer.boundingBox())!.height).toBe(sideBox!.height);
   await side.locator('.lab-fork-reference summary').click();
-  const ids = await page.locator('textarea').evaluateAll((nodes) => nodes.map((node) => node.id));
+  const ids = await page.getByTestId('prompt-input').evaluateAll(nodes => nodes.map(node => node.id));
   expect(new Set(ids).size).toBe(ids.length);
   await side.getByTestId('prompt-input').fill('Retained side draft');
-  await page.screenshot({ path: `../../.tmp/evidence/fork-side-${testInfo.project.name}.png`, fullPage: true });
-  if (testInfo.project.name === 'chromium-mobile') await toggleViewPanel(page, 'Header');
-  await side.getByRole('button', { name: 'Close side conversation' }).click();
-  await expect(side).toHaveCount(1);
-  await expect(side).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('fork-side.png'), fullPage: true });
+  // Closing the fork's view keeps the fork; its source's Side list opens it again.
+  await page.locator(`#lab-context [data-window-view-close='${await side.getAttribute('data-view-id')}']`).click();
+  await expect(side).toHaveCount(0);
   await entry.click();
   await expect(side).toBeVisible();
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Retained side draft');
+  await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
+  // Drafts belong to views (docs/superpowers/specs/2026-10-15-window-workspaces-design.md) and survive a reload.
+  await side.getByTestId('prompt-input').fill('Retained side draft');
   const sideUrl = page.url();
   await page.reload();
   await expect(side).toBeVisible();
   await expect(page).toHaveURL(sideUrl);
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Retained side draft');
+  await expect(side.getByTestId('prompt-input')).toHaveText('Retained side draft');
   await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
   await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
   await expect(primary.locator('.agent-message-user')).toHaveCount(2);
   await expect(primary.getByTestId('timeline')).toContainText('cobalt orchard');
   await side.locator('.lab-fork-reference summary').click();
   await side.getByRole('button', { name: 'Open source session' }).click();
-  await expect(page).toHaveURL(sourceUrl);
-  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]')).toBeVisible();
-  await primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]').click();
+  await expect(primary).toHaveAttribute('data-selected', 'true');
+  await expect(entry).toBeVisible();
+  await entry.click();
   await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
   await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
-  const resumedControl = side.getByRole('button', { name: 'Take control', exact: true });
-  if (await resumedControl.isVisible()) await resumedControl.click();
   await side.getByTestId('prompt-input').fill('A second branch message.');
   await side.getByTestId('prompt-input').press('Enter');
   await expect(side.locator('.agent-message-user')).toHaveCount(3);
@@ -236,8 +256,8 @@ test('btw aliases side and sends its arguments as the first branch message', asy
   await expect(side.getByTestId('timeline')).not.toContainText('cobalt orchard');
 });
 
-test('forks a conversation with a large tool result and discloses shortened context', async ({ page }) => {
-  const primary = await start(page);
+hosted('forks a conversation with a large tool result and discloses shortened context', async ({ page, host }) => {
+  const primary = await start(page, host);
   await page.route('**/timeline?**', async (route) => {
     if (new URL(route.request().url()).searchParams.get('limit') !== '20000') return route.continue();
     const response = await route.fetch();
@@ -249,23 +269,24 @@ test('forks a conversation with a large tool result and discloses shortened cont
   });
   await primary.getByTestId('prompt-input').fill('/fork Continue from that build');
   await primary.getByTestId('prompt-input').press('Enter');
-  await primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]').click();
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  await forkEntries(primary).click();
+  const side = forkPane(page);
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Continue from that build');
   await side.locator('.lab-fork-reference summary').click();
   await expect(side.getByText('1 tool records shortened. User and assistant messages are preserved.')).toBeVisible();
   await expect(side.getByTestId('timeline')).not.toContainText('Build started');
 });
 
-test('rejects a delayed fork input after the main conversation changes', async ({ page }, testInfo) => {
+hosted('rejects a delayed fork input after the main conversation changes', async ({ page, host }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Exercises simultaneous desktop session controls.');
-  const primary = await start(page);
+  const primary = await start(page, host);
   await primary.getByTestId('prompt-input').fill('/fork');
   await primary.getByTestId('prompt-input').press('Enter');
-  await expect(primary.getByRole('navigation', { name: 'Forked sessions' }).locator('button[aria-pressed]')).toHaveCount(1);
-  await showSessions(page);
-  await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button', { name: 'Refresh', exact: true }).click();
-  await page.getByRole('region', { name: 'Discover sessions' }).getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
+  await expect(forkEntries(primary)).toHaveCount(1);
+  // Open the fork itself in the main view from the Host's sessions.
+  const sessions = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
+  await sessions.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await sessions.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
   await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.includes(':record:'))!;
@@ -281,8 +302,19 @@ test('rejects a delayed fork input after the main conversation changes', async (
   await primary.getByRole('button', { name: 'Open source session' }).click();
   await expect(primary.locator('.lab-fork-reference')).toHaveCount(0);
   await page.evaluate(() => (window as unknown as { releaseFork: () => void }).releaseFork());
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((key) => key.includes(':record:'))!)!).delivery)).toBe('pending');
+  // The input is rejected locally: it never reaches the source, and the fork records it as not sent.
+  const delivery = () => page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((key) => key.includes(':record:'))!)!).delivery);
+  await expect.poll(delivery).toBe('pending');
   await expect(primary.getByTestId('timeline')).not.toContainText('This must stay in the fork.');
+  // The fork is not stuck: opening it again, its next input is delivered.
+  const discovery = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
+  await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await discovery.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
+  await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
+  await primary.getByTestId('prompt-input').fill('Delivered after the rejection.');
+  await primary.getByTestId('prompt-input').press('Enter');
+  await expect(primary.locator('.agent-message-assistant').last()).toContainText('Delivered after the rejection.');
+  await expect.poll(delivery).toBe('sent');
 });
 
 test('keeps a tree of side panes with independent drafts and reopens a closed one from its source', async ({ page }, testInfo) => {
@@ -335,37 +367,43 @@ test('keeps a tree of side panes with independent drafts and reopens a closed on
   await page.screenshot({ path: `../../.tmp/evidence/side-tree-${testInfo.project.name}.png`, fullPage: true });
 });
 
-test('a slow sibling attachment does not override the latest side selection', async ({ page }) => {
-  const primary = await start(page);
+hosted('a slow sibling attachment does not override the latest side selection', async ({ page, host }) => {
+  const primary = await start(page, host);
   for (const name of ['First branch', 'Second branch']) {
     await primary.getByTestId('prompt-input').fill(`/fork ${name}`);
     await primary.getByTestId('prompt-input').press('Enter');
     await expect(primary.getByRole('button', { name: new RegExp(`^Side \\d+ · ${name}`) })).toBeVisible();
-    await expect(primary.getByTestId('prompt-input')).toHaveValue('');
+    await expect(primary.getByTestId('prompt-input')).toHaveText('');
   }
   const firstTarget = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes(':record:'))
     .map((key) => JSON.parse(localStorage.getItem(key)!)).find((fork) => fork.firstInput === 'First branch').target.nativeSessionId);
   let release!: () => void;
   let entered = false;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  await page.route('**/v1/remote/attach', async (route) => {
+  // The paired Host attaches its sessions through /v1/remote/hosts/<Host>/attach.
+  await page.route('**/v1/remote/**/attach', async (route) => {
     if (route.request().postDataJSON().nativeSessionId !== firstTarget) return route.continue();
     const response = await route.fetch();
     entered = true;
     await gate;
     await route.fulfill({ response });
   });
+  await page.reload();
+  await expect(primary.getByRole('button', { name: 'Side 2 · Second branch', exact: true })).toBeVisible();
   await primary.getByRole('button', { name: 'Side 1 · First branch', exact: true }).click();
   await expect.poll(() => entered).toBe(true);
   await primary.getByRole('button', { name: 'Side 2 · Second branch', exact: true }).click();
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
-  await expect(side.locator('.lab-side-title')).toContainText('Second branch');
+  // The source's Side list shows one fork pane at a time; the latest choice keeps it when the slower attachment finishes.
+  const second = sideWith(page, 'Second branch');
+  await expect(second).toHaveAttribute('data-selected', 'true');
   const finished = page.waitForResponse((response) => response.url().endsWith('/attach') && response.request().postDataJSON().nativeSessionId === firstTarget);
   release();
   await finished;
-  await expect(side.locator('.lab-side-title')).toContainText('Second branch');
-  await side.getByTestId('prompt-input').fill('Still in the selected branch');
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Still in the selected branch');
+  await expect(page.locator('.lab-side-conversation')).toHaveCount(1);
+  await expect(second).toHaveAttribute('data-selected', 'true');
+  await expect(primary.getByRole('button', { name: 'Side 2 · Second branch', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await second.getByTestId('prompt-input').fill('Still in the selected branch');
+  await expect(second.getByTestId('prompt-input')).toHaveText('Still in the selected branch');
 });
 
 

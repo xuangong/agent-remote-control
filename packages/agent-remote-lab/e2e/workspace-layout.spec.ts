@@ -152,6 +152,7 @@ test('global View stays usable while the main composition is minimized', async (
   await page.setViewportSize({ width: 1440, height: 1000 });
   await expect(primary).toBeHidden(); await expect(view).toBeVisible();
   await page.getByRole('button', { name: /^Restore primary group:/ }).click();
-  await expect(primary.getByRole('button', { name: 'View options', exact: true })).toBeVisible();
+  // A desktop Window keeps View options in its toolbar, whether its primary group is minimized or not.
+  await expect(page.locator('#lab-workbench > header.lab-window-toolbar').getByRole('button', { name: 'View options', exact: true })).toBeVisible();
   await expect(view).toHaveCount(1);
 });

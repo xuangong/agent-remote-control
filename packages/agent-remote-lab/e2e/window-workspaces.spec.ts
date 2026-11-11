@@ -485,8 +485,8 @@ test('session panes preserve independent drafts and mobile Window navigation sel
     await toggleViewPanel(page, 'Sidebar');
     await expect(page.locator('#lab-context')).toBeHidden();
     await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
-    // Without the sidebar, global controls live in the first pane but must preserve the active conversation.
-    await group('alpha').getByRole('button', { name: 'View options', exact: true }).click();
+    // Without the sidebar, global controls live in the Window toolbar but must preserve the active conversation.
+    await page.locator('#lab-workbench > header.lab-window-toolbar').getByRole('button', { name: 'View options', exact: true }).click();
     const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
     await expect(globalOptions).toBeVisible();
     await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');

@@ -50,6 +50,9 @@ interface SuccessionOptions {
   failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
 const selectionFor = compositionSelection;
+/** The request never got a Relay answer: the network failed or the request timed out. */
+const unreachable = (error: unknown) => error instanceof DOMException && error.name === 'TimeoutError'
+  || !!error && typeof error === 'object' && 'code' in error && error.code === 'network_error';
 const identityConfirmationError = 'The native session identity could not be confirmed.';
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
@@ -111,6 +114,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
       discoveryError: undefined as string | undefined,
       replays: [] as SessionSuccessionReplay[], attempted: new Set<string>(), activeAttempt: undefined as string | undefined, targetUnavailable: false,
       historyEvidence: new Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }>(),
+      // The locators the last completed discovery confirmed, kept while a later refresh cannot read the replay.
+      confirmedEvidence: undefined as Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }> | undefined,
       historyTitles: new Map<string, string>(),
       refreshObservers: new Set<() => void>(),
       favoritesHints: new Map<string, { revision: number; operationId: string; status: string }>(),
@@ -496,6 +501,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const request = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]) };
     runtime.discovering = true; runtime.discovered = false; runtime.historyEvidence.clear();
     rememberHistoryTitles(runtime.document.slots.map(selectionFor)); publish();
+    let replayRead = false;
     try {
       if (!runtime.readable) throw new Error('Saved session composition is unreadable or unsupported. Its original data has been preserved.');
       if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') throw new Error('The selected session view no longer matches this session.');
@@ -509,7 +515,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (cursor && cursors.has(cursor)) throw new Error('Session succession replay did not advance.');
         if (cursor) cursors.add(cursor);
       } while (cursor);
-      runtime.replays = all;
+      runtime.replays = all; replayRead = true;
       if (runtime.selection && runtime.intent !== 'history' && !runtime.selectedSlot) runtime.selectedSlot = ensureView(runtime.selection).id;
       if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error('The selected session view is no longer available.');
       const latestByRole = new Map<string, SessionSuccessionReplay>();
@@ -609,7 +615,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
         }
       }
       if (!current()) return;
-      runtime.discovered = true;
+      runtime.discovered = true; runtime.confirmedEvidence = new Map(runtime.historyEvidence);
       if (!runtime.desired) runtime.active = false;
       if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
       else {
@@ -625,6 +631,12 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!runtime.desired && !runtime.document.roles.length && error && typeof error === 'object' && 'code' in error && ['http_404', 'route_not_found'].includes(String(error.code))) {
           runtime.unsupported = true;
           queueMicrotask(() => { if (current()) void discover(); });
+        } else if (!replayRead && runtime.confirmedEvidence && unreachable(error)) {
+          // A refresh that cannot reach the Relay (offline after a resume, for instance) is not evidence that the
+          // locators changed: keep the ones the last discovery confirmed, so views stay attached and input can wait.
+          // The next resume, succession notice or retry refreshes them again. A Relay answer still applies as before.
+          for (const [key, evidence] of runtime.confirmedEvidence) runtime.historyEvidence.set(key, evidence);
+          runtime.discovered = true;
         } else {
           runtime.error = runtime.discoveryError = error instanceof Error ? error.message : 'Session succession could not be recovered.';
           if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') runtime.discovered = true;

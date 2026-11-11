@@ -123,6 +123,7 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
       response.setHeader('content-type', 'application/json'); response.end(JSON.stringify(payload)); return;
     }
     if (url.pathname.includes('/session-successions') && replayGate) await replayGate;
+    if (url.pathname.includes('/session-successions') && replayFailure === 'network') { request.socket.destroy(); return; }
     if (url.pathname.includes('/session-successions') && replayFailure) { response.writeHead(404, { 'content-type': 'application/json' }); response.end(JSON.stringify({ code: replayFailure, error: 'Fixture succession route unavailable.' })); return; }
     let value: unknown;
     if (url.pathname.endsWith('/session-successions/current')) {
@@ -749,6 +750,30 @@ it('allows a manual refresh to confirm the retained source after a native restor
   expect(succession.binding?.client).toBe(binding.client);
   expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'A')).toHaveLength(1);
   expect(f.requests.some(request => /succession\/(prepare|commit)/.test(request.url))).toBe(false);
+}, 10000);
+
+it('keeps the last confirmed locator when a resume refresh cannot reach the Relay', async () => {
+  const real = successionHooks.useSessionSuccession;
+  let succession!: ReturnType<typeof real>;
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  const f = await failureFixture(false, 'B');
+  await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
+  const binding = succession.binding!, source = binding.session;
+  const reads = () => f.requests.filter(item => item.url.includes('/session-successions')).length, before = reads();
+  f.failReplay('network');
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await settleApp(() => { expect(reads()).toBeGreaterThan(before); expect(succession.discovering).toBe(false); });
+  // The failed refresh neither withholds the locator nor reports a synchronization failure.
+  expect(succession.resolveTarget(source, { viewId: source.viewId }).target.nativeSessionId).toBe('B');
+  expect(succession.error).toBeUndefined();
+  expect(succession.result?.status).toBe('applied');
+  expect(succession.binding?.client).toBe(binding.client);
+  // A Relay answer still applies: a failed replay is reported.
+  f.failReplay('temporary_failure');
+  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await settleApp(() => expect(succession.error).toContain('Fixture succession route unavailable'));
+  f.failReplay();
+  expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
 }, 10000);
 
 it('retries a failed metadata refresh without retaining its old error on a healthy native binding', async () => {

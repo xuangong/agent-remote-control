@@ -1,8 +1,9 @@
 import { showNewSession, showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 import { toggleViewPanel } from './view-options';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
-async function start(page: import('@playwright/test').Page) {
+async function start(page: Page) {
   await page.goto('/');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
@@ -14,53 +15,59 @@ async function start(page: import('@playwright/test').Page) {
   return primary;
 }
 
-test('resizes the visible conversation pair and restores its proportion after reload', async ({ page }, testInfo) => {
+/** A Side opens as an attached pane of the Window, beside its source, rather than as a complementary panel. */
+function sideWith(page: Page, text: string): Locator {
+  return page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: text }) });
+}
+
+/** Closes a pane's session view from the sidebar's "In this Window" list; the agent session keeps running. */
+async function closeView(page: Page, pane: Locator) {
+  await page.locator(`#lab-context [data-window-view-close='${await pane.getAttribute('data-view-id')}']`).click();
+}
+
+/** Each pane's width separator is named after its title. */
+async function widthSeparator(page: Page, pane: Locator) {
+  return page.getByRole('separator', { name: `${await pane.getAttribute('aria-label')} width`, exact: true });
+}
+
+test('resizes a Side pane beside its source and restores its width after reload', async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'Requires two visible conversation windows.');
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/side Adjustable side');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  const side = sideWith(page, 'Adjustable side');
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Adjustable side');
-  const divider = page.getByRole('separator', { name: 'Conversation widths' });
+  // Window panes keep their own widths; the Side's separator sits on its trailing edge.
+  const divider = await widthSeparator(page, side);
   await expect(divider).toBeVisible();
-  const original = (await primary.boundingBox())!.width;
+  const original = (await side.boundingBox())!.width;
   const handle = (await divider.boundingBox())!;
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
   await page.mouse.down();
   await page.mouse.move(handle.x + handle.width / 2 + 120, handle.y + handle.height / 2, { steps: 6 });
   await page.mouse.up();
-  await expect.poll(async () => (await primary.boundingBox())!.width).toBeGreaterThan(original + 100);
-  await divider.press('End');
-  expect((await side.boundingBox())!.width).toBeCloseTo(320, 0);
+  await expect.poll(async () => (await side.boundingBox())!.width).toBeGreaterThan(original + 100);
+  await expect(primary).toBeVisible();
   await divider.press('Home');
-  expect((await primary.boundingBox())!.width).toBeCloseTo(320, 0);
+  await expect.poll(async () => Math.round((await side.boundingBox())!.width)).toBe(Number(await divider.getAttribute('aria-valuemin')));
   await divider.press('Enter');
-  expect((await primary.boundingBox())!.width).toBeCloseTo((await side.boundingBox())!.width, 0);
+  await expect.poll(async () => Math.round((await side.boundingBox())!.width)).toBe(Math.round(original));
   await divider.press('Shift+ArrowRight');
-  const preferredWidth = (await primary.boundingBox())!.width;
+  const preferredWidth = (await side.boundingBox())!.width;
+  expect(preferredWidth).toBeGreaterThan(original);
   await page.reload();
   await expect(divider).toBeVisible();
-  await expect.poll(async () => (await primary.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
-  await page.setViewportSize({ width: 1200, height: 900 });
-  await toggleViewPanel(page, 'Sidebar');
-  await toggleViewPanel(page, 'Replica Inspector');
-  await expect.poll(async () => (await primary.boundingBox())!.width + (await side.boundingBox())!.width).toBeLessThan(640);
-  expect(Math.abs((await primary.boundingBox())!.width - (await side.boundingBox())!.width)).toBeLessThanOrEqual(1);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1200);
-  await toggleViewPanel(page, 'Replica Inspector');
-  await toggleViewPanel(page, 'Sidebar');
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await expect.poll(async () => (await primary.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
+  await expect.poll(async () => (await side.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
+  await expect(primary).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(divider).toHaveCount(0);
-  await expect(side).toBeVisible();
-  await expect(primary).toBeHidden();
+  await expect(page.getByRole('separator', { name: / width$/ })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(divider).toBeVisible();
   await expect(primary).toBeVisible();
+  await expect.poll(async () => (await side.boundingBox())!.width).toBeCloseTo(preferredWidth, 0);
   await divider.dblclick();
-  expect((await primary.boundingBox())!.width).toBeCloseTo((await side.boundingBox())!.width, 0);
+  await expect.poll(async () => Math.round((await side.boundingBox())!.width)).toBe(Math.round(original));
 });
 
 test('clicking either side-by-side conversation changes focus without moving the windows', async ({ page }, testInfo) => {
@@ -69,7 +76,7 @@ test('clicking either side-by-side conversation changes focus without moving the
   const sourceUrl = page.url();
   await primary.getByTestId('prompt-input').fill('/side Stable side');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  const side = sideWith(page, 'Stable side');
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Stable side');
   const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
@@ -89,6 +96,7 @@ test('clicking either side-by-side conversation changes focus without moving the
   // Non-input content selects the conversation without stealing focus into its composer.
   await side.locator('.agent-message-assistant').last().click();
   await expect(page).toHaveURL(sideUrl);
+  await expect(side).toHaveAttribute('data-selected', 'true');
   await expect(side.getByTestId('prompt-input')).not.toBeFocused();
   expect(await primary.boundingBox()).toEqual(primaryBox);
   expect(await side.boundingBox()).toEqual(sideBox);
@@ -97,48 +105,53 @@ test('clicking either side-by-side conversation changes focus without moving the
   await expect(side.getByTestId('prompt-input')).toHaveText('Side draft');
   await expect(primary.getByTestId('prompt-input')).toHaveText('Main draft');
 
+  // A nested Side opens as another pane; every pane of the Window stays in place, the source included.
   await side.getByTestId('prompt-input').fill('/side Nested side');
   await side.getByTestId('prompt-input').press('Enter');
-  const nested = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: 'Nested side' }) });
-  const parent = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: 'Stable side' }) });
+  const nested = sideWith(page, 'Nested side');
+  const parent = sideWith(page, 'Stable side');
   await expect(nested.locator('.agent-message-assistant').last()).toContainText('Nested side');
-  await expect(primary).toBeHidden();
+  await expect(primary).toBeVisible();
   const parentBox = await parent.boundingBox();
   const nestedBox = await nested.boundingBox();
   await parent.getByTestId('prompt-input').click();
   await expect(parent.getByTestId('prompt-input')).toBeFocused();
   await expect(page).toHaveURL(sideUrl);
-  await expect(primary).toBeHidden();
+  await expect(primary).toBeVisible();
   expect(await parent.boundingBox()).toEqual(parentBox);
   expect(await nested.boundingBox()).toEqual(nestedBox);
-  const divider = page.getByRole('separator', { name: 'Conversation widths' });
+  // The parent's separator sits between it and the nested Side; narrowing the parent keeps the nested width.
+  const divider = await widthSeparator(page, parent);
   const dividerBox = (await divider.boundingBox())!;
   expect(dividerBox.x).toBeGreaterThan(parentBox!.x);
-  expect(Math.abs(dividerBox.x + dividerBox.width / 2 - nestedBox!.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(dividerBox.x + dividerBox.width - nestedBox!.x)).toBeLessThanOrEqual(dividerBox.width);
   await divider.press('ArrowLeft');
-  expect((await parent.boundingBox())!.width).toBeCloseTo(parentBox!.width - 10, 0);
-  expect((await nested.boundingBox())!.width).toBeCloseTo(nestedBox!.width + 10, 0);
+  await expect.poll(async () => (await parent.boundingBox())!.width).toBeCloseTo(parentBox!.width - 10, 0);
+  expect((await nested.boundingBox())!.width).toBeCloseTo(nestedBox!.width, 0);
 });
 
 test('selecting an opened side in discovery focuses its existing window', async ({ page }) => {
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/side Keep this branch');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', {name: 'Side conversation'});
+  const side = sideWith(page, 'Keep this branch');
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Keep this branch');
   const takeControl = side.getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
   await side.getByTestId('prompt-input').fill('Keep the side draft');
-  const discovery = page.getByRole('region', {name: 'Discover sessions'});
-  if (!await discovery.isVisible()) await toggleViewPanel(page, 'Sidebar');
-  await discovery.getByRole('button', {name: 'Refresh', exact: true}).click();
+  // Discovery lives on the All sessions page, which covers the Window until a session is chosen.
+  const sessions = await openSessionsPage(page);
+  const discovery = sessions.getByRole('region', { name: 'Discover sessions' });
+  await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
   const selected = discovery.locator('.lab-session-row[aria-current="page"]');
   await expect(selected).toHaveCount(1);
   await expect(selected).toContainText('Current session');
   const attachmentRequests: string[] = [];
   page.on('request', request => { if (/\/attach$/.test(new URL(request.url()).pathname)) attachmentRequests.push(request.url()); });
   await selected.click();
+  await expect(sessions).toBeHidden();
   await expect(side).toHaveCount(1);
+  await expect(side).toHaveAttribute('data-selected', 'true');
   await expect(side.getByTestId('prompt-input')).toBeVisible();
   await expect(side.getByTestId('prompt-input')).toHaveText('Keep the side draft');
   expect(attachmentRequests).toEqual([]);
@@ -216,9 +229,9 @@ test('btw aliases side and sends its arguments as the first branch message', asy
   const primary = await start(page);
   await primary.getByTestId('prompt-input').fill('/btw Tell me about the branch');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  const side = sideWith(page, 'Tell me about the branch');
   await expect(side.locator('.agent-message-user').last()).toContainText('Tell me about the branch');
-  await expect(side.getByTestId('prompt-input')).toHaveValue('');
+  await expect(side.getByTestId('prompt-input')).toHaveText('');
   await expect(primary.locator('.agent-message-user')).toHaveCount(2);
   await expect(side.getByTestId('timeline')).not.toContainText('cobalt orchard');
 });
@@ -272,59 +285,52 @@ test('rejects a delayed fork input after the main conversation changes', async (
   await expect(primary.getByTestId('timeline')).not.toContainText('This must stay in the fork.');
 });
 
-test('keeps a tree of side routes with stacked ancestors and independent drafts', async ({ page }, testInfo) => {
+test('keeps a tree of side panes with independent drafts and reopens a closed one from its source', async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium-desktop', 'Keeps five Window panes visible side by side.');
   const primary = await start(page);
-  const sides = page.locator('.lab-side-conversation');
-  async function branch(pane: import('@playwright/test').Locator, text: string) {
+  async function branch(pane: Locator, text: string) {
     await pane.getByTestId('prompt-input').fill(`/side ${text}`);
     await pane.getByTestId('prompt-input').press('Enter');
-    const result = sides.filter({ has: page.locator('.agent-message-user').filter({ hasText: text }) });
+    const result = sideWith(page, text);
     await expect(result).toBeVisible();
     await expect(result.locator('.agent-message-assistant').last()).toContainText(text);
     const takeControl = result.getByRole('button', { name: 'Take control', exact: true });
     if (await takeControl.isVisible()) await takeControl.click();
     return result;
   }
+  // Every Side, nested or not, is its own pane in the Window; its source stays visible.
   const b = await branch(primary, 'Branch B');
   const d = await branch(b, 'Branch D');
-  await expect(primary).toBeHidden();
+  await expect(primary).toBeVisible(); await expect(b).toBeVisible();
   await d.getByTestId('prompt-input').fill('Draft on D');
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
-  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
-  await expect(primary).toBeVisible();
   const c = await branch(primary, 'Branch C');
   const e = await branch(c, 'Branch E');
   await e.getByTestId('prompt-input').fill('Draft on E');
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
-  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
-  await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button', { name: 'Side 1 · Branch B', exact: true }).click();
-  await expect(b).toBeVisible();
-  await expect(d).toBeHidden();
-  await expect(d.getByTestId('prompt-input')).toHaveValue('Draft on D');
-  await expect(e).toBeHidden();
-  if (testInfo.project.name === 'chromium-desktop') await expect(primary).toBeVisible();
-  await expect(b.getByTestId('prompt-input')).toBeFocused();
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 2 });
-  else await page.getByRole('navigation', { name: 'Later windows' }).getByRole('button', { name: 'Expand window 3:', exact: false }).click();
-  await expect(d).toBeVisible();
-  await expect(d.getByTestId('prompt-input')).toHaveValue('Draft on D');
-  if (testInfo.project.name === 'chromium-mobile') await page.getByRole('combobox', { name: 'Side path' }).selectOption({ index: 0 });
-  else await page.getByRole('button', { name: 'Expand window 1:', exact: false }).click();
-  await expect(primary.getByRole('button', { name: 'Side 1 · Branch B', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.lab-side-conversation')).toHaveCount(4);
+  for (const pane of [primary, b, c, d, e]) await expect(pane).toBeVisible();
+  // A source's Side list selects that Side's pane without changing the others or their drafts.
+  const sideB = primary.getByRole('button', { name: 'Side 1 · Branch B', exact: true });
+  await sideB.click();
+  await expect(sideB).toHaveAttribute('aria-pressed', 'true');
+  await expect(b).toHaveAttribute('data-selected', 'true');
+  await expect(d.getByTestId('prompt-input')).toHaveText('Draft on D');
+  await expect(e.getByTestId('prompt-input')).toHaveText('Draft on E');
   await primary.getByRole('button', { name: 'Side 2 · Branch C', exact: true }).click();
-  await expect(c).toBeVisible();
-  await expect(e).toBeHidden();
-  if (testInfo.project.name === 'chromium-desktop') await expect(primary).toBeVisible();
+  await expect(c).toHaveAttribute('data-selected', 'true');
+  await expect(b).not.toHaveAttribute('data-selected', 'true');
   await c.getByRole('button', { name: 'Side 1 · Branch E', exact: true }).click();
-  await expect(e).toBeVisible();
-  if (testInfo.project.name === 'chromium-desktop') await expect(c).toBeVisible();
-  await expect(e.getByTestId('prompt-input')).toHaveValue('Draft on E');
-  if (testInfo.project.name === 'chromium-mobile') await toggleViewPanel(page, 'Header');
-  await e.getByRole('button', { name: 'Close side conversation', exact: false }).click();
+  await expect(e).toHaveAttribute('data-selected', 'true');
+  await expect(e.getByTestId('prompt-input')).toHaveText('Draft on E');
+  // Closing E's view keeps its source C; C's Side list reopens E's session in a new view. Drafts belong to views
+  // (docs/superpowers/specs/2026-10-15-window-workspaces-design.md), so the new view starts with an empty draft.
+  await closeView(page, e);
+  await expect(e).toHaveCount(0);
   await expect(c).toBeVisible();
-  await expect(e).toBeHidden();
   await c.getByRole('button', { name: 'Side 1 · Branch E', exact: true }).click();
-  await expect(e.getByTestId('prompt-input')).toHaveValue('Draft on E');
+  await expect(e.locator('.agent-message-assistant').last()).toContainText('Branch E');
+  await expect(e).toHaveAttribute('data-selected', 'true');
+  await expect(e.getByTestId('prompt-input')).toHaveText('');
+  await expect(d.getByTestId('prompt-input')).toHaveText('Draft on D');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: `../../.tmp/evidence/side-tree-${testInfo.project.name}.png`, fullPage: true });
 });
@@ -374,7 +380,7 @@ test('side creates a lightweight source reference without capturing source histo
   });
   await primary.getByTestId('prompt-input').fill('/side Read background only when needed');
   await primary.getByTestId('prompt-input').press('Enter');
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  const side = sideWith(page, 'Read background only when needed');
   await expect(side.locator('.agent-message-user').last()).toContainText('Read background only when needed');
   expect(captures).toEqual([]);
   expect(creations).toHaveLength(1);

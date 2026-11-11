@@ -1,4 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openSessionsPage } from './all-sessions';
+
+/** The Scan button sits in the session directory: on the All sessions page on desktop, in the Sessions panel on compact layouts. */
+async function showScan(page: Page) {
+  const scan = page.getByRole('button', { name: 'Scan session QR code', exact: true });
+  if (await scan.isVisible()) return scan;
+  if ((page.viewportSize()?.width ?? 1280) > 1180) await openSessionsPage(page);
+  else await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
+  return scan;
+}
 
 async function setup(page: Page) {
   await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
@@ -24,8 +34,7 @@ async function camera(page: Page, delayed = false) {
       return delayed ? new Promise(resolve => Object.assign(window, { allowCamera: () => resolve(stream) })) : Promise.resolve(stream);
     } });
   }, delayed);
-  if (!await page.getByRole('button', { name: 'Scan session QR code', exact: true }).isVisible()) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
-  await page.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
+  await (await showScan(page)).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { cameraRequested: boolean }).cameraRequested)).toBe(true);
 }
 
@@ -42,8 +51,7 @@ test('keeps the transfer compact and releases active or late camera access when 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('share-session.png') });
   await dialog.getByRole('button', { name: 'Close session link' }).click();
-  if (!await page.getByRole('button', { name: 'Scan session QR code', exact: true }).isVisible()) await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
-  await page.getByRole('button', { name: 'Scan session QR code', exact: true }).scrollIntoViewIfNeeded();
+  await (await showScan(page)).scrollIntoViewIfNeeded();
   await page.screenshot({ path: info.outputPath('discover-scan.png') });
   await camera(page);
   const scanner = page.getByRole('dialog', { name: 'Scan session', exact: true });
@@ -108,7 +116,7 @@ test('requests camera access from an older open page without a late decoder down
     await page.getByRole('button', { name: 'Favorites', exact: true }).click();
     await page.getByRole('button', { name: 'Scan to open', exact: true }).click();
   } else {
-    await page.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
+    await (await showScan(page)).click();
   }
   const scanner = page.getByRole('dialog', { name: 'Scan session', exact: true });
   await expect(scanner.getByRole('alert')).toBeVisible();

@@ -27,6 +27,7 @@ const viteCommand = `${scenarioEndpoint ? `VITE_AGENT_REMOTE_FIXTURE_ENDPOINT=${
 export default defineConfig({
   testDir: './e2e',
   ...(mode === 'interactions' ? { testMatch: 'interaction-capabilities.spec.ts' } : {}),
+  globalSetup: './e2e/dev-server-warmup.ts',
   fullyParallel: false,
   workers: 1,
   use: {

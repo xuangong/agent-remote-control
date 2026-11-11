@@ -399,13 +399,25 @@ for (const action of ['focus', 'Ask'] as const) {
       let started!: () => void;
       const requestStarted = new Promise<void>(resolve => { started = resolve; });
       const held = new Promise<void>(resolve => { release = resolve; });
+      const attachments: string[] = [];
       await page.route('**/v1/remote/hosts/*/attach', async route => {
         if (route.request().postDataJSON().nativeSessionId !== identity.nativeSessionId) return route.continue();
+        attachments.push(identity.nativeSessionId);
         const response = await route.fetch();
         started();
         await held;
         try { await route.fulfill({ response }); }
         catch { /* A regression can cancel the root while this response is held. */ }
+      });
+      // After a reload the coordinator reuses a primary the activity channel already reports ready instead of attaching
+      // it again (665197c5). Which arrives first is a race, so hold activity until the attachment is released: the root
+      // then has to attach, which is the pending native attachment this test protects.
+      const activity: Array<() => void> = [];
+      let holdingActivity = true;
+      void held.then(() => { holdingActivity = false; for (const deliver of activity.splice(0)) deliver(); });
+      await page.routeWebSocket(/\/v1\/session-channel\?observation=activity/, route => {
+        const server = route.connectToServer();
+        server.onMessage(message => { if (holdingActivity) activity.push(() => route.send(message)); else route.send(message); });
       });
       await page.reload();
       await requestStarted;
@@ -425,6 +437,8 @@ for (const action of ['focus', 'Ask'] as const) {
       await send(primary, 'The primary connection survived cached selection');
       await expect(primary.locator('.agent-message-assistant').last()).toContainText('The primary connection survived cached selection');
       await expect(page).toHaveURL(url => url.searchParams.get('session') === identity.nativeSessionId);
+      // The action kept the one pending attachment instead of cancelling it and attaching again.
+      expect(attachments).toEqual([identity.nativeSessionId]);
     } finally { release?.(); await fixture.close(); }
   });
 }

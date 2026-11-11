@@ -2866,7 +2866,7 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench' || pageOpen}
       >
-        {windowToolbarShown && sharedWindow ? <WindowToolbar title={sharedWindow.title} viewCount={sharedWindow.views.length}
+        {windowToolbarShown && sharedWindow ? <WindowToolbar windowId={sharedWindow.id} title={sharedWindow.title} viewCount={sharedWindow.views.length}
           leading={<div ref={setWindowToolbarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />}
           // Not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
           onRename={title => void windowActions.saveRename(sharedWindow.id, title)}

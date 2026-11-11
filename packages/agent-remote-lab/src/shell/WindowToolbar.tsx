@@ -9,9 +9,10 @@ import './shell.css';
  * Window actions. The title button is named by its text, so the heading reads as the Window name; renaming is its
  * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
-export function WindowToolbar({ title, viewCount, leading, disabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
+export function WindowToolbar({ windowId, title, viewCount, leading, disabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
   canShowAsSection, onShowAsSection, onCopyLink, onAgentControl, onDelete }: {
-  title: string; viewCount: number; leading?: ReactNode; disabled?: boolean; onRename(title: string): void;
+  /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
+  windowId: string; title: string; viewCount: number; leading?: ReactNode; disabled?: boolean; onRename(title: string): void;
   onNewView(): void; onOpenSession(): void; hasDocks: boolean; docksHidden: boolean; onToggleDocks(): void;
   canShowAsSection: boolean; onShowAsSection(): void; onCopyLink(): void; onAgentControl?(): void; onDelete(): void;
 }) {
@@ -26,6 +27,17 @@ export function WindowToolbar({ title, viewCount, leading, disabled, onRename, o
     returnFocus.current = false;
     button.current?.focus();
   }, [editing]);
+  // A rename belongs to the Window it started in: when the toolbar shows another Window, the edit ends unsaved, and
+  // focus moves from the field that leaves the page to the new title.
+  const shown = useRef(windowId);
+  useLayoutEffect(() => {
+    if (shown.current === windowId) return;
+    shown.current = windowId;
+    if (!editing || ended.current) return;
+    ended.current = true;
+    returnFocus.current = true;
+    setEditing(false);
+  }, [windowId, editing]);
   const start = () => {
     if (disabled) return;
     ended.current = false;

@@ -1,4 +1,4 @@
-import { act, type ComponentProps } from 'react';
+import { act, useState, type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { WindowToolbar } from './WindowToolbar.js';
@@ -7,7 +7,7 @@ type Props = ComponentProps<typeof WindowToolbar>;
 
 async function toolbar(overrides: Partial<Props> = {}) {
   const props: Props = {
-    title: 'Research', viewCount: 3, onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
+    windowId: 'research', title: 'Research', viewCount: 3, onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
     hasDocks: true, docksHidden: false, onToggleDocks: vi.fn(), canShowAsSection: true, onShowAsSection: vi.fn(),
     onCopyLink: vi.fn(), onAgentControl: vi.fn(), onDelete: vi.fn(), ...overrides,
   };
@@ -187,4 +187,26 @@ it('renders the leading slot before the title', async () => {
   const { bar } = await toolbar({ leading: <div data-testid="view-options" /> });
   expect([...bar.children].map(child => child.className)).toEqual(['ui-toolbar-leading', 'ui-toolbar-heading', 'ui-toolbar-trailing']);
   expect(bar.querySelector('.ui-toolbar-leading [data-testid="view-options"]')).not.toBeNull();
+});
+
+it('ends an open rename without saving when another Window takes the toolbar, and returns focus to its title', async () => {
+  const onRename = vi.fn();
+  let show!: (window: { id: string; title: string }) => void;
+  function Harness() {
+    const [window, setWindow] = useState({ id: 'research', title: 'Research' }); show = setWindow;
+    return <WindowToolbar windowId={window.id} title={window.title} viewCount={1} onRename={onRename} onNewView={vi.fn()} onOpenSession={vi.fn()}
+      hasDocks={false} docksHidden={false} onToggleDocks={vi.fn()} canShowAsSection onShowAsSection={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
+  }
+  const container = await render(<Harness />);
+  const bar = container.querySelector<HTMLElement>('header.lab-window-toolbar')!;
+  const field = await startRename(bar);
+  await type(field, 'Draft for Research');
+  await act(async () => show({ id: 'notes', title: 'Notes' }));
+  expect(input()).toBeNull();
+  expect(titleButton(bar).textContent).toBe('Notes');
+  expect(document.activeElement).toBe(titleButton(bar));
+  field.dispatchEvent(new FocusEvent('blur'));
+  await act(async () => titleButton(bar).click());
+  await press(input()!, 'Escape');
+  expect(onRename).not.toHaveBeenCalled();
 });

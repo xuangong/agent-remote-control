@@ -3,7 +3,15 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 
-// jsdom has no modal dialogs; like browsers, closing queues the close event.
+// jsdom has no modal dialogs; like browsers, closing queues the close event. The stubs are removed after each test.
+const dialogMethods = ['showModal', 'close'] as const;
+const originalDialog = Object.fromEntries(dialogMethods.map(name => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)]));
+afterEach(() => {
+  for (const name of dialogMethods) {
+    const original = originalDialog[name];
+    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original); else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
+  }
+});
 beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) {
@@ -82,6 +90,25 @@ it('renames the Window in place, and Escape cancels without leaving the Window',
     await until(() => expect(sidebarRows(app.container, 'Windows').find(row => row.dataset.windowRow === 'A')?.querySelector('strong')?.textContent).toBe('Research'));
     expect(titleButton(app.container).textContent).toBe('Research');
     expect(document.activeElement).toBe(titleButton(app.container));
+  } finally { await app.close(); }
+});
+
+it('ends an open rename unsaved when the page switches to another Window', async () => {
+  const scope = 'http://localhost/window-toolbar-rename-switch/'; seedGroup(scope, windowGroup('A')); seedGroup(scope, windowGroup('B'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    await act(async () => titleButton(app.container).click());
+    const field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
+    await type(field, 'Meant for A');
+    await act(async () => { await app.workspace().open('B'); });
+    await until(() => expect(titleButton(app.container)?.textContent).toBe('B'));
+    expect(toolbar(app.container)!.querySelector('input')).toBeNull();
+    await act(async () => { field.dispatchEvent(new FocusEvent('blur')); await new Promise(resolve => setTimeout(resolve, 50)); });
+    const titles = () => Object.fromEntries(sidebarRows(app.container, 'Windows').map(row => [row.dataset.windowRow, row.querySelector('strong')?.textContent]));
+    expect(titles()).toEqual({ A: 'A', B: 'B' });
+    expect(app.workspace().window?.title).toBe('B');
   } finally { await app.close(); }
 });
 

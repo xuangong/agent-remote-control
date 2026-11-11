@@ -147,7 +147,8 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   });
   useLayoutEffect(() => {
     if (chosen.mode !== 'window' || !shown || !enabled || !descriptor.onSelectWindowPane) return;
-    const select = (event: Event) => { if (allowsWindowPaneSelection(event.target)) descriptor.onSelectWindowPane?.(); };
+    // The listener of a host just parked is removed only after the insertion effect moved it: ignore its events.
+    const select = (event: Event) => { if (allowsWindowPaneSelection(event.target) && !entry.host.closest('[hidden], [inert]')) descriptor.onSelectWindowPane?.(); };
     entry.host.addEventListener('pointerdown', select, true);
     entry.host.addEventListener('focusin', select, true);
     return () => {

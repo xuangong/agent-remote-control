@@ -131,7 +131,8 @@ export function moveSessionHost(host: HTMLElement, parent: HTMLElement) {
   const target = parent as HTMLElement & { moveBefore?(node: Node, child: Node | null): void };
   if (host.isConnected && target.isConnected && target.moveBefore) target.moveBefore(host, null);
   else parent.appendChild(host);
-  if (focus && document.activeElement !== focus) focus.focus({ preventScroll: true });
+  // Keep focus with a host that moves to another visible place; a host being parked gives it up.
+  if (focus && document.activeElement !== focus && !parent.closest('[hidden], [inert]')) focus.focus({ preventScroll: true });
   if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
 }
 

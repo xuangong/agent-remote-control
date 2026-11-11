@@ -105,6 +105,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
   const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const [error, setError] = useState<string>();
+  const currentError = useRef(error); currentError.current = error;
   const [route, setRoute] = useState(0);
   const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key, workspaceNavigation?.mode]);
   useEffect(() => {
@@ -113,7 +114,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       // showed its cached copy read-only while it was read again, so the session the history returned to could
       // not be bound to it, and history skipped back over it.
       const query = new URL(globalThis.location.href).searchParams, id = query.get('window');
-      if (id && query.get('mode') !== 'bot' && !currentlyUnavailable.current && currentStore.current?.getSnapshot().id === id) return;
+      // A Window that failed (its read or its saving) is selected again, so the popstate retries it.
+      const failed = !!currentError.current || currentStore.current?.getSyncState().state === 'error';
+      if (id && query.get('mode') !== 'bot' && !currentlyUnavailable.current && !failed && currentStore.current?.getSnapshot().id === id) return;
       setRoute(value => value + 1);
     };
     globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate);

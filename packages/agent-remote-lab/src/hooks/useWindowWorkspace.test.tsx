@@ -312,6 +312,20 @@ it('keeps the selected hosted Window editable when history moves between its ses
   expect(read().readWindow()?.views[0]?.binding?.nativeSessionId).toBe('second');
 });
 
+it('selects a failed Window again when history moves between its sessions', async () => {
+  const active = windowFixture('failed-window'), fixture = hostedWindows(active);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockRejectedValue(new WindowRequestError('Rejected', 400));
+  history.replaceState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=first`);
+  const read = await mount('https://failed-window.example/', true);
+  await vi.waitFor(() => expect(read().provisional).toBe(false));
+  await act(async () => { await read().operate({ type: 'view.resize', viewId: 'main', width: 500 }).catch(() => {}); });
+  await vi.waitFor(() => expect(read().error).toBeTruthy());
+  const reads = fixture.inspect.mock.calls.length;
+  await act(async () => { history.pushState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=second`); dispatchEvent(new PopStateEvent('popstate')); });
+  // The popstate retries the failed Window by reading it again.
+  await vi.waitFor(() => expect(fixture.inspect.mock.calls.length).toBeGreaterThan(reads));
+});
+
 it('does not let initialization replace a Window explicitly opened while its read was pending', async () => {
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'initial-choice', revision: 0, title: 'Initial', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'manual-choice' };

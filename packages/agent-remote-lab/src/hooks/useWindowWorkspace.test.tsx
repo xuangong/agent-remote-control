@@ -296,6 +296,22 @@ it('keeps the latest requested Window when an earlier open returns later', async
   expect(new URL(location.href).searchParams.get('window')).toBe(third.id);
 });
 
+it('keeps the selected hosted Window editable when history moves between its sessions', async () => {
+  const active = windowFixture('history-window'), fixture = hostedWindows(active);
+  history.replaceState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=first`);
+  const read = await mount('https://history-window.example/', true);
+  await vi.waitFor(() => expect(read().window?.id).toBe(active.id));
+  await vi.waitFor(() => expect(read().provisional).toBe(false));
+  const reads = fixture.inspect.mock.calls.length;
+  await act(async () => { history.pushState(null, '', `/?window=${active.id}&host=host&provider=recorded&session=second`); dispatchEvent(new PopStateEvent('popstate')); });
+  // The Window is not read again or shown read-only, so a session opened from history can be bound to it at once.
+  expect(read().provisional).toBe(false);
+  expect(fixture.inspect.mock.calls.length).toBe(reads);
+  let saved!: Promise<void>;
+  await act(async () => { saved = read().operate({ type: 'view.bind', viewId: 'main', binding: { hostId: 'host', providerId: 'recorded', nativeSessionId: 'second', title: 'Second' } }); saved.catch(() => {}); });
+  expect(read().readWindow()?.views[0]?.binding?.nativeSessionId).toBe('second');
+});
+
 it('does not let initialization replace a Window explicitly opened while its read was pending', async () => {
   const first: WorkspaceWindow = { schemaVersion: 3, id: 'initial-choice', revision: 0, title: 'Initial', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
   const second = { ...first, id: 'manual-choice' };

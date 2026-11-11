@@ -105,9 +105,19 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
   const windows = useMemo(() => groups.filter(hasWindowAppearance).map(group => group.window), [groups]);
   const [error, setError] = useState<string>();
-  const [route, setRoute] = useState(() => globalThis.location.href);
+  const [route, setRoute] = useState(0);
   const navigation = useMemo(() => ({ url: globalThis.location.href }), [route, key, workspaceNavigation?.mode]);
-  useEffect(() => { const navigate = () => setRoute(globalThis.location.href); globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate); }, []);
+  useEffect(() => {
+    const navigate = () => {
+      // Moving between sessions of the selected Window (conversation history) keeps that Window. Reselecting it
+      // showed its cached copy read-only while it was read again, so the session the history returned to could
+      // not be bound to it, and history skipped back over it.
+      const query = new URL(globalThis.location.href).searchParams, id = query.get('window');
+      if (id && query.get('mode') !== 'bot' && !currentlyUnavailable.current && currentStore.current?.getSnapshot().id === id) return;
+      setRoute(value => value + 1);
+    };
+    globalThis.addEventListener('popstate', navigate); return () => globalThis.removeEventListener('popstate', navigate);
+  }, []);
   const cache = (group: WindowGroup) => {
     if (selection.deleted.has(group.window.id)) return;
     try {

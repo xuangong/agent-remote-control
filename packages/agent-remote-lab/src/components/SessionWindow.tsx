@@ -5,7 +5,7 @@ import type { DraftBinding } from '../draft-store.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { type SessionWindowEntry } from '../hooks/useSessionWindows.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
-import { SessionDockHeadingStart, SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
+import { SessionViewPlacement, useRemoveSessionDocks } from './SessionDock.js';
 import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
@@ -71,7 +71,7 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}
           transport={transport} draftStore={draftStore} draftBinding={draftBinding} imageDraftBinding={imageDraftBinding} navigation={navigation} controls={windowControls} menuActions={menuActions} /> : <>
-          <header className="lab-empty-session-heading"><SessionDockHeadingStart /><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
+          <header className="lab-empty-session-heading"><strong {...titleInteraction}>Select session</strong><div>{menuActions ? <SessionHeadingActions sessionKey={entry.id} alwaysCollapsed>{menuActions}</SessionHeadingActions> : null}{windowControls}</div></header>
           <div className="lab-empty-session-body">{entry.target ? <MissingSessionNote title={entry.target.title} host={hostLabel} /> : null}<p>{compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'}</p>
             <button type="button" onClick={onChangeSession}>{compact ? 'Open sidebar' : 'Choose session'}</button></div>
         </>}

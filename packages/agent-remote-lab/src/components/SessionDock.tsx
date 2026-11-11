@@ -14,7 +14,6 @@ interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
   /** Dock panes stay mounted and attached but are not shown; the main area takes their width. */
   docksHidden: boolean;
-  leadingControls?: ReactNode;
   register(item: Omit<DockItem, 'width'>): void;
   unregister(id: string, host: HTMLElement): void;
   add(id: string): void;
@@ -26,13 +25,6 @@ interface DockContext {
   minimizeMain(minimized: boolean): void;
 }
 const Context = createContext<DockContext | undefined>(undefined);
-const HeadingStartContext = createContext<ReactNode>(undefined);
-
-/** Layout controls belong to the first visible dock's root heading. */
-export function useSessionDockHeadingStart(): ReactNode { return useContext(HeadingStartContext); }
-export function SessionDockHeadingStart() {
-  return <>{useSessionDockHeadingStart()}</>;
-}
 const clampWidth = (width: number, minimum = minimumWidth) => Math.max(minimum, Math.min(maximumWidth, width));
 function readLayout(key?: string): DockLayout {
   try {
@@ -48,11 +40,11 @@ function readLayout(key?: string): DockLayout {
 }
 
 /** Placement preferences outlive DOM registrations and main-session navigation. */
-export function SessionDockProvider({ enabled, docksHidden = false, storageScope, leadingControls, children }: {
+export function SessionDockProvider({ enabled, docksHidden = false, storageScope, children }: {
   enabled: boolean;
   /** Hides the dock panes, a view preference of this browser rather than a Window edit; the panes stay mounted. */
   docksHidden?: boolean;
-  storageScope?: string; leadingControls?: ReactNode; children: ReactNode;
+  storageScope?: string; children: ReactNode;
 }) {
   const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
   const shared = useWindowLayout();
@@ -107,7 +99,7 @@ export function SessionDockProvider({ enabled, docksHidden = false, storageScope
     });
     if (operations.length) shared.operate({ type: 'batch', operations });
   }
-  const value: DockContext = shared ? { enabled, docksHidden, items, layout, leadingControls, register, unregister,
+  const value: DockContext = shared ? { enabled, docksHidden, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
     resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width, 240) }),
@@ -125,7 +117,7 @@ export function SessionDockProvider({ enabled, docksHidden = false, storageScope
       const panes = [...layout.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!);
       orderSharedDocks(panes);
     },
-  } : { enabled, docksHidden, items, layout, leadingControls, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
+  } : { enabled, docksHidden, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -168,11 +160,10 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, dock
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x={docked ? '5' : '3'} y={docked ? '5' : '4'} width="16" height="16" rx="2" />{docked ? <path d="M3 16V3h13" /> : <path d="M13 4v16" />}</svg>
     </button>
   </> : null;
-  const headingStart = docked && !dock.docksHidden && dock.items.find(item => item.visible)?.id === id ? dock.leadingControls : undefined;
   return <><div ref={home} className="lab-session-placement-home" />{mounted ? createPortal(
-    <SessionTitleInteractionContext.Provider value={titleInteraction}><HeadingStartContext.Provider value={headingStart}>
+    <SessionTitleInteractionContext.Provider value={titleInteraction}>
       {children({ docked, controls })}
-    </HeadingStartContext.Provider></SessionTitleInteractionContext.Provider>, host) : null}</>;
+    </SessionTitleInteractionContext.Provider>, host) : null}</>;
 }
 
 export function MinimizeMainSession() {

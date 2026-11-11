@@ -10,9 +10,9 @@ import { TrackViewScope } from '../hooks/useSessionAttention.js';
 import { SessionConversationMount, SessionConversationSurfaces, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 import type { SessionConversationProps } from './SessionConversation.js';
 
-const lifecycle = vi.hoisted(() => ({ mounts: 0, unmounts: 0, attachmentEffects: [] as Array<boolean | undefined>, pending: undefined as ((count: number) => void) | undefined, selectWindowPane: vi.fn() }));
+const lifecycle = vi.hoisted(() => ({ shownParked: [] as boolean[], mounts: 0, unmounts: 0, attachmentEffects: [] as Array<boolean | undefined>, pending: undefined as ((count: number) => void) | undefined, selectWindowPane: vi.fn() }));
 vi.mock('./SessionConversation.js', async () => {
-  const { useEffect, useContext } = await import('react');
+  const { useEffect, useContext, useLayoutEffect, useRef } = await import('react');
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { TrackViewScope } = await import('../hooks/useSessionAttention.js');
   return { SessionConversation(props: SessionConversationProps) {
@@ -20,7 +20,10 @@ vi.mock('./SessionConversation.js', async () => {
     useEffect(() => { lifecycle.attachmentEffects.push(props.attachmentEnabled); }, [props.attachmentEnabled]);
     lifecycle.pending = props.onPendingInputChange;
     const layout = useContext(WindowLayoutContext), track = useContext(TrackViewScope);
-    return <><input aria-label="Owned draft" defaultValue="draft" /><button data-pane-selection-ignore>Ignored action</button><output data-visible={props.visible} data-attach={props.attachmentEnabled}
+    const draft = useRef<HTMLInputElement>(null);
+    // What a view that becomes visible sees from its own layout effects, where it measures, scrolls and focuses.
+    useLayoutEffect(() => { if (props.visible) lifecycle.shownParked.push(!draft.current?.isConnected || !!draft.current.closest('[hidden]')); }, [props.visible]);
+    return <><input ref={draft} aria-label="Owned draft" defaultValue="draft" /><button data-pane-selection-ignore>Ignored action</button><output data-visible={props.visible} data-attach={props.attachmentEnabled}
       data-blocked={props.mutationBlocked} data-layout={layout?.window.id} data-track={!!track} data-managed={!!props.attachmentManaged}
       data-agent={props.attachedSession?.agentId} /></>;
   } };
@@ -47,7 +50,7 @@ function Harness() {
     </section>)}
   </SessionConversationSurfaces></WorkspaceReady.Provider>;
 }
-beforeEach(() => { lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; lifecycle.attachmentEffects.length = 0; lifecycle.selectWindowPane.mockClear(); });
+beforeEach(() => { lifecycle.shownParked.length = 0; lifecycle.mounts = 0; lifecycle.unmounts = 0; lifecycle.pending = undefined; lifecycle.attachmentEffects.length = 0; lifecycle.selectWindowPane.mockClear(); });
 
 it.each(['pointerdown', 'focusin'])('routes %s to the shown Window pane and fences ignored, Bot, paused and parked interactions', async type => {
   const container = await render(<Harness />), input = container.querySelector('input')!;
@@ -76,6 +79,14 @@ it('moves one leaf between mode destinations without losing its input node or fo
   expect(container.querySelector('output')?.dataset).toMatchObject({ managed: 'true', agent: 'agent-one', visible: 'true' });
   await act(async () => update({ mode: 'window' }));
   expect(container.querySelector('[data-destination="window"] input')).toBe(input);
+});
+it('places a host that becomes visible before the layout effects of its conversation run', async () => {
+  const container = await render(<Harness />), input = container.querySelector('input');
+  await act(async () => update({ mode: 'bot', bot: false }));
+  expect(input?.closest('[hidden]')).not.toBeNull();
+  await act(async () => update({ mode: 'window' }));
+  expect(container.querySelector('[data-destination="window"] input')).toBe(input);
+  expect(lifecycle.shownParked).toEqual([false, false]);
 });
 it('keeps the surviving registration and collects the last idle host', async () => {
   const container = await render(<Harness />), input = container.querySelector('input');

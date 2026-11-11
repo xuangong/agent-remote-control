@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
@@ -104,6 +104,8 @@ export function SessionConversationSurfaces({ scope, transport, mode, children }
   const enabled = useContext(WorkspaceReady);
   const registry = useMemo(() => new ConversationSurfaces(mode), [scope, transport]);
   const context = useMemo(() => ({ registry }), [registry]);
+  // A stable ref: React detaches a changed ref in the mutation phase, when the surfaces already place their hosts.
+  const parkingRef = useCallback((element: HTMLDivElement | null) => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }, [registry]);
   useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot);
   // Child layout effects publish destinations first; select their mode from that same committed registration set.
   useLayoutEffect(() => registry.selectMode(mode), [registry, mode]);
@@ -112,7 +114,7 @@ export function SessionConversationSurfaces({ scope, transport, mode, children }
     return () => registry.deactivate();
   }, [registry]);
   return <SurfaceScope.Provider value={context}>{children}
-    <div hidden aria-hidden="true" ref={element => { element?.setAttribute('inert', ''); registry.parking = element ?? undefined; }} />
+    <div hidden aria-hidden="true" ref={parkingRef} />
     {[...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} enabled={enabled} />)}
   </SurfaceScope.Provider>;
 }
@@ -128,7 +130,9 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   const window = chosen.mode === 'bot' ? registrations.find(item => item.mode === 'window'
     && sessionKey(item.descriptor.props.target) === sessionKey(descriptor.props.target)) : undefined;
   const attachment = window?.descriptor.props ?? descriptor.props;
-  useLayoutEffect(() => {
+  // Place the host before any layout effect of the conversation runs: those of a view that just became visible
+  // measure, scroll and focus their content (a Trace reveal, a restored reading position), which a parked host cannot.
+  useInsertionEffect(() => {
     const destination = shown ? chosen.destination : registry.parking;
     if (destination) moveSessionHost(entry.host, destination);
   });

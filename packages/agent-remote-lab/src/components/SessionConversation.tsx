@@ -76,6 +76,8 @@ export function SessionConversation(props: SessionConversationProps) {
     currentTarget = inputOwner!.target;
     resolutionError ??= 'The previous input is still pending. Check its result before continuing in the replacement session.';
   }
+  // Synchronizing is a wait, not a failure: the view shows it as opening, without an alert and its Retry.
+  const resolutionNotice = synchronizing && !retainingInput ? undefined : resolutionError;
   const canAttach = attachmentEnabled && !retainingInput;
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
@@ -123,7 +125,7 @@ export function SessionConversation(props: SessionConversationProps) {
     }
     if (!enabled || !canAttach) return;
     let stopped = false; const abort = new AbortController(); setError('');
-    if (attachmentError) { setError(attachmentError); return; }
+    if (attachmentError) { setError(synchronizing ? '' : attachmentError); return; }
     if (props.attachedSession && sessionKey(props.attachedSession) === sessionKey(currentTarget) && !historyRoleId) { setSession(props.attachedSession); return; }
     if (session && sessionKey(session) === targetKey && !historyRoleId) return;
     const cached = connections?.find(currentTarget);
@@ -152,7 +154,7 @@ export function SessionConversation(props: SessionConversationProps) {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
-    }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionError ?? error} nativeTakeover={nativeTakeover}
+    }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined} />;
 }
 function FamilyChat({ visible = true, fixedDisplayMode, dockHeadingStart, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {

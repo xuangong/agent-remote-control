@@ -653,6 +653,24 @@ it('keeps an unclaimed leaf from attaching a changed live locator until its dest
   expect(attach).toHaveBeenCalledExactlyOnceWith('recorded', 'new', expect.any(AbortSignal));
 });
 
+it('shows a view whose locator is still synchronizing as opening, without an alert or attaching', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  const attach = vi.spyOn(directory, 'attach').mockImplementation(() => new Promise(() => {}));
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'cached', title: 'Cached' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const container = await render(<SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+    resolveTarget: () => { throw new SessionLocatorSynchronizingError(); }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+    <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+      directoryFor={() => directory} baseUrl="http://fixture" storageScope="synchronizing-locator" hostLabel="Host" compact={false} active offline={false}
+      transport={transport} draftStore={new DraftStore('synchronizing-locator')} />
+  </SessionViewOperationsContext.Provider>);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.textContent).not.toContain('still synchronizing');
+  expect(attach).not.toHaveBeenCalled();
+});
+
 it('keeps an attachment in flight while a discovery refresh withholds the locator and attaches only once', async () => {
   const { SessionConversation } = await import('./SessionConversation.js');
   const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');

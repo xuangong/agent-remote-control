@@ -572,6 +572,8 @@ test('Ask payload retention failure recovers from the single view document after
       else await route.continue();
     });
     f.available(); await f.seed(context, 'A draft before partial publication', 'duplicate');
+    // The seeded Asks are enabled; the global Ask view is the current place to open them.
+    await context.addInitScript(() => localStorage.setItem('agent-remote:ask-view', 'true'));
     await context.addInitScript(() => {
       const set = Storage.prototype.setItem;
       const fault = { active: sessionStorage.getItem('succession-ask-write-fault') === 'true',
@@ -592,11 +594,9 @@ test('Ask payload retention failure recovers from the single view document after
     const independent = page.locator('.lab-side-conversation').filter({ has: page.getByText('Independent B', { exact: true }) });
     await expect(primary).toBeVisible();
     await expect(primary.getByTestId('prompt-input')).toHaveText('A draft before partial publication');
-    await page.getByRole('button', { name: 'Expand window 2: Independent B', exact: true }).click();
+    // The shared Window shows the selected Side beside its source, so no stack has to be expanded to reach it.
     await expect(independent).toBeVisible();
     await expect(independent.getByTestId('prompt-input')).toHaveText('Side local draft');
-    const returnToPrimary = page.getByRole('button', { name: 'Expand window 1: Original primary', exact: true });
-    if (await returnToPrimary.isVisible()) await returnToPrimary.click();
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', 'base64');
     // Recorded sessions have no image-input capability. Seed previously saved
     // drafts in the actual two-store schema; the product owns their recovery.
@@ -683,7 +683,8 @@ test('Ask payload retention failure recovers from the single view document after
     }), f.scope);
     await testInfo.attach('recovered-owners.json', { contentType: 'application/json', body: Buffer.from(JSON.stringify({ ...recovered, controls: f.controls, reads: f.reads.slice(recoveryReadStart), inputs, images }, null, 2)) });
     await page.screenshot({ path: testInfo.outputPath('partial-reload-recovered.png'), fullPage: true });
-    expect(JSON.parse(recovered.drafts!)).toEqual(JSON.parse(before.drafts!));
+    // Every view keeps its draft. A shared Window view rendered before its slot is mapped may also mirror its text under its session key.
+    expect(JSON.parse(recovered.drafts!)).toMatchObject(JSON.parse(before.drafts!));
     expect(recovered.askDrafts).toBe(before.askDrafts);
     const a = recovered.composition.slots.find((slot: { owners: { text: { key: string } } }) => slot.owners.text.key === 'agent-A');
     const b = recovered.composition.slots.find((slot: { owners: { text: { key: string } }; intent: { target: { native: { nativeSessionId: string } } } }) => slot.owners.text.key !== 'agent-A' && slot.intent.target.native.nativeSessionId === 'B');
@@ -692,46 +693,63 @@ test('Ask payload retention failure recovers from the single view document after
     expect(recovered.ask.map((owner: { sourceSlot: string }) => owner.sourceSlot)).toEqual(expect.arrayContaining([a.id, b.id]));
     expect(recovered.track.map((entry: { view: { primarySlot: string } }) => entry.view.primarySlot)).toEqual(expect.arrayContaining([a.id, b.id]));
     expect(f.reads.slice(recoveryReadStart).some(path => path.includes('/session-successions/current'))).toBe(true);
-    // The enabled Ask retains an activity observer for its own native target after reload.
-    expect(f.controls.filter(item => item.path === '/remote/attach').slice(attachCount).map(item => item.body.nativeSessionId)).toEqual(['B', 'T']);
+    // Recovery attaches the role's successor B once, never A; the global Ask observes each source's Ask target (A's T, B's U).
+    const recoveryAttaches = f.controls.filter(item => item.path === '/remote/attach').slice(attachCount).map(item => item.body.nativeSessionId);
+    expect(recoveryAttaches.filter(id => id === 'B')).toHaveLength(1);
+    expect(new Set(recoveryAttaches)).toEqual(new Set(['B', 'T', 'U']));
     expect(inputs).toEqual([]);
     const beforeLocalNavigation = f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'B').length;
 
-    await primary.locator('.lab-chat-sessions-heading').click();
+    // The session list sits in the view's heading actions, which a shared Window view may keep behind its menu.
+    const openChatSessions = async () => {
+      const heading = primary.locator('.lab-chat-sessions-heading');
+      if (!await heading.isVisible()) {
+        const expand = primary.getByRole('button', { name: 'Expand session actions', exact: true });
+        const more = primary.getByRole('button', { name: 'More session actions', exact: true });
+        await expect(expand.or(more).first()).toBeVisible();
+        if (await expand.isVisible()) { await expand.click(); await expect(heading.or(more).first()).toBeVisible(); }
+        if (!await heading.isVisible()) await more.click();
+      }
+      await heading.click();
+    };
+    await openChatSessions();
     await testInfo.attach('retained-navigation.json', { contentType: 'application/json', body: Buffer.from(JSON.stringify({
       url: page.url(), buttons: await page.locator('button:visible').allTextContents(),
       sessions: await primary.getByRole('region', { name: 'Chat sessions', exact: true }).innerText(),
     }, null, 2)) });
     await page.screenshot({ path: testInfo.outputPath('retained-navigation.png'), fullPage: true });
-    const retainedB = page.getByRole('button', { name: /Independent B/ });
+    // A saved view the shared Window already shows is selected in place rather than replacing the primary.
+    const retainedB = primary.getByRole('button', { name: /Independent B.*Saved view/ });
     await expect(retainedB).toBeVisible(); await retainedB.click();
-    await expect(primary.getByTestId('prompt-input')).toContainText('Side local draft');
-    await expect(primary.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
-    await primary.getByRole('button', { name: 'Ask about this session', exact: true }).click();
-    const ask = primary.getByRole('dialog', { name: 'Ask', exact: true });
+    await expect(independent.getByTestId('prompt-input')).toContainText('Side local draft');
+    await expect(independent.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
+    await expect(primary.getByTestId('prompt-input')).toContainText('A draft before partial publication');
+    // Ask is one global floating control (fd548154) that opens the selected view's source-bound Ask, each with its own draft.
+    const askButton = page.getByRole('button', { name: 'Ask about this session', exact: true });
+    const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
+    await expect(askButton).toContainText('Independent B');
+    await askButton.click();
     await expect(ask.getByTestId('prompt-input')).toHaveText('B Ask draft');
     await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
-    await primary.locator('.lab-chat-sessions-heading').click();
-    await primary.getByRole('button', { name: /Original primary.*Saved view/ }).click();
+    await expect(ask).toHaveCount(0);
+    // The primary's own list names it as its current view; focusing its composer selects its pane again.
+    await primary.getByTestId('prompt-input').click();
     await expect(primary.getByTestId('prompt-input')).toContainText('A draft before partial publication');
     await expect(primary.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-A-image');
-    await primary.getByRole('button', { name: 'Ask about this session', exact: true }).click();
+    await expect(askButton).toContainText('Original primary');
+    await askButton.click();
     await expect(ask.getByTestId('prompt-input')).toHaveText('A Ask draft');
     await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
+    await expect(ask).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
-    const expandActions = primary.getByRole('button', { name: 'Expand session actions', exact: true });
-    await expect(expandActions).toBeVisible();
-    await expandActions.click();
-    const moreActions = primary.getByRole('button', { name: 'More session actions', exact: true });
-    if (await moreActions.isVisible()) await moreActions.click();
-    await primary.locator('.lab-chat-sessions-heading').click();
+    await openChatSessions();
     await primary.getByRole('button', { name: /Independent B.*Saved view/ }).click();
-    await expect(primary.getByTestId('prompt-input')).toContainText('Side local draft');
-    await expect(primary.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
+    await expect(independent.getByTestId('prompt-input')).toContainText('Side local draft');
+    await expect(independent.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
     expect(f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'B')).toHaveLength(beforeLocalNavigation);
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(primary.getByTestId('prompt-input')).toContainText('Side local draft');
-    await expect(primary.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
+    await expect(independent.getByTestId('prompt-input')).toContainText('Side local draft');
+    await expect(independent.locator('[data-image-id]')).toHaveAttribute('data-image-id', 'owner-B-image');
     await page.screenshot({ path: testInfo.outputPath('retained-compact-reloaded.png'), fullPage: true });
     expect(await storedImageBytes(page)).toEqual(images); expect(inputs).toEqual([]);
   } finally {
@@ -744,7 +762,7 @@ test('Ask payload retention failure recovers from the single view document after
   }
 });
 
-for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery restores' : 'Side selection and collapse retain'} an independent Ask window through B failure and Retry`, async ({ page, context }, testInfo) => {
+for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery restores' : 'Side selection retains'} an open Ask on a Side through B failure, Retry and reload`, async ({ page, context }, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-desktop', 'The desktop case keeps two Side panes and their floating Ask visible.');
   test.setTimeout(60000);
   const f = await fixture(), inputs = observeInputs(page);
@@ -753,59 +771,73 @@ for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery 
     if (!committed && new URL(route.request().url()).pathname.endsWith('/session-successions')) await route.fulfill({ json: { version: 1, successions: [], nextCursor: null } });
     else await route.continue();
   });
+  const askState = () => page.evaluate(scope => {
+    const saved = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');
+    return { windows: saved.asks.filter((owner: { open: boolean }) => owner.open).map((owner: { id: string }) => owner.id),
+      geometry: Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith('agent-remote-ask:') && key.includes(':window-')).map(key => [key, localStorage.getItem(key)])) };
+  }, f.scope);
+  const attaches = (nativeSessionId: string) => f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === nativeSessionId).length;
   try {
     await f.seed(context, 'Primary role draft', 'nested-ask');
+    // Since fd548154 Ask is one global floating control; with the Ask view on, the seeded open Ask of Side S is shown.
+    await context.addInitScript(() => localStorage.setItem('agent-remote:ask-view', 'true'));
     await page.goto(`${f.origin}/?host=browser-host&provider=recorded&session=A`);
     await settled(page);
     if (await page.getByRole('button', { name: 'Close Context', exact: true }).isVisible()) await page.getByRole('button', { name: 'Close Context', exact: true }).click();
-    const side = page.locator('.lab-side-conversation').filter({ has: page.locator('.lab-side-title-text', { hasText: 'Independent Side' }) });
-    const ask = side.getByRole('dialog', { name: 'Ask', exact: true });
-    await expect(ask).toBeVisible(); await expect(ask.getByTestId('prompt-input')).toHaveText('Independent Ask draft');
-    await expect(ask.getByText('Recorded history 2', { exact: true })).toBeVisible();
-    await expect(side.locator('.lab-session-view:not([role="dialog"] .lab-session-view)').getByTestId('prompt-input')).toHaveText('Side local draft');
-    const primary = page.locator('.lab-primary-conversation');
-    await expect(primary).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Expand window 1: Original primary', exact: true })).toBeVisible();
-    const askEditor = await ask.getByTestId('prompt-input').elementHandle();
-    const sourceAttaches = f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'A').length;
+    // The shared Window shows the primary with both Sides attached to it; the one open Ask stays bound to its source S.
+    const primary = page.getByRole('region', { name: 'Primary group: Original primary', exact: true });
+    const side = page.getByRole('region', { name: 'Independent Side', exact: true });
+    const nested = page.getByRole('region', { name: 'Nested Side', exact: true });
+    const ask = page.locator(`.lab-session-ask-surface[data-ask-source='${JSON.stringify(['browser-host', 'recorded', 'S'])}']`).getByRole('dialog', { name: 'Ask', exact: true });
+    const askDraft = ask.getByRole('textbox', { name: 'Ask draft', exact: true });
+    await expect(primary).toBeVisible(); await expect(side).toBeVisible(); await expect(nested).toBeVisible();
+    await expect(side.getByTestId('prompt-input')).toHaveText('Side local draft');
+    await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(1);
+    await expect(askDraft).toHaveText('Independent Ask draft');
+    const askEditor = await askDraft.elementHandle();
+    const sameEditor = () => askDraft.evaluate((node, original) => node === original, askEditor);
+    const sourceAttaches = attaches('A');
     if (coldRecovery) expect(sourceAttaches).toBe(0); else expect(sourceAttaches).toBeGreaterThan(0);
     if (!coldRecovery) {
       committed = true;
       await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
     }
-    await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toBeVisible();
-    expect(await ask.getByTestId('prompt-input').evaluate((node, original) => node === original, askEditor)).toBe(true);
-    const before = await page.evaluate(scope => {
-      const saved = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');
-      return { primarySlot: saved.slots.find((slot: { owners: { text: { key: string } } }) => slot.owners.text.key === 'agent-A').id,
-        focus: saved.focus, anchor: saved.anchor, collapsed: saved.collapsed, edges: saved.edges,
-        windows: saved.asks.filter((owner: { open: boolean }) => owner.open).map((owner: { id: string }) => owner.id), geometry: Object.fromEntries(Object.keys(localStorage).filter(key => key.includes(':window-')).map(key => [key, localStorage.getItem(key)])) };
-    }, f.scope);
-    const targetAttaches = f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'T').length;
-    expect(targetAttaches).toBe(1);
-    f.available(); await page.getByRole('button', { name: 'Retry session', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Retry session', exact: true })).toHaveCount(0);
-    await expect(ask.getByTestId('prompt-input')).toHaveText('Independent Ask draft');
-    expect(await ask.getByTestId('prompt-input').evaluate((node, original) => node === original, askEditor)).toBe(true);
-    await expect(primary).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Expand window 1: Original primary', exact: true })).toBeVisible();
-    await expect.poll(() => page.evaluate(scope => {
-      const saved = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');
-      return { primarySlot: saved.slots.find((slot: { owners: { text: { key: string } } }) => slot.owners.text.key === 'agent-A').id,
-        focus: saved.focus, anchor: saved.anchor, collapsed: saved.collapsed, edges: saved.edges,
-        windows: saved.asks.filter((owner: { open: boolean }) => owner.open).map((owner: { id: string }) => owner.id), geometry: Object.fromEntries(Object.keys(localStorage).filter(key => key.includes(':window-')).map(key => [key, localStorage.getItem(key)])) };
-    }, f.scope)).toEqual({ ...before, collapsed: [before.primarySlot] });
-    expect(f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'T')).toHaveLength(targetAttaches);
-    expect(f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'B')).toHaveLength(2);
-    expect(f.controls.filter(item => item.path === '/remote/attach' && item.body.nativeSessionId === 'A')).toHaveLength(sourceAttaches);
-    await page.locator('.lab-side-title-text').getByText('Nested Side', { exact: true }).click();
+    const retry = page.getByRole('button', { name: 'Retry session', exact: true });
+    await expect(retry).toBeVisible();
+    expect(await sameEditor()).toBe(true);
+    const before = await askState();
+    expect(before.windows).toEqual([`ask:${JSON.stringify(['view', 'fixed', 'browser-host', 'recorded', 'S'])}`]);
+    expect(Object.keys(before.geometry)).toHaveLength(2);
+    // The seeded Ask geometry floats over the notice, so the keyboard activates Retry.
+    f.available(); await retry.press('Enter');
+    await expect(retry).toHaveCount(0);
+    await expect(askDraft).toHaveText('Independent Ask draft');
+    expect(await sameEditor()).toBe(true);
+    await expect(side).toBeVisible(); await expect(nested).toBeVisible();
+    await expect.poll(askState).toEqual(before);
+    expect(attaches('B')).toBe(2); expect(attaches('A')).toBe(sourceAttaches);
+    // Selecting another Side moves the focus without moving or remounting the open Ask.
+    await nested.getByTestId('prompt-input').click();
     await expect.poll(() => page.evaluate(scope => {
       const saved = JSON.parse(sessionStorage.getItem(`agent-remote:recovery:${scope}:composition-v2`) ?? '{}');
       const focused = saved.slots?.find((slot: { id: string }) => slot.id === saved.focus);
       return focused?.intent.target.nativeSessionId ?? focused?.intent.target.native?.nativeSessionId;
     }, f.scope)).toBe('U');
-    expect(await ask.getByTestId('prompt-input').evaluate((node, original) => node === original, askEditor)).toBe(true);
-    expect(inputs).toEqual([]);
+    expect(await sameEditor()).toBe(true);
+    await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(1);
     await page.screenshot({ path: testInfo.outputPath('side-ask-retained.png'), fullPage: true });
+    // A reload restores both Sides and the open Ask on S with its draft, which then reaches S's Ask session T.
+    await page.reload(); await settled(page);
+    await expect(side).toBeVisible(); await expect(nested).toBeVisible();
+    await expect(side.getByTestId('prompt-input')).toHaveText('Side local draft');
+    await expect(askDraft.or(ask.getByTestId('prompt-input')).first()).toHaveText('Independent Ask draft');
+    await expect.poll(askState).toEqual(before);
+    // The restored Ask may report that the role's locator is still synchronizing; its own Retry then opens T.
+    const askRetry = ask.getByRole('button', { name: 'Retry', exact: true }), history = ask.getByText('Recorded history 2', { exact: true });
+    await expect(askRetry.or(history).first()).toBeVisible();
+    if (await askRetry.isVisible()) await askRetry.press('Enter');
+    await expect(history).toBeVisible();
+    await expect(ask.getByTestId('prompt-input')).toHaveText('Independent Ask draft');
+    expect(inputs).toEqual([]);
   } finally { await page.goto('about:blank'); await f.close(); }
 });

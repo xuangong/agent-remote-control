@@ -425,7 +425,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         ...(query.get('parent') ? { parentNativeSessionId: query.get('parent')! } : {}),
         ...(query.get('intent') === 'history' ? { sessionIntent: 'history' as const } : {}),
       } : undefined;
-    let target = requested ? undefined : linked;
+    const target = requested ? undefined : linked;
     const initialWindow = () => {
       const imported = importCompositionWindow(composition);
       const session = target;
@@ -467,9 +467,15 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       }
       publishCatalog(local);
       if (!foreground.current) return;
-      // A local Window exists only in the browser that made it. Elsewhere, a link to it opens the session it carries.
-      if (requested && !cached && linked) target = linked;
-      if (requested && !cached && !target) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
+      if (requested && !cached && linked) {
+        // A local Window exists only in the browser that made it. Elsewhere, a link to it opens the session it carries
+        // in a fresh Window, so no existing layout changes; choosing it replaces the foreign window= in the address,
+        // so Back and Forward do not repeat this.
+        try {
+          const fresh = emptyWindow();
+          choose({ window: { ...applyWindowOperation(fresh, { type: 'view.bind', viewId: 'main', binding: linked }), title: linked.title } }, true);
+        } catch (error) { setError(String(error instanceof Error ? error.message : error)); }
+      } else if (requested && !cached) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
       else {
         const existing = cached ?? local.find(hasWindowAppearance);
         try {

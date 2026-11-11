@@ -375,13 +375,19 @@ it('keeps a missing explicit Window link as an error without creating a replacem
   expect(new URL(location.href).searchParams.get('window')).toBe('missing-window');
 }, 10000);
 
-it('opens the session carried by a link to a local Window that this browser does not have', async () => {
+it('opens the session carried by a link to a local Window that this browser does not have in a fresh Window', async () => {
+  const scope = 'missing-window-session-link', existing = { ...windowFixture('existing'), views: [createWindowView('main', { hostId: 'local', providerId: 'recorded', nativeSessionId: 'kept', title: 'Kept' }, 'primary')] };
+  localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:existing`, JSON.stringify(existing));
   history.replaceState(null, '', '/?window=other-browser&host=local&provider=recorded&session=linked');
-  const read = await mount('missing-window-session-link');
+  const read = await mount(scope);
   expect(read().unavailable).toBe(false); expect(read().error).toBeUndefined();
-  expect(read().window!.id).not.toBe('other-browser');
-  const selected = read().window!.views.find(view => view.id === read().window!.selectedPrimaryViewId);
-  expect(selected?.binding).toMatchObject({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'linked' });
+  const window = read().window!;
+  expect(['other-browser', 'existing']).not.toContain(window.id);
+  expect(window.views).toHaveLength(1);
+  expect(window.views[0]?.binding).toMatchObject({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'linked' });
+  // The existing Window keeps its layout, and the address names the fresh Window instead of the foreign one.
+  expect(JSON.parse(localStorage.getItem(`agent-remote:recovery:${scope}:shared-window:existing`)!).views[0].binding.nativeSessionId).toBe('kept');
+  expect(new URL(location.href).searchParams.get('window')).toBe(window.id);
 }, 10000);
 
 it('deletes a nonactive local Window without changing the current selection', async () => {

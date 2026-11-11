@@ -4,6 +4,8 @@
 .lab-session-dock-base { flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; position: relative; }
 .lab-session-dock-rail[data-docked] > .lab-session-dock-base { flex-grow: 0; flex-shrink: 0; }
 .lab-session-dock-pane { position: relative; flex: none; min-width: 320px; height: 100%; background: var(--obs-surface); }
+/* Hidden docks keep their sessions attached but take no width; the resize handle is inside the pane. */
+.lab-session-dock-pane[hidden] { display: none; }
 /* Separators must not consume the width assigned to the session panes. */
 .lab-session-dock-pane::after, .lab-primary-group::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--obs-border); pointer-events: none; z-index: 1; }
 .lab-session-dock-pane::after { left: 0; }

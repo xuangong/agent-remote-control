@@ -29,7 +29,7 @@ export async function pairHost(request: APIRequestContext, testInfo: TestInfo): 
     providers: [{ providerId: 'recorded', displayName: 'Recorded' }],
     resolveSession: id => agents.has(id) ? relay.requireAgent(id) : undefined,
     async control(control) {
-      const path = control.path.split('?')[0];
+      const path = control.path.split('?')[0] ?? control.path;
       if (path === '/remote/catalog/revision') return { status: 200, body: JSON.stringify({ revision: String(sessions.size) }) };
       if (path === '/remote/catalog') return { status: 200, body: JSON.stringify({ hasMore: false, revision: String(sessions.size),
         items: [...sessions].map(([nativeSessionId, session]) => ({ nativeSessionId, providerId: 'recorded', title: session.title,

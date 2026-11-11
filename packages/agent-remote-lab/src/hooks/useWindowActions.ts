@@ -5,6 +5,7 @@ import { byRecentUse } from '../window-recency.js';
 
 type Workspace = ReturnType<typeof useWindowWorkspace>;
 type Scope = { client: Workspace['client']; id?: string };
+export type NoticeTone = 'info' | 'error';
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 
@@ -23,10 +24,12 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
   const currentScope = useRef<Scope>({ client: workspace.client, id: workspace.window?.id });
   currentScope.current = { client: workspace.client, id: workspace.window?.id };
   // A notice is shown only in the Window it was given in, even when it arrives before that Window renders.
-  const [entry, setEntry] = useState<Scope & { text: string }>();
-  const notice = entry && entry.client === workspace.client && entry.id === workspace.window?.id ? entry.text : undefined;
-  const noticeIn = (target: Scope, text: string | undefined) => setEntry(text === undefined ? undefined : { ...target, text });
-  const setNotice = (text: string | undefined) => noticeIn(currentScope.current, text);
+  // Its tone tells a confirmation ('info') from a failure ('error', the default).
+  const [entry, setEntry] = useState<Scope & { text: string; tone: NoticeTone }>();
+  const shown = entry && entry.client === workspace.client && entry.id === workspace.window?.id ? entry : undefined;
+  const notice = shown?.text, noticeTone = shown?.tone;
+  const noticeIn = (target: Scope, text: string | undefined, tone: NoticeTone = 'error') => setEntry(text === undefined ? undefined : { ...target, text, tone });
+  const setNotice = (text: string | undefined, tone: NoticeTone = 'error') => noticeIn(currentScope.current, text, tone);
   const pending = useRef<Scope>();
   const [running, setRunning] = useState<Scope>();
   const busy = !!running && running.client === workspace.client && running.id === workspace.window?.id;
@@ -57,13 +60,13 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     const url = new URL(location.href); url.searchParams.set('window', id);
     for (const key of ['mode', 'section', 'bot']) url.searchParams.delete(key);
     await navigator.clipboard.writeText(url.href);
-    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.');
+    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.', 'info');
   });
   const showAsSection = () => run(async () => {
     const id = workspace.window!.id, client = workspace.client;
     const rank = workspace.groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
     await workspace.operateGroup(id, { type: 'bots.add', rank: !rank ? 'm' : rank.length < 64 ? `${rank}m` : rank });
-    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Shown as a section in Bot mode.');
+    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Shown as a section in Bot mode.', 'info');
   });
   /** Renames a Window; resolves whether the edit is finished, so the caller can close its form. */
   async function saveRename(id: string, title: string): Promise<boolean> {
@@ -93,7 +96,8 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
    */
   async function deleteCurrent(): Promise<boolean> {
     const client = workspace.client, previous = workspace.window?.id;
-    if (!previous) return false;
+    // Not before the open Window is confirmed: a cached Window shown during a cold start is read-only.
+    if (!previous || !workspace.hasActiveWindow || workspace.provisional) return false;
     let failure: { error: unknown } | undefined;
     const done = await run(async () => {
       try {
@@ -118,5 +122,5 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     return false;
   }
   const deleteWindow = (id: string) => run(() => removing(id));
-  return { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename, deleteCurrent, deleteWindow };
+  return { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename, deleteCurrent, deleteWindow };
 }

@@ -15,7 +15,7 @@ const windowOf = (id: string): WorkspaceWindow => ({ schemaVersion: 3, id, title
  * A workspace that behaves like useWindowWorkspace where the actions depend on it: open and create switch the active
  * Window, and remove refuses the active one, as its active-Window guard does.
  */
-async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as WindowGroup[] } = {}) {
+async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as WindowGroup[], provisional = false, confirmed = true } = {}) {
   let windows = ids.map(windowOf), current = active, client: object | undefined;
   let update!: () => void;
   const calls: string[] = [];
@@ -35,7 +35,7 @@ async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as Win
   function Harness() {
     [, update] = useReducer(value => value + 1, 0);
     const window = windows.find(candidate => candidate.id === current);
-    const workspace = { window, windows, groups, client, hasActiveWindow: !!window, unavailable: false,
+    const workspace = { window, windows, groups, client, hasActiveWindow: confirmed && !!window, provisional, unavailable: false,
       readWindow: () => windows.find(candidate => candidate.id === current),
       open, create, remove, operateGroup, operate: async () => {} } as unknown as ReturnType<typeof useWindowWorkspace>;
     result = useWindowActions(workspace, SCOPE);
@@ -59,6 +59,7 @@ it('copies the Window link without Bot route fields', async () => {
   expect(url.searchParams.get('keep')).toBe('1');
   expect(['mode', 'section', 'bot'].some(key => url.searchParams.has(key))).toBe(false);
   expect(test.actions().notice).toBe('Window link copied.');
+  expect(test.actions().noticeTone).toBe('info');
 });
 
 it('shows the Window as a section after the last ranked section', async () => {
@@ -215,4 +216,19 @@ it('shows a notice only in the Window and client it was given in', async () => {
   expect(test.actions().notice).toBeUndefined();
   await test.useClient(undefined);
   expect(test.actions().notice).toBeUndefined();
+});
+
+it('gives a failure notice the error tone', async () => {
+  const test = await fixture();
+  await act(async () => { await test.actions().run(async () => { throw new Error('Relay offline'); }); });
+  expect([test.actions().notice, test.actions().noticeTone]).toEqual(['Relay offline', 'error']);
+});
+
+it.each([['provisional', { provisional: true }], ['not yet confirmed', { confirmed: false }]] as const)('does not delete a Window that is %s', async (_state, options) => {
+  const test = await fixture(options);
+  let deleted!: boolean;
+  await act(async () => { deleted = await test.actions().deleteCurrent(); });
+  expect(deleted).toBe(false);
+  expect(test.calls).toEqual([]);
+  expect(test.current()).toBe('a');
 });

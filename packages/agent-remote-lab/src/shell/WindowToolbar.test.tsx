@@ -210,3 +210,27 @@ it('ends an open rename without saving when another Window takes the toolbar, an
   await press(input()!, 'Escape');
   expect(onRename).not.toHaveBeenCalled();
 });
+
+it('offers only safe actions while read-only: no rename, no adding views, no Show as section nor deletion', async () => {
+  const { bar, props } = await toolbar({ readOnly: true });
+  expect(titleButton(bar).disabled).toBe(true);
+  await act(async () => titleButton(bar).click());
+  expect(input()).toBeNull();
+  const disabled = (menu: HTMLElement) => items(menu).filter(entry => entry.getAttribute('aria-disabled') === 'true').map(entry => entry.textContent);
+  let menu = await openMenu(bar, 'Add');
+  expect(disabled(menu)).toEqual(['New session view', 'Open session…']);
+  await act(async () => item(menu, 'New session view').click());
+  expect(props.onNewView).not.toHaveBeenCalled();
+  await press(menu, 'Escape');
+  menu = await openMenu(bar, 'Window actions');
+  expect(disabled(menu)).toEqual(['Show as section', 'Delete Window…']);
+  await act(async () => item(menu, 'Copy link').click());
+  expect(props.onCopyLink).toHaveBeenCalledTimes(1);
+});
+
+it('disables Delete Window while another Window action runs', async () => {
+  const { bar } = await toolbar({ deleteDisabled: true });
+  const menu = await openMenu(bar, 'Window actions');
+  expect(item(menu, 'Delete Window…').getAttribute('aria-disabled')).toBe('true');
+  expect(item(menu, 'Copy link').getAttribute('aria-disabled')).toBeNull();
+});

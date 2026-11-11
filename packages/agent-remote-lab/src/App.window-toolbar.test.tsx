@@ -1,6 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 
 // jsdom has no modal dialogs; like browsers, closing queues the close event. The stubs are removed after each test.
@@ -13,6 +14,7 @@ afterEach(() => {
   }
 });
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) {
     if (!this.open) return;
@@ -234,5 +236,125 @@ it('opens Agent control in a sheet', async () => {
     const dialog = sheet('Agent control')!;
     expect(dialog?.open).toBe(true);
     expect(dialog.textContent).toContain('Name the session that arranges this Window.');
+  } finally { await app.close(); }
+});
+
+it('shows a cached Window read-only during a cold start: only Copy link acts, and nothing is changed', async () => {
+  const scope = 'http://localhost/window-toolbar-provisional/'; seedGroup(scope, windowGroup('A')); seedGroup(scope, windowGroup('B'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true, holdInspect: true });
+  const mutate = vi.mocked(WindowWorkspaceClient.prototype.mutate);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    expect(app.container.querySelector('#lab-workbench')!.getAttribute('data-window-provisional')).toBe('true');
+    expect(titleButton(app.container).disabled).toBe(true);
+    const disabled = (label: string) => [...document.querySelectorAll<HTMLElement>(`[role="menu"][aria-label="${label}"] [role="menuitem"]`)]
+      .filter(item => item.getAttribute('aria-disabled') === 'true').map(item => item.textContent);
+    const pick = (menu: string, label: string) => act(async () => [...document.querySelectorAll<HTMLElement>(`[role="menu"][aria-label="${menu}"] [role="menuitem"]`)]
+      .find(item => item.textContent === label)!.click());
+    const open = (menu: string) => act(async () => { if (!document.querySelector(`[role="menu"][aria-label="${menu}"]`)) toolbar(app.container)!.querySelector<HTMLButtonElement>(`button[aria-label="${menu}"]`)!.click(); });
+    await open('Add');
+    expect(disabled('Add')).toEqual(['New session view', 'Open session…']);
+    await pick('Add', 'New session view');
+    await press(document.querySelector('[role="menu"][aria-label="Add"]') ?? document.body, 'Escape');
+    await open('Window actions');
+    expect(disabled('Window actions')).toEqual(['Show as section', 'Delete Window…']);
+    await pick('Window actions', 'Delete Window…');
+    expect(sheet('Delete this Window?')).toBeUndefined();
+    await pick('Window actions', 'Show as section');
+    expect(app.workspace().window?.views).toHaveLength(2);
+    expect(mutate).not.toHaveBeenCalled();
+    app.releaseInspect();
+    await until(() => expect(app.container.querySelector('#lab-workbench')!.hasAttribute('data-window-provisional')).toBe(false));
+    expect(titleButton(app.container).disabled).toBe(false);
+  } finally { await app.close(); }
+});
+
+it('shows hidden docks again when a view is docked, and when the last dock closes', async () => {
+  const scope = 'http://localhost/window-toolbar-dock-reset/';
+  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock'), createWindowView('A-float', botTarget('Afloat'), 'float')]));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  const toggle = (label: string) => toolbar(app.container)?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  try {
+    await until(() => expect(toggle('Hide docks')).not.toBeNull());
+    await act(async () => toggle('Hide docks')!.click());
+    expect(toggle('Show docks')).not.toBeNull();
+    await act(async () => { await app.workspace().operate({ type: 'view.place', viewId: 'A-float', placement: 'dock' }); });
+    await until(() => expect(toggle('Hide docks')).not.toBeNull());
+    expect(localStorage.getItem('agent-remote:docks-hidden')).toBe('0');
+
+    await act(async () => toggle('Hide docks')!.click());
+    await act(async () => { await app.workspace().operate({ type: 'batch', operations: [{ type: 'view.close', viewId: 'A-float' }, { type: 'view.close', viewId: 'A-dock' }] }); });
+    await until(() => expect(app.workspace().window?.views.some(view => view.placement === 'dock')).toBe(false));
+    expect(toggle('Show docks') ?? null).toBeNull();
+    expect(localStorage.getItem('agent-remote:docks-hidden')).toBe('0');
+  } finally { await app.close(); }
+});
+
+it('keeps hidden docks hidden when the page switches to another Window', async () => {
+  const scope = 'http://localhost/window-toolbar-dock-switch/';
+  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock')]));
+  seedGroup(scope, windowGroup('B', [createWindowView('B-dock', botTarget('Bdock'), 'dock')]));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(toolbar(app.container)?.querySelector('button[aria-label="Hide docks"]')).not.toBeNull());
+    await act(async () => toolbar(app.container)!.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!.click());
+    await act(async () => { await app.workspace().open('B'); });
+    await until(() => expect(titleButton(app.container)?.textContent).toBe('B'));
+    expect(toolbar(app.container)!.querySelector('button[aria-label="Show docks"]')).not.toBeNull();
+  } finally { await app.close(); }
+});
+
+it('closes the toolbar sheets when the toolbar goes away', async () => {
+  const scope = 'http://localhost/window-toolbar-sheet-mode/'; seedGroup(scope, windowGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    await choose(app.container, 'Window actions', 'Delete Window…');
+    expect(sheet('Delete this Window?')?.open).toBe(true);
+    await app.switchMode('bot');
+    expect(sheet('Delete this Window?')).toBeUndefined();
+    await app.switchMode('window');
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    expect(sheet('Delete this Window?')).toBeUndefined();
+  } finally { await app.close(); }
+});
+
+it('shows a failed Window action as an error toast', async () => {
+  const scope = 'http://localhost/window-toolbar-error-toast/'; seedGroup(scope, windowGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: vi.fn(async () => { throw new Error('Clipboard blocked'); }) } });
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    await choose(app.container, 'Window actions', 'Copy link');
+    await until(() => expect([...document.querySelectorAll<HTMLElement>('.lab-toast')].find(node => node.textContent?.includes('Clipboard blocked'))?.dataset.tone).toBe('error'));
+  } finally { await app.close(); }
+});
+
+it.each([
+  ['no session views', () => [] as WindowGroup['window']['views'], {}],
+  ['floating views only', () => [createWindowView('float', botTarget('F'), 'float')], {}],
+  ['docks only', () => [createWindowView('dock', botTarget('D'), 'dock')], {}],
+  ['a minimized primary group', () => [{ ...createWindowView('primary', botTarget('P'), 'primary'), collapsed: true }], {}],
+  ['a provisional Window', () => [createWindowView('primary', botTarget('P'), 'primary')], { hosted: true, holdInspect: true }],
+] as const)('keeps View options in the toolbar, with the sidebar hidden, for %s', async (_case, views, options) => {
+  const scope = `http://localhost/window-toolbar-view-${_case.replace(/\W+/g, '-')}/`;
+  const group = botGroup('A', false);
+  seedGroup(scope, { ...group, window: { ...group.window, views: views(), selectedPrimaryViewId: views().find(view => view.placement === 'primary')?.id ?? null, selectedViewId: views()[0]?.id ?? null } });
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, options);
+  const apple = /Mac|iPhone|iPad/.test(navigator.platform);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    if (options === undefined || !('holdInspect' in options)) expect(app.container.querySelector('#lab-workbench')!.hasAttribute('data-window-provisional')).toBe(false);
+    else expect(app.container.querySelector('#lab-workbench')!.getAttribute('data-window-provisional')).toBe('true');
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
+    expect(app.container.querySelector<HTMLElement>('#lab-context')!.hidden).toBe(true);
+    await until(() => expect(app.button('View options')?.closest('header.lab-window-toolbar')).toBe(toolbar(app.container)));
+    expect(app.container.querySelectorAll('button[aria-label="View options"]')).toHaveLength(1);
   } finally { await app.close(); }
 });

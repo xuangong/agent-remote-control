@@ -464,17 +464,26 @@ function AppContent({
   };
   // One set of Window actions for the sidebar's Windows list and the Window toolbar: one busy state, one notice, shown as a toast.
   const windowActions = useWindowActions(windowWorkspace, baseUrl);
+  // A notice is cleared once a toast shows it; while toasts are inactive (Bot mode) it waits.
   useEffect(() => {
-    if (!windowActions.notice) return;
-    toast?.show('window-action', 'Window', windowActions.notice, 'info');
+    if (!windowActions.notice || !toast) return;
+    toast.show('window-action', 'Window', windowActions.notice, windowActions.noticeTone ?? 'error');
     windowActions.setNotice(undefined);
-  }, [windowActions.notice]);
+  }, [windowActions.notice, windowActions.noticeTone, toast]);
   const [docksHidden, setDocksHidden] = useState(() => { try { return localStorage.getItem(DOCKS_HIDDEN_KEY) === '1'; } catch { return false; } });
   useEffect(() => { try { localStorage.setItem(DOCKS_HIDDEN_KEY, docksHidden ? '1' : '0'); } catch { /* Keep the choice for this page without storage. */ } }, [docksHidden]);
   const [agentControlOpen, setAgentControlOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  // A Window's sheets belong to it: switching Windows closes them.
-  useEffect(() => { setAgentControlOpen(false); setDeleteConfirmOpen(false); }, [windowWorkspace.client, sharedWindow?.id]);
+  // Docking a view in the open Window shows the docks again, and so does closing its last dock; switching Windows keeps the choice.
+  const dockViews = useRef<{ windowId?: string; ids: Set<string> }>({ ids: new Set() });
+  const dockIds = (sharedWindow?.views ?? []).filter(view => view.placement === 'dock').map(view => view.id);
+  const dockKey = dockIds.join('\n');
+  useEffect(() => {
+    const previous = dockViews.current, ids = new Set(dockIds);
+    dockViews.current = { windowId: sharedWindow?.id, ids };
+    if (!sharedWindow || previous.windowId !== sharedWindow.id) return;
+    if (dockIds.some(id => !previous.ids.has(id)) || previous.ids.size > 0 && ids.size === 0) setDocksHidden(false);
+  }, [sharedWindow?.id, dockKey]);
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
   if (!accessReady) botPresentation.recovering = true;
@@ -1258,6 +1267,8 @@ function AppContent({
   }
   /** The desktop Window toolbar, above the session views of an available shared Window. */
   const windowToolbarShown = !!sharedWindow && !compactLayout && !windowWorkspace.unavailable;
+  // The toolbar's sheets belong to its Window: switching Windows, or the toolbar going away (a compact layout, Bot mode, an unavailable Window), closes them.
+  useEffect(() => { setAgentControlOpen(false); setDeleteConfirmOpen(false); }, [windowWorkspace.client, sharedWindow?.id, windowToolbarShown, windowMode]);
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
     const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
     if (slot && entry.managed) {
@@ -2868,7 +2879,8 @@ function AppContent({
       >
         {windowToolbarShown && sharedWindow ? <WindowToolbar windowId={sharedWindow.id} title={sharedWindow.title} viewCount={sharedWindow.views.length}
           leading={<div ref={setWindowToolbarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />}
-          // Not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
+          // The title is not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
+          readOnly={windowWorkspace.provisional} deleteDisabled={windowActions.busy}
           onRename={title => void windowActions.saveRename(sharedWindow.id, title)}
           onNewView={addSessionView} onOpenSession={createSessionView}
           hasDocks={sharedWindow.views.some(view => view.placement === 'dock')} docksHidden={docksHidden} onToggleDocks={() => setDocksHidden(value => !value)}
@@ -3054,7 +3066,7 @@ function AppContent({
         {windowCatalog(windowWorkspace).every(window => window.id === sharedWindow.id) ? ' A new empty Window opens in its place.' : null}</p>
       <div className="lab-sheet-actions">
         <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
-        <Button variant="destructive" onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
+        <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
       </div>
     </Sheet> : null}
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;

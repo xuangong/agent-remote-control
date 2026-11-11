@@ -27,7 +27,7 @@ export function useWindowSessionBridge(options: Options) {
   const [settled, refreshProjection] = useReducer(value => value + 1, 0);
   const adopted = useRef(new Set<string>());
   const projectedGroup = useRef<string>();
-  const projected = useRef<string>();
+  const projected = useRef<string>(), presentedGroup = useRef<string>();
   const successionAttempt = useRef<string>();
   const { window, succession, enabled } = options;
   const adoptedDocument = useRef(succession.document);
@@ -36,6 +36,7 @@ export function useWindowSessionBridge(options: Options) {
     adopted.current.clear();
     projected.current = undefined;
     projectedGroup.current = undefined;
+    presentedGroup.current = undefined;
   }
   const groupKey = window && JSON.stringify([window.id, window.selectedPrimaryViewId]);
   const history = succession.navigationIntent.sessionIntent === 'history';
@@ -46,7 +47,10 @@ export function useWindowSessionBridge(options: Options) {
     adoptWindowPrimaryRole(succession.document, window);
     if (enabled && (!succession.discovering || initialized)) adopted.current.add(groupKey);
   }
-  const slots = window && (!succession.discovering || initialized || adopted.current.has(groupKey!)) ? windowCompositionMapping(succession.document, window) : undefined;
+  // A group whose slots were already presented (a cached start before access) keeps them through the first discovery:
+  // withdrawing them for its duration would remount the views' draft editors and lose their image owners.
+  const slots = window && (!succession.discovering || initialized || adopted.current.has(groupKey!) || presentedGroup.current === groupKey) ? windowCompositionMapping(succession.document, window) : undefined;
+  presentedGroup.current = slots ? groupKey : undefined;
   const primarySlot = window?.selectedPrimaryViewId ? slots?.get(window.selectedPrimaryViewId) : undefined;
   const empty = !!options.unavailable || !!window && !primary?.binding;
   useEffect(() => {

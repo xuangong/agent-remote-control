@@ -353,3 +353,19 @@ it('reports synchronous Window validation failures while projecting an applied s
   expect(test.options.onError).toHaveBeenCalledWith(error);
   expect(test.options.window!.views[0]!.binding?.nativeSessionId).toBe(session.nativeSessionId);
 }, 10000);
+
+it('keeps the slots of a cached start presented through the first discovery after access returns', async () => {
+  const test = await harness(options => {
+    options.window = { ...emptyWindow(), views: [createWindowView('main', windowSessionBinding(session), 'primary')] };
+  });
+  // Before access, the cached Window shows its views with their slots.
+  const cached = test.read().slots?.get('main');
+  expect(cached).toBeDefined();
+  // Access returns and the first discovery starts: the views keep the same slots, so their editors stay mounted.
+  test.options.enabled = true; (test.options.succession as { discovering: boolean }).discovering = true;
+  await test.update();
+  expect(test.read().slots?.get('main')).toBe(cached);
+  (test.options.succession as { discovering: boolean }).discovering = false;
+  await test.update();
+  expect(test.read().slots?.get('main')?.id).toBe(cached!.id);
+});

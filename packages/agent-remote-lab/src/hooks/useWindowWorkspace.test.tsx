@@ -359,6 +359,15 @@ it('keeps a missing explicit Window link as an error without creating a replacem
   expect(new URL(location.href).searchParams.get('window')).toBe('missing-window');
 }, 10000);
 
+it('opens the session carried by a link to a local Window that this browser does not have', async () => {
+  history.replaceState(null, '', '/?window=other-browser&host=local&provider=recorded&session=linked');
+  const read = await mount('missing-window-session-link');
+  expect(read().unavailable).toBe(false); expect(read().error).toBeUndefined();
+  expect(read().window!.id).not.toBe('other-browser');
+  const selected = read().window!.views.find(view => view.id === read().window!.selectedPrimaryViewId);
+  expect(selected?.binding).toMatchObject({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'linked' });
+}, 10000);
+
 it('deletes a nonactive local Window without changing the current selection', async () => {
   const scope = 'local-target-delete', read = await mount(scope); const target = read().window!;
   await act(async () => read().create());

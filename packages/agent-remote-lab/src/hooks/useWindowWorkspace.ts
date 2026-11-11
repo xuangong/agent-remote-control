@@ -406,8 +406,8 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     const query = new URL(navigation.url).searchParams;
     const windowRoute = foreground.current && query.get('mode') !== 'bot';
     const requested = windowRoute ? query.get('window') : null;
-    const explicitSession = windowRoute && !requested && !!query.get('host') && !!query.get('provider') && !!query.get('session');
-    const target: WindowSessionBinding | undefined = explicitSession ? {
+    const linkedSession = windowRoute && !!query.get('host') && !!query.get('provider') && !!query.get('session');
+    const linked: WindowSessionBinding | undefined = linkedSession ? {
         hostId: query.get('host')!, providerId: query.get('provider')!, nativeSessionId: query.get('session')!,
         title: composition.slots.find(slot => slot.intent.target.hostId === query.get('host')
           && slot.intent.target.native.providerId === query.get('provider')
@@ -415,16 +415,18 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         ...(query.get('parent') ? { parentNativeSessionId: query.get('parent')! } : {}),
         ...(query.get('intent') === 'history' ? { sessionIntent: 'history' as const } : {}),
       } : undefined;
+    let target = requested ? undefined : linked;
     const initialWindow = () => {
       const imported = importCompositionWindow(composition);
-      if (!target) return imported;
-      const existing = imported.views.find(view => view.binding?.hostId === target.hostId
-        && view.binding.providerId === target.providerId && view.binding.nativeSessionId === target.nativeSessionId
-        && view.binding.sessionIntent === target.sessionIntent);
+      const session = target;
+      if (!session) return imported;
+      const existing = imported.views.find(view => view.binding?.hostId === session.hostId
+        && view.binding.providerId === session.providerId && view.binding.nativeSessionId === session.nativeSessionId
+        && view.binding.sessionIntent === session.sessionIntent);
       if (existing) { imported.selectedViewId = existing.id; imported.selectedPrimaryViewId = windowPrimaryViewId(imported, existing.id) ?? imported.selectedPrimaryViewId; return imported; }
-      const operation = imported.selectedPrimaryViewId ? { type: 'view.bind' as const, viewId: imported.selectedPrimaryViewId, binding: target } : sessionLinkOperation(imported, target);
+      const operation = imported.selectedPrimaryViewId ? { type: 'view.bind' as const, viewId: imported.selectedPrimaryViewId, binding: session } : sessionLinkOperation(imported, session);
       const bound = operation ? applyWindowOperation(imported, operation) : imported;
-      Object.assign(imported, bound, { revision: 0, title: target.title, selectedViewId: bound.selectedPrimaryViewId ?? bound.selectedViewId });
+      Object.assign(imported, bound, { revision: 0, title: session.title, selectedViewId: bound.selectedPrimaryViewId ?? bound.selectedViewId });
       return imported;
     };
     const preferredIds = () => {
@@ -455,7 +457,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       }
       publishCatalog(local);
       if (!foreground.current) return;
-      if (requested && !cached) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
+      // A local Window exists only in the browser that made it. Elsewhere, a link to it opens the session it carries.
+      if (requested && !cached && linked) target = linked;
+      if (requested && !cached && !target) { setError('This Window is unavailable in the local workbench.'); setUnavailable(true); }
       else {
         const existing = cached ?? local.find(hasWindowAppearance);
         try {

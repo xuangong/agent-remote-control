@@ -18,7 +18,7 @@ import { sessionViewNavigation, type SessionViewNavigationActions, type SessionV
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
-import { SessionViewOperationsContext } from '../session-view-operations.js';
+import { SessionLocatorSynchronizingError, SessionViewOperationsContext } from '../session-view-operations.js';
 import { useSuccessionContext } from '../hooks/useSuccessionContext.js';
 
 export type FamilySessionPresentationContext = ReturnType<typeof useConversationSession> & {
@@ -53,11 +53,22 @@ export function SessionConversation(props: SessionConversationProps) {
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
   const [inputOwner, setInputOwner] = useState<{ source: SessionWindowTarget; target: SessionWindowTarget; count: number }>();
-  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined;
+  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined, synchronizing = false;
   try {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
-  } catch (error) { resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.'; }
+  } catch (error) {
+    resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.';
+    synchronizing = error instanceof SessionLocatorSynchronizingError;
+  }
+  // A discovery refresh briefly withholds every locator. Keep attaching the target this view last resolved, so a refresh
+  // does not cancel an attachment in flight and start another; input still waits until the locator is confirmed again.
+  const resolutionRequest = JSON.stringify([sessionKey(target), props.viewId ?? null, !!props.nativePrefixOnly]);
+  const lastResolution = useRef<{ request: string; target: SessionWindowTarget; historyRoleId?: string }>();
+  const retainedResolution = synchronizing && lastResolution.current?.request === resolutionRequest ? lastResolution.current : undefined;
+  if (!resolutionError) lastResolution.current = { request: resolutionRequest, target: currentTarget, historyRoleId };
+  else if (retainedResolution) { currentTarget = retainedResolution.target; historyRoleId = retainedResolution.historyRoleId; }
+  const attachmentError = retainedResolution ? undefined : resolutionError;
   // Keep the same source's queue observable while its live locator follows succession. Explicit navigation admits its own target.
   const retainingInput = !!inputOwner?.count && sessionKey(inputOwner.source) === sessionKey(target)
     && sessionKey(inputOwner.target) !== sessionKey(currentTarget);
@@ -112,7 +123,7 @@ export function SessionConversation(props: SessionConversationProps) {
     }
     if (!enabled || !canAttach) return;
     let stopped = false; const abort = new AbortController(); setError('');
-    if (resolutionError) { setError(resolutionError); return; }
+    if (attachmentError) { setError(attachmentError); return; }
     if (props.attachedSession && sessionKey(props.attachedSession) === sessionKey(currentTarget) && !historyRoleId) { setSession(props.attachedSession); return; }
     if (session && sessionKey(session) === targetKey && !historyRoleId) return;
     const cached = connections?.find(currentTarget);
@@ -134,7 +145,7 @@ export function SessionConversation(props: SessionConversationProps) {
       setNativeOwner(error instanceof DirectoryError && error.nativeOwner ? { targetKey, owner: error.nativeOwner } : undefined);
     });
     return () => { stopped = true; abort.abort(); };
-  }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, resolutionError, attempt, connections, enabled, canAttach, directory, props.attachedSession?.agentId, props.attachmentManaged]);
+  }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, attachmentError, attempt, connections, enabled, canAttach, directory, props.attachedSession?.agentId, props.attachmentManaged]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
   const pending = !!resolutionError || !displayedSession;
   return <FamilyChat {...props} onPendingInputChange={count => {

@@ -640,6 +640,35 @@ it('keeps an unclaimed leaf from attaching a changed live locator until its dest
   expect(attach).toHaveBeenCalledExactlyOnceWith('recorded', 'new', expect.any(AbortSignal));
 });
 
+it('keeps an attachment in flight while a discovery refresh withholds the locator and attaches only once', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  let finish!: (value: { agentId: string; nativeSessionId: string }) => void;
+  const attach = vi.spyOn(directory, 'attach').mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'side', title: 'Side' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore('refreshing-locator');
+  let setSynchronizing!: (value: boolean) => void;
+  function Harness() {
+    const [synchronizing, set] = useState(false); setSynchronizing = set;
+    return <SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+      resolveTarget: () => { if (synchronizing) throw new SessionLocatorSynchronizingError(); return { target }; }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+        directoryFor={() => directory} baseUrl="http://fixture" storageScope="refreshing-locator" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={drafts} />
+    </SessionViewOperationsContext.Provider>;
+  }
+  await render(<Harness />);
+  expect(attach).toHaveBeenCalledOnce();
+  const signal = attach.mock.calls[0]![2]!;
+  await act(async () => setSynchronizing(true));
+  await act(async () => setSynchronizing(false));
+  expect(signal.aborted).toBe(false);
+  await act(async () => finish({ agentId: 'side-agent', nativeSessionId: 'side' }));
+  expect(attach).toHaveBeenCalledOnce();
+});
+
 it('aborts native restoration on leaf teardown and ignores a late attachment result', async () => {
   const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
   const { unmount } = await import('../test/setup.js');

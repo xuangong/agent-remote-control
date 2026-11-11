@@ -9,6 +9,7 @@ import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { restoreSession } from '../session-restoration.js';
+import { SessionLocatorSynchronizingError } from '../session-view-operations.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
@@ -827,7 +828,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return owner.id;
   }
   function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
-    if (!live() || !runtime.discovered || runtime.discovering) throw new Error('The current session locator is still synchronizing.');
+    if (!live() || !runtime.discovered || runtime.discovering) throw new SessionLocatorSynchronizingError();
     if (selection.parentNativeSessionId) return { target: selection };
     const slot = requested.viewId ? runtime.document.slots.find(slot => slot.id === requested.viewId) : undefined;
     const matches = [...runtime.historyEvidence.values()].filter(evidence => evidence.replays.some(replay =>

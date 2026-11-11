@@ -16,4 +16,8 @@ export interface SessionViewOperations {
   refreshSettled(result: SuccessionActionResult, source: OpenedSession): Promise<void>;
   successionContextFor?(viewId?: string): { operationId: string; target: NativeSessionRef } | undefined;
 }
+/** Succession discovery is (re)reading the current locators; a view may keep the target it last resolved until it finishes. */
+export class SessionLocatorSynchronizingError extends Error {
+  constructor() { super('The current session locator is still synchronizing.'); this.name = 'SessionLocatorSynchronizingError'; }
+}
 export const SessionViewOperationsContext = createContext<SessionViewOperations | undefined>(undefined);

@@ -1,5 +1,5 @@
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 
@@ -10,14 +10,23 @@ export const forkCommands = [
   { id: 'console:side', name: 'side', aliases: ['btw'], kind: 'command' as const, description: 'Open an independent conversation alongside this chat' },
 ];
 
-export function forkActions(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork | undefined, transport: RemoteAgentTransport): LabWorkbenchActions {
+/**
+ * `targetsFork`: whether the view these actions came from still shows the fork. A first input delayed past a change of
+ * that view (its Window view rebound to the source, for instance) is rejected before dispatch as `session_changed`,
+ * so the fork records it as not sent ('pending') rather than of unknown delivery.
+ */
+export function forkActions(actions: LabWorkbenchActions, store: ForkStore, record: SessionFork | undefined, transport: RemoteAgentTransport, targetsFork?: () => boolean): LabWorkbenchActions {
   if (!record) return actions;
   const delivery = store.getLocal(record.id) ?? (!record.remote ? record : undefined);
   if (!delivery?.target) return actions;
   record = delivery;
   const target = delivery.target;
-  async function withContext<T>(text: string, send: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
+  async function withContext<T>(text: string, dispatch: (input: string) => Promise<T>, identity?: string): Promise<T | undefined> {
     await inheritSettings(actions, store, record!, transport);
+    const send = (input: string) => {
+      if (targetsFork && !targetsFork()) throw new RemoteOperationError('session_changed', 'The conversation changed before this action could be sent. Return to its original session to retry.', true);
+      return dispatch(input);
+    };
     return store.send(record!.id, text, send, async () => {
       const context = await captureForkContext(transport, target);
       const rows = JSON.parse(context.text) as { role: string; text: string }[];

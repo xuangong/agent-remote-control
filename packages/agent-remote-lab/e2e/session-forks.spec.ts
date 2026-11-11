@@ -284,9 +284,9 @@ hosted('rejects a delayed fork input after the main conversation changes', async
   await primary.getByTestId('prompt-input').press('Enter');
   await expect(forkEntries(primary)).toHaveCount(1);
   // Open the fork itself in the main view from the Host's sessions.
-  const discovery = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
-  await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await discovery.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
+  const sessions = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
+  await sessions.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await sessions.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
   await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.includes(':record:'))!;
@@ -302,13 +302,19 @@ hosted('rejects a delayed fork input after the main conversation changes', async
   await primary.getByRole('button', { name: 'Open source session' }).click();
   await expect(primary.locator('.lab-fork-reference')).toHaveCount(0);
   await page.evaluate(() => (window as unknown as { releaseFork: () => void }).releaseFork());
-  // The input never reaches the source. In a Window the fork view's own conversation holds it, so its delivery is
-  // left unconfirmed ('uncertain', checked against the fork's history before its next send) rather than 'pending'.
+  // The input is rejected locally: it never reaches the source, and the fork records it as not sent.
   const delivery = () => page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((key) => key.includes(':record:'))!)!).delivery);
-  await expect.poll(delivery).not.toBe('sent');
-  await page.waitForTimeout(1000);
-  expect(['pending', 'uncertain']).toContain(await delivery());
+  await expect.poll(delivery).toBe('pending');
   await expect(primary.getByTestId('timeline')).not.toContainText('This must stay in the fork.');
+  // The fork is not stuck: opening it again, its next input is delivered.
+  const discovery = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
+  await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await discovery.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
+  await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
+  await primary.getByTestId('prompt-input').fill('Delivered after the rejection.');
+  await primary.getByTestId('prompt-input').press('Enter');
+  await expect(primary.locator('.agent-message-assistant').last()).toContainText('Delivered after the rejection.');
+  await expect.poll(delivery).toBe('sent');
 });
 
 test('keeps a tree of side panes with independent drafts and reopens a closed one from its source', async ({ page }, testInfo) => {

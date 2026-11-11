@@ -2448,7 +2448,13 @@ function AppContent({
     const view = options.bot ? botGroup?.window.views.find(view => view.id === options.bot!.viewId) : sharedWindow?.views.find(view => view.id === context.windowViewId);
     const isPrimary = view?.placement === 'primary';
     const fork = forkStore.find(source);
-    const commands = botPresentation ? context.actions : forkActions(actions ?? context.actions, forkStore, fork, transport);
+    // In a Window, a fork view's input belongs to the fork only while that view still shows it.
+    const forkTarget = fork?.target;
+    const targetsFork = forkTarget && context.windowViewId ? () => {
+      const binding = windowWorkspace.readWindow()?.views.find(item => item.id === context.windowViewId)?.binding;
+      return !!binding && sessionKey({ ...binding, hostId: binding.hostId ?? 'local' }) === sessionKey({ ...forkTarget, hostId: forkTarget.hostId ?? 'local' });
+    } : undefined;
+    const commands = botPresentation ? context.actions : forkActions(actions ?? context.actions, forkStore, fork, transport, targetsFork);
     const gated = successionGated && successionDialog?.scope === baseUrl && viewKey(successionDialog.source) === source.viewId;
     const host = remoteHosts.find(host => host.id === source.hostId);
     const available = accessReady && !context.offline && context.status === 'ready' && !context.pending && sourceCurrent(source);

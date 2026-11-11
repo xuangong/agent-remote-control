@@ -3,6 +3,7 @@ import { selectConnectedHost } from './all-sessions';
 import jsQR from 'jsqr';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
+import { clickSessionAction } from './session-actions';
 
 test('shares a decodable QR without fetching more scripts from an older open page', async ({ page }, info) => {
   test.setTimeout(60000);
@@ -15,18 +16,17 @@ test('shares a decodable QR without fetching more scripts from an older open pag
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
-    const original = page.url();
+    await expect(page).toHaveURL(/[?&]session=/);
+    // The shared link names the session, not the sharer's Window (?window=<id>).
+    const address = new URL(page.url()); address.searchParams.delete('window');
+    const original = address.href;
     const lateScripts: string[] = [];
     await page.route('**/assets/*.js', route => {
       lateScripts.push(route.request().url());
       return route.fulfill({ status: 404, body: 'Asset no longer available' });
     });
-    if (!await page.getByRole('button', { name: 'Share session link' }).isVisible()) {
-      await page.getByRole('button', { name: 'View options', exact: true }).click();
-      await page.getByLabel('Header', { exact: true }).check();
-      await page.getByRole('button', { name: 'View options', exact: true }).click();
-    }
-    await page.getByRole('button', { name: 'Share session link' }).click();
+    // Share sits among the view's session actions, which may keep it behind "More session actions".
+    await clickSessionAction(page.locator('.lab-primary-conversation'), 'Share session link');
     const dialog = page.getByRole('dialog', { name: 'Share session', exact: true });
     const qr = dialog.getByAltText('Session QR code');
     await expect(qr).toBeVisible();

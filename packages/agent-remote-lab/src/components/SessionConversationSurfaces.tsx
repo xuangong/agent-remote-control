@@ -135,6 +135,12 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   const attachment = window?.descriptor.props ?? descriptor.props;
   // Place the host before any layout effect of the conversation runs: those of a view that just became visible
   // measure, scroll and focus their content (a Trace reveal, a restored reading position), which a parked host cannot.
+  // A layout effect here would run too late: React runs a parent's layout effects after its children's, and the
+  // conversation is a child (through the portal). useInsertionEffect is used for moving DOM because it runs in the
+  // commit's mutation phase: after this commit's DOM changes inside the host (children are committed first), and
+  // before every layout effect and ref attachment of the commit. It relies on that order only; the destination it
+  // moves to is a node from an earlier commit (registered in a layout effect, then published), and the parking element
+  // may still be unset on the first commit, which is why a missing destination is skipped.
   useInsertionEffect(() => {
     const destination = placed ? chosen.destination : registry.parking;
     if (destination) moveSessionHost(entry.host, destination);

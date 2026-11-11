@@ -2200,8 +2200,9 @@ it.each(['history', 'control', 'runtime'] as const)('keeps a matching session al
   const initial = connection()!;
   await act(async () => { await new Promise(resolve => nativeSetTimeout(resolve, 300)); });
   expect(succession.error).toBeUndefined();
-  expect(succession.binding).toBeUndefined();
-  expect(succession.sessionState.synchronized).toBe(false);
+  // A restoring runtime does not hide which session this is: the view binds to show it, but grants nothing.
+  if (phase === 'runtime') expect(succession.binding?.client).toBe(initial.client);
+  else { expect(succession.binding).toBeUndefined(); expect(succession.sessionState.synchronized).toBe(false); }
   expect(succession.sessionState.operations.send_message.allowed).toBe(false);
   expect(succession.imageRecipient).toBeUndefined();
   expect(succession.sessionState.connection).toBe(initial.client.getSessionState().connection);

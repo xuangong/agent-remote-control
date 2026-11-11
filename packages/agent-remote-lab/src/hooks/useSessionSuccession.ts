@@ -416,10 +416,16 @@ export function useSessionSuccession(options: SuccessionOptions) {
           && agent.runtimeInfo.providerId === identity.providerId && agent.runtimeInfo.sessionId === identity.nativeSessionId;
       };
       let confirmed = false;
-      const synchronized = () => {
+      // The snapshot and replayed history confirm which native session this is. Its
+      // runtime connection only gates operations: a session that opens while its native
+      // runtime reconnects still binds, so the view shows it and its recovery notice.
+      const identified = () => {
         const state = lease.replica.getState(), native = lease.client.getSessionState();
-        return exactIdentity() && state.timeline.initialized && !!state.timeline.epoch && native.synchronized
-          && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
+        return exactIdentity() && state.timeline.initialized && !!state.timeline.epoch && native.synchronized && !native.controlChecking;
+      };
+      const synchronized = () => {
+        const native = lease.client.getSessionState();
+        return identified() && native.runtime?.state === 'connected' && !native.recovering;
       };
       const viewCurrent = () => confirmed && exactIdentity();
       const imageCurrent = () => synchronized() && lease.client.getSessionState().operations.send_message.allowed && !lease.client.getSessionState().readOnly;
@@ -450,7 +456,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
           binding.recipient = { identity: JSON.stringify([options.scope, desired.slot.id, desired.revision, desired.target, session.agentId]), lifetime,
             isCurrent: () => lifetime.active && imageLifetime === lifetime && imageCurrent() && lease.replica.getState().timeline.epoch === epoch };
         }
-        const nativeReady = synchronized();
+        const nativeReady = identified();
         // Replay owns the composition until its participants settle. An earlier native
         // attachment must not invalidate that read by publishing its binding metadata.
         if (nativeReady && !confirmed && !runtime.discovering && runtime.result?.status === 'applied') {

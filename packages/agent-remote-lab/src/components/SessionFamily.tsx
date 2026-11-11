@@ -99,10 +99,14 @@ export function SessionFamily(props: Props) {
   useEffect(() => {
     if (compact || !active || !revealShown) return;
     const pane = container.current?.children[revealIndex];
+    let cancelled = false;
     let frame = requestAnimationFrame(() => { frame = requestAnimationFrame(() => {
-      if (pane instanceof HTMLElement) pane.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      // The frame may outlive the family (an environment torn down without unmounting it): reveal only a mounted pane,
+      // and tolerate an environment without scrollIntoView or matchMedia.
+      if (cancelled || !(pane instanceof HTMLElement) || !pane.isConnected) return;
+      pane.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     }); });
-    return () => cancelAnimationFrame(frame);
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
   }, [reveal, revealShown, compact, active]);
   /** The pane of an attached view's own source; a local family is one chain. */
   function parentIndex(index: number) {

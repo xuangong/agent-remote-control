@@ -179,7 +179,10 @@ test('narrow panes keep their selection and draft without exposing dock title dr
   await expect(view).toBeVisible();
   await expect(page.locator('[data-session-title-draggable]')).toHaveCount(0);
   await expect(view.getByRole('button', { name: /^(Dock|Float) /, includeHidden: true })).toHaveCount(0);
-  const heading = view.locator('.lab-session-heading-title');
+  // A narrow pane folds its heading, title included, into the timeline's "Session actions" toolbar; dragging there
+  // must not reorder docks either.
+  await expect(view.locator('.lab-session-heading-title')).toBeHidden();
+  const heading = view.getByRole('toolbar', { name: 'Session actions', exact: true });
   const start = await point(heading);
   await page.mouse.move(start.x, start.y); await page.mouse.down();
   await page.mouse.move(start.x + 100, start.y, { steps: 8 }); await page.mouse.up();

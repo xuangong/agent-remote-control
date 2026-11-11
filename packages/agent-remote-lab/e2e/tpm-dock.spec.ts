@@ -15,7 +15,14 @@ test('TPM groups remain usable while multiple workspaces are open', async ({ pag
   await list.locator('[data-tpm-work]').filter({ hasText: 'Connection recovery' }).click();
   const second = page.getByRole('dialog', { name: 'TPM: Connection recovery' });
   await expect(second).toBeVisible();
-  await expect(second.getByRole('button', { name: 'Open main session: Agent Remote Control', exact: true })).toBeVisible();
+  // The main session is one of the TPM session's attributions (082069a0), behind "Show session attributions".
+  // The open TPM works list overlaps the toggle, so it is activated from the keyboard, as in session-attributions.
+  const attributions = second.getByRole('button', { name: 'Show session attributions', exact: true });
+  await attributions.focus(); await attributions.press('Enter');
+  const table = second.getByRole('table', { name: 'Session attributions' });
+  await expect(table).toContainText('Agent Remote Control');
+  await second.getByRole('button', { name: 'Hide session attributions', exact: true }).press('Enter');
+  await expect(table).toBeHidden();
   await expect(page.locator('.lab-tpm-window:visible')).toHaveCount(isMobile ? 1 : 2);
   await list.getByRole('button', { name: 'Close TPM works' }).click();
   await second.getByTestId('prompt-input').fill('Preserve this delivery draft');

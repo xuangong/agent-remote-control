@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openSessionsPage } from './all-sessions';
 
-/** The Track capsule. `.lab-tracking-floating` is also the class of the floating Window, Team and TPM capsules. */
-const track = (page: Page) => page.locator('.lab-tracking-floating').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
+/** The Track capsule, floating or (while the desktop sidebar shows) in the sidebar's Shortcuts. `.lab-tracking-floating` is also the class of the floating Window, Team and TPM capsules. */
+const track = (page: Page) => page.locator('.lab-tracking-floating, .lab-sidebar-shortcut-track').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -15,7 +15,7 @@ test('opens live tracking without a second attach or background history download
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   let attachments = 0;
   let opening = false;
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.route('**/v1/remote/hosts/host/attach', async route => {
     attachments += 1;
     // Attachment is deliberately unavailable after tracking is ready.
@@ -47,7 +47,7 @@ test('opens live tracking without a second attach or background history download
 
 test('moves the tracking button without opening it and keeps the menu inside the viewport', async ({ page }, testInfo) => {
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.goto('/e2e/fixtures/session-stars.html');
   const button = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   const initial = (await button.boundingBox())!;
@@ -96,12 +96,17 @@ test('moves the tracking button without opening it and keeps the menu inside the
 
 test('shares sidebar and title favorites while retaining only local activity tracking', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  let stars: Record<string, unknown>[] = [{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
-  await page.route('**/v1/stars', route => {
-    const method = route.request().method();
-    if (method === 'POST') stars = [...stars, { ...route.request().postDataJSON(), starredAt: 1, available: true, online: true, hostName: 'Work Mac' }];
-    if (method === 'DELETE') stars = stars.filter(item => item.nativeSessionId !== route.request().postDataJSON().nativeSessionId);
-    return route.fulfill({ json: { stars } });
+  const saved = (session: Record<string, unknown>, order: number) => ({ ...session, starredAt: 1, available: true, online: true, hostName: 'Work Mac',
+    favoriteId: `favorite-${session.nativeSessionId}`, folderId: null, order });
+  let stars: Record<string, unknown>[] = [saved({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks' }, 0)];
+  let revision = 0;
+  // Favorites are an account tree read and changed through v1/favorites since 4ef75855.
+  await page.route('**/v1/favorites', route => {
+    const command = route.request().method() === 'POST' ? route.request().postDataJSON() : undefined;
+    if (command?.type === 'save-session') stars = [...stars, saved(command.session, stars.length)];
+    if (command?.type === 'remove-session') stars = stars.filter(item => item.nativeSessionId !== command.session.nativeSessionId);
+    if (command) revision++;
+    return route.fulfill({ json: { revision, folders: [], stars } });
   });
   await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: 'agent-1' } }));
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
@@ -115,41 +120,63 @@ test('shares sidebar and title favorites while retaining only local activity tra
   if (!mobile) await openSessionsPage(page);
   const title = page.getByRole('button', { name: 'Favorites', exact: true });
   if (mobile) await title.click();
+  // A star opens the favorite editor (4ef75855); a new favorite goes to the root folder.
   await page.getByRole('button', { name: 'Star Research notes', exact: true }).last().click();
-  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-sessions-page [aria-label="Favorites"]');
-  await expect(favorites.getByText('Research notes', { exact: true })).toBeVisible();
-  await favorites.getByRole('button', { name: 'Track Research notes', exact: true }).click();
-  if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
+  const editor = page.getByRole('dialog', { name: 'Add favorite', exact: true });
+  await editor.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  await expect.poll(() => stars.length).toBe(2);
+  // Favorites is a page on desktop (it covers the Window, whose sessions then count as unseen) and a title menu on phones.
+  const showFavorites = async () => { if (!mobile) await openSessionsPage(page, 'Favorites'); else if (!await page.locator('.lab-title-favorites section').isVisible()) await title.click(); };
+  const leaveFavorites = async () => {
+    if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
+    else await page.locator('#lab-sessions-page').getByRole('button', { name: 'Back to Window', exact: true }).click();
+  };
+  await showFavorites();
+  const favorites = page.locator(mobile ? '.lab-title-favorites section' : '#lab-sessions-page').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
+  const favorite = (name: string) => favorites.getByRole('treeitem').filter({ hasText: name });
+  // Track and Remove favorite live in each row's actions menu.
+  const favoriteAction = async (name: string, action: 'Track' | 'Untrack' | 'Remove favorite') => {
+    await favorite(name).getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
+    await page.getByRole('button', { name: action, exact: true }).click();
+  };
+  await expect(favorite('Research notes')).toBeVisible();
+  await favoriteAction('Research notes', 'Track');
+  await leaveFavorites();
+  // The current session is tracked without appearing among the background sessions.
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(track(page).locator('section')).not.toContainText('Research notes');
   await expect(track(page).locator('.lab-tracking-count')).toHaveText('0');
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
-  if (mobile) await title.click();
-  await favorites.getByRole('button', { name: 'Track Build checks', exact: true }).click();
-  if (mobile) await page.getByRole('button', { name: 'Close Favorites', exact: true }).click();
+  await showFavorites();
+  await favoriteAction('Build checks', 'Track');
+  await leaveFavorites();
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(track(page).locator('section')).toContainText('Ready');
   await expect(track(page).locator('.lab-tracking-count')).toHaveText('1');
   await expect(page.getByTestId('prompt-input')).toHaveText('Keep my draft');
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-activity', { detail: 'waiting' })));
-  await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('A tracked session needs attention', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(track(page).locator('section')).toContainText('Waiting');
-  await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'New status for Build checks. Mark as seen', exact: true }).click();
-  await expect(page.getByLabel('1 session status changes', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('tracking.png') });
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  // Tracking is local to this browser and survives a reload; favorites are shared through the account.
   await page.goto('/e2e/fixtures/session-stars.html');
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(track(page).locator('section')).toContainText('Build checks');
-  await track(page).locator('section').getByRole('button', { name: 'Untrack Build checks', exact: true }).click();
+  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await showFavorites();
+  await favoriteAction('Build checks', 'Untrack');
+  await leaveFavorites();
+  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   await expect(track(page).locator('section')).toContainText('current session');
   expect(stars).toHaveLength(2);
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
-  if (mobile) await title.click();
-  await favorites.getByRole('button', { name: 'Unstar Research notes', exact: true }).last().click();
-  await expect(favorites.locator('.lab-favorite-list')).not.toContainText('Research notes');
+  await showFavorites();
+  await favoriteAction('Research notes', 'Remove favorite');
+  await expect(favorite('Research notes')).toHaveCount(0);
   expect(stars).toHaveLength(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
@@ -158,7 +185,7 @@ test('shares sidebar and title favorites while retaining only local activity tra
 
 
 test('uses consistent status colors for mobile titles and grouped tracking counts', async ({ page }, testInfo) => {
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
   await page.addInitScript(() => {
     const sessions = ['working-session', 'pending-session', 'idle-one', 'idle-two', 'recorded-session'].map(nativeSessionId => ({
@@ -210,8 +237,8 @@ test('uses consistent status colors for mobile titles and grouped tracking count
   }
 });
 
-test('pulses for unread pending and completed work, prioritizes pending, and marks each changed session', async ({ page }, testInfo) => {
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+test('pulses for unread pending and completed work, prioritizes pending, and marks each changed session seen when it is opened', async ({ page }, testInfo) => {
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
   await page.addInitScript(() => {
     const sessions = ['Needs input', 'Finished work'].map(nativeSessionId => ({
@@ -220,12 +247,13 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
     localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify(sessions));
   });
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
-  await page.goto('/e2e/fixtures/session-stars.html');
+  // Since 3f8cdc90 a tracked session is marked seen by opening its row, so the fixture serves the opened conversation.
+  await page.goto('/e2e/fixtures/session-stars.html?switching');
   const floating = track(page);
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   const panel = floating.locator('section');
-  const pendingIndicator = page.getByRole('button', { name: 'New status for Needs input. Mark as seen', exact: true });
-  const idleIndicator = page.getByRole('button', { name: 'New status for Finished work. Mark as seen', exact: true });
+  const row = (title: string) => panel.locator('.lab-session-row').filter({ hasText: title });
+  const opened = (title: string) => page.locator('.lab-primary-conversation').getByText(`Conversation for ${title}`, { exact: true });
   const activity = async (agentId: string, status: string) => {
     await page.evaluate(detail => window.dispatchEvent(new CustomEvent('fixture-activity', { detail })), { agentId, status });
   };
@@ -240,12 +268,13 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
   await expect(floating).toHaveAttribute('data-alert', 'idle');
   await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
   await trigger.click();
-  await expect(idleIndicator).toBeVisible();
+  await expect(row('Finished work')).toContainText('Ready');
   await expect(floating).toHaveAttribute('data-alert', 'idle');
+  // Pending work takes priority over completed work.
   await activity('Needs input', 'waiting');
   await expect(floating).toHaveAttribute('data-alert', 'pending');
   await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-pending-pulse');
-  await expect(pendingIndicator).toBeVisible();
+  await expect(row('Needs input')).toContainText('Waiting');
   const backgrounds = await trigger.evaluate(element => {
     const animation = element.getAnimations().find(value => value instanceof CSSAnimation)!;
     animation.pause(); animation.currentTime = 0;
@@ -257,34 +286,35 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
   });
   expect(backgrounds[0]).not.toBe(backgrounds[1]);
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
-  await trigger.click();
-  await expect(pendingIndicator).toBeVisible();
-  await expect(idleIndicator).toBeVisible();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(trigger).toHaveCSS('animation-name', 'none');
   await expect(floating).toHaveAttribute('data-alert', 'pending');
   await page.screenshot({ path: testInfo.outputPath('pending-reminders.png') });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await pendingIndicator.click();
-  await expect(pendingIndicator).toHaveCount(0);
-  await expect(panel.getByRole('button', { name: 'Needs input Waiting · recorded', exact: true })).toBeFocused();
+  // Opening the pending session marks it seen; the completed one keeps its own reminder.
+  await trigger.click();
+  await row('Needs input').click();
+  await expect(opened('Needs input')).toBeVisible();
   await expect(floating).toHaveAttribute('data-alert', 'idle');
   await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
+  // The open session shows its own status instead of alerting.
   await activity('Needs input', 'waiting');
   await expect(floating).toHaveAttribute('data-alert', 'idle');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.screenshot({ path: testInfo.outputPath('idle-reminders.png') });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await idleIndicator.click();
-  await expect(panel.locator('.lab-tracked-change')).toHaveCount(0);
+  await trigger.click();
+  await row('Finished work').click();
+  await expect(opened('Finished work')).toBeVisible();
   await expect(trigger).toHaveCSS('animation-name', 'none');
-  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
+  await expect(floating).not.toHaveAttribute('data-alert', /./);
+  // A background session that needs input again alerts again until its state moves on.
   await activity('Needs input', 'running'); await activity('Needs input', 'waiting');
   await expect(floating).toHaveAttribute('data-alert', 'pending');
   await activity('Needs input', 'running');
   await expect(trigger).toHaveCSS('animation-name', 'none');
   await trigger.click();
-  await expect(pendingIndicator).toBeVisible();
+  await expect(row('Needs input')).toContainText('Working');
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width);
 });
 
@@ -292,14 +322,15 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
 test('draws the tracking edge from applied content and closes immediately when the activity target is reached', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
-  await page.route('**/v1/stars', route => route.fulfill({ json: { stars: [] } }));
+  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
   await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: 'background-session' } }));
   await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
   await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
   await page.addInitScript(() => localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([
     { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
   ])));
-  await page.goto('/e2e/fixtures/session-stars.html?switching=1&catchup=1');
+  // The session's Controller grants control, so catching up ends with the same composer instead of a Read only notice.
+  await page.goto('/e2e/fixtures/session-stars.html?switching=1&catchup=1&control=1');
   await expect(track(page).locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   await page.mouse.move(0, 0);

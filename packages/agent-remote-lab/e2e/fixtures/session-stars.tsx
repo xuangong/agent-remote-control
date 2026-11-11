@@ -25,6 +25,8 @@ const observers = new Map<RemoteTransportListener, string>();
 const catchUpFixture = new URLSearchParams(location.search).has('catchup');
 const contentObservers = new Map<RemoteTransportListener, string>();
 const allowContent = new URLSearchParams(location.search).has('switching');
+// A current Controller negotiates session control and grants it; without it, an opened session is read only.
+const controlFixture = new URLSearchParams(location.search).has('control');
 if (allowContent) directory.attach = async (_providerId, nativeSessionId) => ({ agentId: nativeSessionId, nativeSessionId });
 const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProviders' | 'createAgent' | 'resumeAgent'> = {
   listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded' }],
@@ -52,10 +54,15 @@ const transport: RemoteAgentTransport & Pick<HttpWebSocketTransport, 'listProvid
       if (allowContent && message.type === 'negotiate' && message.observation !== 'activity') {
         observers.delete(listener);
         contentObservers.set(listener, agentId);
-        listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated' });
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'negotiated', ...(controlFixture ? { sessionControl: true } : {}) });
         listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: {
           ...replicaState.agent!, id: agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId },
         } });
+        if (controlFixture) listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
+        return;
+      }
+      if (controlFixture && message.type === 'session_control_request') {
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId, requestId: message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
         return;
       }
       if (allowContent && message.type === 'timeline_subscription') {

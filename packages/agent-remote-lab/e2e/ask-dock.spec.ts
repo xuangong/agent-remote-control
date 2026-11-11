@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+import { toggleViewPanel } from './view-options';
 
 async function enableAsk(view: Locator) {
   const input = view.getByTestId('prompt-input');
@@ -20,9 +21,11 @@ async function start(page: Page, isMobile: boolean) {
   const identity = await response.json() as { nativeSessionId: string };
   await expect(page).toHaveTitle('New session · Agent Remote Control');
   const owner = page.locator('.lab-primary-conversation');
-  await enableAsk(owner.locator(':scope > .lab-session-view'));
+  await enableAsk(owner.locator('.lab-session-view'));
   const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
   await expect(trigger).toBeEnabled();
+  // While the desktop sidebar is visible, Ask, Windows and Teams are its rows; these tests use the floating ones.
+  if (await trigger.evaluate(element => !!element.closest('#lab-context'))) await toggleViewPanel(page, 'Sidebar');
   const surface = page.locator('.lab-ask-workspaces');
   await expect(surface).toHaveCount(1);
   await expect.poll(async () => {
@@ -110,7 +113,7 @@ test('keyboard movement shares one launcher while binding each Ask to the select
   const preferred = { x: initial.x - 10, y: initial.y + 40 };
   await expectPosition(trigger, preferred);
   expect(await surface.locator('.lab-ask-floating').evaluate(element => parseFloat(getComputedStyle(element).transitionDuration))).toBeLessThanOrEqual(.00001);
-  const primary = owner.locator(':scope > .lab-session-view');
+  const primary = owner.locator('.lab-session-view');
   const sideCreated = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await primary.getByTestId('prompt-input').fill('/side Keep a separate Ask conversation');
   await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
@@ -118,7 +121,7 @@ test('keyboard movement shares one launcher while binding each Ask to the select
   const sideIdentity = await (await sideCreated).json();
   const side = page.locator('.lab-side-conversation');
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Keep a separate Ask conversation');
-  const sideView = side.locator(':scope > .lab-session-view');
+  const sideView = side.locator('.lab-session-view');
   const takeControl = sideView.getByRole('button', { name: 'Take control', exact: true });
   if (await takeControl.isVisible()) await takeControl.click();
   await sideView.getByTestId('prompt-input').focus();

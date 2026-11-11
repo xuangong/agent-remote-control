@@ -9,6 +9,7 @@ import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { restoreSession } from '../session-restoration.js';
+import { SessionLocatorSynchronizingError } from '../session-view-operations.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { recoveryGeneration } from '../conversation-recovery.js';
 import { flushRecoveryWrites } from '../recovery-writes.js';
@@ -153,25 +154,36 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return runtime.document.scope === options.scope ? runtime.document.slots.find(slot => slot.id === id
       && sessionKey(selectionFor(slot)) === sessionKey(selection)) : undefined;
   }
+  /** The existing slot a session's succession lineage resolves to: its role, else its origin. */
+  function lineageSlot(selection: Selection) {
+    const lineage = runtime.replays.find(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)));
+    if (!lineage) return;
+    const key = compositionRoleKey({ scope: options.scope, hostId: lineage.to.hostId, controllerId: lineage.projection.role.current.controllerId, roleId: lineage.projection.role.id });
+    const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
+    return { origin, slot: runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key) ?? slotFor(origin) };
+  }
+  /** Before replays load, a role slot is known only by the origin it was created for. */
+  function roleOriginSlot(selection: Selection) {
+    return runtime.document.slots.find(slot => slot.intent.kind === 'role'
+      && sessionKey({ hostId: slot.origin.target.hostId, ...slot.origin.target.native }) === sessionKey(selection));
+  }
   function ensureView(selection: Selection, explicitId = selection.viewId): CompositionSlot {
     if (explicitId) {
-      const existing = explicitSlot(selection, explicitId);
+      // A predecessor resolves to its role's slot, which already targets the successor; accept that view again.
+      const successor = runtime.document.scope === options.scope ? lineageSlot(selection)?.slot ?? roleOriginSlot(selection) : undefined;
+      const existing = explicitSlot(selection, explicitId) ?? (successor?.id === explicitId ? successor : undefined);
       if (!existing) throw new Error('The selected session view no longer matches this session.');
       return existing;
     }
-    const lineage = runtime.replays.find(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)));
+    const lineage = lineageSlot(selection);
     if (lineage) {
-      const key = compositionRoleKey({ scope: options.scope, hostId: lineage.to.hostId, controllerId: lineage.projection.role.current.controllerId, roleId: lineage.projection.role.id });
-      const role = runtime.document.slots.find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === key);
-      if (role) return role;
-      const origin = { hostId: lineage.from.hostId, ...lineage.projection.role.origin, title: selection.title };
-      const original = slotFor(origin);
-      if (original) return original;
+      if (lineage.slot) return lineage.slot;
+      const { origin } = lineage;
       const slot = createCompositionSlot(compositionOriginId(origin), origin, options.scope);
       runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
       return slot;
     }
-    const existing = slotFor(selection);
+    const existing = slotFor(selection) ?? roleOriginSlot(selection);
     if (existing) return existing;
     const slot = createCompositionSlot(compositionOriginId(selection), selection, options.scope);
     runtime.document.slots.push(slot); runtime.document.asks.push(createAskOwner(slot, options.scope)); runtime.document.editRevision++;
@@ -634,9 +646,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.result = unavailable('invalid_view'); runtime.error = 'The selected session view no longer matches this session.'; publish(); return true;
     }
     if (intent === 'history') {
-      const request = new AbortController(), sequence = runtime.sequence;
+      const request = new AbortController();
       runtime.navigation = request;
-      const current = () => live() && !request.signal.aborted && runtime.sequence === sequence;
+      // Leaving, clearing or another navigation aborts this request; a discovery refresh while the Host attaches does not.
+      const current = () => live() && !request.signal.aborted;
       const candidate = requestedSlot ?? slotFor(selection, true) ?? createHistorySlot(compositionOriginId(selection, true), {
         hostId: selection.hostId ?? 'local', native: { providerId: selection.providerId, nativeSessionId: selection.nativeSessionId },
       }, options.scope);
@@ -815,7 +828,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return owner.id;
   }
   function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
-    if (!live() || !runtime.discovered || runtime.discovering) throw new Error('The current session locator is still synchronizing.');
+    if (!live() || !runtime.discovered || runtime.discovering) throw new SessionLocatorSynchronizingError();
     if (selection.parentNativeSessionId) return { target: selection };
     const slot = requested.viewId ? runtime.document.slots.find(slot => slot.id === requested.viewId) : undefined;
     const matches = [...runtime.historyEvidence.values()].filter(evidence => evidence.replays.some(replay =>

@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { useTrackingPosition } from './useTrackingPosition.js';
+import { arrangeFloatingEntries, useTrackingPosition } from './useTrackingPosition.js';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
 let viewport: EventTarget & { offsetLeft: number; offsetTop: number; width: number; height: number };
@@ -24,6 +24,12 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clea
 function Entry({ name, className = '' }: { name: string; className?: string }) {
   const { root, style, handlers } = useTrackingPosition(name);
   return <div ref={root} style={style} {...handlers} className={`lab-tracking-floating ${className}`} data-name={name}>
+    <button type="button" className="lab-session-popover-trigger">{name}</button>
+  </div>;
+}
+function Docked({ name }: { name: string }) {
+  const { root, style } = useTrackingPosition(name, undefined, { enabled: false });
+  return <div ref={root} style={style} className="lab-sidebar-shortcut" data-name={name}>
     <button type="button" className="lab-session-popover-trigger">{name}</button>
   </div>;
 }
@@ -136,4 +142,18 @@ it('reads the stylesheet placement of an entry first rendered hidden once it is 
     expect(container.querySelector<HTMLElement>('[data-name="hidden"]')!.style.left).toBe('280px');
     expect(top(container, 'hidden')).toBe(114);
   } finally { css.remove(); }
+});
+
+it('leaves a docked entry unpositioned and out of the floating arrangement', async () => {
+  place('docked', 20, 300);
+  place('floating', 20, 300);
+  const container = await render(<><Docked name="docked" /><Entry name="floating" /></>);
+  const docked = container.querySelector<HTMLElement>('[data-name="docked"]')!;
+  expect(docked.getAttribute('style')).toBeNull();
+  expect(top(container, 'floating')).toBe(300);
+  await act(async () => { arrangeFloatingEntries(); });
+  await act(async () => { window.dispatchEvent(new Event('resize')); });
+  await view({ height: 700 });
+  expect(docked.getAttribute('style')).toBeNull();
+  expect(top(container, 'floating')).toBe(300);
 });

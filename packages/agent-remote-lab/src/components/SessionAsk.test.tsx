@@ -176,6 +176,27 @@ it('keeps an expanded Ask available independently of its old source launcher pre
   expect(restore).toHaveBeenCalledExactlyOnceWith(source, props.synchronize, sessionKey(source));
 });
 
+it('keeps a covered Ask mounted and hidden until the page that covers it closes', async () => {
+  const { ask, props } = fixture([{ source, restoring: true, restoreOnly: true }]);
+  ask.drafts.set(sessionKey(source), 'Question kept under the page');
+  let cover!: (value: boolean) => void;
+  function Harness() {
+    const [covered, setCovered] = useState(false);
+    cover = setCovered;
+    return <SessionAsk {...props} source={source} covered={covered} />;
+  }
+  const container = await render(<Harness />);
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog).not.toBeNull();
+  await act(async () => cover(true));
+  expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.hidden).toBe(true);
+  await act(async () => cover(false));
+  expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+  expect(container.querySelector<HTMLElement>('.lab-session-ask-surface')?.hidden).toBe(false);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Ask draft"]')?.value).toBe('Question kept under the page');
+});
+
 it('preserves a desktop Ask and its draft when selection moves to another source view', async () => {
   const { ask, props } = fixture([{ source, restoring: true, restoreOnly: true }]);
   const { layout, view } = sharedFixture(ask);
@@ -250,6 +271,34 @@ it('restores multiple expanded Ask windows without moving focus or cancelling th
   expect(restore).toHaveBeenCalledTimes(2);
   expect(parentFocus).not.toHaveBeenCalled();
   expect(document.activeElement).toBe(input);
+});
+
+it('keeps a restoration in flight through a discovery refresh and only starts one when it is permitted', async () => {
+  const entry: AskEntry = { source, restoring: true, restoreOnly: true };
+  const { props, restore } = fixture([entry]);
+  const cancel = vi.fn();
+  restore.mockImplementation(() => cancel);
+  let set!: (value: { canRestore: boolean; synchronizing: boolean }) => void;
+  function Harness() {
+    const [state, change] = useState({ canRestore: false, synchronizing: true }); set = change;
+    return <SessionAsk {...props} source={source} canRestore={state.canRestore} synchronizing={state.synchronizing} />;
+  }
+  // A saved Ask waiting to be restored is not started while discovery withholds restoration.
+  await render(<Harness />);
+  expect(restore).not.toHaveBeenCalled();
+  await act(async () => set({ canRestore: true, synchronizing: false }));
+  expect(restore).toHaveBeenCalledOnce();
+  // Discovery withholds restoration (canRestore is false) while the started one is still restoring: it is not cancelled.
+  await act(async () => set({ canRestore: false, synchronizing: true }));
+  await act(async () => set({ canRestore: true, synchronizing: false }));
+  expect(cancel).not.toHaveBeenCalled();
+  expect(restore).toHaveBeenCalledOnce();
+  // Once nothing is in flight, a refresh does not start a restoration, and losing permission otherwise still cancels.
+  entry.restoring = false;
+  await act(async () => set({ canRestore: false, synchronizing: true }));
+  expect(cancel).toHaveBeenCalledOnce();
+  await act(async () => set({ canRestore: false, synchronizing: false }));
+  expect(restore).toHaveBeenCalledOnce();
 });
 
 it('focuses an explicitly opened Ask and only minimizes the Ask containing the Escape event', async () => {

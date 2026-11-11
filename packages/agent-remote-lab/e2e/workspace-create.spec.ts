@@ -34,6 +34,8 @@ test('creates a real Host workspace from Browse and starts an Agent inside it', 
   try {
     const { hostId } = await host.ready;
     await page.goto('/'); await showNewSession(page);
+    // Providers are scoped to the selected Host (ae3ff0ba): choose the Host, then its Provider.
+    await page.getByLabel('Connected Host').selectOption(hostId);
     await page.getByTestId('provider-select').selectOption(JSON.stringify([hostId, 'recorded']));
     await page.getByRole('button', { name: 'Browse…' }).click();
     const modal = page.getByRole('dialog', { name: 'Choose a workspace folder' });

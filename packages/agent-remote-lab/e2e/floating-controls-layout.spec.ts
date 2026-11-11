@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { sessionLinkFixture } from './session-link-fixture';
+import { toggleViewPanel } from './view-options';
 
 const controls = [
   { view: 'window', label: 'Windows', position: 'agent-remote:window-position' },
@@ -71,6 +72,12 @@ test('Team moves after a remembered workspace confirms its access', async ({ pag
     const close = page.getByRole('button', { name: 'Close Context', exact: true });
     const button = page.getByRole('button', { name: 'Teams', exact: true });
     const team = page.locator('.lab-team-floating');
+    // While the desktop sidebar is visible, Teams is one of its Shortcuts; hiding the sidebar lets it float.
+    const float = async () => {
+      await expect(button).toBeVisible();
+      if (await button.evaluate(element => !!element.closest('#lab-context'))) await toggleViewPanel(page, 'Sidebar');
+    };
+    if (!isMobile) await float();
     await expect(team).toBeAttached();
     // A relaunched phone app renders the remembered workspace before its access is confirmed; Team appears only then.
     let confirm!: () => void;
@@ -80,6 +87,7 @@ test('Team moves after a remembered workspace confirms its access', async ({ pag
     await expect(page.locator('.lab-shell')).toBeVisible();
     await expect(team).toHaveCount(0);
     confirm();
+    if (!isMobile) await float();
     await expect(team).toBeAttached();
     if (isMobile) { await expect(close).toBeVisible(); await close.click(); }
     await expect(button).toBeVisible();

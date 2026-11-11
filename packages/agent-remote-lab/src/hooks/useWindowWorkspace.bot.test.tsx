@@ -96,12 +96,14 @@ it('rejects late group acquisition after access changes', async () => {
   vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(id => id === 'late' ? new Promise(done => { resolve = done; }) : Promise.resolve(group('a')));
   const pending = harness.read().acquireGroup('late'); const rejection = expect(pending).rejects.toThrow('scope'); await harness.render('bot', false); await act(async () => { resolve(group('late', true)); await rejection; }); expect(harness.read().readGroup('late')).toBeUndefined();
 });
-it('fences a cached native target until an explicit section route is inspected', async () => {
+it('keeps a cached Window read-only, without recording it as chosen, until an explicit section route is inspected', async () => {
   const section = group('section', true); const backend = server(section); const cached = { window: section.window };
   const key = 'agent-remote:recovery:https://cached-section/:shared-window'; conversationLocalStorage.setItem(`${key}:section`, JSON.stringify(cached)); history.replaceState(null, '', '/?window=section&host=stale&provider=p&session=old');
   let finish!: (group: WindowGroup) => void; backend.inspect.mockImplementation(() => new Promise(done => { finish = done; })); const { read, sectionRoute } = await mount('https://cached-section/', true);
-  expect(read().sessionBridge).toBeUndefined(); expect(read().authority).toBeUndefined(); expect(read().unavailable).toBe(true); expect(sessionStorage.getItem(key)).toBeNull(); expect(localStorage.getItem(`${key}:last-window`)).toBeNull();
-  await act(async () => finish(section)); expect(read().window).toBeUndefined(); expect(sectionRoute).toHaveBeenCalledWith('section');
+  expect(read().provisional).toBe(true); expect(read().hasActiveWindow).toBe(false); expect(sessionStorage.getItem(key)).toBeNull(); expect(localStorage.getItem(`${key}:last-window`)).toBeNull();
+  expect(new URL(location.href).searchParams.get('session')).toBe('old');
+  await act(async () => finish(section)); expect(read().window).toBeUndefined(); expect(read().unavailable).toBe(true); expect(sectionRoute).toHaveBeenCalledWith('section');
+  expect(sessionStorage.getItem(key)).toBeNull(); expect(localStorage.getItem(`${key}:last-window`)).toBeNull();
 });
 it('rejects an older layout if the group changes while its operation acquires a lease', async () => {
   const { read } = await mount('local-layout-fence'); let handle!: GroupHandle; const sectionId = await read().createSection('Section');
@@ -154,4 +156,31 @@ it('recovers a lost section POST over a real transport and adopts the inspected 
     await vi.waitFor(async () => { await act(async () => {}); expect(reloaded.read().readGroup(id)?.bots?.rank).toBe('z'); expect(reloaded.read().sectionCreationState.state).toBe('idle'); }, { timeout: 3000, interval: 5 });
     expect(reloaded.read().window?.id).toBe('a'); expect(location.search).toBe('?window=a'); expect(writes).toHaveLength(1); expect(conversationSessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window:pending-section-create`)).toBeNull();
   } finally { if (root) await act(async () => root!.unmount()); root = undefined; relay.closeAllConnections(); await new Promise<void>(resolve => relay.close(() => resolve())); }
+});
+it('shows a cached Window read-only on a cold start until the service confirms it', async () => {
+  const backend = server(group('a')); const key = 'agent-remote:recovery:https://cold/:shared-window';
+  const cached = group('a'); cached.window.title = 'Cached'; conversationLocalStorage.setItem(`${key}:a`, JSON.stringify(cached)); conversationLocalStorage.setItem(`${key}:last-window`, 'a');
+  let finish!: () => void; const confirmed = new Promise<void>(done => { finish = done; });
+  const list = vi.mocked(WindowWorkspaceClient.prototype.listGroups).getMockImplementation()!;
+  vi.mocked(WindowWorkspaceClient.prototype.listGroups).mockImplementation(async () => { await confirmed; return list(); });
+  const mutate = vi.mocked(WindowWorkspaceClient.prototype.mutate);
+  const { read } = await mount('https://cold/', true);
+  expect(read().window?.title).toBe('Cached'); expect(read().provisional).toBe(true); expect(read().unavailable).toBe(false); expect(read().hasActiveWindow).toBe(false);
+  expect(read().authority).toBeDefined(); expect(read().sessionBridge).toBeDefined();
+  await act(async () => { await expect(read().operate({ type: 'rename', title: 'Edited' })).rejects.toThrow('Wait for this Window'); });
+  await act(async () => { read().authority!.operate({ type: 'view.close', viewId: 'main' }); await Promise.resolve(); });
+  expect(read().window?.views.map(view => view.id)).toEqual(['main']); expect(mutate).not.toHaveBeenCalled(); expect(backend.changes).not.toHaveBeenCalled();
+  await act(async () => { finish(); }); await vi.waitFor(async () => { await act(async () => {}); expect(read().provisional).toBe(false); });
+  expect(read().window?.title).toBe('a'); expect(read().hasActiveWindow).toBe(true); expect(new URL(location.href).searchParams.get('window')).toBe('a');
+  await act(async () => { await read().operate({ type: 'rename', title: 'Edited' }); }); expect(mutate).toHaveBeenCalledTimes(1); expect(read().window?.title).toBe('Edited');
+});
+it('leaves a cached Window shown read-only when the service says it became a section', async () => {
+  const section = group('a', true); const backend = server(section); const key = 'agent-remote:recovery:https://became-section/:shared-window';
+  conversationLocalStorage.setItem(`${key}:a`, JSON.stringify(group('a'))); history.replaceState(null, '', '/?window=a');
+  let finish!: (group: WindowGroup) => void; backend.inspect.mockImplementation(() => new Promise(done => { finish = done; }));
+  const mutate = vi.mocked(WindowWorkspaceClient.prototype.mutate);
+  const { read, sectionRoute } = await mount('https://became-section/', true);
+  expect(read().window?.id).toBe('a'); expect(read().provisional).toBe(true); expect(sectionRoute).not.toHaveBeenCalled();
+  await act(async () => { finish(section); }); await vi.waitFor(async () => { await act(async () => {}); expect(sectionRoute).toHaveBeenCalledWith('a'); });
+  expect(read().window).toBeUndefined(); expect(read().provisional).toBe(false); expect(read().unavailable).toBe(true); expect(mutate).not.toHaveBeenCalled();
 });

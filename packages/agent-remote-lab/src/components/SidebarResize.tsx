@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
 const storageKey = 'agent-remote.sidebar-width';
-const defaultWidth = 320;
-const minWidth = 260;
-const maxWidth = 560;
+const defaultWidth = 260;
+const minWidth = 220;
+const maxWidth = 360;
 
+/** The saved width, clamped to the allowed range so a width saved under an older range survives as the nearest one. */
 function savedWidth(): number {
   try {
     const value = Number(localStorage.getItem(storageKey));
-    return Number.isFinite(value) && value >= minWidth && value <= maxWidth ? value : defaultWidth;
+    return Number.isFinite(value) && value > 0 ? Math.min(maxWidth, Math.max(minWidth, Math.round(value))) : defaultWidth;
   } catch { return defaultWidth; }
 }
 
@@ -23,6 +24,8 @@ export function useSidebarWidth(inspectorOpen: boolean) {
   useEffect(() => {
     try { localStorage.setItem(storageKey, String(preferredWidth)); } catch { /* Resizing remains available without browser storage. */ }
   }, [preferredWidth]);
+  // The viewport term never binds on desktop today (the sidebar shows only above 1180px, which leaves room for 360px
+  // beside the inspector); it is kept as a guard should those widths change.
   const maximum = Math.max(minWidth, Math.min(maxWidth, viewport - 480 - (inspectorOpen ? 320 : 0)));
   const width = Math.min(preferredWidth, maximum);
   return { width, maximum, setWidth,

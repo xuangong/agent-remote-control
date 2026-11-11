@@ -94,7 +94,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const currentlyUnavailable = useRef(unavailable); currentlyUnavailable.current = unavailable;
   const readWindow = useCallback(() => currentlyUnavailable.current ? undefined : currentStore.current?.getSnapshot(), []);
   const [deleted, setDeleted] = useState(false);
-  const selectStore = (next: WindowWorkspaceStore | undefined) => { currentStore.current = next; setStore(next); };
+  // A cached Window shown before the service confirms it is read-only: it may since have changed, been deleted or become a section.
+  const [provisional, setProvisional] = useState(false);
+  const currentlyProvisional = useRef(provisional); currentlyProvisional.current = provisional;
+  const selectStore = (next: WindowWorkspaceStore | undefined, cachedOnly = false) => {
+    currentStore.current = next; setStore(next); currentlyProvisional.current = cachedOnly; setProvisional(cachedOnly);
+  };
   const [publishedCatalog, setPublishedCatalog] = useState(() => ({ catalog, groups: catalog.groups }));
   const groups = publishedCatalog.catalog === catalog ? publishedCatalog.groups : catalog.groups;
   // Only a group shown as a Window can be opened in the workbench; a section alone belongs to Bot mode.
@@ -128,9 +133,9 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (confirmed) commitImportedWindowComposition(composition, window);
     if (workspaceNavigation && !confirmed) {
       // Until the service confirms the cached group (it may since have become a section), the page keeps showing
-      // the Window it has; only a page without one waits on "Opening Window…".
+      // the Window it has; a page without one shows the cached group read-only, without writing anything from it.
       if (currentStore.current && confirmedStores.has(currentStore.current) && !currentlyUnavailable.current) return;
-      selectStore(next); currentlyUnavailable.current = true; setUnavailable(true); setDeleted(false); return;
+      selectStore(next, true); currentlyUnavailable.current = false; setUnavailable(false); setDeleted(false); return;
     }
     try { conversationSessionStorage.setItem(key, window.id); } catch { /* The URL still identifies the chosen Window. */ }
     try { conversationLocalStorage.setItem(`${key}:last-window`, window.id); } catch { /* The catalog can restore a Window without this preference. */ }
@@ -531,6 +536,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   const operate = (operation: WindowGroupOperation): Promise<void> => {
     const active = currentStore.current;
     if (!active || currentlyUnavailable.current || !inScope()) throw new Error('Open an available Window before editing its layout.');
+    if (currentlyProvisional.current) return Promise.reject(new Error('Wait for this Window to load before editing its layout.'));
     applyGroupOperation(active.getGroup(), operation);
     return active.operate(operation).catch(error => {
       if (inScope() && currentStore.current === active) setError(String(error instanceof Error ? error.message : error));
@@ -542,7 +548,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
   };
   const hasActiveWindow = confirmed && !unavailable;
   const deletedWindowIds = useMemo(() => [...selection.deleted] as readonly string[], [selection, selection.deleted.size]);
-  return { window, group, windows, groups, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState,
+  return { window, group, windows, groups, error, client, deleted, deletedWindowIds, hasActiveWindow, saveState, provisional: !!window && provisional,
     retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
     sectionCreationState, retrySection: () => createSectionRequest(undefined, true),
     acquireGroup, readGroup, operateGroup, refreshGroups,

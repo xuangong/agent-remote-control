@@ -19,15 +19,18 @@ try {
     const page = await context.newPage();
     await page.goto(origin + '/', { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.locator('main.lab-shell').waitFor({ timeout: 30_000 });
-    // 1. Choose the development Host.
-    const host = page.getByRole('combobox').first();
+    // 1. Add an empty view; a new view is selected, so the session opens in it.
+    await page.getByRole('button', { name: 'New session view' }).first().click();
+    // 2. Open the New session page (desktop: from the sidebar's New menu) and choose the development Host there.
+    await page.locator('#lab-context').getByRole('button', { name: 'New', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'New session' }).click();
+    const form = page.locator('#lab-sessions-page');
+    await form.waitFor({ state: 'visible', timeout: 30_000 });
+    const host = form.locator('#remote-host');
+    await host.waitFor({ timeout: 30_000 });
     const label = (await host.locator('option').allTextContents()).find(text => text.startsWith('Dev · '));
     if (!label) throw new Error('The Host list has no Dev · Host; check pnpm local status.');
     await host.selectOption({ label });
-    // 2. Add an empty view, select it, and open the new-session form for it.
-    await page.getByRole('button', { name: 'New session view' }).click();
-    await page.getByText('Choose a session from the sidebar').last().click();
-    await page.getByRole('button', { name: /New session/ }).first().click();
     // 3. Remember which views already have a composer, then open the session.
     const panes = '.lab-session-family-pane[data-view-id]';
     const before = await page.locator(panes).evaluateAll(list => list.filter(pane => pane.querySelector('[data-testid="prompt-input"]')).map(pane => pane.dataset.viewId));

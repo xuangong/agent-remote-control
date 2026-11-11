@@ -1,5 +1,21 @@
 import { expect, test, type Locator } from '@playwright/test';
 import { toggleViewPanel } from './view-options';
+import { showNewSession } from './session-navigation';
+
+/**
+ * A collapsed tool row: one title row, plus (in a narrow tool container) its command summary, which wraps and is
+ * clamped to three lines (65efb4fb) instead of being cut to one.
+ */
+async function expectCompactTool(tool: Locator, width: number) {
+  const summary = tool.locator('.agent-tool-summary');
+  const narrow = width <= 620;
+  if (narrow) {
+    const clamp = await summary.evaluate(element => { const style = getComputedStyle(element); return { clamp: style.webkitLineClamp, height: element.getBoundingClientRect().height, line: parseFloat(style.fontSize) * 1.5 }; });
+    expect(clamp.clamp).toBe('3');
+    expect(clamp.height).toBeLessThanOrEqual(clamp.line * 3 + 1);
+  }
+  expect((await tool.boundingBox())!.height).toBeLessThanOrEqual(narrow ? 90 : 60);
+}
 
 async function expectContained(container: Locator) {
   const overflow = await container.evaluate(element => {
@@ -23,7 +39,7 @@ for (const width of [320, 390, 844, 1440]) {
     await expect(toggle).toContainText('Failed');
     if (mode === 'simple') {
       await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
-      expect((await tool.boundingBox())!.height).toBeLessThanOrEqual(60);
+      await expectCompactTool(tool, width);
     } else {
       const preview = tool.locator('.agent-text-preview');
       await expect(preview).toContainText('diff --git');
@@ -52,7 +68,7 @@ for (const width of [320, 390, 844, 1440]) {
     await expect(toggle).toContainText('Failed');
     await expect(error).toHaveCount(0);
     await expect(tool.locator('.agent-tool-preview')).toHaveCount(0);
-    expect((await tool.boundingBox())!.height).toBeLessThanOrEqual(60);
+    await expectCompactTool(tool, width);
     await expectContained(page.getByTestId('timeline'));
     await page.screenshot({ path: testInfo.outputPath(`failed-command-${mode}-${width}-collapsed.png`) });
   });
@@ -72,6 +88,8 @@ for (const width of [320, 390, 844, 1440]) {
         if (element.closest('pre, .agent-markdown-table')) return [];
         if (element.closest('.agent-visually-hidden, option')) return [];
         const style = getComputedStyle(element);
+        // Hidden measuring boxes (the action toolbar's) render nothing, so they cannot overflow visibly.
+        if (style.visibility === 'hidden') return [];
         const ellipsis = style.textOverflow === 'ellipsis' && style.overflowX === 'hidden';
         if (element.parentElement && getComputedStyle(element.parentElement).textOverflow === 'ellipsis'
           && getComputedStyle(element.parentElement).overflowX === 'hidden') return [];
@@ -115,13 +133,14 @@ for (const width of [320, 390, 844, 1440]) {
   test(`contains long resources and all controller views at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 740 });
     await page.goto('/');
-    await page.getByRole('button', { name: 'New session', exact: true }).click();
+    await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
     const path = `artifacts/${'resource'.repeat(64)}.txt`;
     await page.getByTestId('prompt-input').fill(`Download [long resource](${path}).`);
     await page.getByTestId('prompt-submit').click();
-    const resource = page.locator('.agent-resources li').filter({ hasText: path }).last();
+    // Resource cards show the file name rather than the full locator (54cc2377).
+    const resource = page.locator('.agent-resources li').filter({ has: page.locator('code').getByText(path.split('/').pop()!, { exact: true }) }).last();
     await expect(resource).toBeVisible();
     await expectContained(resource);
     await expectContained(page.getByTestId('timeline'));

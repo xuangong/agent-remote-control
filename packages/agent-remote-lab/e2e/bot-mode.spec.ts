@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -117,7 +118,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
   const captured = operations(page);
   try {
     await page.goto(fixture.url); await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
+    await selectConnectedHost(page, fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(composer(page, 'window')).toBeEnabled();
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const client = fixtureClient(context, fixture.url + access.basePath, fixture.url);
@@ -129,7 +130,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
     let menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
     await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
     await expect.poll(async () => !!(await client.inspect(bId)).bots).toBe(true);
-    await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await closeWindows(page);
     await page.goto(`${fixture.url}/?window=${aId}`); await showWindowConversation(page);
     const before = await client.inspect(aId); await mode(page, 'bot');
     const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name: 'Bot B', exact: true }).click();
@@ -171,7 +172,7 @@ for (const change of ['hidden', 'ineligible'] as const) {
     const captured = operations(page);
     try {
       await page.goto(fixture.url); await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-      await page.getByLabel('Connected Host').selectOption(fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
+      await selectConnectedHost(page, fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
       await expect(composer(page, 'window')).toBeEnabled();
       const access = await (await context.request.get(fixture.url + '/auth/status')).json();
       const client = fixtureClient(context, fixture.url + access.basePath, fixture.url), id = new URL(page.url()).searchParams.get('window')!;
@@ -179,7 +180,7 @@ for (const change of ['hidden', 'ineligible'] as const) {
       const menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
       await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
       await expect.poll(async () => !!(await client.inspect(id)).bots).toBe(true);
-      await menu.getByRole('button', { name: 'Close Windows', exact: true }).click(); await mode(page, 'bot');
+      await closeWindows(page); await mode(page, 'bot');
       const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
       await expectDraft(composer(page, 'bot'), ''); const beforeUrl = page.url();
       if (change === 'hidden') await mutate(client, id, { type: 'bot.update', viewId: view.id, details: { hidden: true } });
@@ -211,11 +212,21 @@ async function mode(page: Page, value: 'window' | 'bot') {
   await button.click(); await expect(modeRegion(page, value)).toBeVisible();
   await expect(region).toBeHidden(); await expect(region).toHaveAttribute('inert', '');
 }
+/** Wide pages with a visible sidebar list Windows there; otherwise the floating Window capsule opens its panel. */
+async function sidebarWindows(page: Page) {
+  return (page.viewportSize()?.width ?? 1280) > 1180 && await modeRegion(page, 'window').locator('#lab-context').isVisible();
+}
 async function windows(page: Page) {
   const region = modeRegion(page, 'window');
+  if (await sidebarWindows(page)) return region.locator('#lab-context .lab-window-workspaces');
   const trigger = region.getByRole('button', { name: 'Windows', exact: true });
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
   return region.getByRole('region', { name: 'Windows', exact: true });
+}
+/** Closes the floating Windows panel; the sidebar's Windows section has nothing to close. */
+async function closeWindows(page: Page) {
+  if (await sidebarWindows(page)) return;
+  await modeRegion(page, 'window').getByRole('region', { name: 'Windows', exact: true }).getByRole('button', { name: 'Close Windows', exact: true }).click();
 }
 function operations(page: Page) {
   const creates: unknown[] = [], attaches: string[] = [], sends: unknown[] = [];
@@ -254,7 +265,7 @@ async function openRecordedBot(page: Page) {
   const options = menu.locator('details.lab-window-options');
   if (!await options.evaluate(element => element.hasAttribute('open'))) await options.locator('summary').click();
   await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-  await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
+  await closeWindows(page);
   return { windowId, captured, agentId: agentId as string };
 }
 async function savedLocalGroup(page: Page, id: string): Promise<WindowGroup> {
@@ -270,7 +281,7 @@ test('selects the Window pane through timeline clicks and composer focus while B
   const fixture = await sessionLinkFixture({ automaticSignIn: true });
   try {
     await page.goto(fixture.url); await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
+    await selectConnectedHost(page, fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(composer(page, 'window')).toBeEnabled();
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const client = fixtureClient(context, fixture.url + access.basePath, fixture.url), id = new URL(page.url()).searchParams.get('window')!;
@@ -365,7 +376,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
   const fixture = await sessionLinkFixture({ automaticSignIn: true });
   try {
     await page.goto(fixture.url); await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
+    await selectConnectedHost(page, fixture.hostId); await showNewSession(page); await page.getByTestId('session-create').click();
     await composer(page, 'window').fill('A long conversation paragraph with enough readable content to scroll. '.repeat(40));
     await expect(modeRegion(page, 'window').getByTestId('prompt-submit')).toBeEnabled(); await composer(page, 'window').press('Enter');
     await expect(modeRegion(page, 'window').locator('.agent-message-assistant').last()).toContainText('Recorded reply:');
@@ -391,7 +402,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
     ] });
     const label = 'A readable label that wraps naturally across the available roster width. '.repeat(2).slice(0, 120);
     await mutate(client, id, { type: 'bot.update', viewId: original.id, details: { label, picture: { shape: 'hexagon', color: '#35836b' }, pinned: true } });
-    await menu.getByRole('button', { name: 'Close Windows', exact: true }).click(); await mode(page, 'bot');
+    await closeWindows(page); await mode(page, 'bot');
     const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Bots', exact: true });
     const row = nav.locator('[data-bot-place]').filter({ hasText: label }); await expect(row).toHaveCount(1); await row.click();
     await expect(row).toHaveAccessibleName(title);

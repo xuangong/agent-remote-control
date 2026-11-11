@@ -1,4 +1,6 @@
+import { clickSessionAction } from './session-actions';
 import { expect, test, type Page } from '@playwright/test';
+import { selectConnectedHost } from './all-sessions';
 import jsQR from 'jsqr';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
@@ -6,6 +8,11 @@ import { showNewSession } from './session-navigation';
 async function signIn(page: Page, subject = 'alice') {
   await page.getByRole('link', { name: 'Sign in' }).click();
   await page.getByRole('link', { name: `Sign in as ${subject}` }).click();
+}
+
+/** The address without the Window it is shown in. */
+function sessionLink(address: string): string {
+  const url = new URL(address); url.searchParams.delete('window'); return url.href;
 }
 
 test('QR and copied URLs open the same session across authenticated devices without browser storage', async ({ page, browser }, testInfo) => {
@@ -18,7 +25,7 @@ test('QR and copied URLs open the same session across authenticated devices with
   try {
     await page.goto(f.url);
     await signIn(page);
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
@@ -28,9 +35,13 @@ test('QR and copied URLs open the same session across authenticated devices with
     const original = page.url();
     expect(new URL(original).searchParams.get('host')).toBe(f.hostId);
     expect(new URL(original).searchParams.get('session')).toBeTruthy();
-    await page.getByRole('button', { name: 'Share session link' }).click();
+    // A shared link names the session, not the sharer's Window; each device opens it in its own Window (?window=<id>).
+    const link = sessionLink(original);
+    expect(new URL(link).searchParams.has('window')).toBe(false);
+    // Share sits among the view's session actions, which may keep it behind "More session actions".
+    await clickSessionAction(page.locator('.lab-primary-conversation'), 'Share session link');
     const dialog = page.getByRole('dialog', { name: 'Share session' });
-    await expect(dialog.getByLabel('Session URL')).toHaveValue(original);
+    await expect(dialog.getByLabel('Session URL')).toHaveValue(link);
     const qr = dialog.getByAltText('Session QR code');
     await expect(qr).toBeVisible();
     const pixels = await qr.evaluate(async (element: HTMLImageElement) => {
@@ -39,11 +50,11 @@ test('QR and copied URLs open the same session across authenticated devices with
       const context = canvas.getContext('2d')!; context.drawImage(element, 0, 0);
       return { data: [...context.getImageData(0, 0, canvas.width, canvas.height).data], width: canvas.width, height: canvas.height };
     });
-    expect(jsQR(new Uint8ClampedArray(pixels.data), pixels.width, pixels.height)?.data).toBe(original);
+    expect(jsQR(new Uint8ClampedArray(pixels.data), pixels.width, pixels.height)?.data).toBe(link);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await dialog.getByRole('button', { name: 'Copy link' }).click();
     await expect(dialog.getByRole('button', { name: 'Copied' })).toBeVisible();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(original);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link);
     await page.screenshot({ path: testInfo.outputPath('session-qr.png') });
     const qrData = await qr.getAttribute('src');
     await dialog.getByRole('button', { name: 'Close session link' }).click();
@@ -63,17 +74,17 @@ test('QR and copied URLs open the same session across authenticated devices with
       value: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }));
     await mobile.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
     await mobile.getByText('Paste a session link', { exact: true }).click();
-    await mobile.getByLabel('Session link', { exact: true }).fill(original);
+    await mobile.getByLabel('Session link', { exact: true }).fill(link);
     await mobile.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(mobile.getByRole('dialog', { name: 'Scan session', exact: true })).not.toBeVisible();
     await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
-    expect(mobile.url()).toBe(original);
+    expect(sessionLink(mobile.url())).toBe(link);
     await showNewSession(mobile);
     await mobile.getByLabel('Connected Host').selectOption(f.hostId);
     await mobile.getByTestId('session-create').click();
     await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
-    await expect(mobile).not.toHaveURL(original);
+    await expect.poll(() => sessionLink(mobile.url())).not.toBe(link);
     await mobile.getByTestId('prompt-input').fill('Keep this draft when scanning');
     await mobile.evaluate(async data => {
       const image = new Image(); image.src = data!; await image.decode();
@@ -86,15 +97,15 @@ test('QR and copied URLs open the same session across authenticated devices with
     await mobile.getByRole('button', { name: 'Favorites', exact: true }).click();
     await mobile.getByRole('button', { name: 'Scan to open', exact: true }).click();
     await expect(mobile.getByRole('dialog', { name: 'Scan session', exact: true })).not.toBeVisible();
-    await expect(mobile).toHaveURL(original);
+    await expect.poll(() => sessionLink(mobile.url())).toBe(link);
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
     expect(await mobile.evaluate(() => (window as unknown as { scanDocument: boolean }).scanDocument)).toBe(true);
     expect(await mobile.evaluate(() => (window as unknown as { scanStream: MediaStream }).scanStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
     expect(lateScannerScripts).toEqual([]);
     await mobile.evaluate(() => history.back());
-    await expect(mobile.getByTestId('prompt-input')).toHaveValue('Keep this draft when scanning');
+    await expect(mobile.getByTestId('prompt-input')).toHaveText('Keep this draft when scanning');
     await mobile.evaluate(() => history.forward());
-    await expect(mobile).toHaveURL(original);
+    await expect.poll(() => sessionLink(mobile.url())).toBe(link);
     const takeControl = mobile.getByRole('button', { name: 'Take control', exact: true });
     await expect(takeControl).toBeVisible();
     await takeControl.click();
@@ -111,7 +122,7 @@ test('QR and copied URLs open the same session across authenticated devices with
 
     f.setSubject('bob');
     const denied = await outsider.newPage();
-    await denied.goto(original);
+    await denied.goto(link);
     await signIn(denied, 'bob');
     await expect(denied.getByRole('alert').first()).toBeVisible();
     await expect(denied.locator('.agent-message-user')).toHaveCount(0);

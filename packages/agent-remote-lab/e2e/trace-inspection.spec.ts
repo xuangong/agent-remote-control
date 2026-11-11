@@ -43,7 +43,7 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   await page.screenshot({ path: testInfo.outputPath('trace-details.png') });
   await details.getByRole('button', { name: 'Show in Conversation' }).click();
   await expect(entry).toHaveAttribute('data-inspected', 'true');
-  await expect(prompt).toHaveValue('Keep this draft');
+  await expect(prompt).toHaveText('Keep this draft');
   const anchor = await entry.evaluate(element => element.getBoundingClientRect().top);
   const top = await viewport.evaluate(element => element.scrollHeight - element.clientHeight + element.scrollTop);
   await page.getByRole('button', { name: 'Append event', exact: true }).click();
@@ -75,7 +75,9 @@ test('returns to the root conversation from trace while nested side sessions are
     pane = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: text }) });
     await expect(pane.locator('.agent-message-assistant').last()).toContainText(text);
   }
-  await expect(primary).toBeHidden();
+  // Sides are attached Window panes: the root stays visible beside them while the newest Side is selected.
+  await expect(primary).toBeVisible();
+  await expect(pane).toHaveAttribute('data-selected', 'true');
   if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
   await page.getByRole('tab', { name: 'Trace', exact: true }).click();
   const row = page.locator('[data-trace-entry-key]').filter({ hasText: 'cobalt orchard' }).last();
@@ -106,5 +108,5 @@ test('filters trace events, restores list focus, and resets inspection on an epo
   await expect(details).toContainText('/workspace/example');
   await page.getByRole('button', { name: 'Replace timeline', exact: true }).click();
   await expect(page.locator('[data-trace-entry-key][aria-current="true"]')).toHaveCount(0);
-  await expect(page.getByRole('searchbox', { name: 'Search trace' })).toHaveValue('');
+  await expect(page.getByRole('searchbox', { name: 'Search trace' })).toHaveText('');
 });

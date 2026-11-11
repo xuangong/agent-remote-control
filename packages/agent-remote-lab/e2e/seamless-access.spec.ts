@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openSessionsPage, selectConnectedHost } from './all-sessions';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
@@ -19,7 +20,7 @@ for (const signal of ['visibility', 'pageshow'] as const) {
     try {
       await page.goto(f.url);
       await page.getByRole('link', { name: 'Sign in' }).click();
-      await page.getByLabel('Connected Host').selectOption(f.hostId);
+      await selectConnectedHost(page, f.hostId);
       await showNewSession(page);
       await page.getByTestId('session-create').click();
       const input = page.getByTestId('prompt-input');
@@ -41,7 +42,7 @@ for (const signal of ['visibility', 'pageshow'] as const) {
         }
       }, signal);
       await expect.poll(() => checking).toBe(true);
-      await expect(input).toHaveValue('Draft before switching apps');
+      await expect(input).toHaveText('Draft before switching apps');
       await expect(page.getByTestId('connection-summary')).toContainText('Ready');
       await expect(page.locator('.gateway-recovery')).not.toBeVisible();
       expect(await editor!.evaluate(element => element.isConnected)).toBe(true);
@@ -65,7 +66,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await page.goto(f.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
     await page.getByRole('link', { name: 'Sign in as alice' }).click();
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     const input = page.getByTestId('prompt-input');
@@ -91,7 +92,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await page.reload();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
     await expect(input).toBeVisible();
-    await expect(input).toHaveValue('My unsent draft');
+    await expect(input).toHaveText('My unsent draft');
     await expect.poll(async () => Math.abs(await timeline.evaluate(element => element.scrollTop) - readingTop)).toBeLessThan(4);
     await page.screenshot({ path: testInfo.outputPath('cached-workspace.png') });
     const editor = await input.elementHandle();
@@ -100,7 +101,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
     waiting = false; release();
     await expect(page.getByTestId('connection-summary')).toContainText('Ready');
     await expect.poll(() => editor!.evaluate(element => element.isConnected)).toBe(true);
-    await expect(input).toHaveValue('Continue typing before authorization');
+    await expect(input).toHaveText('Continue typing before authorization');
     await expect.poll(async () => Math.abs(await timeline.evaluate(element => element.scrollTop) - readingTop)).toBeLessThan(4);
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
   } finally { release?.(); await f.close(); }
@@ -111,12 +112,16 @@ test('returning browsers automatically complete Gateway authorization without an
   try {
     await page.goto(f.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
+    // The Host selector is on the All sessions page (phase 2b), reached once the workspace is signed in.
+    await openSessionsPage(page);
     await expect(page.getByLabel('Connected Host')).toBeVisible();
     await page.evaluate(() => sessionStorage.removeItem('agent-remote:automatic-sign-in'));
     await page.context().clearCookies();
     await page.reload();
+    await openSessionsPage(page);
     await expect(page.getByLabel('Connected Host')).toBeVisible();
-    await expect(page).toHaveURL(f.url + '/');
+    // Back at the app root, which now names its Window, rather than on a Gateway sign-in page.
+    await expect(page).toHaveURL(new RegExp(`^${f.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/(\\?window=[\\w-]+)?$`));
     expect(await page.evaluate(() => !!sessionStorage.getItem('agent-remote:automatic-sign-in'))).toBe(true);
   } finally { await f.close(); }
 });
@@ -130,7 +135,7 @@ test('confirmed device protection clears disk copies across tabs without interru
   try {
     await page.goto(f.url);
     await page.getByRole('link', { name: 'Sign in' }).click();
-    await page.getByLabel('Connected Host').selectOption(f.hostId);
+    await selectConnectedHost(page, f.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     const input = page.getByTestId('prompt-input');
@@ -188,14 +193,14 @@ test('confirmed device protection clears disk copies across tabs without interru
     const contentKeys = () => [localStorage, sessionStorage].flatMap(storage => Object.keys(storage).filter(key => /^(agent-remote:(recovery:)|agent-remote-(forks:|ask:|opened:|tracking:|conversation-history)|arc:prompt-edit)/.test(key)));
     await expect.poll(() => page.evaluate(contentKeys)).toEqual([]);
     await second.bringToFront();
-    await expect(second.getByTestId('prompt-input')).toHaveValue('Other tab draft');
+    await expect(second.getByTestId('prompt-input')).toHaveText('Other tab draft');
     await second.getByTestId('prompt-input').fill('Still private');
     await second.evaluate(() => {
       window.dispatchEvent(new PageTransitionEvent('pagehide'));
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     });
     await expect.poll(() => second!.evaluate(contentKeys)).toEqual([]);
-    await expect(second.getByTestId('prompt-input')).toHaveValue('Still private');
+    await expect(second.getByTestId('prompt-input')).toHaveText('Still private');
     await second.getByTestId('prompt-submit').click();
     await expect(second.locator('.agent-message-assistant').last()).toContainText('Still private');
     await expect.poll(() => second!.evaluate(contentKeys)).toEqual([]);
@@ -209,7 +214,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await expect.poll(() => page.evaluate(contentKeys)).toEqual([]);
     release();
     await expect(page.getByTestId('prompt-input')).toBeEnabled();
-    await expect(page.getByTestId('prompt-input')).toHaveValue('');
+    await expect(page.getByTestId('prompt-input')).toHaveText('');
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Still private');
   } finally { release?.(); await second?.close(); await f.close(); }
 });

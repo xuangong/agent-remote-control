@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { selectConnectedHost } from './all-sessions';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { createWindowView, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
@@ -72,6 +73,9 @@ for (const placement of ['primary', 'dock', 'float', 'attached'] as const) {
 }
 
 async function openWindows(page: Page) {
+  // Wide pages with a visible sidebar list Windows there; otherwise the floating Window capsule opens its panel.
+  const sidebar = page.locator('#lab-context .lab-window-workspaces');
+  if ((page.viewportSize()?.width ?? 1280) > 1180 && await sidebar.isVisible()) return sidebar;
   const trigger = page.getByRole('button', { name: 'Windows', exact: true });
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
   const panel = page.locator('.lab-window-panel');
@@ -118,7 +122,7 @@ async function createWorkspace(page: Page, context: BrowserContext) {
   try {
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page);
     await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();

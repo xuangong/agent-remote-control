@@ -5,7 +5,7 @@
   position: absolute; inset: 0; grid-column: 1 / -1; grid-row: 2;
   z-index: 145; pointer-events: none;
 }
-.lab-ask-workspaces > .lab-ask-floating { z-index: 3; }
+.lab-ask-workspaces .lab-ask-floating { z-index: 3; }
 /* Keep page navigation above non-modal conversations and their launchers. */
 .lab-shell:has(> .lab-ask-workspaces .lab-ask-window) > :is(.lab-app-bar, .lab-mobile-navigation) { z-index: 147; }
 @media (max-width: 1180px) { .lab-ask-workspaces { grid-row: 3; } }
@@ -55,14 +55,14 @@
 
 .lab-ask-waiting { flex: none; padding: 8px 12px; font-size: 12px; color: var(--obs-text-secondary); max-height: 20%; overflow: auto; overflow-wrap: anywhere; }
 
-.lab-ask-floating[data-status="working"] .lab-ask-trigger { background: var(--tracking-working-surface); }
-.lab-ask-floating[data-status="pending"] .lab-ask-trigger { background: var(--tracking-pending-surface); }
+:is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-status="working"] .lab-ask-trigger { background: var(--tracking-working-surface); }
+:is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-status="pending"] .lab-ask-trigger { background: var(--tracking-pending-surface); }
 .lab-ask-floating[data-status="idle"] .lab-ask-trigger { background: var(--obs-surface); }
-.lab-ask-floating[data-alert="pending"] .lab-ask-trigger { animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite; }
-.lab-ask-floating[data-alert="idle"] .lab-ask-trigger { animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite; }
+:is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-alert="pending"] .lab-ask-trigger { animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite; }
+:is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-alert="idle"] .lab-ask-trigger { animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
-  .lab-ask-floating[data-alert="pending"] .lab-ask-trigger { animation: none; background: var(--tracking-pending-surface); }
-  .lab-ask-floating[data-alert="idle"] .lab-ask-trigger { animation: none; background: var(--tracking-idle-surface); }
+  :is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-alert="pending"] .lab-ask-trigger { animation: none; background: var(--tracking-pending-surface); }
+  :is(.lab-ask-floating, .lab-sidebar-shortcut-ask)[data-alert="idle"] .lab-ask-trigger { animation: none; background: var(--tracking-idle-surface); }
 }
 
 .lab-ask-viewport[data-presentation="floating"] .lab-ask-window :is(.lab-workbench-heading, .lab-ask-heading) { cursor: grab; touch-action: none; user-select: none; }

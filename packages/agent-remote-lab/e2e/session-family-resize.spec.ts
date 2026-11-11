@@ -243,7 +243,7 @@ test('empty pane selection uses the same visible treatment and clears the previo
   await page.goto(`${fixture}?selection&empty`);
   await expectSelectedPane(page, 'Primary');
   const empty = page.getByRole('region', { name: 'Session: Select session', exact: true });
-  await empty.getByRole('button', { name: 'Open sidebar', exact: true }).click();
+  await empty.getByRole('button', { name: 'Choose session', exact: true }).click();
   await expect(empty).toHaveAttribute('aria-current', 'true');
   await expect(page.locator('.lab-session-family-pane[data-selected="true"]')).toHaveCount(0);
   await page.evaluate(() => { document.documentElement.dataset.inputModality = 'pointer'; });
@@ -262,7 +262,8 @@ test('narrow pane selection follows the foreground child and its parent navigati
   await page.goto(`${fixture}?selection&selected=primary-child`);
   await expectSelectedPane(page, 'Primary child');
   await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
-  await pane(page, 'Primary child').getByRole('button', { name: 'Back to Primary', exact: true }).click();
+  // A narrow pane folds Back into its collapsed "Session actions" toolbar (the page's Side path also leads back).
+  await clickSessionAction(pane(page, 'Primary child'), 'Back to Primary');
   await expectSelectedPane(page, 'Primary');
   await expect(page.locator('.lab-session-family-pane:visible')).toHaveCount(1);
   await page.reload();

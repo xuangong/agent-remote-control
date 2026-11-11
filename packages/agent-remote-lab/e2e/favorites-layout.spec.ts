@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 
 const base = { hostId: 'host', providerId: 'recorded', title: 'Same session title', starredAt: 1, available: true, online: true, hostName: 'Work Mac' };
 async function setup(page: Page, title = base.title) {
@@ -52,9 +53,9 @@ test('aligns the desktop account and keeps long favorite titles on one line with
     const a = (await identity.boundingBox())!, b = (await security.boundingBox())!;
     expect(Math.abs(a.y + a.height / 2 - b.y - b.height / 2)).toBeLessThan(2);
     await expect(page.locator('#lab-context').getByRole('button', { name: 'Security', exact: true })).toHaveCount(0);
-    await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
+    await openSessionsPage(page, 'Favorites');
   }
-  const tree = page.locator(mobile ? '.lab-title-favorites' : '#lab-context').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
+  const tree = page.locator(mobile ? '.lab-title-favorites' : '#lab-sessions-page').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
   const row = tree.getByRole('treeitem').first();
   const title = row.locator('strong'), actions = row.getByRole('button', { name: /^Actions for / });
   await expect(title).toBeVisible();
@@ -74,10 +75,9 @@ test('untracks and unstars only the chosen identity when session titles are iden
   const mobile = testInfo.project.name.includes('mobile');
   if (mobile) await page.getByRole('button', { name: 'Favorites', exact: true }).click();
   else {
-    await showSessions(page);
-    await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
+    await openSessionsPage(page, 'Favorites');
   }
-  const tree = page.locator(mobile ? '.lab-title-favorites' : '#lab-context').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
+  const tree = page.locator(mobile ? '.lab-title-favorites' : '#lab-sessions-page').getByRole('tree', { name: 'Favorites folders and sessions', exact: true });
   const first = tree.locator('[data-favorite-id="favorite-first"]'), second = tree.locator('[data-favorite-id="favorite-second"]');
   for (const row of [first, second]) await favoriteAction(page, row, 'Track');
   const tracked = () => page.evaluate(() => JSON.parse(localStorage.getItem(`agent-remote-tracking:${location.origin}/u/alice/`) ?? '[]').map((item: { nativeSessionId: string }) => item.nativeSessionId));

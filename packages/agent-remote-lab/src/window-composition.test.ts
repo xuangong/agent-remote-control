@@ -96,6 +96,28 @@ it('preserves an enrolled native role while allocating independent Window view o
   expect(view.owners.text).not.toEqual(enrolled.owners.text);
   expect(ensureWindowCompositionSlot(doc, 'other', 'main', binding).id).not.toBe(view.id);
 });
+it('returns a view to its role slot once this page verifies the Handoff the Window already showed', () => {
+  const doc = createCompositionDocument('scope');
+  const native = (nativeSessionId: string) => ({ controllerId: 'controller', providerId: 'codex', nativeSessionId });
+  const progress = { revision: 2, status: 'applied' as const, retention: 'page' as const };
+  const checkpoint: RoleCheckpoint = { scope: 'scope', hostId: 'mac', controllerId: 'controller', roleId: 'role', appliedRevision: 2,
+    desired: { operationId: 'handoff-b', expectedRevision: 1, committedRevision: 2, from: native('s1'), to: native('B'),
+      projectionDigest: { version: 1, algorithm: 'sha256', hex: 'a'.repeat(64) } },
+    documents: { composition: progress, track: progress, ask: progress, draftViews: progress } };
+  doc.roles.push(checkpoint);
+  const role = ensureWindowCompositionSlot(doc, 'w', 'main', binding);
+  role.intent = { kind: 'role', roleKey: compositionRoleKey(checkpoint), revision: 2, target: { hostId: 'mac', native: native('B') } };
+  // Another page hands B off to C; the Window shows C before this page has verified that Handoff.
+  const successor = { ...binding, nativeSessionId: 'C', role: { controllerId: 'controller', roleId: 'role', revision: 3 } };
+  const early = ensureWindowCompositionSlot(doc, 'w', 'main', successor);
+  expect(early.id).not.toBe(role.id);
+  checkpoint.appliedRevision = 3; checkpoint.desired = { ...checkpoint.desired, operationId: 'handoff-c', expectedRevision: 2, committedRevision: 3, from: native('B'), to: native('C') };
+  role.intent = { ...role.intent, revision: 3, target: { hostId: 'mac', native: native('C') } };
+  expect(ensureWindowCompositionSlot(doc, 'w', 'main', successor)).toBe(role);
+  expect(ensureWindowCompositionSlot(doc, 'w', 'main', successor)).toBe(role);
+  // A view of the same session elsewhere keeps its own owners.
+  expect(ensureWindowCompositionSlot(doc, 'w', 'other', successor).id).not.toBe(role.id);
+});
 it('does not promote a self-reported Window role binding to native role authority', () => {
   const doc = createCompositionDocument('scope');
   const view = ensureWindowCompositionSlot(doc, 'w', 'main', { ...binding, role: { controllerId: 'fake', roleId: 'fake', revision: 10 } });

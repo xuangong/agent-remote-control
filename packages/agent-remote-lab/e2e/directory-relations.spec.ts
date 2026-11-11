@@ -1,10 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
-import { showNewSession, showSessions } from './session-navigation';
+import { showNewSession } from './session-navigation';
+import { showAllSessions } from './all-sessions';
 
 async function showDirectory(page: Page) {
-  await showSessions(page);
-  await page.getByRole('navigation', { name: 'Sidebar sections' }).getByRole('button', { name: 'Sessions', exact: true }).click();
-  const directory = page.getByRole('region', { name: 'Discover sessions', exact: true });
+  const directory = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions', exact: true });
   await directory.getByRole('button', { name: 'Refresh', exact: true }).click();
   return directory;
 }
@@ -32,7 +31,8 @@ test('Discover sessions reopens linked Ask and Side native sessions from their s
   const sideCreation = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await input.fill('/side Saved directory Side'); await input.press('Enter');
   const sideIdentity = await (await sideCreation).json() as { nativeSessionId: string };
-  const side = page.getByRole('complementary', { name: 'Side conversation' });
+  // A Side opens as an attached Window pane rather than a complementary panel.
+  const side = page.locator('.lab-side-conversation:visible');
   await expect(side.locator('.agent-message-assistant').last()).toContainText('Saved directory Side');
   const sideMessages = await side.locator('.agent-message-user').count();
   expect(creations).toHaveLength(3);
@@ -41,6 +41,8 @@ test('Discover sessions reopens linked Ask and Side native sessions from their s
   for (const [identity, kind, message, messageCount] of [[askIdentity, 'Ask', 'Saved directory Ask', askMessages], [sideIdentity, 'Side', 'Saved directory Side', sideMessages]] as const) {
     await page.goto(sourceUrl);
     await expect(input).toBeEnabled();
+    // Opening a session binds the selected view, which is still the Side; select the main view so the linked session replaces it.
+    await input.click();
     const directory = await showDirectory(page);
     const sourceRow = directory.locator(`[data-session-key='${sourceKey}']`);
     await sourceRow.locator(':scope > .lab-session-branch > .lab-session-toggle').click();

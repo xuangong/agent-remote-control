@@ -11,6 +11,8 @@ type Succession = Pick<ReturnType<typeof useSessionSuccession>, 'document' | 'de
 interface Options {
   window?: WorkspaceWindow;
   unavailable?: boolean;
+  /** A cached Window not yet confirmed by the service: its sessions are shown, but nothing is written to its layout. */
+  readOnly?: boolean;
   readWindow?(): WorkspaceWindow | undefined;
   operate(operation: WindowOperation): Promise<void>;
   succession: Succession;
@@ -71,18 +73,19 @@ export function useWindowSessionBridge(options: Options) {
     return () => { cancelled = true; };
   }, [groupKey, window?.revision, primarySlot?.id, succession.document, enabled, concreteHistory, settled]);
   useEffect(() => {
-    if (!enabled || !window || succession.discovering || pending.current.size) return;
+    if (!enabled || options.readOnly || !window || succession.discovering || pending.current.size) return;
     const operation = windowSuccessionLayout(succession.document, window);
     const key = operation && JSON.stringify([window.id, window.revision, operation]);
     if (!operation || key === successionAttempt.current) return;
     successionAttempt.current = key;
     try { void options.operate(operation).catch(error => latest.current.onError(error)); }
     catch (error) { latest.current.onError(error); }
-  }, [window?.id, window?.revision, succession.document.editRevision, succession.discovering, concreteHistory, enabled, settled]);
+  }, [window?.id, window?.revision, succession.document.editRevision, succession.discovering, concreteHistory, enabled, options.readOnly, settled]);
 
   const openPrimary = useCallback(async (session: SessionEntry, attached?: OpenedSession, restoreLayout = false, keepOriginal?: boolean, slotId?: string, targetViewId?: string, sessionIntent?: 'history', expectedBinding?: WindowSessionBinding | null): Promise<boolean> => {
     const current = latest.current, targetWindow = current.readWindow ? current.readWindow() : current.window;
     if (current.unavailable) throw new Error('Choose an available Window before opening a session.');
+    if (current.readOnly && targetWindow) throw new Error('Wait for this Window to load before opening a session in it.');
     if (!targetWindow) return sessionIntent ? current.succession.open(session, sessionIntent, keepOriginal, slotId) : attached ? current.succession.openAttached(attached, restoreLayout) : current.succession.open(session);
     const destination = targetViewId ?? targetWindow.selectedPrimaryViewId;
     if (destination && !targetWindow.views.some(view => view.id === destination && view.placement === 'primary')) throw new Error('The target primary view is unavailable.');

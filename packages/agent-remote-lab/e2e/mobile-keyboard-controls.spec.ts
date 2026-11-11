@@ -212,7 +212,8 @@ async function syntheticControlDrag(control: Locator) {
   });
 }
 
-test('applies keyboard-dismiss dragging to controls while preserving their next activation', async ({ page, browserName }) => {
+test('applies keyboard-dismiss dragging to controls while preserving their next activation', async ({ page, browserName, hasTouch }) => {
+  test.skip(!hasTouch, 'Follow-up taps need a touch screen; chromium-mobile and webkit-mobile-viewport run this.');
   const draft = 'A control drag must not submit this draft';
   const input = await openFocusedComposer(page, draft);
   const view = page.locator('.lab-primary-conversation');
@@ -347,7 +348,8 @@ test('cancels the Send hold after a small native drag but preserves a stationary
   } finally { await cdp.detach(); }
 });
 
-test('drags an image atom without opening its preview and still previews on a tap', async ({ page, browserName }) => {
+test('drags an image atom without opening its preview and still previews on a tap', async ({ page, browserName, hasTouch }) => {
+  test.skip(!hasTouch, 'The preview tap needs a touch screen; chromium-mobile and webkit-mobile-viewport run this.');
   await page.addInitScript(() => {
     const viewport = Object.assign(new EventTarget(), { width: 390, height: 420, offsetTop: 160, offsetLeft: 0, scale: 1 });
     Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });

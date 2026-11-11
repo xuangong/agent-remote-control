@@ -162,7 +162,7 @@ textarea {
   position: relative;
   --agent-preview-layer: 146;
   display: grid;
-  grid-template-columns: var(--lab-sidebar-width, 320px) minmax(0, 1fr);
+  grid-template-columns: var(--lab-sidebar-width, 260px) minmax(0, 1fr);
   grid-template-rows: 58px minmax(0, 1fr);
   width: 100%;
   height: 100vh;
@@ -171,7 +171,7 @@ textarea {
   background: var(--obs-canvas);
 }
 
-.lab-shell.lab-inspector-open { grid-template-columns: var(--lab-sidebar-width, 320px) minmax(0, 1fr) 320px; }
+.lab-shell.lab-inspector-open { grid-template-columns: var(--lab-sidebar-width, 260px) minmax(0, 1fr) 320px; }
 .lab-window-mode[hidden] { display: none !important; }
 .lab-window-mode .lab-window-recovery { grid-column: 1 / -1; grid-row: 1 / -1; }
 
@@ -290,28 +290,22 @@ textarea {
 .lab-sidebar-resize:is(:hover, :focus-visible, [data-resizing])::before { background: var(--obs-action); }
 .lab-sidebar-resize:focus-visible { outline: 2px solid var(--obs-action); outline-offset: -2px; }
 .lab-sidebar-resize[data-resizing]::after { content: ''; position: fixed; inset: 0; cursor: col-resize; user-select: none; }
-.lab-sidebar-tabs { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--obs-border); }
-.lab-sidebar-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 34px; padding: 6px 9px; border-color: transparent; background: transparent; color: var(--obs-text-secondary); white-space: nowrap; font-size: 12px; }
-.lab-sidebar-tabs button:nth-child(2) { margin-left: auto; }
-.lab-sidebar-tabs button[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
-.lab-sidebar-tabs button:hover { background: var(--obs-canvas); }
 @media (min-width: 1181px) {
   /* The desktop sidebar takes the sidebar color; the compact rail stays a white sheet. Containers inside it are
      transparent or sidebar-colored, fields and push buttons stay white, and hovered rows use the row-hover fill
      because the canvas color equals the sidebar color in light mode. */
   .lab-context-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--ui-sidebar); }
-  .lab-sidebar-tabs button:not([aria-pressed="true"]):hover:not(:disabled) { background: var(--ui-row-hover); }
-  .lab-context-rail .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover { background: var(--ui-row-hover); }
+  .lab-context-rail .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover, .lab-sessions-page .lab-favorite-node:not([data-current="true"], [data-drop="inside"]):hover { background: var(--ui-row-hover); }
   .lab-context-rail .lab-vscode-authorization, .lab-context-rail .lab-controller-updates li { background: transparent; }
-  .lab-context-rail > .lab-rail-heading, .lab-sidebar-tabs { flex-shrink: 0; }
-  /* Keep absolutely positioned accessibility text inside the sidebar scrollport. */
-  .lab-sidebar-content { position: relative; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 14px; scrollbar-gutter: stable; }
+  .lab-context-rail > .lab-rail-heading { flex-shrink: 0; }
+  /* On desktop the panel content is on the All sessions page, whose body scrolls (shell.css); keep absolutely positioned accessibility text inside it. */
+  .lab-sidebar-content { position: relative; }
   .lab-sidebar-content .lab-host-pairing { gap: 7px; margin: 0 0 16px; padding-bottom: 14px; }
   .lab-sidebar-content .lab-host-pairing .lab-directory-heading { margin-bottom: 0; }
   .lab-sidebar-content .lab-directory-heading h2 { font-size: 12px; color: var(--obs-text-secondary); font-weight: 600; }
   .lab-sidebar-content .lab-host-pairing > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .lab-sidebar-content .lab-browse-provider { margin-top: 0; font-size: 12px; }
-  .lab-sidebar-content .lab-session-search { position: sticky; top: -16px; z-index: 2; margin: 0 -2px 16px; padding: 8px 2px; background: var(--ui-sidebar); font-size: 12px; }
+  .lab-sidebar-content .lab-session-search { position: sticky; top: 0; z-index: 2; margin: 0 -2px 16px; padding: 8px 2px; background: var(--ui-background); font-size: 12px; }
   .lab-sidebar-content .lab-session-search input { min-height: 36px; font-size: 13px; }
   .lab-sidebar-content .lab-session-list { max-height: none; overflow: visible; margin-block: 6px 0; }
   .lab-sidebar-content .lab-session-directory { margin: 0 0 22px; }
@@ -327,9 +321,9 @@ textarea {
   .lab-sidebar-content .lab-display-settings h2 { font-size: 14px; }
   .lab-sidebar-content .lab-display-settings summary { padding-block: 10px; cursor: pointer; }
 }
-.lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea { min-width: 0; max-width: 100%; }
-.lab-context-rail select { overflow: hidden; text-overflow: ellipsis; }
-.lab-context-rail .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
+.lab-context-rail input, .lab-context-rail select, .lab-context-rail textarea, .lab-sessions-page input, .lab-sessions-page select, .lab-sessions-page textarea { min-width: 0; max-width: 100%; }
+.lab-context-rail select, .lab-sessions-page select { overflow: hidden; text-overflow: ellipsis; }
+.lab-context-rail .lab-session-list, .lab-sessions-page .lab-session-list { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
 .lab-inspector-rail { display: grid; align-content: start; border-left: 1px solid var(--obs-border); }
 
 .lab-rail-mobile-heading {
@@ -1262,7 +1256,8 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-chevron { color: var(--obs-text-secondary); font-size: 11px; }
 .lab-favorites-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-ask-floating,
-.lab-tracking-floating {
+.lab-tracking-floating,
+.lab-sidebar-shortcut {
   --tracking-working-surface: color-mix(in oklab, var(--obs-success) 24%, var(--obs-surface));
   --tracking-pending-surface: color-mix(in oklab, var(--ui-status-attention) 22%, var(--obs-surface));
   --tracking-idle-surface: color-mix(in oklab, var(--obs-text-secondary) 24%, var(--obs-surface));
@@ -1283,12 +1278,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-tracking-badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--obs-surface); border-radius: 50%; background: var(--obs-text); }
 .lab-tracking-attention { position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--obs-warning); }
-.lab-tracking-floating[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
-.lab-tracking-floating[data-alert="pending"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="pending"] .lab-session-popover-trigger {
   animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-pending-surface); --tracking-edge-color: var(--ui-status-attention);
 }
-.lab-tracking-floating[data-alert="idle"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="idle"] .lab-session-popover-trigger {
   animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-idle-surface); --tracking-edge-color: var(--obs-text-secondary);
 }
@@ -1301,7 +1296,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   50% { background-color: var(--tracking-idle-surface); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lab-tracking-floating[data-alert] .lab-session-popover-trigger { animation: none; }
+  :is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert] .lab-session-popover-trigger { animation: none; }
 }
 .lab-tracked-change { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 36px; padding: 6px; border-color: transparent; background: transparent; font-size: 11px; color: var(--obs-text-secondary); }
 .lab-tracked-change > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -1404,9 +1399,6 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-controller-updates a { display: block; margin: 8px 0; }
 
 /* Account favorites use compact bookmark rows, independent of session discovery. */
-.lab-sidebar-tabs button:nth-child(2) { margin-left: 0; }
-.lab-sidebar-tabs .lab-sidebar-new { margin-left: auto; }
-.lab-sidebar-tabs { flex-wrap: wrap; }
 .lab-session-panel-actions button[aria-pressed="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 .lab-favorites-filter-group { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .lab-favorites-filter-group button.lab-favorites-filter { border: 1px solid var(--obs-border); border-radius: 999px; background: transparent; color: var(--obs-text-secondary); padding: 3px 9px; min-height: 28px; font-size: 11px; }

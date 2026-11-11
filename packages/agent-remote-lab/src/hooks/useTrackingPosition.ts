@@ -77,7 +77,11 @@ export function arrangeFloatingEntries() {
   }
 }
 
-export function useTrackingPosition(storageKey = 'agent-remote-tracking-position', triggerSelector = '.lab-session-popover-trigger') {
+/**
+ * `enabled: false` keeps the root ref usable (for dismissal and lookups) but never registers a floating entry,
+ * adds no listeners and returns an empty style, as for an entry docked in the sidebar.
+ */
+export function useTrackingPosition(storageKey = 'agent-remote-tracking-position', triggerSelector = '.lab-session-popover-trigger', { enabled = true } = {}) {
   const root = useRef<HTMLDivElement>(null);
   /** The point shown, in fixed CSS coordinates. */
   const position = useRef<Position>();
@@ -129,7 +133,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
   }
 
   useLayoutEffect(() => {
-    if (!element) return;
+    if (!element || !enabled) return;
     let placement: Position | undefined;
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
@@ -167,7 +171,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
       window.visualViewport?.removeEventListener('scroll', resize);
       arrangeFloatingEntries();
     };
-  }, [storageKey, element]);
+  }, [storageKey, element, enabled]);
 
   const isTrigger = (target: EventTarget) => target instanceof Element && !!target.closest(triggerSelector);
   const handlers: HTMLAttributes<HTMLDivElement> = {
@@ -211,5 +215,5 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
     },
   };
   /** `edge` reports a position held against the right viewport margin. */
-  return { root, style, handlers, edge, move, current: () => position.current };
+  return { root, style: enabled ? style : {}, handlers, edge: enabled ? edge : undefined, move, current: () => position.current };
 }

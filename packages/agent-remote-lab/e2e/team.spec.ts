@@ -62,7 +62,7 @@ for (const navigation of ['team', 'create'] as const) {
   const primary = page.locator('.lab-primary-conversation');
   const openTracked = async () => {
    await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-   await page.locator('.lab-tracking-floating .lab-session-row').filter({ hasText: tracked.title }).click();
+   await page.getByRole('region', { name: 'Tracked sessions', exact: true }).locator('.lab-session-row').filter({ hasText: tracked.title }).click();
    await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBe(tracked.nativeSessionId);
    await expect(primary).toBeVisible();
    await expect(primary.locator('.agent-message-assistant')).toContainText('Conversation for tracked');
@@ -148,7 +148,7 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
  }));
  const {showNewSession}=await import('./session-navigation');
  await page.goto('/');await showNewSession(page);await page.getByTestId('session-create').click();
- const primary=page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary=page.locator('.lab-primary-conversation .lab-session-view');
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
  await expect(page).toHaveURL(/[?&]provider=[^&]+/);
  const url=new URL(page.url()),provider=url.searchParams.get('provider')!;
@@ -198,7 +198,7 @@ test('Team applies an ordinary layout and its menu visibility does not hide sess
 test('Team command and View switch share a retained presentation preference', async ({ page }) => {
  const { showNewSession } = await import('./session-navigation');
  await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary = page.locator('.lab-primary-conversation .lab-session-view');
  const input = primary.getByTestId('prompt-input');
  await expect(input).toBeEnabled();
  const entry = page.getByRole('button', { name: 'Teams', exact: true });
@@ -334,7 +334,7 @@ test('Dock child navigation uses the live channel without replacing the main ses
   });
  });
  await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
- const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+ const primary = page.locator('.lab-primary-conversation .lab-session-view');
  await expect(primary.getByTestId('prompt-input')).toBeEnabled();
  await primary.getByTestId('prompt-input').fill('Keep primary draft');
  await expect(page).toHaveURL(/[?&]provider=[^&]+/);
@@ -361,14 +361,18 @@ test('Dock child navigation uses the live channel without replacing the main ses
  await expect(parent.getByTestId('prompt-input')).toBeEnabled();
  await parent.getByTestId('prompt-input').fill('Keep Team draft');
  await parent.locator('.agent-child-sessions > summary').click();
- await parent.locator(`[data-child-session-id="${child!.nativeSessionId}"]`).click();
+ const childRow = parent.locator(`[data-child-session-id="${child!.nativeSessionId}"]`);
+ await childRow.click();
+ // Since b7f70fea a subagent pane is created only after the Host attaches it; a failure stays in the parent's subagent list.
  const childPane = page.getByRole('region', { name: 'Live child', exact: true });
- await expect(childPane.getByRole('alert')).toContainText('Child temporarily unavailable');
+ await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toContainText('Child temporarily unavailable');
+ await expect(childPane).toHaveCount(0);
  await expect(page).toHaveURL(address);
  fail = false;
  const attemptsBeforeRetry = requests.length;
- await childPane.getByRole('button', { name: 'Retry', exact: true }).click();
+ await childRow.click();
  await expect(childPane.getByTestId('prompt-input')).toBeEnabled();
+ await expect(parent.getByRole('group', { name: 'Session subagents' }).getByRole('alert')).toHaveCount(0);
  expect(requests).toHaveLength(attemptsBeforeRetry + 1);
  expect(requests).toEqual(Array(requests.length).fill({ providerId: provider, parentNativeSessionId: leader!.nativeSessionId, nativeSessionId: child!.nativeSessionId }));
  await childPane.getByRole('button', { name: isMobile ? 'Back to Leader' : 'Close subagent', exact: true }).click();

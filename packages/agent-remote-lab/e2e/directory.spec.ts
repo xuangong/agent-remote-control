@@ -1,5 +1,6 @@
 import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
+import { openSessionsPage } from './all-sessions';
 import { expect, test } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -10,8 +11,10 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await page.addInitScript(() => localStorage.setItem('agent-remote:tpm-view', 'false'));
   await page.goto('/');
   const compact = testInfo.project.name === 'chromium-mobile';
-  const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
-  const showContext = () => showSessions(page);
+  // Desktop lists sessions on the All sessions page, which the sidebar opens; compact layouts keep them in the Context dialog.
+  const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
+  const showContext = async () => { if (compact) await showSessions(page); else await openSessionsPage(page); };
+  if (!compact) await showContext();
   await expect(context().getByRole('region', { name: 'Discover sessions' })).toBeVisible();
   const discovery = () => context().getByRole('region', { name: 'Discover sessions' });
   await expect(discovery().locator('.lab-session-row').first()).toBeVisible();
@@ -44,6 +47,7 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
   await showContext();
   await expect(discovery().locator('.lab-session-row').first()).toBeVisible();
   if (compact) await context().getByRole('button', { name: 'Close Context' }).click();
+  else await context().getByRole('button', { name: 'Back to Window', exact: true }).click();
   await toggleViewPanel(page, 'Header');
   await page.getByLabel('Connection details', { exact: true }).click();
   await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
@@ -62,9 +66,13 @@ test('discovers, creates, switches, and reconnects sessions while retaining draf
 
 test('creates a temporary pairing key through the workbench', async ({ page }, testInfo) => {
   await page.goto('/');
-  const context = testInfo.project.name === 'chromium-mobile' ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
+  const compact = testInfo.project.name === 'chromium-mobile';
+  // Desktop shows Hosts on the All sessions page and settings on the Settings page, both opened from the sidebar.
+  const context = compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
+  if (!compact) await openSessionsPage(page);
   await expect(context.getByRole('region', { name: 'Remote Hosts' })).toBeVisible();
-  await context.getByRole('button', { name: testInfo.project.name === 'chromium-mobile' ? 'Settings' : 'Sidebar settings', exact: true }).click();
+  if (compact) await context.getByRole('button', { name: 'Settings', exact: true }).click();
+  else await openSessionsPage(page, 'Settings');
   await context.getByRole('button', { name: 'Pair Agent Host' }).click();
   const responsePromise = page.waitForResponse((response) => response.url().endsWith('/v1/remote/pairings') && response.request().method() === 'POST');
   await context.getByRole('button', { name: 'Generate pairing key' }).click();

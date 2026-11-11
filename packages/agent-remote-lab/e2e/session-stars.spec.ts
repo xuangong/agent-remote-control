@@ -1,5 +1,8 @@
-import { expect, test } from '@playwright/test';
-import { showSessions } from './session-navigation';
+import { expect, test, type Page } from '@playwright/test';
+import { openSessionsPage } from './all-sessions';
+
+/** The Track capsule. `.lab-tracking-floating` is also the class of the floating Window, Team and TPM capsules. */
+const track = (page: Page) => page.locator('.lab-tracking-floating').filter({ has: page.getByRole('button', { name: 'Tracked sessions', exact: true }) });
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -25,17 +28,17 @@ test('opens live tracking without a second attach or background history download
     { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
   ])));
   await page.goto('/e2e/fixtures/session-stars.html?switching=1');
-  await expect(page.locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
+  await expect(track(page).locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
   expect(await page.evaluate(() => performance.getEntriesByName('tracked-content-loaded').length)).toBe(0);
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
   const beforeOpen = attachments;
   opening = true;
   await page.evaluate(() => performance.mark('tracked-open'));
-  await page.locator('.lab-tracking-floating .lab-session-row').click();
+  await track(page).locator('.lab-session-row').click();
   await expect(page.locator('.lab-primary-conversation .agent-message-assistant')).toContainText('Conversation for background-session');
   await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Ready');
   expect(attachments).toBe(beforeOpen);
-  await expect(page.locator('.lab-tracking-count')).toHaveText('0');
+  await expect(track(page).locator('.lab-tracking-count')).toHaveText('0');
   await expect(page).toHaveURL(/session=background-session/);
   const duration = await page.evaluate(() => performance.measure('tracked-switch', 'tracked-open', 'tracked-content-loaded').duration);
   await testInfo.attach('fixture-switch-timing', { body: JSON.stringify({ durationMs: duration, attachRequestsOnClick: attachments - beforeOpen }), contentType: 'application/json' });
@@ -66,7 +69,7 @@ test('moves the tracking button without opening it and keeps the menu inside the
   expect(moved.x).toBeLessThan(60);
   await expect(button).toHaveAttribute('aria-expanded', 'false');
   await button.click();
-  const panel = page.locator('.lab-tracking-floating section');
+  const panel = track(page).locator('section');
   await expect(panel).toBeVisible();
   const bounds = (await panel.boundingBox())!;
   expect(bounds.x).toBeGreaterThanOrEqual(0);
@@ -109,39 +112,39 @@ test('shares sidebar and title favorites while retaining only local activity tra
   await expect(page.getByRole('region', { name: 'Opened sessions' })).toHaveCount(0);
   await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Working');
   await page.getByTestId('prompt-input').fill('Keep my draft');
-  if (!mobile) await showSessions(page);
+  if (!mobile) await openSessionsPage(page);
   const title = page.getByRole('button', { name: 'Favorites', exact: true });
   if (mobile) await title.click();
   await page.getByRole('button', { name: 'Star Research notes', exact: true }).last().click();
-  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-context [aria-label="Favorites"]');
+  const favorites = mobile ? page.locator('.lab-title-favorites section') : page.locator('#lab-sessions-page [aria-label="Favorites"]');
   await expect(favorites.getByText('Research notes', { exact: true })).toBeVisible();
   await favorites.getByRole('button', { name: 'Track Research notes', exact: true }).click();
   if (mobile) { await page.getByRole('button', { name: 'Close Favorites', exact: true }).click(); await expect(title).toBeFocused(); }
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).not.toContainText('Research notes');
-  await expect(page.locator('.lab-tracking-count')).toHaveText('0');
+  await expect(track(page).locator('section')).not.toContainText('Research notes');
+  await expect(track(page).locator('.lab-tracking-count')).toHaveText('0');
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   if (mobile) await title.click();
   await favorites.getByRole('button', { name: 'Track Build checks', exact: true }).click();
   if (mobile) await page.getByRole('button', { name: 'Close Favorites', exact: true }).click();
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('Ready');
-  await expect(page.locator('.lab-tracking-count')).toHaveText('1');
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Keep my draft');
+  await expect(track(page).locator('section')).toContainText('Ready');
+  await expect(track(page).locator('.lab-tracking-count')).toHaveText('1');
+  await expect(page.getByTestId('prompt-input')).toHaveText('Keep my draft');
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-activity', { detail: 'waiting' })));
   await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('Waiting');
+  await expect(track(page).locator('section')).toContainText('Waiting');
   await expect(page.getByLabel('1 session status changes', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New status for Build checks. Mark as seen', exact: true }).click();
   await expect(page.getByLabel('1 session status changes', { exact: true })).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('tracking.png') });
   await page.goto('/e2e/fixtures/session-stars.html');
   await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('Build checks');
-  await page.locator('.lab-tracking-floating section').getByRole('button', { name: 'Untrack Build checks', exact: true }).click();
-  await expect(page.locator('.lab-tracking-floating section')).toContainText('current session');
+  await expect(track(page).locator('section')).toContainText('Build checks');
+  await track(page).locator('section').getByRole('button', { name: 'Untrack Build checks', exact: true }).click();
+  await expect(track(page).locator('section')).toContainText('current session');
   expect(stars).toHaveLength(2);
   await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
   if (mobile) await title.click();
@@ -167,7 +170,7 @@ test('uses consistent status colors for mobile titles and grouped tracking count
   if (mobile) await page.setViewportSize({ width: 320, height: 740 });
   for (const status of ['running', 'waiting', 'idle']) {
     await page.goto(`/e2e/fixtures/session-stars.html?status=${status}`);
-    const counts = page.locator('.lab-tracking-counts');
+    const counts = track(page).locator('.lab-tracking-counts');
     await expect(counts.locator('[data-session-status="idle"]')).toHaveText('4');
     for (const [agentId, activity] of [['working-session', 'running'], ['pending-session', 'waiting']]) {
       await page.evaluate(detail => window.dispatchEvent(new CustomEvent('fixture-activity', { detail })), { agentId, status: activity });
@@ -195,7 +198,7 @@ test('uses consistent status colors for mobile titles and grouped tracking count
       await expect(trigger).toBeFocused();
     }
     await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-    const panel = page.locator('.lab-tracking-floating section');
+    const panel = track(page).locator('section');
     for (const [title, activity] of [['working-session', 'running'], ['pending-session', 'waiting'], ['idle-one', 'idle'], ['idle-two', 'idle']] as const) {
       await expect(panel.locator('strong', { hasText: title })).toHaveCSS('color', colors[activity]!);
     }
@@ -218,7 +221,7 @@ test('pulses for unread pending and completed work, prioritizes pending, and mar
   });
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
   await page.goto('/e2e/fixtures/session-stars.html');
-  const floating = page.locator('.lab-tracking-floating');
+  const floating = track(page);
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   const panel = floating.locator('section');
   const pendingIndicator = page.getByRole('button', { name: 'New status for Needs input. Mark as seen', exact: true });
@@ -297,11 +300,11 @@ test('draws the tracking edge from applied content and closes immediately when t
     { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
   ])));
   await page.goto('/e2e/fixtures/session-stars.html?switching=1&catchup=1');
-  await expect(page.locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
+  await expect(track(page).locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   await page.mouse.move(0, 0);
   const normalBorder = await trigger.evaluate(node => getComputedStyle(node).borderTopColor);
-  await trigger.click(); await page.locator('.lab-tracking-floating .lab-session-row').click();
+  await trigger.click(); await track(page).locator('.lab-session-row').click();
   const ring = page.locator('.lab-tracking-catch-up');
   await expect(ring).toHaveAttribute('data-state', 'catching_up');
   const composer = page.locator('.lab-primary-conversation .lab-composer-dock');
@@ -333,7 +336,7 @@ test('draws the tracking edge from applied content and closes immediately when t
     }));
   }));
   expect(completion).toEqual({ state: 'complete', offset: '0px', transition: '0s', border: normalBorder, visibility: 'hidden' });
-  await expect(input).toHaveValue('Draft while catching up');
+  await expect(input).toHaveText('Draft while catching up');
   expect(await composer.boundingBox()).toEqual(geometry);
   await page.screenshot({ path: testInfo.outputPath('catch-up-complete.png') });
   await expect(trigger).toHaveCSS('border-top-color', normalBorder);

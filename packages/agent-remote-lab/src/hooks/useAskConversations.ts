@@ -18,6 +18,7 @@ import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from
 import { inspectImageDraft } from '@orchardworks/agent-remote-web/browser';
 import type { CompositionParticipantResult } from '../session-composition-application.js';
 import { isAskSelected } from '../ask-presentation.js';
+import { SessionLocatorSynchronizingError } from '../session-view-operations.js';
 
 export type AskInputSender = (text: string, operationId: string) => Promise<unknown>;
 interface AskInputOwner { recordId: string; target?: string; creation?: string }
@@ -35,6 +36,8 @@ interface AskOpenOptions { existingOnly?: boolean; synchronize?: () => Promise<v
 export function useAskConversations(document: CompositionDocument, transport: RemoteAgentTransport, directory?: SessionDirectoryClient, selectedHostId = 'local', onCreated?: () => void, resolveExecution?: (source: OpenedSession) => SessionEntry, authority?: WindowLayoutAuthority) {
   const baseUrl = document.scope;
   const shared = useRef(authority); shared.current = authority;
+  // Read the latest resolver: a wait for a synchronizing locator outlives the render that started it.
+  const resolveExecutionRef = useRef(resolveExecution); resolveExecutionRef.current = resolveExecution;
   const preparations = useRef(new Map<string, AbortController>());
   const preparationSettlements = useRef(new Map<string, Promise<void>>());
   const resumeRequested = useRef(new Set<string>());
@@ -333,8 +336,8 @@ export function useAskConversations(document: CompositionDocument, transport: Re
     return entry.record?.remote ? { ...entry, record: undefined, attached: false } : entry;
   }
   function restore(source: OpenedSession, synchronize: () => Promise<void>, associationOwner: string) {
-    if (shared.current && sharedView(associationOwner) && !sharedView(associationOwner)?.binding) return;
     const key = keyFor(source, associationOwner);
+    if (shared.current && sharedView(associationOwner) && !sharedView(associationOwner)?.binding && !entryFor(source, associationOwner).record?.target) return;
     const epoch = association.epochs.get(key);
     const previous = windows.controllers.get(key);
     if (entries.get(key)?.busy && !preparations.current.get(key)?.signal.aborted || !isEnabled(source, associationOwner) || !(windows.restoring.has(key) || shared.current && !isAskAttached(entries.get(key))) || previous && !previous.signal.aborted || !expanded(key) || !directory) return;
@@ -457,7 +460,10 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       }
       if (restoringCurrent) update(key, { attached: false, attachedParticipant: undefined });
       const savedTarget = record.target;
-      const locator = savedTarget ? resolveExecution?.(savedTarget) ?? savedTarget : record.source;
+      // A succession discovery (after reload, a Retry or a refresh) briefly withholds the current locator: wait for it
+      // rather than failing, so an open Ask reaches its session without its own Retry.
+      const locator = savedTarget ? await currentExecution(savedTarget, preparation.signal) ?? savedTarget : record.source;
+      requireCurrent();
       const following = savedTarget && sessionKey(locator) !== sessionKey(savedTarget);
       if (following && !record.configured && !record.remote) throw new Error('The original Ask configuration is incomplete. Recover it before following its current session.');
       if (!locator.providerId || !locator.nativeSessionId) throw new Error('The saved Ask native locator is unavailable. Retry after restoring its identity.');
@@ -521,6 +527,14 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       if (current && resumeRequested.current.delete(key) && isEnabled(source, associationOwner) && expanded(key)) {
         void open(sourceState, source, '', false, { synchronize, associationOwner, existingOnly }).catch(() => {});
       }
+    }
+  }
+
+  async function currentExecution(target: OpenedSession, signal: AbortSignal): Promise<SessionEntry | undefined> {
+    for (let delay = 50; ; delay = Math.min(delay * 2, 1000)) {
+      try { return resolveExecutionRef.current?.(target); }
+      catch (error) { if (!(error instanceof SessionLocatorSynchronizingError)) throw error; }
+      await abortableDelay(delay, signal);
     }
   }
 
@@ -602,6 +616,15 @@ export function useAskConversations(document: CompositionDocument, transport: Re
   }
   return { revision, sharedView, isEnabled, isOpen, toggle, store, entries, entryFor, drafts, draftBinding, setDraft, sendInput, discardInput, restore, open, close, minimize,
     associationOwner, ownerEditRevision, applySourceProjection, retainAssociationOwners };
+}
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 async function waitForAskRelations(synchronize: () => Promise<void>, signal: AbortSignal): Promise<void> {

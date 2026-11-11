@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { selectConnectedHost, addSessionView } from './all-sessions';
 import { showNewSession } from './session-navigation';
 import { sessionLinkFixture } from './session-link-fixture';
 
@@ -9,10 +10,10 @@ async function openAsk(page: Page) {
   await page.getByTestId('session-create').click();
   expect((await sourceCreated).ok()).toBe(true);
   await expect(page).toHaveTitle('New session · Agent Remote Control');
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-input');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view').getByTestId('prompt-input');
   await expect(primary).toBeEnabled();
   await primary.fill('/ask');
-  await expect(page.locator('.lab-primary-conversation > .lab-session-view').getByTestId('prompt-submit')).toBeEnabled();
+  await expect(page.locator('.lab-primary-conversation .lab-session-view').getByTestId('prompt-submit')).toBeEnabled();
   await primary.press('Enter');
   const creations: unknown[] = [];
   const attachments: { nativeSessionId: string }[] = [];
@@ -85,12 +86,12 @@ test('reload keeps a minimized Ask closed and reopens its saved conversation and
 async function remoteSource(page: Page, fixture: Awaited<ReturnType<typeof sessionLinkFixture>>) {
   await page.goto(fixture.url + '/auth/login');
   await page.getByRole('link', { name: 'Sign in as alice', exact: true }).click();
-  await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+  await selectConnectedHost(page, fixture.hostId);
   await showNewSession(page);
   const created = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/create'));
   await page.getByTestId('session-create').click();
   const identity = await (await created).json() as { nativeSessionId: string };
-  const primary = page.locator('.lab-primary-conversation > .lab-session-view');
+  const primary = page.locator('.lab-primary-conversation .lab-session-view');
   await expect(primary.getByTestId('prompt-input')).toBeEnabled();
   const nativeSessionId = identity.nativeSessionId;
   await primary.getByTestId('prompt-input').fill('/ask');
@@ -110,6 +111,11 @@ test('a hosted global Ask keeps Window, Team, Track and View controls available'
     await view.click();
     const options = page.getByRole('region', { name: 'View options', exact: true });
     await options.getByRole('checkbox', { name: 'Track view', exact: true }).check();
+    // TPM view starts hidden for fine pointers.
+    await options.getByRole('checkbox', { name: 'TPM view', exact: true }).check();
+    // While the desktop sidebar is visible, these controls are its sections and Shortcuts; hidden, they float beside Ask.
+    const sidebar = options.getByRole('checkbox', { name: 'Sidebar', exact: true });
+    if (!isMobile && await sidebar.isChecked()) await sidebar.uncheck();
     await options.press('Escape');
     await trigger.click();
     await expect(ask.getByTestId('prompt-input')).toBeEnabled();
@@ -218,7 +224,7 @@ test('Ask opens for a session shown in a Window dock', async ({ page, isMobile }
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     const primary = page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input');
     await expect(primary).toBeEnabled();
@@ -226,7 +232,7 @@ test('Ask opens for a session shown in a Window dock', async ({ page, isMobile }
     await primary.press('Enter');
     const trigger = page.getByRole('button', { name: 'Ask about this session', exact: true });
     await expect(trigger).toBeEnabled();
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dock = page.locator('[data-dock-id]').first();
     await dock.click();
     await showNewSession(page);

@@ -1,6 +1,6 @@
 import { act, useReducer } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { applyWindowOperation, createWindowView, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type WindowOperation, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
@@ -38,8 +38,8 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
   await app.close(); localStorage.clear(); sessionStorage.clear();
 });
 
-async function fixture() {
-  let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', undefined, 'primary')] };
+async function fixture({ views = [createWindowView('main', undefined, 'primary')], ...props }: { views?: WindowView[] } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview' | 'placement'> = {}) {
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
   let other: WorkspaceWindow = { ...window, id: 'other', title: 'Window' };
   const renamed = vi.fn();
   let renameOther: (title: string) => Promise<{ saved: Promise<void> }> = async title => { other = { ...other, title, revision: other.revision + 1 }; return { saved: Promise.resolve() }; };
@@ -49,12 +49,13 @@ async function fixture() {
   let saveState = { state: 'saving' as 'saving' | 'offline' | 'error', pending: 1, error: undefined as string | undefined };
   const retry = vi.fn(async () => {});
   const discard = vi.fn(() => saved);
+  let update!: () => void;
+  const operate = vi.fn((operation: WindowOperation) => {
+    if (rejectLocal) throw new Error('This Window cannot be edited.');
+    window = applyWindowOperation(window, operation); update(); return saved;
+  });
   function Harness() {
-    const [, update] = useReducer(value => value + 1, 0); redraw = update;
-    const operate = (operation: WindowOperation) => {
-      if (rejectLocal) throw new Error('This Window cannot be edited.');
-      window = applyWindowOperation(window, operation); update(); return saved;
-    };
+    [, update] = useReducer(value => value + 1, 0); redraw = update;
     const workspace = { window, windows: [window, other], hasActiveWindow: true, unavailable: false, saveState,
       retrySave: retry, discardLocalChanges: discard, open: async () => {}, create: async () => {}, remove: async () => {}, operate,
       async rename(id: string, title: string) {
@@ -63,7 +64,7 @@ async function fixture() {
         const result = await renameOther(title); update(); return result;
       },
     } as unknown as ReturnType<typeof useWindowWorkspace>;
-    return <WindowWorkspaces workspace={workspace} />;
+    return <WindowWorkspaces workspace={workspace} {...props} />;
   }
   const container = await render(<Harness />);
   const button = (title: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === title)!;
@@ -76,7 +77,7 @@ async function fixture() {
     });
     await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   };
-  return { container, button, rename, renamed, read: () => window, readOther: () => other, retry, discard, rejectSave,
+  return { container, button, rename, renamed, operate, read: () => window, readOther: () => other, retry, discard, rejectSave,
     setRenameOther(value: typeof renameOther) { renameOther = value; },
     rejectLocal: () => { rejectLocal = true; },
     async offline() { await act(async () => { saveState = { state: 'offline', pending: 1, error: 'Network unavailable' }; redraw(); }); },
@@ -143,7 +144,7 @@ it('closes every pane locally, including the last one, and can create a view in 
   expect(test.read().views).toHaveLength(1);
   await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-close]')!.click());
   expect(test.read()).toMatchObject({ id: 'window', selectedViewId: null, selectedPrimaryViewId: null, views: [] });
-  expect(test.container.textContent).toContain('No session views');
+  expect(test.container.textContent).toContain('No session views. Add one or open one from Sessions.');
   expect(test.button('New session view').disabled).toBe(false);
   await act(async () => test.button('New session view').click());
   expect(test.read().id).toBe('window');
@@ -184,4 +185,118 @@ it('cancels a rename with Escape, keeps an unchanged title without saving, and r
   await test.rename('other', 'Window');
   expect(test.renamed).not.toHaveBeenCalled();
   expect(test.container.querySelector('form')).toBeNull();
+});
+
+it('lists the current Window in layout order and focuses a chosen view', async () => {
+  const navigate = vi.fn();
+  // A Side follows its source in the array, as the layout requires.
+  const test = await fixture({ onNavigate: navigate, views: [
+    createWindowView('float', undefined, 'float'), { ...createWindowView('dock'), collapsed: true },
+    createWindowView('main', undefined, 'primary'), { ...createWindowView('side', undefined, 'attached'), attachedTo: 'main' },
+  ] });
+  const views = test.container.querySelector('nav[aria-label="Session views"]')!;
+  expect(test.container.textContent).toContain('In this Window');
+  expect([...views.querySelectorAll('[data-window-view-row]')].map(row => [row.getAttribute('data-window-view-row'), row.getAttribute('data-depth')]))
+    .toEqual([['main', null], ['side', '1'], ['dock', null], ['float', null]]);
+  expect(views.querySelector('[data-window-view-row="dock"]')?.hasAttribute('data-collapsed')).toBe(true);
+  expect(views.querySelector('[data-window-view-row="float"]')?.hasAttribute('data-collapsed')).toBe(false);
+  const pane = document.createElement('div'); pane.dataset.viewId = 'dock'; pane.scrollIntoView = vi.fn(); document.body.append(pane);
+  try {
+    await act(async () => views.querySelector<HTMLButtonElement>('[data-window-view-id="dock"]')!.click());
+    expect(test.operate).toHaveBeenCalledWith({ type: 'batch', operations: [
+      { type: 'view.collapse', viewId: 'dock', collapsed: false }, { type: 'view.select', viewId: 'dock' }] });
+    expect(test.read()).toMatchObject({ selectedViewId: 'dock' });
+    expect(test.read().views.find(view => view.id === 'dock')?.collapsed).toBe(false);
+    expect(navigate).toHaveBeenCalledOnce();
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)); });
+    expect(pane.scrollIntoView).toHaveBeenCalled();
+    // An expanded view is only selected.
+    await act(async () => views.querySelector<HTMLButtonElement>('[data-window-view-id="float"]')!.click());
+    expect(test.operate).toHaveBeenLastCalledWith({ type: 'view.select', viewId: 'float' });
+  } finally { pane.remove(); }
+});
+
+it('offers All Windows in the sidebar when an overview is available, and reports opening a Window', async () => {
+  const overview = vi.fn(), navigate = vi.fn();
+  const test = await fixture({ placement: 'sidebar', onOverview: overview, onNavigate: navigate });
+  await act(async () => test.container.querySelector<HTMLButtonElement>('button[aria-label="Show all Windows"]')!.click());
+  expect(overview).toHaveBeenCalledOnce();
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-id="other"]')!.click());
+  expect(navigate).toHaveBeenCalledOnce();
+});
+
+it('shows no All Windows button without an overview', async () => {
+  const test = await fixture({ placement: 'sidebar' });
+  expect(test.container.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
+});
+
+it('names All sessions in the sidebar\'s empty-views note', async () => {
+  const test = await fixture({ placement: 'sidebar', views: [] });
+  expect(test.container.textContent).toContain('No session views. Add one or open one from All sessions.');
+});
+
+it('neither scrolls nor navigates when choosing a view is refused', async () => {
+  const navigate = vi.fn(), frame = vi.spyOn(window, 'requestAnimationFrame');
+  const test = await fixture({ onNavigate: navigate });
+  test.rejectLocal();
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[data-window-view-id="main"]')!.click());
+  expect(test.container.textContent).toContain('This Window cannot be edited.');
+  expect(frame).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it('shows sidebar headings with icon actions, flat rows without check marks, and no delete note', async () => {
+  const overview = vi.fn();
+  const test = await fixture({ placement: 'sidebar', onOverview: overview, views: [
+    createWindowView('main', undefined, 'primary'), { ...createWindowView('side', undefined, 'attached'), attachedTo: 'main' },
+  ] });
+  const root = test.container.querySelector('.lab-window-workspaces')!;
+  expect(root.getAttribute('data-placement')).toBe('sidebar');
+  expect([...root.querySelectorAll('.lab-window-section-heading > h2.lab-sidebar-section-title')].map(heading => heading.textContent)).toEqual(['Windows', 'In this Window']);
+  const named = (name: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.getAttribute('aria-label') === name);
+  for (const name of ['New Window', 'Show all Windows', 'New session view']) {
+    const [button, ...others] = named(name);
+    expect(others).toHaveLength(0);
+    expect(button?.classList.contains('ui-icon-button')).toBe(true);
+    expect(button?.textContent).toBe('');
+    expect(button?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  }
+  expect(named('Show all Windows')[0]!.classList.contains('lab-window-overview-trigger')).toBe(true);
+  await act(async () => named('Show all Windows')[0]!.click());
+  expect(overview).toHaveBeenCalledOnce();
+  await act(async () => named('New session view')[0]!.click());
+  expect(test.read().views).toHaveLength(3);
+  expect(root.textContent).not.toContain('✓');
+  expect(root.querySelector('.lab-window-selected')).toBeNull();
+  expect(root.textContent).not.toContain('before deleting');
+  // Current and selected rows keep aria-current, and indented views keep their depth.
+  expect(root.querySelector('[data-window-id="window"]')?.getAttribute('aria-current')).toBe('true');
+  expect(root.querySelector(`[data-window-view-id="${test.read().selectedViewId}"]`)?.getAttribute('aria-current')).toBe('true');
+  expect(root.querySelector('[data-window-view-row="side"]')?.getAttribute('data-depth')).toBe('1');
+  // Row actions keep their classes, names, titles and data attributes.
+  const rename = root.querySelector<HTMLButtonElement>('.lab-window-rename-trigger[data-window-rename="other"]')!;
+  expect([rename.getAttribute('aria-label'), rename.title]).toEqual(['Rename Window: Window', 'Rename this Window']);
+  const deletes = [...root.querySelectorAll<HTMLButtonElement>('.lab-window-delete')];
+  expect(deletes.map(button => [button.getAttribute('aria-label'), button.title, button.disabled])).toEqual([
+    ['Delete Window: Project', 'Switch to another Window before deleting this one.', true],
+    ['Delete Window: Window', 'Delete this layout. Agent sessions keep running.', false],
+  ]);
+  const close = root.querySelector<HTMLButtonElement>('.lab-window-view-close[data-window-view-close="main"]')!;
+  expect([close.getAttribute('aria-label'), close.title, close.textContent]).toEqual(['Close session view: Empty view', 'Close this session view. Agent sessions keep running.', '']);
+  for (const button of [rename, ...deletes, close]) expect(button.classList.contains('ui-icon-button')).toBe(true);
+  await test.rename('other', 'Research');
+  expect(test.renamed).toHaveBeenLastCalledWith('other', 'Research');
+});
+
+it('keeps the floating panel text buttons, check marks and delete note by default', async () => {
+  const test = await fixture();
+  const root = test.container.querySelector('.lab-window-workspaces')!;
+  expect(root.getAttribute('data-placement')).toBe('panel');
+  expect(test.button('New Window')).toBeDefined();
+  // The floating panel's WindowMenu offers All Windows itself.
+  expect(root.querySelector('button[aria-label="Show all Windows"]')).toBeNull();
+  expect(root.querySelector('.lab-window-selected[aria-label="Current Window"]')?.textContent).toBe('✓');
+  expect(root.querySelector('.lab-window-selected[aria-label="Selected view"]')?.textContent).toBe('✓');
+  expect(root.textContent).toContain('Switch to another Window before deleting the active one.');
+  expect(root.querySelector('.ui-icon-button')).toBeNull();
 });

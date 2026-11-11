@@ -48,6 +48,12 @@ export function ensureWindowCompositionSlot(document: CompositionDocument, windo
   const entries = (document.windowBindings ?? []).filter(entry => entry.windowId === windowId && entry.viewId === viewId);
   const exact = entries.find(entry => entry.bindingKey === windowBindingKey(binding));
   const existing = exact && document.slots.find(slot => slot.id === exact.slotId);
+  // A view that met its successor before this page verified the Handoff got a fresh slot; once verified, the view's role slot and owners take over again.
+  const roleKey = binding.role && binding.sessionIntent !== 'history'
+    ? compositionRoleKey({ scope: document.scope, hostId: binding.hostId, controllerId: binding.role.controllerId, roleId: binding.role.roleId }) : undefined;
+  const lineage = roleKey ? entries.flatMap(entry => document.slots.filter(slot => slot.id === entry.slotId))
+    .find(slot => slot.intent.kind === 'role' && slot.intent.roleKey === roleKey && slotMatchesBinding(document, slot, binding)) : undefined;
+  if (lineage && existing !== lineage && existing?.intent.kind !== 'role') return bindWindowCompositionSlot(document, windowId, viewId, binding, lineage.id);
   if (existing && slotMatchesBinding(document, existing, binding)) return existing;
   const current = entries.flatMap(entry => document.slots.filter(slot => slot.id === entry.slotId)).find(slot => slotMatchesBinding(document, slot, binding));
   if (current) return bindWindowCompositionSlot(document, windowId, viewId, binding, current.id);

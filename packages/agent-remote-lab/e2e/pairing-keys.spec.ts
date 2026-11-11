@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { openSessionsPage } from './all-sessions';
 
 for (const purpose of ['host-only', 'gateway-setup'] as const) {
   test(`creates and revokes a ${purpose} invitation without retaining its secret`, async ({ page }, testInfo) => {
@@ -18,8 +19,9 @@ for (const purpose of ['host-only', 'gateway-setup'] as const) {
     });
     await page.goto('/');
     const compact = testInfo.project.name === 'chromium-mobile';
-    const context = compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-context');
-    await context.getByRole('button', { name: compact ? 'Settings' : 'Sidebar settings', exact: true }).click();
+    const context = compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
+    if (compact) await context.getByRole('button', { name: 'Settings', exact: true }).click();
+    else await openSessionsPage(page, 'Settings');
     await context.getByRole('button', { name: 'Pair Agent Host', exact: true }).click();
     await expect(context.getByLabel('Pairing purpose', { exact: true })).toHaveValue('host-only');
     if (purpose === 'gateway-setup') await context.getByLabel('Pairing purpose', { exact: true }).selectOption(purpose);

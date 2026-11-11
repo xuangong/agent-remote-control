@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { showNewSession } from './session-navigation';
+import { toggleViewPanel } from './view-options';
 
 const sourceView = (owner: Locator) => owner.locator('.lab-session-view');
 const sourceIdentities = new WeakMap<Locator, string>();
@@ -291,6 +292,9 @@ test('each source keeps its own expanded Ask and restoration does not duplicate 
 test('Ask stays floating over the page while source panes resize and remain interactive', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Uses two visible desktop containers.');
   const { primary, side, select } = await openComposition(page, false);
+  // The Ask capsule floats over the page only while the desktop sidebar is hidden; the sidebar holds it as a Shortcuts row otherwise.
+  await toggleViewPanel(page, 'Sidebar');
+  await expect(page.locator('#lab-context')).toBeHidden();
   await select(primary, 0);
   await send(sourceView(primary), '/ask A source-bound global floating conversation');
   const ask = askView(primary);

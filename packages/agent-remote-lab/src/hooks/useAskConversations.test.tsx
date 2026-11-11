@@ -58,13 +58,15 @@ async function setup(transport = {} as import('@orchardworks/agent-remote-web').
     return Response.json({ agentId: path.endsWith('/attach') ? 'restored-agent' : 'created-agent', nativeSessionId: body.nativeSessionId ?? 'ask-native' });
   });
   let ask!: ReturnType<typeof useAskConversations>;
-  function Harness() { const [, changed] = useState(0); rerender = () => changed(value => value + 1); ask = useAskConversations(fixtureDocument(), activeTransport, directory); return null; }
+  let resolveExecution: Parameters<typeof useAskConversations>[5];
+  function Harness() { const [, changed] = useState(0); rerender = () => changed(value => value + 1); ask = useAskConversations(fixtureDocument(), activeTransport, directory, 'local', undefined, resolveExecution); return null; }
   let container = await render(<Harness />);
   await act(async () => { await ask.open(state, source, '', false, { associationOwner: ownerId(source) }); ask.setDraft(ownerId(source), 'Unsent Ask draft'); });
   return { requests, current: () => ask, failAttach: (message?: string, status = 503, code?: string) => { attachError = message ? { message, status, code } : undefined; },
     failCreate: (message?: string) => { createError = message; },
     pauseAttach: () => { let finish!: () => void; attachPause = new Promise<void>(resolve => { finish = resolve; }); return finish; },
     replaceTransport: () => { activeTransport = {} as typeof transport; rerender(); },
+    resolveWith: (resolve: Parameters<typeof useAskConversations>[5]) => { resolveExecution = resolve; rerender(); },
     pauseCreate: () => { let finish!: () => void; createPause = new Promise<void>(resolve => { finish = resolve; }); return finish; },
     reload: async () => { await unmount(container); viewDocument = undefined; container = await render(<Harness />); return container; } };
 }
@@ -83,6 +85,49 @@ it('restores an expanded source-bound Ask and draft without creating another nat
     expect.objectContaining({ path: '/v1/remote/create' }),
     { path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'ask-native' } },
   ]);
+});
+
+it('waits while the current locator synchronizes and then restores the saved Ask without its own Retry', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { SessionLocatorSynchronizingError } = await import('../session-view-operations.js');
+    const fixture = await setup();
+    let synchronizing = true;
+    // Each render passes a new resolver; the wait must follow the latest one.
+    fixture.resolveWith(target => { if (synchronizing) throw new SessionLocatorSynchronizingError(); return target; });
+    await fixture.reload();
+    await act(async () => { fixture.current().restore(source, async () => {}, ownerId(source)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ busy: true, attached: false });
+    expect(fixture.current().entryFor(source, ownerId(source)).error).toBeUndefined();
+    expect(fixture.requests.filter(request => request.path.endsWith('/attach'))).toHaveLength(0);
+    fixture.resolveWith(target => { if (synchronizing) throw new SessionLocatorSynchronizingError(); return target; });
+    synchronizing = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: true, busy: false, error: undefined });
+    expect(fixture.requests.filter(request => request.path.endsWith('/attach'))).toEqual([
+      { path: '/v1/remote/attach', body: { providerId: 'codex', nativeSessionId: 'ask-native' } },
+    ]);
+  } finally { vi.useRealTimers(); }
+});
+
+it('stops waiting for a synchronizing locator when the Ask is minimized', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { SessionLocatorSynchronizingError } = await import('../session-view-operations.js');
+    const fixture = await setup();
+    let synchronizing = true;
+    fixture.resolveWith(target => { if (synchronizing) throw new SessionLocatorSynchronizingError(); return target; });
+    await fixture.reload();
+    let cancel: (() => void) | undefined;
+    await act(async () => { cancel = fixture.current().restore(source, async () => {}, ownerId(source)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    await act(async () => { fixture.current().minimize(source, ownerId(source)); cancel?.(); });
+    synchronizing = false;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(fixture.requests.filter(request => request.path.endsWith('/attach'))).toHaveLength(0);
+    expect(fixture.current().entryFor(source, ownerId(source))).toMatchObject({ attached: false, busy: false });
+  } finally { vi.useRealTimers(); }
 });
 
 it('retries a saved Ask without waiting for its source snapshot', async () => {

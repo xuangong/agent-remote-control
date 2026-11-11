@@ -3,14 +3,29 @@ import { runWindowCommand } from '../../agent-host/src/window-command.js';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
+import { openSessionsPage, selectConnectedHost, addSessionView } from './all-sessions';
+import { toggleViewPanel } from './view-options';
 import { compositionMetadataKey, createAskOwner, createCompositionDocument, createCompositionSlot, type CompositionDocument } from '../src/session-composition.js';
 import { bindWindowCompositionSlot } from '../src/window-composition.js';
 
+/** Wide pages with a visible sidebar list Windows there; otherwise the floating Window capsule opens its panel. */
+async function sidebarWindows(page: Page) {
+  return (page.viewportSize()?.width ?? 1280) > 1180 && await page.locator('#lab-context').isVisible();
+}
 async function openWindows(page: Page) {
+  if (await sidebarWindows(page)) return page.locator('#lab-context .lab-window-workspaces');
   const trigger = page.getByRole('button', { name: 'Windows', exact: true });
   if (await trigger.getAttribute('aria-expanded') !== 'true') await trigger.click();
   return page.locator('.lab-window-panel');
 }
+/** Closes the floating Windows panel; the sidebar's Windows section has nothing to close. */
+async function closeWindows(page: Page) {
+  if (await sidebarWindows(page)) return;
+  await page.locator('.lab-window-panel').getByRole('button', { name: 'Close Windows', exact: true }).click();
+}
+
+/** The status a page shows once its Window is deleted elsewhere. */
+const windowDeleted = 'Window deleted. Choose another Window or create a new one.';
 
 /** Every Window row offers rename; this starts it for the current Window. */
 async function renameCurrentWindow(panel: ReturnType<Page['locator']>) {
@@ -32,7 +47,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const menu = await openWindows(page);
@@ -42,8 +57,9 @@ test('two pages share Window UI edits and external commands across narrow presen
     second = await context.newPage(); second.on('pageerror', error => errors.push(error.message));
     await second.setViewportSize({ width: 1680, height: 1000 });
     await second.goto(address.href);
-    await openWindows(second);
-    await expect(second.locator(`[data-window-id="${windowId}"]`)).toHaveAttribute('aria-current', 'true');
+    // The hidden sidebar keeps its Windows section mounted, so look in the panel that shows.
+    const secondMenu = await openWindows(second);
+    await expect(secondMenu.locator(`[data-window-id="${windowId}"]`)).toHaveAttribute('aria-current', 'true');
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${encodeURIComponent(windowId)}`;
     const inspect = async (): Promise<WorkspaceWindow> => {
@@ -87,11 +103,12 @@ test('two pages share Window UI edits and external commands across narrow presen
     await renameCurrentWindow(menu);
     await menu.getByLabel('Window title').fill('Shared browser workspace');
     await menu.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(second.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
-    await menu.getByRole('button', { name: 'Close Windows', exact: true }).click();
-    await second.getByRole('button', { name: 'Close Windows', exact: true }).click();
-    await page.locator('.lab-session-dock-add').click();
-    await expect(second.locator('[data-view-id]')).toHaveCount(1);
+    await expect(secondMenu.locator('[data-window-id][aria-current="true"]')).toContainText('Shared browser workspace');
+    await closeWindows(page);
+    await closeWindows(second);
+    await addSessionView(page);
+    // The new view reaches the other page as its one dock pane (the primary's pane carries a view id too).
+    await expect(second.locator('[data-dock-id]')).toHaveCount(1);
     const viewId = (await inspect()).views.find(view => view.id !== 'main' && !view.attachedTo)!.id;
     const pane = page.locator(`[data-dock-id="${viewId}"]`);
     const otherPane = second.locator(`[data-dock-id="${viewId}"]`);
@@ -122,7 +139,8 @@ test('two pages share Window UI edits and external commands across narrow presen
     await command(['view', 'collapse', windowId, primaryId, '--value', 'false']);
     await command(['view', 'select', windowId, viewId]);
     await second.setViewportSize({ width: 390, height: 844 });
-    await expect(second.locator(`[data-view-id="${viewId}"]`)).toBeVisible();
+    // The dock's window and the session pane inside it both carry the view id.
+    await expect(second.locator(`.lab-ask-window[data-view-id="${viewId}"]`)).toBeVisible();
     await expect(second.locator('.lab-session-dock-add')).toHaveCount(0);
     await expect(second.locator('.lab-ordinary-workspace')).toBeHidden();
     expect((await inspect()).views.find(view => view.id === viewId)?.width).toBe(620);
@@ -148,7 +166,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(otherPrimary.getByTestId('prompt-input')).toBeEnabled();
     await expect(pane).toBeVisible(); await expect(otherPane).toBeVisible();
     await otherPane.getByRole('button', { name: 'Close Shared dock session', exact: true }).click();
-    await expect(page.locator('[data-view-id]')).toHaveCount(0);
+    await expect(page.locator('[data-dock-id]')).toHaveCount(0);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === viewId)).toBe(false);
     const nativeCreatesBeforeDelete = creations.filter(url => new URL(url).pathname.endsWith('/create')).length;
     await openWindows(page);
@@ -159,7 +177,7 @@ test('two pages share Window UI edits and external commands across narrow presen
     const createsBeforeDelete = creations.length;
     await menu.locator(`[data-window-id="${windowId}"]`).locator('..').getByRole('button', { name: 'Delete Window: Shared browser workspace', exact: true }).click();
     await expect(menu.locator(`[data-window-id="${windowId}"]`)).toHaveCount(0);
-    await expect(second.getByText('Window deleted', { exact: true })).toBeVisible();
+    await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
     expect(new URL(page.url()).searchParams.get('window')).toBe(nextId);
     expect(new URL(second.url()).searchParams.get('window')).toBe(windowId);
     await expect.poll(async () => (await context.request.get(endpoint)).status()).toBe(404);
@@ -180,7 +198,7 @@ test('a fresh page restores an opening Ask, shares close and reopen, and survive
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     const primary = page.locator('.lab-primary-group[data-selected="true"]');
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
@@ -254,7 +272,7 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await page.setViewportSize({ width, height: 667 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const trigger = page.getByRole('button', { name: 'Windows', exact: true });
@@ -267,9 +285,10 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await panel.getByLabel('Window title', { exact: true }).fill(title);
     const bounds = async () => panel.evaluate(element => {
       const box = element.getBoundingClientRect();
-      const controls = Array.from(element.querySelectorAll('[data-window-row], [data-window-id], [data-window-view-id], input')).map(control => {
+      // A view row holds its open button and its close button, so the row is the list item.
+      const controls = Array.from(element.querySelectorAll('[data-window-row], [data-window-view-row], [data-window-id], [data-window-view-id], input')).map(control => {
         const rect = control.getBoundingClientRect();
-        return { label: control.hasAttribute('data-window-row') || control.hasAttribute('data-window-view-id') ? 'list item' : control.getAttribute('aria-label'), left: rect.left, right: rect.right, width: rect.width };
+        return { label: control.hasAttribute('data-window-row') || control.hasAttribute('data-window-view-row') ? 'list item' : control.getAttribute('aria-label'), left: rect.left, right: rect.right, width: rect.width };
       });
       return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, controls, pageWidth: document.documentElement.scrollWidth };
     });
@@ -297,7 +316,7 @@ for (const width of [320, 390]) test(`floating Window management remains usable 
     await openWindowOptions(panel);
     const agentControl = panel.getByText('Agent control', { exact: true });
     await agentControl.click();
-    const revoke = panel.getByRole('button', { name: 'Revoke manager', exact: true });
+    const revoke = panel.getByRole('button', { name: 'Clear manager', exact: true });
     await revoke.scrollIntoViewIfNeeded();
     await expect(revoke).toBeInViewport();
     if (width === 390) await page.screenshot({ path: `/tmp/window-menu-${test.info().project.name}-390-options.png` });
@@ -336,7 +355,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     await page.setViewportSize({ width: 390, height: 667 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
@@ -377,8 +396,8 @@ test('active Windows cannot be deleted and deleting another Window never creates
     context.on('request', request => { const path = new URL(request.url()).pathname; if (path.includes('/windows') && request.method() !== 'GET') requests.push({ method: request.method(), path }); });
     await panel.getByRole('button', { name: 'Delete Window: Window', exact: true }).click();
     await expect.poll(async () => (await catalog()).map(window => window.id)).toEqual([existingId]);
-    await expect(second.getByText('Window deleted', { exact: true })).toBeVisible();
-    const recoveryDeletes = second.locator('.lab-window-unavailable button[aria-label^="Delete Window:"]');
+    await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
+    const recoveryDeletes = second.locator('.lab-window-recovery button[aria-label^="Delete Window:"]');
     await expect(recoveryDeletes).toHaveCount(1);
     for (const button of await recoveryDeletes.all()) await expect(button).toBeDisabled();
     const recovery = second.locator('.lab-window-recovery[data-deleted="true"]');
@@ -393,10 +412,10 @@ test('active Windows cannot be deleted and deleting another Window never creates
     expect(new URL(second.url()).searchParams.get('window')).toBe(deletedId);
     expect(requests.filter(request => request.method === 'POST')).toEqual([]);
     // A deleted page recovers only after an explicit user choice.
-    await second.locator(`.lab-window-unavailable [data-window-id="${existingId}"]`).click();
+    await second.locator(`.lab-window-recovery [data-window-id="${existingId}"]`).click();
     await openWindows(second);
     await expect(otherPanel.locator('[data-window-id][aria-current="true"]')).toHaveAttribute('data-window-id', existingId);
-    await expect(second.getByText('Window deleted', { exact: true })).toHaveCount(0);
+    await expect(second.getByText(windowDeleted, { exact: true })).toHaveCount(0);
     await expect(otherPanel.getByRole('button', { name: 'Delete Window: Existing workspace', exact: true })).toBeDisabled();
     expect(new URL(second.url()).searchParams.get('window')).toBe(existingId);
     expect(requests.filter(request => request.method === 'POST')).toEqual([]);
@@ -421,7 +440,7 @@ test('session panes preserve independent drafts and mobile Window navigation sel
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
     const windowId = new URL(page.url()).searchParams.get('window')!;
@@ -461,7 +480,12 @@ test('session panes preserve independent drafts and mobile Window navigation sel
     await alphaRoot.getByTestId('prompt-input').fill('Alpha independent draft');
     await betaRoot.getByTestId('prompt-input').fill('Beta independent draft');
     await expect.poll(async () => { const value = await inspect(); return [value.selectedPrimaryViewId, value.selectedViewId]; }).toEqual(['beta', 'beta']);
-    // Global controls live in the first pane but must preserve the active conversation.
+    // The desktop sidebar stays after a session opens and holds the global controls; hiding it must preserve the active conversation too.
+    await expect(page.locator('#lab-context')).toBeVisible();
+    await toggleViewPanel(page, 'Sidebar');
+    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect.poll(async () => (await inspect()).selectedViewId).toBe('beta');
+    // Without the sidebar, global controls live in the first pane but must preserve the active conversation.
     await group('alpha').getByRole('button', { name: 'View options', exact: true }).click();
     const globalOptions = page.getByRole('region', { name: 'View options', exact: true });
     await expect(globalOptions).toBeVisible();
@@ -528,12 +552,12 @@ test('ordinary dock creation captures its selected view and directory opening re
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
     const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
-    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await closeWindows(page);
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
     const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
@@ -544,7 +568,7 @@ test('ordinary dock creation captures its selected view and directory opening re
     };
     const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
     const original = primary.binding!;
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
     const dock = page.locator(`[data-dock-id="${dockId}"]`);
     await dock.click();
@@ -564,9 +588,7 @@ test('ordinary dock creation captures its selected view and directory opening re
     await page.unroute('**/v1/remote/hosts/*/create');
     await operate({ type: 'view.select', viewId: dockId });
     await expect(dock.getByTestId('prompt-input')).toBeEnabled();
-    const { showSessions } = await import('./session-navigation');
-    await showSessions(page);
-    const discover = page.getByRole('region', { name: 'Discover sessions' });
+    const discover = (await openSessionsPage(page)).getByRole('region', { name: 'Discover sessions' });
     await discover.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(discover.locator('.lab-session-row').first()).toBeVisible();
     // Choose the original primary session from the actual directory.
@@ -587,22 +609,19 @@ test('Track opens its session in the selected empty ordinary dock on mobile with
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
     const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
-    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await closeWindows(page);
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
     const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
     const tracked = (await inspect()).views.find(view => view.placement === 'primary')!.binding!;
     await page.locator('.lab-primary-group[data-selected="true"] .lab-star-button').click();
     await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
-    const { showSessions } = await import('./session-navigation');
-    await showSessions(page);
-    await page.locator('#lab-context').getByRole('button', { name: 'Favorites', exact: true }).click();
-    const favorite = page.locator('#lab-context').getByRole('treeitem').first();
+    const favorite = (await openSessionsPage(page, 'Favorites')).getByRole('treeitem').first();
     await favorite.getByRole('button', { name: /^Actions for / }).click();
     await page.getByRole('button', { name: 'Track', exact: true }).click();
     await expect(favorite.getByLabel('Tracked on this device', { exact: true })).toBeVisible();
@@ -610,7 +629,7 @@ test('Track opens its session in the selected empty ordinary dock on mobile with
     await expect.poll(async () => (await inspect()).views.find(view => view.placement === 'primary')?.binding?.nativeSessionId).not.toBe(tracked.nativeSessionId);
     const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
     await page.locator(`[data-dock-id="${dockId}"]`).click();
     await expect.poll(async () => (await inspect()).selectedViewId).toBe(dockId);
@@ -636,7 +655,7 @@ for (const entry of ['root', 'session deep link'] as const) test(`reopening ${en
   try {
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
@@ -740,7 +759,7 @@ test('cold root displays cached Window layout and session messages before author
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group')).toContainText('Recorded history 1');
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
@@ -765,9 +784,10 @@ test('cold root displays cached Window layout and session messages before author
       }
     });
     await reopened.setViewportSize({ width: 1680, height: 1000 });
-    let blocked = 0; const creations: string[] = [];
+    let blocked = 0; const creations: string[] = [], edits: string[] = [];
     reopened.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/v1/windows')) creations.push(request.url());
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/operations')) edits.push(request.url());
     });
     await reopened.route('**/v1/windows**', async route => {
       const path = new URL(route.request().url()).pathname;
@@ -781,8 +801,11 @@ test('cold root displays cached Window layout and session messages before author
     await expect.poll(() => reopened.evaluate(() => Object.keys(localStorage).some(key => key.includes(':workspace:') && localStorage.getItem(key)?.includes('Cached message before authority')))).toBe(true);
     await expect(reopened.locator('.lab-primary-group')).toContainText('Cached message before authority');
     await reopened.screenshot({ path: `/tmp/window-reopen-cache-${test.info().project.name}.png` });
-    expect(creations).toHaveLength(0);
+    // The cached Window is read-only until the service confirms it.
+    await expect(reopened.getByTestId('workbench')).toHaveAttribute('data-window-provisional', 'true');
+    expect(creations).toHaveLength(0); expect(edits).toHaveLength(0);
     release();
+    await expect(reopened.getByTestId('workbench')).not.toHaveAttribute('data-window-provisional');
     await expect.poll(() => new URL(reopened.url()).searchParams.get('window')).toBe(id);
     await expect(reopened.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
     await expect(reopened.locator('.lab-primary-group')).toContainText('Recorded history 1');
@@ -799,7 +822,7 @@ test('the Window overview shows every Window by recent use and switches with the
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
@@ -835,9 +858,12 @@ test('the Window overview shows every Window by recent use and switches with the
     await page.keyboard.press('Escape');
     await expect(overview).toBeHidden();
     expect(new URL(page.url()).searchParams.get('window')).toBe(ids.Third);
-    // Focus returns where it was.
-    await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Windows', exact: true })).toBeFocused();
+    // Focus returns where it was: to the sidebar's Windows section, which stays, or to the floating capsule, whose panel closed.
+    if (await sidebarWindows(page)) await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toBeFocused();
+    else {
+      await expect(panel.getByRole('button', { name: 'Show all Windows', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Windows', exact: true })).toBeFocused();
+    }
     // Ctrl+Shift+Up opens it from the keyboard, arrows move, and Enter opens the focused Window.
     await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => undefined);
     await page.keyboard.press('Control+Shift+ArrowUp');
@@ -873,7 +899,7 @@ test('Windows show session states, from shared states for sessions this page doe
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const [nativeSessionId] = fixture.nativeSessionIds();
@@ -923,17 +949,17 @@ test('a session the Host no longer has shows as an empty view, without reopening
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
     const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
-    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await closeWindows(page);
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
     const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
     const primary = (await inspect()).views.find(view => view.placement === 'primary')!;
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
     await page.locator(`[data-dock-id="${dockId}"]`).click();
     await showNewSession(page); await page.getByTestId('session-create').click();
@@ -950,7 +976,7 @@ test('a session the Host no longer has shows as an empty view, without reopening
     await expect(primaryView.locator('.lab-missing-session-note')).toHaveText('“New session” no longer exists on Cross-device Host. It was deleted, or it was never saved because it received no message.');
     await expect(primaryView.getByRole('button', { name: 'New session', exact: true })).toBeVisible();
     await expect(dock.locator('.lab-missing-session-note')).toBeVisible();
-    await expect(dock.getByRole('button', { name: 'Open sidebar', exact: true })).toBeVisible();
+    await expect(dock.getByRole('button', { name: 'Choose session', exact: true })).toBeVisible();
     await expect(dock.getByTestId('prompt-input')).toHaveCount(0);
     await expect(page.locator('.lab-session-notice')).toHaveCount(0);
     await expect(page.getByText(/could not find this session/)).toHaveCount(0);
@@ -978,12 +1004,12 @@ test('quotes messages of several turns from one session view into another, whose
     await page.setViewportSize({ width: 1680, height: 1000 });
     await page.goto(fixture.url);
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
-    await page.getByLabel('Connected Host').selectOption(fixture.hostId);
+    await selectConnectedHost(page, fixture.hostId);
     await showNewSession(page); await page.getByTestId('session-create').click();
     await expect(page.locator('.lab-primary-group[data-selected="true"]').getByTestId('prompt-input')).toBeEnabled();
     const panel = await openWindows(page);
     const windowId = (await panel.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
-    await panel.getByRole('button', { name: 'Close Windows', exact: true }).click();
+    await closeWindows(page);
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const endpoint = `${fixture.url}${access.basePath}v1/windows/${windowId}`;
     const inspect = async (): Promise<WorkspaceWindow> => (await (await context.request.get(endpoint)).json()).window;
@@ -994,7 +1020,7 @@ test('quotes messages of several turns from one session view into another, whose
       await source.getByTestId('prompt-input').press('Enter');
       await expect(source.locator('.agent-message-assistant').last()).toContainText(`Recorded reply: ${text}`);
     }
-    await page.locator('.lab-session-dock-add').click();
+    await addSessionView(page);
     const dockId = (await inspect()).views.find(view => view.placement === 'dock')!.id;
     await page.locator(`[data-dock-id="${dockId}"]`).click();
     await showNewSession(page); await page.getByTestId('session-create').click();

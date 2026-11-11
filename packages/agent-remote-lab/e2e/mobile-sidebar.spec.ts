@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { showNewSession, showSessions } from './session-navigation';
+import { openSessionsPage } from './all-sessions';
 
 test('opens session links with the sidebar closed while the Host attachment is pending', async ({ page }) => {
   let releaseAttachment!: () => void;
@@ -36,12 +37,17 @@ test('closes the sidebar when selecting a session and respects reopening it duri
   });
   try {
     await page.goto('/');
-    const rail = page.locator('#lab-context');
+    // Desktop lists sessions on the All sessions page, which closes on opening one while the sidebar stays; compact layouts close the drawer.
+    const desktop = (page.viewportSize()?.width ?? 0) > 1180;
+    const rail = desktop ? page.locator('#lab-sessions-page') : page.locator('#lab-context');
+    const show = async () => { if (desktop) await openSessionsPage(page); else await showSessions(page); };
+    if (desktop) await show();
     await expect(rail).toBeVisible();
     await rail.getByRole('region', { name: 'Discover sessions' }).locator('.lab-session-row').first().click();
     await expect.poll(() => attachmentRequested).toBe(true);
     await expect(rail).toBeHidden();
-    await showSessions(page);
+    if (desktop) await expect(page.locator('#lab-context')).toBeVisible();
+    await show();
     await expect(rail).toBeVisible();
     releaseAttachment();
     await expect(page.getByTestId('connection-summary')).toContainText('Ready');
@@ -81,6 +87,9 @@ test('closes the sidebar immediately when resuming a session', async ({ page }) 
   await page.goto('/?host=local&provider=recorded&session=recorded-welcome');
   await expect(page.getByTestId('connection-summary')).toContainText('Ready');
   await showNewSession(page);
+  // Desktop shows the new-session form as a page, which closes on resuming while the sidebar stays; compact layouts close the drawer.
+  const desktop = (page.viewportSize()?.width ?? 0) > 1180;
+  const rail = page.locator(desktop ? '#lab-sessions-page' : '#lab-context');
   const resume = page.getByTestId('session-resume');
   await expect(resume).toBeEnabled();
   let releaseAttachment!: () => void;
@@ -94,13 +103,13 @@ test('closes the sidebar immediately when resuming a session', async ({ page }) 
   try {
     await resume.click();
     await expect.poll(() => attachmentRequested).toBe(true);
-    await expect(page.locator('#lab-context')).toBeHidden();
+    await expect(rail).toBeHidden();
     await expect(page.getByTestId('timeline')).toBeVisible();
-    await showSessions(page);
+    if (desktop) await showNewSession(page); else await showSessions(page);
     releaseAttachment();
     await expect(page.getByTestId('session-create')).toBeEnabled();
     await expect(page.getByTestId('connection-summary')).toContainText('Ready');
-    await expect(page.locator('#lab-context')).toBeVisible();
+    await expect(rail).toBeVisible();
   } finally { releaseAttachment(); }
 });
 
@@ -212,9 +221,13 @@ test('manages tracking from the sidebar favorites filter without row close butto
   await expect(page.locator('.lab-tracking-floating .lab-session-row')).toHaveCount(1);
   expect((await page.locator('.lab-tracking-floating .lab-session-row').boundingBox())!.width).toBeGreaterThan(150);
   await page.getByRole('button', { name: 'Close Tracked sessions', exact: true }).click();
-  await showSessions(page);
-  const rail = page.locator('#lab-context');
-  await rail.getByRole('button', { name: 'Favorites', exact: true }).click();
+  // Desktop opens Favorites as a page from the sidebar's Shortcuts; compact layouts keep it in the drawer's tabs.
+  const desktop = (page.viewportSize()?.width ?? 0) > 1180;
+  const rail = desktop ? await openSessionsPage(page, 'Favorites') : page.locator('#lab-context');
+  if (!desktop) {
+    await showSessions(page);
+    await rail.getByRole('button', { name: 'Favorites', exact: true }).click();
+  }
   const filter = rail.getByRole('button', { name: 'Filter tracked favorites', exact: true });
   const all = rail.getByRole('button', { name: 'Show all favorites', exact: true });
   await expect(all).toHaveText('2 favorites');
@@ -227,7 +240,7 @@ test('manages tracking from the sidebar favorites filter without row close butto
   await expect(all).toHaveAttribute('aria-pressed', 'false');
   await expect(rail.locator('[role="treeitem"]')).toHaveCount(1);
   await expect(rail.locator('[data-favorite-id="tracked"]')).toBeVisible();
-  const nav = rail.getByRole('navigation', { name: 'Sidebar sections' });
+  const nav = page.locator('#lab-context').getByRole('navigation', { name: desktop ? 'Shortcuts' : 'Sidebar sections' });
   expect(await nav.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: info.outputPath('tracked-favorites.png'), animations: 'disabled' });
   await rail.getByRole('button', { name: 'Actions for Research notes', exact: true }).click();

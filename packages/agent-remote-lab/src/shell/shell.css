@@ -3,3 +3,55 @@
 .lab-sidebar-header > .lab-workbench-mode { flex: 1; min-width: 0; }
 .lab-sidebar-header-actions { display: flex; flex: none; align-items: center; gap: 2px; }
 .lab-sidebar-header-actions:empty { display: none; }
+
+/* The slots and the container that the Team, TPM, Track and Ask entries move between (see movable-host.tsx) add no box. */
+.lab-movable-slot, .lab-movable-host { display: contents; }
+
+/* Shortcuts in the desktop sidebar: the capsules' triggers as full-width rows; their panels open beside the sidebar.
+   The rows never carry .lab-tracking-floating, so the capsule rules (fixed position, data-edge panel variables) do
+   not reach them; the panel rule below (0,2,0) only has to win over the base .lab-session-popover-panel (0,1,0). */
+.lab-sidebar-shortcut[data-hidden="true"] { display: none; }
+.lab-sidebar-shortcut > .lab-session-popover-trigger, .lab-sidebar-shortcut .lab-session-popover > .lab-session-popover-trigger {
+  position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 8px; width: 100%; min-height: 30px; padding: 4px 10px;
+  border: 0; border-radius: var(--ui-radius-control); color: var(--ui-label); box-shadow: none;
+  font: var(--ui-size-body)/1.2 var(--ui-font); text-align: start;
+}
+/* (0,1,0), so the Ask and Track status and alert surfaces, (0,3,0), still show on the row. */
+.lab-sidebar-shortcut :where(.lab-session-popover-trigger) { background: transparent; }
+.lab-sidebar-shortcut > .lab-session-popover-trigger:hover:not(:disabled), .lab-sidebar-shortcut .lab-session-popover > .lab-session-popover-trigger:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
+/* Counts sit at the end of the row; badges keep their own colors. */
+.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count, .lab-tracking-counts) { margin-inline-start: auto; }
+.lab-sidebar-shortcut :is(.lab-team-count, .lab-tpm-count) { color: var(--ui-label-secondary); }
+.lab-sidebar-shortcut .lab-tracking-count { font-size: var(--ui-size-callout); }
+.lab-sidebar-shortcut .lab-tracking-badge { border-color: var(--ui-sidebar); }
+.lab-sidebar-shortcut .lab-session-popover-panel {
+  position: fixed; top: 12px; right: auto; bottom: auto; left: calc(var(--lab-sidebar-width, 260px) + 8px);
+  width: min(420px, calc(100vw - var(--lab-sidebar-width, 260px) - 24px)); max-height: calc(100dvh - 24px); overflow: auto; z-index: 148;
+}
+
+/* The sidebar footer: Host status and Settings. */
+.lab-sidebar-footer { display: flex; align-items: center; gap: 4px; padding: 6px 8px; border-top: 1px solid var(--ui-separator); }
+.lab-sidebar-hosts { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; min-height: 28px; padding: 4px 8px; border: 0;
+  border-radius: var(--ui-radius-control); color: var(--ui-label-secondary); background: transparent; font: var(--ui-size-callout)/1.2 var(--ui-font); text-align: start; }
+.lab-sidebar-hosts:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
+.lab-sidebar-host-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ui-label-tertiary); }
+.lab-sidebar-host-dot[data-host-state="online"] { background: var(--ui-status-success); }
+.lab-sidebar-host-dot[data-host-state="partial"] { background: var(--ui-status-attention); }
+.lab-sidebar-host-dot[data-host-state="offline"] { background: var(--ui-status-failure); }
+@media (forced-colors: active) { .lab-sidebar-host-dot { forced-color-adjust: none; background: CanvasText; } }
+
+/* The desktop sidebar: Windows, In this Window and Shortcuts scroll above the footer.
+   `.lab-sidebar-link:hover:not(:disabled)` is (0,3,0), so it wins over the global `button:hover:not(:disabled)` (0,2,1) in any load order. */
+.lab-sidebar-scroll { display: flex; flex: 1; flex-direction: column; gap: 14px; min-height: 0; padding: 4px 8px 12px; overflow: auto; }
+.lab-sidebar-section { display: flex; flex-direction: column; gap: 1px; }
+.lab-sidebar-section-title { margin: 0 0 4px; padding: 0 10px; color: var(--ui-label-secondary); font: 600 var(--ui-size-caption)/1.3 var(--ui-font); }
+.lab-sidebar-link { display: flex; align-items: center; width: 100%; min-height: 30px; padding: 4px 10px; border: 0; border-radius: var(--ui-radius-control);
+  color: var(--ui-label); background: transparent; font: var(--ui-size-body)/1.2 var(--ui-font); text-align: start; }
+.lab-sidebar-link:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); border-color: transparent; }
+.lab-sidebar-link[aria-current="page"] { background: var(--ui-selection); }
+
+/* The All sessions page: the sidebar panels shown in place of the Window on desktop. */
+.lab-sessions-page { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--ui-background); }
+.lab-sessions-page[hidden] { display: none; }
+.lab-sessions-page-body { flex: 1; min-height: 0; overflow: auto; }
+.lab-sessions-page-body > .lab-sidebar-content { max-width: 720px; margin: 0 auto; padding: 16px 20px 32px; }

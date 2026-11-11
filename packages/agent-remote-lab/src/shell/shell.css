@@ -88,3 +88,41 @@
 /* The Window toolbar's confirmation sheets. */
 .lab-sheet-message { margin: 0 0 16px; color: var(--ui-label); font: var(--ui-size-body)/1.4 var(--ui-font); }
 .lab-sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* The ⌘K palette: a modal near the top of the viewport. The body fills the dialog, so a click on the dialog itself is the backdrop.
+   No transition of its own; the token durations already drop to 0 under prefers-reduced-motion for anything added later.
+   `.lab-command-input.lab-command-input` (0,2,0) wins over the global `input` rules in app.css. */
+.lab-command-palette {
+  width: min(640px, calc(100vw - 32px)); max-width: none; max-height: 70vh; margin: 12vh auto auto; padding: 0; border: 0;
+  border-radius: var(--ui-radius-sheet); color: var(--ui-label); background: var(--ui-background-elevated); box-shadow: var(--ui-shadow-overlay); overflow: clip;
+}
+.lab-command-palette[open] { display: flex; flex-direction: column; }
+.lab-command-palette::backdrop { background: var(--ui-backdrop); }
+.lab-command-body { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.lab-command-input.lab-command-input {
+  flex: none; box-sizing: border-box; width: 100%; min-height: 52px; margin: 0; padding: 12px 18px; border: 0; border-bottom: 1px solid var(--ui-separator);
+  border-radius: 0; color: var(--ui-label); background: transparent; font: var(--ui-size-title)/1.3 var(--ui-font);
+}
+.lab-command-input.lab-command-input::placeholder { color: var(--ui-label-secondary); }
+/* The caret and the active option show where the keys go; a ring around the whole field would only frame the dialog again. */
+.lab-command-input.lab-command-input:focus-visible { outline: none; }
+.lab-command-results { flex: 1; min-height: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain; }
+.lab-command-results:empty { display: none; }
+.lab-command-group + .lab-command-group { margin-top: 6px; }
+.lab-command-group-title { padding: 6px 12px 4px; color: var(--ui-label-secondary); font: 600 var(--ui-size-caption)/1.3 var(--ui-font); }
+.lab-command-option {
+  display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 12px; border-radius: var(--ui-radius-control);
+  color: var(--ui-label); font: var(--ui-size-body)/1.25 var(--ui-font); cursor: pointer;
+}
+.lab-command-option[aria-selected="true"] { background: var(--ui-selection); }
+.lab-command-title { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-command-subtitle { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-label-secondary); font-size: var(--ui-size-callout); text-overflow: ellipsis; white-space: nowrap; }
+.lab-command-shortcut { flex: none; margin-inline-start: auto; color: var(--ui-label-secondary); font: var(--ui-size-caption)/1 var(--ui-font); }
+.lab-command-empty { margin: 0; padding: 20px 18px; color: var(--ui-label-secondary); font: var(--ui-size-body)/1.3 var(--ui-font); text-align: center; }
+.lab-command-empty:empty { display: none; }
+/* Forced colors drop the shadow and the selection fill: keep the dialog's edge and mark the active option with system colors. */
+@media (forced-colors: active) {
+  .lab-command-palette { border: 1px solid CanvasText; }
+  .lab-command-option[aria-selected="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
+  .lab-command-option[aria-selected="true"] :is(.lab-command-subtitle, .lab-command-shortcut) { color: HighlightText; }
+}

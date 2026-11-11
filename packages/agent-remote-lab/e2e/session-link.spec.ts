@@ -106,9 +106,8 @@ test('QR and copied URLs open the same session across authenticated devices with
     await expect(mobile.getByTestId('prompt-input')).toHaveText('Keep this draft when scanning');
     await mobile.evaluate(() => history.forward());
     await expect.poll(() => sessionLink(mobile.url())).toBe(link);
-    const takeControl = mobile.getByRole('button', { name: 'Take control', exact: true });
-    await expect(takeControl).toBeVisible();
-    await takeControl.click();
+    // Authorized clients share a Host session since 4a8bfae5, so the phone continues without taking control.
+    await expect(mobile.getByRole('button', { name: 'Take control', exact: true })).toHaveCount(0);
     await expect(mobile.getByTestId('prompt-input')).toBeEditable();
     await mobile.getByTestId('prompt-input').fill('Reply from phone');
     await mobile.getByTestId('prompt-submit').click();

@@ -866,7 +866,7 @@ it('binds a directory session into the selected empty view when there is no shar
     expect(view()).toHaveLength(1);
     const id = view()[0]!.getAttribute('data-view-id');
     expect(container.querySelector('.lab-session-open-target')?.textContent).toBe('Open in: Empty session view');
-    await act(async () => directory.onOpen({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'chosen', title: 'Chosen session', createdAt: 'now', updatedAt: 'now', state: 'idle' }));
+    await act(async () => directory.onOpen({ providerId: 'recorded', nativeSessionId: 'chosen', title: 'Chosen session', createdAt: 'now', updatedAt: 'now', state: 'idle' }));
     expect(view()).toHaveLength(1);
     expect(view()[0]!.getAttribute('data-view-id')).toBe(id);
     expect(view()[0]!.querySelector('[aria-label="Close Chosen session"]')).not.toBeNull();

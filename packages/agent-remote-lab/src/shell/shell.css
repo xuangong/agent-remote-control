@@ -55,3 +55,24 @@
 .lab-sessions-page[hidden] { display: none; }
 .lab-sessions-page-body { flex: 1; min-height: 0; overflow: auto; }
 .lab-sessions-page-body > .lab-sidebar-content { max-width: 720px; margin: 0 auto; padding: 16px 20px 32px; }
+
+/* The Window toolbar: the title reads as a plain heading until hovered; renaming swaps in a field with the same type.
+   Doubled classes (0,2,0) and their states (0,3,0) win over the global `button` and `input` rules in app.css.
+   The heading lets them overhang it (for the hover fill and focus ring); the button truncates a long name itself. */
+.lab-window-toolbar .ui-toolbar-title { overflow: visible; }
+.lab-window-toolbar-title.lab-window-toolbar-title {
+  display: block; width: fit-content; max-width: calc(100% + 6px); min-width: 0; min-height: 0; margin: 0 0 0 -6px; padding: 1px 6px; overflow: hidden;
+  border: 0; border-radius: var(--ui-radius-control); color: var(--ui-label); background: transparent;
+  font: inherit; text-align: start; text-overflow: ellipsis; white-space: nowrap; cursor: text; opacity: 1; transform: none; --ui-focus-offset: 1px;
+  transition: background-color var(--ui-duration-short) var(--ui-ease);
+}
+.lab-window-toolbar-title.lab-window-toolbar-title:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); border-color: transparent; }
+.lab-window-toolbar-title.lab-window-toolbar-title:active:not(:disabled) { transform: none; }
+.lab-window-toolbar-title.lab-window-toolbar-title:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }
+.lab-window-toolbar-title.lab-window-toolbar-title:disabled { color: var(--ui-label); background: transparent; cursor: default; opacity: 1; }
+.lab-window-toolbar-input.lab-window-toolbar-input {
+  box-sizing: border-box; width: min(100%, 360px); min-height: 0; margin: 0 0 0 -6px; padding: 0 5px;
+  border: 1px solid var(--ui-separator); border-radius: var(--ui-radius-control); color: var(--ui-label); background: var(--ui-background);
+  font: inherit; --ui-focus-offset: 1px;
+}
+.lab-window-toolbar-input.lab-window-toolbar-input:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }

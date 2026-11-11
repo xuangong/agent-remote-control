@@ -1,12 +1,13 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowActions, windowCatalog } from '../hooks/useWindowActions.js';
 import { AgentControl } from './AgentControl.js';
 import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
 import { windowOutline } from '../window-outline.js';
 import { IconButton } from '../ui/IconButton.js';
+import { revealView, viewSelection } from '../window-view-selection.js';
 
 export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
@@ -67,11 +68,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     } finally { if (generation === navigation.current) setOpeningId(undefined); }
   }
   function chooseView(view: WindowView) {
-    const select: WindowOperation = { type: 'view.select', viewId: view.id };
-    if (!edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select)) return;
-    // The pane may render or expand on the next frame; bring it into view then.
-    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-view-id]')].find(element => element.dataset.viewId === view.id)
-      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
+    if (!edit(viewSelection(view))) return;
+    revealView(view.id);
     onNavigate?.();
   }
   function startRename(window: { id: string; title: string }) {

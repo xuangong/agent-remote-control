@@ -1,6 +1,8 @@
 /* Shell parts shared by Window mode and Bot mode. */
 .lab-sidebar-header { display: flex; align-items: center; gap: 6px; padding: 10px 8px 8px 10px; }
 .lab-sidebar-header > .lab-workbench-mode { flex: 1; min-width: 0; }
+/* Segments size from their labels, so "Window" stays whole beside Search and + down to the narrowest sidebar (220px). */
+.lab-sidebar-header .ui-segmented > button[aria-pressed] { flex: 1 1 auto; }
 .lab-sidebar-header-actions { display: flex; flex: none; align-items: center; gap: 2px; }
 .lab-sidebar-header-actions:empty { display: none; }
 

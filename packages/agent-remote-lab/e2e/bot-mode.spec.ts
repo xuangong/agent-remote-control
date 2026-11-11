@@ -531,3 +531,68 @@ for (const [width, height] of [[1440, 900], [1181, 800], [1180, 800], [390, 844]
     expect(captured.creates).toHaveLength(1); expect(captured.sends).toHaveLength(0);
   });
 }
+
+/** ⌘K or Ctrl+K, as the page reads the platform: device emulation may report another system than the one running the browser. */
+async function pressSearchShortcut(page: Page) {
+  const apple = await page.evaluate(() => /mac|iphone|ipad/i.test((navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform));
+  await page.keyboard.press(apple ? 'Meta+K' : 'Control+K');
+}
+
+test('opens a Window and a bot from the command palette, and returns focus when it closes', async ({ page }) => {
+  await openRecordedBot(page);
+  const window = modeRegion(page, 'window'), toolbar = window.locator('header.lab-window-toolbar');
+  // The sidebar header holds the mode switch, Search and +; its segments keep their whole labels.
+  const header = window.locator('#lab-context .lab-sidebar-header');
+  await expect(header.getByRole('button', { name: 'Search', exact: true })).toBeVisible();
+  const whole = () => header.locator('.lab-workbench-mode button').evaluateAll(buttons => buttons.map(button => button.scrollWidth <= button.clientWidth));
+  const sidebarWidth = () => window.locator('#lab-context').evaluate(element => Math.round(element.getBoundingClientRect().width));
+  expect(await sidebarWidth()).toBe(260);
+  expect(await whole()).toEqual([true, true]);
+  // Also at the narrowest width the sidebar can be resized to.
+  await window.evaluate(element => element.style.setProperty('--lab-sidebar-width', '220px'));
+  await expect.poll(sidebarWidth).toBe(220);
+  expect(await whole()).toEqual([true, true]);
+  await window.evaluate(element => element.style.removeProperty('--lab-sidebar-width'));
+  // Name the section's Window, then make another one current.
+  await toolbar.locator('button.lab-window-toolbar-title').click();
+  await toolbar.getByLabel('Window title', { exact: true }).fill('Palette Alpha');
+  await toolbar.getByLabel('Window title', { exact: true }).press('Enter');
+  await expect(toolbar.locator('h2')).toHaveText('Palette Alpha');
+  await header.getByRole('button', { name: 'New', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'New Window', exact: true }).click();
+  await expect(toolbar.locator('h2')).not.toHaveText('Palette Alpha');
+
+  // ⌘K / Ctrl+K works from the composer, and Escape returns focus there.
+  const palette = page.getByRole('dialog', { name: 'Search', exact: true });
+  const input = composer(page, 'window').first();
+  await input.click();
+  await pressSearchShortcut(page);
+  await expect(palette).toBeVisible();
+  await expect(palette.getByRole('combobox', { name: 'Search' })).toBeFocused();
+  await screenshot(page, 'command-palette');
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  await expect(input).toBeFocused();
+
+  await pressSearchShortcut(page);
+  await palette.getByRole('combobox', { name: 'Search' }).fill('Palette Alpha');
+  await page.keyboard.press('Enter');
+  await expect(palette).toHaveCount(0);
+  await expect(toolbar.locator('h2')).toHaveText('Palette Alpha');
+
+  // A bot, chosen from Window mode, opens in Bot mode.
+  await mode(page, 'bot');
+  const bot = modeRegion(page, 'bot').locator('.lab-bot-section .lab-bot-row').first();
+  const name = (await bot.getAttribute('aria-label'))!;
+  await expect(bot).not.toHaveAttribute('aria-current', 'true');
+  await mode(page, 'window');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  // The recorded bot is named like the New session action, which ranks first; its section's name, its subtitle, narrows to it.
+  await palette.getByRole('combobox', { name: 'Search' }).fill(`${name} Palette Alpha`);
+  await expect(palette.getByRole('option')).toHaveCount(1);
+  await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Enter');
+  await expect(modeRegion(page, 'bot')).toBeVisible();
+  await expect(bot).toHaveAttribute('aria-current', 'true');
+  await expect(composer(page, 'bot')).toBeVisible();
+});

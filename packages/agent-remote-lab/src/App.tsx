@@ -2,7 +2,7 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
@@ -25,7 +25,7 @@ import { Sheet } from './ui/Sheet.js';
 import { Button } from './ui/Button.js';
 import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
-import { touchWindow } from './window-recency.js';
+import { byRecentUse, touchWindow } from './window-recency.js';
 import { useSessionStates } from './hooks/useSessionStates.js';
 import { sessionActivity } from './session-activity-status.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
@@ -186,6 +186,11 @@ import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 import { useDeploymentUpdate } from './hooks/useDeploymentUpdate.js';
 import { useShellShortcuts } from './hooks/useShellShortcuts.js';
+import { CommandPalette } from './shell/CommandPalette.js';
+import type { CommandItem } from './shell/command-search.js';
+import { commandSessions, sessionSubtitle, sessionViewLocation, type CommandSession } from './shell/command-items.js';
+import { revealView, viewSelection } from './window-view-selection.js';
+import { applePlatform } from './platform.js';
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -583,13 +588,21 @@ function AppContent({
   const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
   const contextFocusHidden = useRef(false);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
-  useShellShortcuts({
-    setMode: navigation.setMode,
-    toggleSidebar: compactLayout ? undefined : windowMode ? () => {
-      contextFocusHidden.current = focusWithinContext();
-      setDesktopContextVisible(value => !value);
-    } : () => setBotRosterCollapsed(value => !value),
-  });
+  const toggleSidebar = compactLayout ? undefined : windowMode ? () => {
+    contextFocusHidden.current = focusWithinContext();
+    setDesktopContextVisible(value => !value);
+  } : () => setBotRosterCollapsed(value => !value);
+  // ⌘K opens the command palette, which serves both modes.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  useShellShortcuts({ setMode: navigation.setMode, toggleSidebar, openSearch });
+  // Steps that search runs once Window mode has taken over (see inWindowMode); after the Window workspace's own effects.
+  const afterWindowMode = useRef<Array<() => void>>([]);
+  // A deferred step uses the functions of the render that runs it, not of the render that queued it.
+  const searchRuns = useRef({ openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView });
+  searchRuns.current = { openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView };
+  const [windowModeSteps, setWindowModeSteps] = useState(0);
+  useEffect(() => { if (windowMode) for (const step of afterWindowMode.current.splice(0)) step(); }, [windowMode, windowModeSteps]);
   // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
   useLayoutEffect(() => {
     const lost = contextFocusHidden.current;
@@ -1234,12 +1247,15 @@ function AppContent({
     if (panel === 'favorites') void favorites.refresh();
   }
   const sessionsPageTitle = sessionPanel === 'list' ? 'All sessions' : sessionPanel === 'favorites' ? 'Favorites' : sessionPanel === 'new' ? 'New session' : 'Settings';
-  /** Shows the new-session form: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
-  function openNewSessionPanel() {
-    if (!compactLayout) { openPage('new'); return; }
-    setActiveView('workbench'); setSessionPanel('new');
+  /** Shows a sidebar panel: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
+  function showPanel(panel: typeof sessionPanel) {
+    if (!compactLayout) { openPage(panel); return; }
+    setActiveView('workbench'); setSessionPanel(panel);
     setInspectorOpen(false); setContextOpen(true);
+    if (panel === 'favorites') void favorites.refresh();
   }
+  /** Shows the new-session form. */
+  function openNewSessionPanel() { showPanel('new'); }
   function createWindowFromMenu() {
     if (creatingWindowRef.current) return;
     creatingWindowRef.current = true; setCreatingWindow(true);
@@ -1743,6 +1759,71 @@ function AppContent({
   }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, windowSessionStatus);
+  /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
+  function selectWindowView(view: WindowView) {
+    const failed = (error: unknown) => windowActions.setNotice(message(error, 'The session view was not selected.'));
+    try { void windowWorkspace.operate(viewSelection(view)).catch(failed); } catch (error) { failed(error); return; }
+    revealView(view.id); closePage();
+  }
+  /**
+   * Runs a step in Window mode. Entering Window mode restores the page's Window, which would supersede a Window opened
+   * or created in the same turn, so from Bot mode the step waits until Window mode has taken over.
+   */
+  function inWindowMode(step: () => void) {
+    if (windowMode) { step(); return; }
+    afterWindowMode.current.push(step); navigation.setMode('window'); setWindowModeSteps(value => value + 1);
+  }
+  async function openWindowFromSearch(id: string) {
+    try { await windowWorkspace.open(id); closePage(); }
+    catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); }
+  }
+  /**
+   * Opens a session from search: in the view that shows it (in the open Window first, else opening the Window that
+   * has it), or else in the presented view, as All sessions does.
+   */
+  async function openSessionFromSearch(session: CommandSession) {
+    const key = sessionKey(session), current = windowWorkspace.readWindow();
+    const location = sessionViewLocation(windowCatalog(windowWorkspace), current?.id, key);
+    if (!location) { void openDirectorySession(session); return; }
+    if (location.windowId !== current?.id) {
+      try { await windowWorkspace.open(location.windowId); }
+      catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); return; }
+    }
+    // Only select once that Window is open: a newer navigation may have replaced it while it loaded.
+    const open = windowWorkspace.readWindow();
+    const view = open?.id === location.windowId ? open.views.find(candidate => candidate.binding && sessionKey(candidate.binding) === key) : undefined;
+    if (view) selectWindowView(view);
+  }
+  /** The palette's items, built from what the page already knows, and only while it is open. */
+  function commandItems(): CommandItem[] {
+    const apple = applePlatform(), toWindow = () => navigation.setMode('window');
+    const inWindow = (step: () => void) => () => inWindowMode(step);
+    const sidebarShown = windowMode ? desktopContextVisible : !botRosterCollapsed;
+    const overview = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+    const action = (id: string, title: string, run: () => void, shortcut?: string): CommandItem => ({ id: `action:${id}`, kind: 'action', title, run, ...(shortcut ? { shortcut } : {}) });
+    const actions: CommandItem[] = [
+      action('new-session', 'New session', () => { toWindow(); openNewSessionPanel(); }),
+      action('new-window', 'New Window', inWindow(() => searchRuns.current.createWindowFromMenu())),
+      ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }))] : []),
+      action('all-sessions', 'All sessions', () => { toWindow(); showPanel('list'); }),
+      ...(userScoped ? [action('favorites', 'Favorites', () => { toWindow(); showPanel('favorites'); })] : []),
+      action('settings', 'Settings', () => { toWindow(); showPanel('settings'); }),
+      ...(toggleSidebar ? [action('toggle-sidebar', sidebarShown ? 'Hide sidebar' : 'Show sidebar', toggleSidebar, apple ? '⌘\\' : 'Ctrl+\\')] : []),
+      windowMode ? action('bot-mode', 'Switch to Bot mode', () => navigation.setMode('bot'), apple ? '⌥⌘2' : 'Ctrl+Alt+2')
+        : action('window-mode', 'Switch to Window mode', toWindow, apple ? '⌥⌘1' : 'Ctrl+Alt+1'),
+      ...(overview ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
+    ];
+    const catalog = windowCatalog(windowWorkspace);
+    const windows = byRecentUse(baseUrl, catalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
+      subtitle: `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`, run: inWindow(() => void searchRuns.current.openWindowFromSearch(window.id)) }));
+    const bots = botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
+      title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
+      run: () => navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId }) })));
+    const sessions = commandSessions(sessionEntries, favorites.stars, catalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
+      .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
+        return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}), run: inWindow(() => void searchRuns.current.openSessionFromSearch(session)) }; });
+    return [...actions, ...windows, ...bots, ...sessions];
+  }
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
   const applySessionTitle = useCallback((session: StarInput) => {
     setConfirmedTitleState(current => {
@@ -2816,7 +2897,7 @@ function AppContent({
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
-      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<Menu label="New" icon="plus" items={[
+      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={openSearch} actions={<Menu label="New" icon="plus" items={[
         { label: 'New session', onSelect: openNewSessionPanel },
         { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
       ]} />} /> : null}
@@ -3069,7 +3150,9 @@ function AppContent({
         <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
       </div>
     </Sheet> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
+  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch} />
+    {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
+    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

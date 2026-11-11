@@ -210,8 +210,10 @@ export function SessionFamily(props: Props) {
           flex: rootView.placement === 'float' ? 'none' : '0 0 var(--lab-session-family-root-width, auto)' } : undefined : { width: childWidth(item, index), minWidth: shared ? 240 : 320, flex: 'none' }}
         onPointerDownCapture={event => { if (allowsWindowPaneSelection(event.target)) focusPane(index); }} onFocusCapture={event => { if (allowsWindowPaneSelection(event.target)) focusPane(index); }}>
         {(visited || active || !compact) ? <SessionTitleInteractionContext.Provider value={index === 0 ? titleInteraction : undefined}><FamilyConversation {...props}
-          slotId={index === 0 && rootView && isBotView(rootView) ? sessionBridge?.slotForView(rootView.id)?.id : undefined}
-          onSelectWindowPane={() => focusPane(index)}
+          // A conversation with a slot renders into the movable conversation host, so it stays mounted when its view moves
+          // between families: a root shown in Bot mode, or an attached pane that becomes an independent dock when unlinked.
+          slotId={index === 0 ? rootView && isBotView(rootView) ? sessionBridge?.slotForView(rootView.id)?.id : undefined : childSlot?.id}
+          onSelectWindowPane={() => focusPane(index)} familyActive={active} retainHidden={index > 0}
           visible={active && (!compact || focus === index) && !(index > 0 && attached[index - 1]?.collapsed)}
           dockHeadingStart={index === 0 ? dockHeadingStart : undefined} familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
@@ -231,7 +233,9 @@ export function SessionFamily(props: Props) {
   </div>;
 }
 
-function FamilyConversation({ slotId, onSelectWindowPane, ...props }: SessionConversationProps & { slotId?: string; onSelectWindowPane(): void }) {
-  return slotId ? <SessionConversationMount mode="window" active={props.visible !== false}
-    descriptor={{ slotId, titleInteraction: undefined, onSelectWindowPane, props: { ...props, visible: props.visible !== false } }} /> : <SessionConversation {...props} />;
+function FamilyConversation({ slotId, onSelectWindowPane, familyActive, retainHidden, ...props }: SessionConversationProps & { slotId?: string; onSelectWindowPane(): void; familyActive: boolean; retainHidden: boolean }) {
+  // An attached pane hidden in its active family (another pane focused on a narrow screen, or collapsed) stays in place
+  // and attached, as it did when rendered inline.
+  return slotId ? <SessionConversationMount mode="window" active={retainHidden ? familyActive : props.visible !== false}
+    descriptor={{ slotId, titleInteraction: undefined, onSelectWindowPane, retainHidden, props: { ...props, visible: props.visible !== false } }} /> : <SessionConversation {...props} />;
 }

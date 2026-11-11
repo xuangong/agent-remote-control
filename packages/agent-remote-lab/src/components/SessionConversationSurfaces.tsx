@@ -26,6 +26,8 @@ export interface SessionSurfaceDescriptor {
   layout?: WindowLayoutAuthority; bridge?: WindowSessionBridge; presentedViewId?: string;
   titleInteraction: ContextType<typeof SessionTitleInteractionContext>;
   onSelectWindowPane?(): void;
+  /** Keep the conversation in its destination, and attached, while its active registration is not visible. */
+  retainHidden?: boolean;
 }
 export function allowsWindowPaneSelection(target: EventTarget | null): boolean {
   return target instanceof Element && !target.closest('[data-pane-selection-ignore],.lab-conversation-history,.lab-session-heading-actions-trigger,.lab-timeline-tools-toggle,.lab-session-main-minimize');
@@ -125,6 +127,7 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   const chosen = selected ?? registrations.find(item => item.mode === mode) ?? registrations[0] ?? entry.last;
   const descriptor = chosen.descriptor;
   const shown = !!selected && descriptor.props.visible;
+  const placed = shown || !!selected && !!descriptor.retainHidden;
   entry.last = chosen;
   // The Window still owns attachment of its selected primary view when the same slot is shown as a Bot.
   const window = chosen.mode === 'bot' ? registrations.find(item => item.mode === 'window'
@@ -133,7 +136,7 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   // Place the host before any layout effect of the conversation runs: those of a view that just became visible
   // measure, scroll and focus their content (a Trace reveal, a restored reading position), which a parked host cannot.
   useInsertionEffect(() => {
-    const destination = shown ? chosen.destination : registry.parking;
+    const destination = placed ? chosen.destination : registry.parking;
     if (destination) moveSessionHost(entry.host, destination);
   });
   useLayoutEffect(() => {
@@ -148,8 +151,8 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
   }, [entry.host, chosen.mode, shown, enabled, descriptor.onSelectWindowPane]);
   const props: SessionConversationProps = { ...descriptor.props,
     attachmentManaged: attachment.attachmentManaged, attachedSession: attachment.attachedSession, attachmentNotice: attachment.attachmentNotice,
-    visible: shown, mutationBlocked: !enabled || !shown || descriptor.props.mutationBlocked,
-    attachmentEnabled: enabled && shown && descriptor.props.attachmentEnabled !== false,
+    visible: shown, mutationBlocked: !enabled || !placed || descriptor.props.mutationBlocked,
+    attachmentEnabled: enabled && placed && descriptor.props.attachmentEnabled !== false,
     onPendingInputChange(count) {
       if (registry.reportPending(entry, count)) descriptor.props.onPendingInputChange?.(count);
     },

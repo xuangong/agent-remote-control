@@ -815,3 +815,44 @@ it.each(['attach', 'native restoration'] as const)('preserves one pending %s req
   expect(attach).toHaveBeenCalledTimes(expectedCalls);
   await unmount(container);
 });
+
+it('keeps the same editor when an attached pane is unlinked into an independent dock', async () => {
+  const { SessionConversationSurfaces } = await import('./SessionConversationSurfaces.js');
+  const { WindowSessionBridgeContext } = await import('../window-session-bridge-context.js');
+  const { createCompositionSlot } = await import('../session-composition-model.js');
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Root' };
+  const { agentId: _, ...binding } = session;
+  const sideBinding = { ...binding, nativeSessionId: 'side', title: 'Side' };
+  const root = createWindowView('root', binding, 'primary');
+  let window: WorkspaceWindow = { schemaVersion: 3, id: 'unlink', title: 'Window', revision: 0, selectedPrimaryViewId: 'root', selectedViewId: 'side',
+    views: [root, { ...createWindowView('side', sideBinding, 'attached'), attachedTo: root.id }] };
+  const slots = new Map([['root', createCompositionSlot('slot-root', binding, 'unlink')], ['side', createCompositionSlot('slot-side', sideBinding, 'unlink')]]);
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const drafts = new DraftStore('unlink-family');
+  let update!: () => void;
+  function Harness() {
+    const [, renderAgain] = useState(0); update = () => renderAgain(value => value + 1);
+    const authority = { window, readWindow: () => window, operate(operation: Parameters<typeof applyWindowOperation>[1]) { window = applyWindowOperation(window, operation); update(); } };
+    const family = (view: WorkspaceWindow['views'][number], placement: string) => <section key={view.id} data-placement={placement}>
+      <SessionFamily target={{ ...view.binding!, hostId: 'local' }} viewId={view.id} storageScope="unlink-family" baseUrl="http://fixture" hostLabel="Local"
+        compact={false} active offline transport={transport} draftStore={drafts}
+        draftBinding={{ store: drafts, key: slots.get(view.id)!.owners.text.key }} imageDraftBinding={slots.get(view.id)!.owners.image} /></section>;
+    return <WorkspaceReady.Provider value={false}><WindowLayoutContext.Provider value={authority}>
+      <WindowSessionBridgeContext.Provider value={{ slotForView: id => slots.get(id) }}>
+        <SessionConversationSurfaces scope="unlink-family" transport={transport} mode="window">
+          {window.views.filter(view => view.placement !== 'attached').map(view => family(view, view.placement))}
+        </SessionConversationSurfaces>
+      </WindowSessionBridgeContext.Provider>
+    </WindowLayoutContext.Provider></WorkspaceReady.Provider>;
+  }
+  const view = await render(<Harness />);
+  const editor = () => view.querySelector('[data-view-id="side"] [data-testid="prompt-input"]');
+  const before = editor();
+  expect(before?.closest('[data-placement="primary"]')).not.toBeNull();
+  // Unlinking keeps the view and moves it out of its source's family into a dock of its own.
+  await act(async () => { window = { ...window, views: window.views.map(item => item.id === 'side' ? { ...item, placement: 'dock', attachedTo: undefined } : item) }; update(); });
+  await act(async () => { await Promise.resolve(); });
+  expect(editor()?.closest('[data-placement="dock"]')).not.toBeNull();
+  expect(editor()).toBe(before);
+  expect(before?.isConnected).toBe(true);
+});

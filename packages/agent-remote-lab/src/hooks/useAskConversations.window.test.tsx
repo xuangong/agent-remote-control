@@ -279,3 +279,43 @@ it.each([false, true].flatMap(deferred => ['ask', 'attached', 'other'].map(selec
   await act(async () => { second.current().close(source, second.owner.id); second.flush(); });
   expect(second.current().sharedView(second.owner.id)).toBeUndefined();
 });
+
+it('restores a saved Ask into an open shared Ask view that has no binding yet', async () => {
+  const slot = createCompositionSlot('saved-source', source, scope), owner = createAskOwner(slot, scope);
+  const document = createCompositionDocument(scope, [slot]); document.asks = [owner]; document.primary = slot.id;
+  const requests: { path: string; nativeSessionId?: string }[] = [];
+  const directory = new SessionDirectoryClient(scope, async (url, init) => {
+    const path = new URL(String(url)).pathname, body = JSON.parse(String(init?.body));
+    requests.push({ path, nativeSessionId: body.nativeSessionId });
+    return Response.json({ agentId: path.endsWith('/attach') ? 'restored-agent' : 'created-agent', nativeSessionId: body.nativeSessionId ?? 'saved-ask' });
+  });
+  const transport = {} as RemoteAgentTransport;
+  // The Ask was created before this Window existed, so the Window's Ask view carries no binding.
+  let ask!: ReturnType<typeof useAskConversations>;
+  function Legacy() { ask = useAskConversations(document, transport, directory); return null; }
+  const legacy = await render(<Legacy />);
+  await act(async () => { await ask.open(replicaState, source, '', false, { associationOwner: owner.id }); });
+  await unmount(legacy);
+  let shared: WorkspaceWindow = { schemaVersion: 3, id: 'migrated-window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', windowSessionBinding(source), 'primary'),
+      { ...createWindowView('ask-view', undefined, 'float'), feature: createWindowFeature({ kind: 'ask', id: owner.id }), bindingPolicy: 'managed' as const, closeWith: 'main' }] };
+  bindWindowCompositionSlot(document, shared.id, 'main', source, slot.id);
+  function Harness() {
+    const [window, changed] = useState(shared);
+    ask = useAskConversations(document, transport, directory, 'local', undefined, undefined, {
+      window, resolveViewId: id => resolveCompositionWindowViewId(document, window, id),
+      operate(operation) { shared = applyWindowOperation(shared, operation); changed(shared); },
+    });
+    return null;
+  }
+  await render(<Harness />);
+  expect(ask.sharedView(owner.id)?.binding).toBeUndefined();
+  expect(ask.isOpen(source, owner.id)).toBe(true);
+  await act(async () => { ask.restore(source, async () => {}, owner.id); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(ask.entryFor(source, owner.id)).toMatchObject({ attached: true, record: { target: { nativeSessionId: 'saved-ask' } } });
+  expect(requests.filter(request => request.path.endsWith('/create'))).toHaveLength(1);
+  expect(requests.filter(request => request.path.endsWith('/attach'))).toEqual([{ path: '/v1/remote/attach', nativeSessionId: 'saved-ask' }]);
+  // The restored target is published to the shared view.
+  expect(shared.views.find(view => view.id === 'ask-view')?.binding?.nativeSessionId).toBe('saved-ask');
+});

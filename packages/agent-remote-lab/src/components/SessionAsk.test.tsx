@@ -273,6 +273,34 @@ it('restores multiple expanded Ask windows without moving focus or cancelling th
   expect(document.activeElement).toBe(input);
 });
 
+it('keeps a restoration in flight through a discovery refresh and only starts one when it is permitted', async () => {
+  const entry: AskEntry = { source, restoring: true, restoreOnly: true };
+  const { props, restore } = fixture([entry]);
+  const cancel = vi.fn();
+  restore.mockImplementation(() => cancel);
+  let set!: (value: { canRestore: boolean; synchronizing: boolean }) => void;
+  function Harness() {
+    const [state, change] = useState({ canRestore: false, synchronizing: true }); set = change;
+    return <SessionAsk {...props} source={source} canRestore={state.canRestore} synchronizing={state.synchronizing} />;
+  }
+  // A saved Ask waiting to be restored is not started while discovery withholds restoration.
+  await render(<Harness />);
+  expect(restore).not.toHaveBeenCalled();
+  await act(async () => set({ canRestore: true, synchronizing: false }));
+  expect(restore).toHaveBeenCalledOnce();
+  // Discovery withholds restoration (canRestore is false) while the started one is still restoring: it is not cancelled.
+  await act(async () => set({ canRestore: false, synchronizing: true }));
+  await act(async () => set({ canRestore: true, synchronizing: false }));
+  expect(cancel).not.toHaveBeenCalled();
+  expect(restore).toHaveBeenCalledOnce();
+  // Once nothing is in flight, a refresh does not start a restoration, and losing permission otherwise still cancels.
+  entry.restoring = false;
+  await act(async () => set({ canRestore: false, synchronizing: true }));
+  expect(cancel).toHaveBeenCalledOnce();
+  await act(async () => set({ canRestore: false, synchronizing: false }));
+  expect(restore).toHaveBeenCalledOnce();
+});
+
 it('focuses an explicitly opened Ask and only minimizes the Ask containing the Escape event', async () => {
   const { ask, props } = fixture([{ source }, { source: sibling, restoring: true, restoreOnly: true }]);
   let open = false;

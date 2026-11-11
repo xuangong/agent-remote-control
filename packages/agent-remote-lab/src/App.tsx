@@ -2332,7 +2332,7 @@ function AppContent({
       && !!sourceState?.timeline.initialized && !!sourceState.timeline.epoch && !!native?.synchronized && native.runtime?.state === 'connected' && !native.controlChecking && !native.recovering;
     return <SessionAsk compact={compactLayout} key={associationOwner} associationOwner={associationOwner} imageRecipient={target ? succession.recipientFor(target, associationOwner) : undefined} source={source} ask={ask} storageScope={baseUrl}
       visible={askSurfaceVisible} covered={pageOpen} triggerRef={askTriggerRef} onToggleEnabled={() => askView.setVisible(!askView.visible)}
-      canRestore={accessReady && (!!target && !compositionProtected || available && (!compositionProtected || independentRestore))} synchronize={refreshRelations}
+      canRestore={accessReady && (!!target && !compositionProtected || available && (!compositionProtected || independentRestore))} synchronizing={compositionProtected} synchronize={refreshRelations}
       onOpen={clean => openAsk(source, sourceState, clean)} replicaFor={replicaFor} transport={transport}
       navigation={viewNavigation} />;
   }

@@ -1,5 +1,5 @@
 import { useWindowLayout } from '../window-workspace-context.js';
-import { useEffect, type RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { FilePreviewScope } from '@orchardworks/agent-remote-web/react';
 import type { OpenedSession } from '../directory-client.js';
@@ -11,12 +11,15 @@ import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser
 import { resolveAskPresentation } from '../ask-presentation.js';
 
 /** Each source association retains its Ask conversation in the global surface. */
-export function SessionAsk({ source, ask, visible, covered = false, canRestore, storageScope, synchronize, onOpen, onToggleEnabled, triggerRef, replicaFor, transport, navigation, associationOwner, imageRecipient, compact = false }: {
+export function SessionAsk({ source, ask, visible, covered = false, canRestore, synchronizing = false, storageScope, synchronize, onOpen, onToggleEnabled, triggerRef, replicaFor, transport, navigation, associationOwner, imageRecipient, compact = false }: {
   source: OpenedSession; ask: ReturnType<typeof useAskConversations>;
   visible: boolean;
   /** Another page covers the Window: the Ask stays mounted, with its draft, scroll and connection, but is hidden. */
   covered?: boolean;
-  canRestore: boolean; storageScope: string;
+  canRestore: boolean;
+  /** Succession discovery is refreshing the current locators. A restoration already in flight continues through it. */
+  synchronizing?: boolean;
+  storageScope: string;
   synchronize(): Promise<void>; onOpen(clean?: boolean): void; onToggleEnabled(): void;
   triggerRef: RefObject<HTMLButtonElement>;
   replicaFor(id: string): AgentReplica; transport: RemoteAgentTransport;
@@ -39,10 +42,15 @@ export function SessionAsk({ source, ask, visible, covered = false, canRestore, 
     if (!shared || !sharedView || event.target instanceof Element && event.target.closest('[data-pane-selection-ignore],.lab-session-family-pane')) return;
     if ((shared.readWindow?.() ?? shared.window).selectedViewId !== sharedView.id) shared.operate({ type: 'view.select', viewId: sharedView.id });
   };
+  // A discovery refresh withholds restoration, but must not cancel one this Ask started and start it again once it finishes.
+  const restoreStarted = useRef(false);
+  const restorePermitted = canRestore || synchronizing && restoreStarted.current && !!(entry.busy || entry.restoring);
   useEffect(() => {
-    if (!shown || !canRestore) return;
-    return ask.restore(source, synchronize, associationOwner);
-  }, [storageScope, ask.store, transport, key, source.agentId, shown, canRestore, synchronize, sharedTarget]);
+    if (!shown || !restorePermitted) return;
+    const cancel = ask.restore(source, synchronize, associationOwner);
+    restoreStarted.current = !!cancel;
+    return () => { restoreStarted.current = false; cancel?.(); };
+  }, [storageScope, ask.store, transport, key, source.agentId, shown, restorePermitted, synchronize, sharedTarget]);
   if (!shown) return null;
   return <div className="lab-session-ask-surface" hidden={covered} data-ask-source={sessionKey(source)} data-ask-owner={associationOwner}
     style={{ zIndex: selected ? 2 : 1 }} onPointerDownCapture={focus} onFocusCapture={focus}>

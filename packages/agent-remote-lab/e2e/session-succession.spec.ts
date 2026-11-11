@@ -789,15 +789,19 @@ for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery 
     const side = page.getByRole('region', { name: 'Independent Side', exact: true });
     const nested = page.getByRole('region', { name: 'Nested Side', exact: true });
     const ask = page.locator(`.lab-session-ask-surface[data-ask-source='${JSON.stringify(['browser-host', 'recorded', 'S'])}']`).getByRole('dialog', { name: 'Ask', exact: true });
-    const askDraft = ask.getByRole('textbox', { name: 'Ask draft', exact: true });
+    const askComposer = ask.getByTestId('prompt-input'), history = ask.getByText('Recorded history 2', { exact: true });
     await expect(primary).toBeVisible(); await expect(side).toBeVisible(); await expect(nested).toBeVisible();
     await expect(side.getByTestId('prompt-input')).toHaveText('Side local draft');
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(1);
-    await expect(askDraft).toHaveText('Independent Ask draft');
-    const askEditor = await askDraft.elementHandle();
-    const sameEditor = () => askDraft.evaluate((node, original) => node === original, askEditor);
+    // The open Ask restores by itself and reaches S's Ask session T, keeping its draft.
+    await expect(history).toBeVisible();
+    await expect(askComposer).toHaveText('Independent Ask draft');
+    const askEditor = await askComposer.elementHandle();
+    const sameEditor = () => askComposer.evaluate((node, original) => node === original, askEditor);
     const sourceAttaches = attaches('A');
     if (coldRecovery) expect(sourceAttaches).toBe(0); else expect(sourceAttaches).toBeGreaterThan(0);
+    const targetAttaches = attaches('T');
+    expect(targetAttaches).toBe(1);
     if (!coldRecovery) {
       committed = true;
       await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
@@ -811,11 +815,13 @@ for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery 
     // The seeded Ask geometry floats over the notice, so the keyboard activates Retry.
     f.available(); await retry.press('Enter');
     await expect(retry).toHaveCount(0);
-    await expect(askDraft).toHaveText('Independent Ask draft');
+    // B's Retry leaves the Ask on S connected to T with the same editor, without attaching T again.
+    await expect(askComposer).toHaveText('Independent Ask draft');
+    await expect(history).toBeVisible();
     expect(await sameEditor()).toBe(true);
     await expect(side).toBeVisible(); await expect(nested).toBeVisible();
     await expect.poll(askState).toEqual(before);
-    expect(attaches('B')).toBe(2); expect(attaches('A')).toBe(sourceAttaches);
+    expect(attaches('B')).toBe(2); expect(attaches('A')).toBe(sourceAttaches); expect(attaches('T')).toBe(targetAttaches);
     // Selecting another Side moves the focus without moving or remounting the open Ask.
     await nested.getByTestId('prompt-input').click();
     await expect.poll(() => page.evaluate(scope => {
@@ -826,18 +832,14 @@ for (const coldRecovery of [false, true]) test(`${coldRecovery ? 'Cold recovery 
     expect(await sameEditor()).toBe(true);
     await expect(page.getByRole('dialog', { name: 'Ask', exact: true })).toHaveCount(1);
     await page.screenshot({ path: testInfo.outputPath('side-ask-retained.png'), fullPage: true });
-    // A reload restores both Sides and the open Ask on S with its draft, which then reaches S's Ask session T.
+    // A reload restores both Sides and the open Ask on S, which reaches T again by itself while the role's locator synchronizes.
     await page.reload(); await settled(page);
     await expect(side).toBeVisible(); await expect(nested).toBeVisible();
     await expect(side.getByTestId('prompt-input')).toHaveText('Side local draft');
-    await expect(askDraft.or(ask.getByTestId('prompt-input')).first()).toHaveText('Independent Ask draft');
-    await expect.poll(askState).toEqual(before);
-    // The restored Ask may report that the role's locator is still synchronizing; its own Retry then opens T.
-    const askRetry = ask.getByRole('button', { name: 'Retry', exact: true }), history = ask.getByText('Recorded history 2', { exact: true });
-    await expect(askRetry.or(history).first()).toBeVisible();
-    if (await askRetry.isVisible()) await askRetry.press('Enter');
     await expect(history).toBeVisible();
-    await expect(ask.getByTestId('prompt-input')).toHaveText('Independent Ask draft');
+    await expect(askComposer).toHaveText('Independent Ask draft');
+    await expect(ask.getByRole('button', { name: 'Retry', exact: true })).toHaveCount(0);
+    await expect.poll(askState).toEqual(before);
     expect(inputs).toEqual([]);
   } finally { await page.goto('about:blank'); await f.close(); }
 });

@@ -456,7 +456,7 @@ function AppContent({
     for (const id of workspaceController.deletedWindowIds) windowRetention.forgetWindow(id);
   }, [workspaceController.deletedWindowIds, windowRetention]);
   const windowWorkspace = { ...workspaceController,
-    ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false } : {}),
+    ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
   };
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
@@ -484,7 +484,7 @@ function AppContent({
     succession.rememberSide(session);
     setMountedViewSessions(values => JSON.stringify(values[view.id]) === JSON.stringify(session) ? values : { ...values, [view.id]: session });
   }
-  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable,
+  const windowSession = useWindowSessionBridge({ window: sharedWindow, unavailable: windowWorkspace.unavailable, readOnly: windowWorkspace.provisional, readWindow: windowWorkspace.readWindow, operate: windowWorkspace.operate, succession, enabled: accessReady && activated && !windowWorkspace.unavailable && !windowWorkspace.provisional,
     onError: error => setSessionNotice(sessionConnectionFailure(error, false)) });
   const sharedSlots = windowSession.slots, sharedFamily = windowSession.family;
   const sharedViewForSlot = windowSession.viewForSlot;
@@ -1732,7 +1732,8 @@ function AppContent({
     describe: (hostId, providerId, nativeSessionId, signal) => new SessionDirectoryClient(baseUrl, undefined, hostId).nativeTitle(providerId, nativeSessionId, signal) });
   const titleProjection = useRef<ReadonlyMap<string, string>>();
   useEffect(() => {
-    if (!sharedWindow || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;
+    // A cached Window is renamed only once the service confirms it.
+    if (!sharedWindow || windowWorkspace.provisional || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;
     titleProjection.current = confirmedTitles;
     try {
       for (const edit of windowTitleEdits(sharedWindow, confirmedTitles)) {
@@ -1741,7 +1742,7 @@ function AppContent({
         else editWindow(edit);
       }
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
-  }, [sharedWindow?.id, sharedWindow?.revision, confirmedTitles]);
+  }, [sharedWindow?.id, sharedWindow?.revision, windowWorkspace.provisional, confirmedTitles]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const remove = transport.onSessionTitle?.(session => {
@@ -2471,7 +2472,8 @@ function AppContent({
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({
         ...current, [source.agentId]: { ...current[source.agentId], [requestId]: draft },
       })),
-      mutationBlocked: gated,
+      // A cached Window not yet confirmed by the service shows its sessions without sending to them.
+      mutationBlocked: gated || windowWorkspace.provisional,
       onInspectEntry: botPresentation ? undefined : (key: string) => {
         if (view) windowWorkspace.authority?.operate({ type: 'view.select', viewId: view.id });
         setTraceNavigation({ scope: JSON.stringify([context.state?.agent?.id, context.state?.timeline.epoch]), key, view: 'trace', requestId: ++traceRequestCounter.current });
@@ -2826,6 +2828,8 @@ function AppContent({
         className={sharedWindow ? 'lab-window-workbench' : (sessionNotice && !nativeTakeover && !(compactLayout && contextOpen)) || promptMigrations.notice ? 'lab-workbench-with-notice' : undefined}
         id="lab-workbench"
         data-testid="workbench"
+        data-window-provisional={windowWorkspace.provisional || undefined}
+        aria-busy={windowWorkspace.provisional || undefined}
         role="tabpanel"
         aria-labelledby="lab-workbench-tab"
         tabIndex={-1}

@@ -784,9 +784,10 @@ test('cold root displays cached Window layout and session messages before author
       }
     });
     await reopened.setViewportSize({ width: 1680, height: 1000 });
-    let blocked = 0; const creations: string[] = [];
+    let blocked = 0; const creations: string[] = [], edits: string[] = [];
     reopened.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/v1/windows')) creations.push(request.url());
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/operations')) edits.push(request.url());
     });
     await reopened.route('**/v1/windows**', async route => {
       const path = new URL(route.request().url()).pathname;
@@ -800,8 +801,11 @@ test('cold root displays cached Window layout and session messages before author
     await expect.poll(() => reopened.evaluate(() => Object.keys(localStorage).some(key => key.includes(':workspace:') && localStorage.getItem(key)?.includes('Cached message before authority')))).toBe(true);
     await expect(reopened.locator('.lab-primary-group')).toContainText('Cached message before authority');
     await reopened.screenshot({ path: `/tmp/window-reopen-cache-${test.info().project.name}.png` });
-    expect(creations).toHaveLength(0);
+    // The cached Window is read-only until the service confirms it.
+    await expect(reopened.getByTestId('workbench')).toHaveAttribute('data-window-provisional', 'true');
+    expect(creations).toHaveLength(0); expect(edits).toHaveLength(0);
     release();
+    await expect(reopened.getByTestId('workbench')).not.toHaveAttribute('data-window-provisional');
     await expect.poll(() => new URL(reopened.url()).searchParams.get('window')).toBe(id);
     await expect(reopened.locator('.lab-primary-group').getByTestId('prompt-input')).toBeEnabled();
     await expect(reopened.locator('.lab-primary-group')).toContainText('Recorded history 1');

@@ -20,7 +20,8 @@ for (const target of ['main', 'side', 'ask'] as const) {
       if (target === 'ask') await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
     }
     const pane = target === 'main' ? primary : target === 'side'
-      ? page.getByRole('complementary', { name: 'Side conversation' })
+      // A Side opens as an attached Window pane beside its source.
+      ? page.locator('.lab-side-conversation:visible')
       : page.getByRole('dialog', { name: 'Ask', exact: true });
     const text = `Pending ${target} message after mobile sleep`;
     const input = pane.getByTestId('prompt-input');

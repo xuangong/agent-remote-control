@@ -94,8 +94,6 @@
 .lab-window-workbench > .lab-ordinary-workspace:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .lab-window-workbench > .lab-ordinary-workspace[hidden] { display: none; }
 .lab-window-workbench .lab-session-dock-rail { flex: 1; height: auto; min-height: 0; }
-.lab-window-controls { flex: none; padding: 4px 8px; }
-.lab-window-controls:empty { display: none; }
 .lab-window-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; color: var(--obs-text-secondary); }
 .lab-window-empty p { margin: 0; }
 

@@ -76,3 +76,13 @@
   font: inherit; --ui-focus-offset: 1px;
 }
 .lab-window-toolbar-input.lab-window-toolbar-input:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }
+
+/* In a desktop Window the toolbar heads the workbench, a flex column, and the session views take the remaining height.
+   Floating session views are placed against the main stage, so they start below the toolbar rather than under it. */
+.lab-window-workbench { --lab-window-toolbar-height: 52px; }
+.lab-window-workbench > .lab-window-toolbar { position: sticky; top: 0; z-index: 2; height: var(--lab-window-toolbar-height); }
+.lab-window-workbench:has(> .lab-window-toolbar) > .lab-session-windows .lab-ask-viewport { top: var(--lab-window-toolbar-height); }
+
+/* The Window toolbar's confirmation sheets. */
+.lab-sheet-message { margin: 0 0 16px; color: var(--ui-label); font: var(--ui-size-body)/1.4 var(--ui-font); }
+.lab-sheet-actions { display: flex; justify-content: flex-end; gap: 8px; }

@@ -22,8 +22,13 @@ function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, placement = 'panel' }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
+  /**
+   * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
+   * owner shows the notice; without them the list runs its own actions and shows their notices itself.
+   */
+  actions?: ReturnType<typeof useWindowActions>;
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
   /** Shows all Windows; with it the sidebar's Windows heading offers a "Show all Windows" button (the floating panel's WindowMenu has its own). */
@@ -34,7 +39,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   placement?: 'panel' | 'sidebar';
 }) {
   const sidebar = placement === 'sidebar';
-  const { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = useWindowActions(workspace);
+  const ownActions = useWindowActions(workspace);
+  const { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
   // The Window whose title is being edited in the list, and the scope it belongs to.
   const [renaming, setRenaming] = useState<{ id: string; client: typeof workspace.client }>(), [title, setTitle] = useState(''), [saving, setSaving] = useState(false);
   const [agentControl, setAgentControl] = useState(false);
@@ -165,6 +171,6 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         </details> : null}
       </details>
     </> : null}
-    {workspace.error || notice ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}
+    {workspace.error || notice && !sharedActions ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}
   </div>;
 }

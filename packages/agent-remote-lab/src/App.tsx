@@ -18,6 +18,11 @@ import { useWindowWorkspace } from './hooks/useWindowWorkspace.js';
 import { useWindowSessionRetention } from './hooks/useWindowSessionRetention.js';
 import { WindowLayoutContext, WindowPresentationContext } from './window-workspace-context.js';
 import { WindowWorkspaces } from './components/WindowWorkspaces.js';
+import { AgentControl } from './components/AgentControl.js';
+import { useWindowActions, windowCatalog } from './hooks/useWindowActions.js';
+import { WindowToolbar } from './shell/WindowToolbar.js';
+import { Sheet } from './ui/Sheet.js';
+import { Button } from './ui/Button.js';
 import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
 import { touchWindow } from './window-recency.js';
@@ -376,8 +381,7 @@ function AppContent({
   const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
   const [minimizedViewTarget, setMinimizedViewTarget] = useState<HTMLDivElement | null>(null);
   const [sessionViewTarget, setSessionViewTarget] = useState<HTMLDivElement | null>(null);
-  const [windowViewTarget, setWindowViewTarget] = useState<HTMLDivElement | null>(null);
-  const [dockViewTarget, setDockViewTarget] = useState<HTMLDivElement | null>(null);
+  const [windowToolbarViewTarget, setWindowToolbarViewTarget] = useState<HTMLDivElement | null>(null);
   const [mobileViewTarget, setMobileViewTarget] = useState<HTMLDivElement | null>(null);
   const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
   const [pageViewTarget, setPageViewTarget] = useState<HTMLDivElement | null>(null);
@@ -458,6 +462,19 @@ function AppContent({
   const windowWorkspace = { ...workspaceController,
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
   };
+  // One set of Window actions for the sidebar's Windows list and the Window toolbar: one busy state, one notice, shown as a toast.
+  const windowActions = useWindowActions(windowWorkspace, baseUrl);
+  useEffect(() => {
+    if (!windowActions.notice) return;
+    toast?.show('window-action', 'Window', windowActions.notice, 'info');
+    windowActions.setNotice(undefined);
+  }, [windowActions.notice]);
+  const [docksHidden, setDocksHidden] = useState(() => { try { return localStorage.getItem(DOCKS_HIDDEN_KEY) === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem(DOCKS_HIDDEN_KEY, docksHidden ? '1' : '0'); } catch { /* Keep the choice for this page without storage. */ } }, [docksHidden]);
+  const [agentControlOpen, setAgentControlOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // A Window's sheets belong to it: switching Windows closes them.
+  useEffect(() => { setAgentControlOpen(false); setDeleteConfirmOpen(false); }, [windowWorkspace.client, sharedWindow?.id]);
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
   if (!accessReady) botPresentation.recovering = true;
@@ -1234,6 +1251,13 @@ function AppContent({
     try { sessionWindows.create(); showWindowSessionChooser(); }
     catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
+  /** Adds an empty session view and selects it, without opening the sessions page. */
+  function addSessionView() {
+    try { sessionWindows.create(); }
+    catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
+  }
+  /** The desktop Window toolbar, above the session views of an available shared Window. */
+  const windowToolbarShown = !!sharedWindow && !compactLayout && !windowWorkspace.unavailable;
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
     const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
     if (slot && entry.managed) {
@@ -2472,7 +2496,6 @@ function AppContent({
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
     return {
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
-      headingStart: !botPresentation && !compactLayout && view?.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({
@@ -2668,7 +2691,7 @@ function AppContent({
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
     successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
-    leadingControls={sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setDockViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+    docksHidden={!!sharedWindow && !compactLayout && docksHidden}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}
     {activated ? tracking.observers : null}
     {!windowWorkspace.unavailable ? <>
@@ -2713,7 +2736,9 @@ function AppContent({
     <ViewOptions modeControls={<WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />} attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? dockViewTarget ?? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget
+      // A desktop Window keeps View options in one place, its toolbar, rather than in the first pane heading.
+      : windowToolbarShown ? windowToolbarViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={!windowMode || supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -2796,7 +2821,7 @@ function AppContent({
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
-            <WindowWorkspaces workspace={windowWorkspace} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
+            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
               onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
@@ -2841,7 +2866,15 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench' || pageOpen}
       >
-        {sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setWindowViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-window-controls" /> : null}
+        {windowToolbarShown && sharedWindow ? <WindowToolbar title={sharedWindow.title} viewCount={sharedWindow.views.length}
+          leading={<div ref={setWindowToolbarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />}
+          // Not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
+          onRename={title => void windowActions.saveRename(sharedWindow.id, title)}
+          onNewView={addSessionView} onOpenSession={createSessionView}
+          hasDocks={sharedWindow.views.some(view => view.placement === 'dock')} docksHidden={docksHidden} onToggleDocks={() => setDocksHidden(value => !value)}
+          canShowAsSection={!windowWorkspace.group?.bots} onShowAsSection={() => void windowActions.showAsSection()}
+          onCopyLink={() => void windowActions.copyLink()} onAgentControl={windowWorkspace.client ? () => setAgentControlOpen(true) : undefined}
+          onDelete={() => setDeleteConfirmOpen(true)} /> : null}
         <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={entry.id} entry={entry} baseUrl={baseUrl}
           // Not windowStageVisible: `visible` also decides docking (a hidden view leaves the dock) and, through SessionFamily, keeps the
           // conversation attached. The sessions page hides #lab-workbench instead, and visibleWindows leaves these views unseen.
@@ -2865,7 +2898,6 @@ function AppContent({
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         {sharedWindow ? <SessionDockRail compact={compactLayout} onCreateView={createSessionView}
-          minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />}
           onSelectPrimaryGroup={selectPrimaryGroup}
           onResizePrimaryGroup={(viewId, width) => windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width })}
           onCollapsePrimaryGroup={(viewId, collapsed) => windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed })}
@@ -2897,7 +2929,6 @@ function AppContent({
                 sessionPresentation={presentSessionView} />
                 : <div className="lab-empty-session-view" role="status" data-view-id={view.id} aria-current={view.id === presentedViewId || undefined}>
                   <header className="lab-empty-session-heading">
-                    {!compactLayout && view.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
                     <strong>Select session</strong>
                     <button type="button" data-pane-selection-ignore aria-label="Close primary group: Select session" title="Close session view"
                       onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button>
@@ -3014,6 +3045,18 @@ function AppContent({
     </SupportingRail>
     </WindowPresentationContext.Provider>
     </> : null}
+    {/* Mounted only while open, so other dialogs on the page stay the only ones there. */}
+    {sharedWindow && windowToolbarShown && windowMode && agentControlOpen ? <Sheet open title="Agent control" onClose={() => setAgentControlOpen(false)}>
+      <AgentControl client={windowWorkspace.client} windowId={sharedWindow.id} current={menuCurrentBinding} active />
+    </Sheet> : null}
+    {sharedWindow && windowToolbarShown && windowMode && deleteConfirmOpen ? <Sheet open title="Delete this Window?" onClose={() => setDeleteConfirmOpen(false)}>
+      <p className="lab-sheet-message">{`“${sharedWindow.title}” and its layout are deleted. Its agent sessions keep running and stay in All sessions.`}
+        {windowCatalog(windowWorkspace).every(window => window.id === sharedWindow.id) ? ' A new empty Window opens in its place.' : null}</p>
+      <div className="lab-sheet-actions">
+        <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+        <Button variant="destructive" onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
+      </div>
+    </Sheet> : null}
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
@@ -3041,6 +3084,9 @@ function focusWithinContext(): boolean {
 function createAgentId(): string {
   return `lab-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
 }
+
+/** Whether the desktop Window toolbar hides the dock rail's panes; one choice for every Window. */
+const DOCKS_HIDDEN_KEY = 'agent-remote:docks-hidden';
 
 function isCompactLayout(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1180px)').matches;

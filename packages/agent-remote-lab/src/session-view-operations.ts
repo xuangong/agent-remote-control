@@ -15,6 +15,8 @@ export interface SessionViewOperations {
   directory(source: OpenedSession): SessionSuccessionDirectory;
   refreshSettled(result: SuccessionActionResult, source: OpenedSession): Promise<void>;
   successionContextFor?(viewId?: string): { operationId: string; target: NativeSessionRef } | undefined;
+  /** Reads the current locators again, for a view that has waited too long for them. */
+  synchronize?(): void;
 }
 /** Succession discovery is (re)reading the current locators; a view may keep the target it last resolved until it finishes. */
 export class SessionLocatorSynchronizingError extends Error {

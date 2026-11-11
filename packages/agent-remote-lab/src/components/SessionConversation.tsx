@@ -49,6 +49,8 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   familyRoot: boolean; entries: SessionWindowTarget[];
   onNavigate(destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession): Promise<void>;
 }
+/** How long a view waits for its locator before it reports the wait with a Retry. */
+export const locatorSynchronizingNoticeMs = 30_000;
 export function SessionConversation(props: SessionConversationProps) {
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
@@ -77,8 +79,18 @@ export function SessionConversation(props: SessionConversationProps) {
     currentTarget = inputOwner!.target;
     resolutionError ??= 'The previous input is still pending. Check its result before continuing in the replacement session.';
   }
-  // Synchronizing is a wait, not a failure: the view shows it as opening, without an alert and its Retry.
-  const resolutionNotice = synchronizing && !retainingInput ? undefined : resolutionError;
+  // Synchronizing is a wait, not a failure: the view shows it as opening, without an alert and its Retry, unless the
+  // wait lasts long enough to need one.
+  const [synchronizingOverdue, setSynchronizingOverdue] = useState(false);
+  useEffect(() => {
+    setSynchronizingOverdue(false);
+    if (!synchronizing) return;
+    const timer = setTimeout(() => setSynchronizingOverdue(true), locatorSynchronizingNoticeMs);
+    return () => clearTimeout(timer);
+  }, [synchronizing]);
+  const resolutionNotice = synchronizing && !retainingInput && !synchronizingOverdue ? undefined : resolutionError;
+  const retrySynchronizing = synchronizing && synchronizingOverdue && operations?.synchronize
+    ? () => { setSynchronizingOverdue(false); operations.synchronize!(); } : undefined;
   const canAttach = attachmentEnabled && !retainingInput;
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
@@ -159,7 +171,7 @@ export function SessionConversation(props: SessionConversationProps) {
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
-    onRetryAttachment={enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined} />;
+    onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined)} />;
 }
 function FamilyChat({ visible = true, fixedDisplayMode, dockHeadingStart, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });

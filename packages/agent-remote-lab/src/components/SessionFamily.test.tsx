@@ -671,6 +671,30 @@ it('shows a view whose locator is still synchronizing as opening, without an ale
   expect(attach).not.toHaveBeenCalled();
 });
 
+it('reports a locator that stays synchronizing with a Retry that reads it again', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { SessionConversation, locatorSynchronizingNoticeMs } = await import('./SessionConversation.js');
+    const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+    const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'overdue', title: 'Overdue' };
+    const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+    const synchronize = vi.fn();
+    const container = await render(<SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true, synchronize,
+      resolveTarget: () => { throw new SessionLocatorSynchronizingError(); }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}}
+        baseUrl="http://fixture" storageScope="overdue-locator" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={new DraftStore('overdue-locator')} />
+    </SessionViewOperationsContext.Provider>);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(locatorSynchronizingNoticeMs); });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('still synchronizing');
+    await act(async () => alert!.querySelector('button')!.click());
+    expect(synchronize).toHaveBeenCalledOnce();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
 it('keeps showing a view whose locator is stale while its input waits, without attaching again', async () => {
   const { SessionConversation } = await import('./SessionConversation.js');
   const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');

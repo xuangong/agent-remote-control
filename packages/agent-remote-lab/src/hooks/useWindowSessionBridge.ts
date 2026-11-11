@@ -50,7 +50,9 @@ export function useWindowSessionBridge(options: Options) {
   // A group whose slots were already presented (a cached start before access) keeps them through the first discovery:
   // withdrawing them for its duration would remount the views' draft editors and lose their image owners.
   const slots = window && (!succession.discovering || initialized || adopted.current.has(groupKey!) || presentedGroup.current === groupKey) ? windowCompositionMapping(succession.document, window) : undefined;
-  presentedGroup.current = slots ? groupKey : undefined;
+  // Recorded after commit, so a render React discards does not count as presented.
+  const presented = slots ? groupKey : undefined;
+  useEffect(() => { presentedGroup.current = presented; }, [presented]);
   const primarySlot = window?.selectedPrimaryViewId ? slots?.get(window.selectedPrimaryViewId) : undefined;
   const empty = !!options.unavailable || !!window && !primary?.binding;
   useEffect(() => {

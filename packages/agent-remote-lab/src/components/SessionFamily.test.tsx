@@ -520,6 +520,19 @@ it('does not announce or display a mismatched native replica as the requested se
   expect(presentation.mock.calls.at(-1)?.[0].actions.sendMessage).toBeUndefined();
 }, 10000);
 
+it('keeps an attached session draft-only until its native snapshot matches, whatever the presentation says', async () => {
+  const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'requested', agentId: 'identity-agent', title: 'Requested native' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  const view = await render(<WorkspaceReady.Provider value><SessionFamily target={session} attachedSession={session} attachmentManaged replica={new AgentReplica()}
+    sessionPresentation={() => ({ draftOnly: false })} storageScope="identity-draft" baseUrl="http://fixture" hostLabel="Local" compact={false} active offline={false}
+    transport={transport} draftStore={new DraftStore('identity-draft')} /></WorkspaceReady.Provider>);
+  const editor = view.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
+  // Without a matching snapshot the editor stays editable as a draft, so its arrival does not disable it and drop focus.
+  if (editor instanceof HTMLTextAreaElement) expect(editor.disabled).toBe(false);
+  else expect(editor.getAttribute('contenteditable')).toBe('true');
+  expect(view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')?.disabled).toBe(true);
+});
+
 it('keeps the composer mounted while its managed target changes and fences the previous native session', async () => {
   const original = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'before', agentId: 'before-agent', title: 'Before' };
   const next = { ...original, nativeSessionId: 'after', agentId: 'after-agent', title: 'After' };

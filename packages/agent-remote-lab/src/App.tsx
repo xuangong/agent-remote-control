@@ -2467,7 +2467,6 @@ function AppContent({
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
       headingStart: !botPresentation && !compactLayout && view?.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
-      draftOnly: context.pending,
       questionDrafts: questionDrafts[source.agentId] ?? {},
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({
         ...current, [source.agentId]: { ...current[source.agentId], [requestId]: draft },

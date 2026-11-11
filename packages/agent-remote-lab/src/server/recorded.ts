@@ -46,6 +46,8 @@ export interface RecordedLabProviderOptions {
     interactions?: Partial<AgentCapabilities['interactions']>;
   };
   deferSteerObservation?: boolean;
+  /** The provider identity the fixture reports, so a fake Host can present it as a native provider. */
+  providerId?: string;
 }
 
 export function createRecordedLabProvider(options: RecordedLabProviderOptions = {}): {
@@ -53,6 +55,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
   controller: RecordedLabController;
 } {
   const sessions = new Map<string, RecordedLabSession>();
+  const providerId = options.providerId ?? PROVIDER_ID;
   const sessionCapabilities: AgentCapabilities = {
     ...defaultCapabilities,
     ...options.capabilities,
@@ -62,13 +65,13 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
     },
   };
   const provider: AgentProviderAdapter = {
-    descriptor: { providerId: PROVIDER_ID, displayName: 'Recorded semantic Provider', sessionExtensions: { instructions: false, tools: true } },
+    descriptor: { providerId, displayName: 'Recorded semantic Provider', sessionExtensions: { instructions: false, tools: true } },
     async readSessionHistory(id, query) { return requireSession(sessions, id).historyPage(query); },
     async createSession(config) {
       return openSession(config);
     },
     async resumeSession(handle, extensions) {
-      if (handle.providerId !== PROVIDER_ID || handle.opaque !== persistenceOpaque(handle.sessionId)) {
+      if (handle.providerId !== providerId || handle.opaque !== persistenceOpaque(handle.sessionId)) {
         throw new Error('Recorded persistence handle does not match this Provider.');
       }
       return openSession({ sessionId: handle.sessionId, ...extensions });
@@ -87,6 +90,7 @@ export function createRecordedLabProvider(options: RecordedLabProviderOptions = 
       () => {
         if (sessions.get(config.sessionId) === session) sessions.delete(config.sessionId);
       },
+      providerId,
     );
     sessions.set(config.sessionId, session);
     return session;
@@ -130,9 +134,10 @@ class RecordedLabSession implements AgentSession {
     readonly capabilities: AgentCapabilities,
     private readonly deferSteerObservation: boolean,
     private readonly onDispose: () => void,
+    private readonly providerId: string,
   ) {
     this.tools = bindAgentSessionTools(config.tools, () => this.assertOpen());
-    for (const observation of recordedHistory(sessionId)) { this.remember(observation.event); this.stream.push(observation); }
+    for (const observation of recordedHistory(sessionId, providerId)) { this.remember(observation.event); this.stream.push(observation); }
     this.stream.push({ type: 'history_boundary' });
   }
 
@@ -201,10 +206,10 @@ class RecordedLabSession implements AgentSession {
   async cancel(): Promise<void> {
     this.assertOpen();
     for (const requestId of this.pending.keys()) {
-      this.emit({ type: 'interaction_invalidated', provider: PROVIDER_ID, requestId, reason: 'Canceled from the Lab.' });
+      this.emit({ type: 'interaction_invalidated', provider: this.providerId, requestId, reason: 'Canceled from the Lab.' });
     }
     this.pending.clear();
-    this.emit({ type: 'turn_canceled', provider: PROVIDER_ID, reason: 'Canceled from the Lab.', turnId: 'recorded-turn' });
+    this.emit({ type: 'turn_canceled', provider: this.providerId, reason: 'Canceled from the Lab.', turnId: 'recorded-turn' });
     this.updateRuntime('idle');
   }
 
@@ -213,7 +218,7 @@ class RecordedLabSession implements AgentSession {
     const request = this.pending.get(requestId);
     if (!request || request.kind !== response.kind) throw new Error('Recorded interaction response does not match a pending request.');
     this.pending.delete(requestId);
-    this.emit({ type: 'interaction_resolved', provider: PROVIDER_ID, requestId, response });
+    this.emit({ type: 'interaction_resolved', provider: this.providerId, requestId, response });
     if (requestId === 'recorded-question') this.request(planRequest());
     else if (requestId === 'recorded-plan') this.request(toolOnceRequest());
     else if (requestId === 'recorded-tool-once') this.request(toolDenyRequest());
@@ -235,14 +240,14 @@ class RecordedLabSession implements AgentSession {
 
   private currentRuntimeInfo(): AgentRuntimeInfo {
     return {
-      providerId: PROVIDER_ID,
+      providerId: this.providerId,
       sessionId: this.sessionId,
       status: this.status,
       cwd: this.config.cwd ?? process.cwd(),
       model: this.config.model ?? 'recorded-model',
       mode: 'deterministic',
       persistence: {
-        providerId: PROVIDER_ID,
+        providerId: this.providerId,
         sessionId: this.sessionId,
         opaque: persistenceOpaque(this.sessionId),
       },
@@ -251,7 +256,7 @@ class RecordedLabSession implements AgentSession {
 
   private updateRuntime(status: AgentRuntimeInfo['status']): void {
     this.status = status;
-    this.emit({ type: 'runtime_updated', provider: PROVIDER_ID, runtimeInfo: this.currentRuntimeInfo() });
+    this.emit({ type: 'runtime_updated', provider: this.providerId, runtimeInfo: this.currentRuntimeInfo() });
   }
 
   async dispose(): Promise<void> {
@@ -287,7 +292,7 @@ class RecordedLabSession implements AgentSession {
   advance(): void {
     this.assertOpen();
     this.updateRuntime('running');
-    this.emit({ type: 'turn_started', provider: PROVIDER_ID, turnId: 'recorded-turn' });
+    this.emit({ type: 'turn_started', provider: this.providerId, turnId: 'recorded-turn' });
     this.emitTimeline({ type: 'assistant_message', text: 'Live recorded output.', messageId: 'live-message' }, 'recorded-turn');
     this.emitTimeline({ type: 'reasoning', text: 'Checking the deterministic fixture.' }, 'recorded-turn');
     this.emitTimeline({
@@ -304,7 +309,7 @@ class RecordedLabSession implements AgentSession {
         { id: 'report', text: 'Report result', completed: false, status: 'in_progress' },
       ],
     }, 'recorded-turn');
-    this.emit({ type: 'turn_completed', provider: PROVIDER_ID, turnId: 'recorded-turn' });
+    this.emit({ type: 'turn_completed', provider: this.providerId, turnId: 'recorded-turn' });
     this.updateRuntime('idle');
     this.request(questionRequest());
   }
@@ -313,7 +318,7 @@ class RecordedLabSession implements AgentSession {
     this.assertOpen();
     this.emit({
       type: 'turn_failed',
-      provider: PROVIDER_ID,
+      provider: this.providerId,
       error: 'Recorded deterministic failure.',
       code: 'recorded_failure',
     });
@@ -335,12 +340,12 @@ class RecordedLabSession implements AgentSession {
 
   private request(request: AgentInteractionRequest): void {
     this.pending.set(request.requestId, request);
-    this.emit({ type: 'interaction_requested', provider: PROVIDER_ID, request });
+    this.emit({ type: 'interaction_requested', provider: this.providerId, request });
   }
 
   private emitTimeline(item: Extract<AgentStreamEvent, { type: 'timeline' }>['item'], turnId?: string): void {
     this.emit({
-      type: 'timeline', provider: PROVIDER_ID, item,
+      type: 'timeline', provider: this.providerId, item,
       ...(turnId ? { turnId } : {}),
     });
   }
@@ -361,7 +366,7 @@ class RecordedLabSession implements AgentSession {
   }
 }
 
-function recordedHistory(sessionId: string): ProviderObservation[] {
+function recordedHistory(sessionId: string, providerId = PROVIDER_ID): ProviderObservation[] {
   const items: Extract<AgentStreamEvent, { type: 'timeline' }>['item'][] = [
     { type: 'user_message', text: 'Recorded history 1', messageId: `${sessionId}-history-1` },
     { type: 'assistant_message', text: 'Recorded history 2', messageId: `${sessionId}-history-2` },
@@ -381,7 +386,7 @@ function recordedHistory(sessionId: string): ProviderObservation[] {
     sourceKey: `recorded-history-${index + 1}`,
     occurredAt: Date.UTC(2026, 8, 2, 0, 0, index),
     delivery: 'history',
-    event: { type: 'timeline', provider: PROVIDER_ID, item },
+    event: { type: 'timeline', provider: providerId, item },
   }));
 }
 

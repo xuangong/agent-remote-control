@@ -79,26 +79,44 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
       return currentScope.current.client === client;
     } catch (error) { report(error); return false; }
   }
+  // Windows whose deletion is still in flight; deleting the open Window never switches to one of them.
+  const deleting = useRef(new Set<string>());
+  async function removing(id: string) {
+    deleting.current.add(id);
+    try { await workspace.remove(id); } finally { deleting.current.delete(id); }
+  }
+  const openNow = () => workspace.readWindow?.()?.id ?? currentScope.current.id;
   /**
-   * Deletes the open Window without leaving the page without one: it opens the most recently used other Window, or
-   * creates one, and then deletes the previous Window. Deleting refuses the active Window, so a switch that a newer
-   * navigation superseded keeps it.
+   * Deletes the open Window without leaving the page without one: it opens the most recently used other Window that
+   * is not being deleted (trying the next when one fails to open), or creates an empty one, and then deletes the
+   * previous Window. Deleting refuses the active Window, so a switch that a newer navigation superseded keeps it.
    */
   async function deleteCurrent(): Promise<boolean> {
     const client = workspace.client, previous = workspace.window?.id;
     if (!previous) return false;
-    let failure: unknown;
+    let failure: { error: unknown } | undefined;
     const done = await run(async () => {
-      const others = windowCatalog(workspace).filter(window => window.id !== previous);
-      const next = (scope ? byRecentUse(scope, others) : others)[0];
-      if (next) await workspace.open(next.id); else await workspace.create();
-      try { await workspace.remove(previous); } catch (error) { failure = error; }
+      try {
+        const others = windowCatalog(workspace).filter(window => window.id !== previous && !deleting.current.has(window.id));
+        const candidates = scope ? byRecentUse(scope, others) : others;
+        let opened = false;
+        for (const candidate of candidates) {
+          try { await workspace.open(candidate.id); opened = true; break; }
+          catch (error) {
+            // Once the page has left the Window being deleted, it does not move on to yet another one.
+            if (openNow() !== previous || candidate === candidates.at(-1)) throw error;
+          }
+        }
+        // The replacement for the last Window starts empty rather than carrying this page's session views.
+        if (!opened) await workspace.create({ empty: true });
+        await removing(previous);
+      } catch (error) { failure = { error }; }
     });
-    if (failure === undefined) return done;
+    if (!failure) return done;
     // The notice belongs to whichever Window is open now, which may not have rendered yet.
-    if (currentScope.current.client === client) noticeIn({ client, id: workspace.readWindow?.()?.id ?? currentScope.current.id }, `The Window was not deleted: ${message(failure)}`);
+    if (currentScope.current.client === client) noticeIn({ client, id: openNow() }, `The Window was not deleted: ${message(failure.error)}`);
     return false;
   }
-  const deleteWindow = (id: string) => run(() => workspace.remove(id));
+  const deleteWindow = (id: string) => run(() => removing(id));
   return { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename, deleteCurrent, deleteWindow };
 }

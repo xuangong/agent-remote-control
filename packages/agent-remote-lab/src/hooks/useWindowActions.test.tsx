@@ -16,13 +16,13 @@ const windowOf = (id: string): WorkspaceWindow => ({ schemaVersion: 3, id, title
  * Window, and remove refuses the active one, as its active-Window guard does.
  */
 async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as WindowGroup[] } = {}) {
-  let windows = ids.map(windowOf), current = active;
+  let windows = ids.map(windowOf), current = active, client: object | undefined;
   let update!: () => void;
   const calls: string[] = [];
   let openSwitches = true, created = 0;
   const open = vi.fn(async (id: string) => { calls.push(`open:${id}`); if (openSwitches) { current = id; update(); } });
-  const create = vi.fn(async () => {
-    const window = windowOf(`new-${++created}`); calls.push(`create:${window.id}`);
+  const create = vi.fn(async (options?: { empty?: boolean }) => {
+    const window = windowOf(`new-${++created}`); calls.push(`create:${window.id}${options?.empty ? ':empty' : ''}`);
     windows = [...windows, window]; current = window.id; update();
   });
   const remove = vi.fn(async (id: string) => {
@@ -35,7 +35,7 @@ async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as Win
   function Harness() {
     [, update] = useReducer(value => value + 1, 0);
     const window = windows.find(candidate => candidate.id === current);
-    const workspace = { window, windows, groups, client: undefined, hasActiveWindow: !!window, unavailable: false,
+    const workspace = { window, windows, groups, client, hasActiveWindow: !!window, unavailable: false,
       readWindow: () => windows.find(candidate => candidate.id === current),
       open, create, remove, operateGroup, operate: async () => {} } as unknown as ReturnType<typeof useWindowWorkspace>;
     result = useWindowActions(workspace, SCOPE);
@@ -43,7 +43,9 @@ async function fixture({ ids = ['a', 'b', 'c'], active = 'a', groups = [] as Win
   }
   const container = await render(<Harness />);
   return { container, calls, open, create, remove, operateGroup, actions: () => result, current: () => current, ids: () => windows.map(window => window.id),
-    stopSwitching() { openSwitches = false; } };
+    stopSwitching() { openSwitches = false; },
+    async switchTo(id: string) { await act(async () => { current = id; update(); }); },
+    async useClient(next: object | undefined) { await act(async () => { client = next; update(); }); } };
 }
 
 it('copies the Window link without Bot route fields', async () => {
@@ -103,20 +105,72 @@ it('deletes the current Window after opening the most recently used other one', 
 it('creates a Window before deleting the only one', async () => {
   const test = await fixture({ ids: ['a'] });
   await act(async () => { await test.actions().deleteCurrent(); });
-  expect(test.calls).toEqual(['create:new-1', 'remove:a']);
+  expect(test.calls).toEqual(['create:new-1:empty', 'remove:a']);
   expect(test.current()).toBe('new-1');
   expect(test.ids()).toEqual(['new-1']);
 });
 
-it('keeps the current Window and says so when opening another one fails', async () => {
+it('keeps the current Window and says so when no other Window opens', async () => {
   const test = await fixture();
-  test.open.mockRejectedValueOnce(new Error('This Window is unavailable.'));
+  test.open.mockRejectedValue(new Error('This Window is unavailable.'));
+  let deleted!: boolean;
+  await act(async () => { deleted = await test.actions().deleteCurrent(); });
+  expect(deleted).toBe(false);
+  expect(test.open.mock.calls.map(([id]) => id)).toEqual(['b', 'c']);
+  expect(test.remove).not.toHaveBeenCalled();
+  expect(test.create).not.toHaveBeenCalled();
+  expect(test.current()).toBe('a');
+  expect(test.actions().notice).toBe('The Window was not deleted: This Window is unavailable.');
+});
+
+it('tries the next Window when one fails to open', async () => {
+  const test = await fixture();
+  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); throw new Error('This Window is unavailable.'); });
+  let deleted!: boolean;
+  await act(async () => { deleted = await test.actions().deleteCurrent(); });
+  expect(deleted).toBe(true);
+  expect(test.calls).toEqual(['open:b', 'open:c', 'remove:a']);
+  expect(test.current()).toBe('c');
+  expect(test.actions().notice).toBeUndefined();
+});
+
+it('reports a failure in the Window it reached when opening switched and then failed', async () => {
+  const test = await fixture();
+  test.open.mockImplementationOnce(async id => { test.calls.push(`open:${id}`); await test.switchTo(id); throw new Error('The Window scope changed before opening.'); });
+  let deleted!: boolean;
+  await act(async () => { deleted = await test.actions().deleteCurrent(); });
+  expect(deleted).toBe(false);
+  expect(test.calls).toEqual(['open:b']);
+  expect(test.current()).toBe('b');
+  expect(test.ids()).toEqual(['a', 'b', 'c']);
+  expect(test.actions().notice).toBe('The Window was not deleted: The Window scope changed before opening.');
+});
+
+it('reports a failed creation of the replacement Window', async () => {
+  const test = await fixture({ ids: ['a'] });
+  test.create.mockRejectedValueOnce(new Error('Storage full'));
   let deleted!: boolean;
   await act(async () => { deleted = await test.actions().deleteCurrent(); });
   expect(deleted).toBe(false);
   expect(test.remove).not.toHaveBeenCalled();
-  expect(test.current()).toBe('a');
-  expect(test.actions().notice).toBe('This Window is unavailable.');
+  expect(test.actions().notice).toBe('The Window was not deleted: Storage full');
+});
+
+it('never switches to a Window whose deletion is still in flight', async () => {
+  touchWindow(SCOPE, 'c', 1); touchWindow(SCOPE, 'a', 2); touchWindow(SCOPE, 'b', 3);
+  const test = await fixture();
+  let finish!: () => void;
+  test.remove.mockImplementationOnce(id => { test.calls.push(`remove:${id}`); return new Promise<void>(resolve => { finish = resolve; }); });
+  let first!: Promise<boolean>;
+  await act(async () => { first = test.actions().deleteCurrent(); });
+  expect(test.current()).toBe('b');
+  // A is still listed while its deletion runs; deleting B now goes to C rather than back to A.
+  expect(test.ids()).toContain('a');
+  await act(async () => { await test.actions().deleteCurrent(); });
+  expect(test.calls).toEqual(['open:b', 'remove:a', 'open:c', 'remove:b']);
+  expect(test.current()).toBe('c');
+  await act(async () => finish());
+  expect(await first).toBe(true);
 });
 
 it('keeps the Window when a newer navigation superseded the switch, and says so', async () => {
@@ -146,4 +200,19 @@ it('deletes another Window by id', async () => {
   const test = await fixture();
   await act(async () => { await test.actions().deleteWindow('b'); });
   expect(test.ids()).toEqual(['a', 'c']);
+});
+
+it('shows a notice only in the Window and client it was given in', async () => {
+  const test = await fixture();
+  await act(async () => test.actions().setNotice('Only for A.'));
+  expect(test.actions().notice).toBe('Only for A.');
+  await test.switchTo('b');
+  expect(test.actions().notice).toBeUndefined();
+  await test.switchTo('a');
+  expect(test.actions().notice).toBeUndefined();
+  await act(async () => test.actions().setNotice('Only for this client.'));
+  await test.useClient({});
+  expect(test.actions().notice).toBeUndefined();
+  await test.useClient(undefined);
+  expect(test.actions().notice).toBeUndefined();
 });

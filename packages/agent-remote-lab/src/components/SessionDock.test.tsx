@@ -273,3 +273,33 @@ it('hides dock panes without detaching them, gives the main area the width, and 
   expect(rail.hasAttribute('data-docks-hidden')).toBe(false);
   expect(view.querySelector('[data-leading]')).not.toBeNull();
 });
+
+it('hides and shows the docks of a shared Window without editing it, keeping the main area minimized', async () => {
+  let hide!: (value: boolean) => void;
+  const operate = vi.fn();
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [{ ...createWindowView('main', undefined, 'primary'), collapsed: true }, createWindowView('one', undefined, 'dock')] };
+  function Harness() {
+    const [docksHidden, setDocksHidden] = useState(false); hide = setDocksHidden;
+    return <WindowLayoutContext.Provider value={{ window, operate }}><SessionDockProvider enabled docksHidden={docksHidden}>
+      <SessionDockRail><MinimizeMainSession /><textarea defaultValue="Main draft" /></SessionDockRail>
+      <SessionViewPlacement id="one" title="one" visible>{({ controls }) => <section><SessionHeading trailing={controls}>one</SessionHeading><textarea defaultValue="one" /></section>}</SessionViewPlacement>
+    </SessionDockProvider></WindowLayoutContext.Provider>;
+  }
+  const view = await render(<Harness />);
+  const base = () => view.querySelector<HTMLElement>('.lab-session-dock-base')!;
+  const pane = view.querySelector<HTMLElement>('[data-dock-id="one"]')!;
+  const main = view.querySelector('.lab-session-dock-main-content textarea');
+  expect(base().hasAttribute('data-minimized')).toBe(true);
+  await act(async () => hide(true));
+  expect(pane.hidden).toBe(true);
+  // With its docks hidden, the main area is shown in full.
+  expect(base().hasAttribute('data-minimized')).toBe(false);
+  expect(view.querySelector<HTMLElement>('.lab-session-dock-main-content')!.hidden).toBe(false);
+  await act(async () => hide(false));
+  expect(pane.hidden).toBe(false);
+  expect(view.querySelector('[data-dock-id="one"]')).toBe(pane);
+  expect(base().hasAttribute('data-minimized')).toBe(true);
+  expect(view.querySelector('.lab-session-dock-main-content textarea')).toBe(main);
+  expect(operate).not.toHaveBeenCalled();
+});

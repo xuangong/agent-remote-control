@@ -52,10 +52,12 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     const compact = testInfo.project.name === 'chromium-mobile';
     const context = () => compact ? page.getByRole('dialog', { name: 'Context' }) : page.locator('#lab-sessions-page');
     const provider = () => context().getByTestId('provider-select');
-    const label = `${selected.name} · Browser DSH ${testInfo.project.name} · Online`;
-    await expect(provider().getByRole('option', { name: label, exact: true })).toHaveCount(1);
-    await provider().selectOption({ label });
-    await expect(context().getByLabel('Connected Host')).toHaveValue(hostId);
+    // Providers are scoped to the selected Host (ae3ff0ba): choose the Host, then its Provider.
+    const host = context().getByLabel('Connected Host');
+    await host.selectOption(hostId);
+    await expect(provider().getByRole('option', { name: selected.name, exact: true })).toHaveCount(1);
+    await provider().selectOption({ label: selected.name });
+    await expect(provider()).toHaveValue(JSON.stringify([hostId, selected.id]));
     await context().getByLabel('Connected Host').selectOption(alternateHostId);
     await expect(provider()).toHaveValue(JSON.stringify([alternateHostId, selected.id]));
     await context().getByLabel('Connected Host').selectOption(hostId);
@@ -76,23 +78,28 @@ test(`selects ${selected.name} on a paired Host and creates through its real upl
     await expect(page.locator('.agent-message-assistant').filter({ hasText: 'Recorded reply: Hello from the Provider selector.' })).toBeVisible();
     await page.getByTestId('prompt-input').fill('/side Continue from the paired Host context.');
     await page.getByTestId('prompt-input').press('Enter');
-    const side = page.getByRole('complementary', { name: 'Side conversation' });
+    // A Side opens as an attached Window pane beside its source.
+    const side = page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: 'Continue from the paired Host context.' }) });
     await expect(side.locator('.agent-message-user').last()).toContainText('Continue from the paired Host context.');
     await expect(side.locator('.lab-fork-reference summary')).toBeVisible();
     expect(creations).toHaveLength(2);
     expect(creations[1]).toMatchObject({ providerId: selected.id, operationId: expect.any(String), cwd: '/native/project' });
-    await side.getByRole('button', { name: 'Close side conversation' }).click();
+    await page.locator(`#lab-context [data-window-view-close='${await side.getAttribute('data-view-id')}']`).click();
+    await expect(side).toHaveCount(0);
     await uplink.close();
     await showSessions(page);
     await expect(context().getByRole('region', { name: 'Lab scenario controls' })).toHaveCount(0);
     await expect(context().getByTestId('session-resume')).toBeDisabled();
     await showNewSession(page);
     await context().getByRole('button', { name: 'Retry Hosts', exact: true }).click();
-    await expect(provider().getByRole('option', { name: `${selected.name} · Browser DSH ${testInfo.project.name} · Offline`, exact: true })).toHaveCount(1);
+    // The paired Host is now offline: it stays selectable with its Provider, but cannot create.
+    await expect(host.getByRole('option', { name: new RegExp(`^Browser DSH ${testInfo.project.name} · Offline`) })).toHaveCount(1);
+    await host.selectOption(hostId);
+    await expect(provider()).toHaveValue(JSON.stringify([hostId, selected.id]));
     await expect(context().getByTestId('session-create')).toBeDisabled();
-    await expect(provider()).toBeEnabled();
     await page.screenshot({ path: testInfo.outputPath('host-provider.png'), fullPage: true });
-    await provider().selectOption('recorded');
+    await host.selectOption({ index: 0 });
+    await provider().selectOption({ label: 'Recorded semantic Provider' });
     await expect(context().getByTestId('session-create')).toBeEnabled();
   } finally {
     await uplink.close();

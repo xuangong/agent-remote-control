@@ -89,7 +89,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     if (!edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select)) return;
     // The pane may render or expand on the next frame; bring it into view then.
     requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-view-id]')].find(element => element.dataset.viewId === view.id)
-      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     onNavigate?.();
   }
   function startRename(window: { id: string; title: string }) {

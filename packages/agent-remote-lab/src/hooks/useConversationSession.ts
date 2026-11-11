@@ -1,22 +1,25 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
-import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { remoteSessionState, type AgentReplica, type RemoteAgentTransport, type RemoteSessionState } from '@orchardworks/agent-remote-web';
 import { useSessionView } from '@orchardworks/agent-remote-web/react';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { RecoveryScope } from '../conversation-recovery.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
-import { SessionViewOperationsContext } from '../session-view-operations.js';
+import { SessionLocatorSynchronizingError, SessionViewOperationsContext } from '../session-view-operations.js';
 import { sessionKey } from '../session-tree.js';
 
 /** Product retention and account policy compose the neutral session consumer. */
 export function useConversationSession(session: OpenedSession, transport: RemoteAgentTransport, cachedReplica?: AgentReplica, pending = false, following?: { nativePrefixOnly?: boolean; viewId?: string; externalAttachment?: boolean; sessionIntent?: 'history'; attachmentAvailable?: boolean }) {
   const enabled = useContext(WorkspaceReady);
   const operations = useContext(SessionViewOperationsContext);
-  let resolved = session, resolving = false, historical = following?.sessionIntent === 'history';
+  let resolved = session, resolving = false, stale = false, historical = following?.sessionIntent === 'history';
   try {
     const target = operations?.resolveTarget(session, following);
     if (target) { resolved = { ...session, ...target.target }; historical ||= !!target.historyRoleId; }
-  } catch { resolving = true; }
+  } catch (error) {
+    // A locator restored while the Relay is unreachable keeps this session connected; only its input waits.
+    if (error instanceof SessionLocatorSynchronizingError && error.stale) stale = true; else resolving = true;
+  }
   const targetKey = sessionKey(resolved);
   const [attachment, setAttachment] = useState<{ session: OpenedSession; transport: RemoteAgentTransport; scope: string }>();
   const attached = attachment?.transport === transport && attachment.scope === operations?.storageScope ? attachment.session : undefined;
@@ -40,5 +43,13 @@ export function useConversationSession(session: OpenedSession, transport: Remote
   useEffect(() => () => { if (!shared) connections.clear(); }, [connections, shared]);
   const source = useMemo(() => ({ acquire: (agentId: string, replica: AgentReplica) => connections.acquire(agentId, replica, bound) }), [connections, bound.agentId, bound.hostId, bound.providerId, bound.nativeSessionId]);
   const view = useSessionView({ agentId: bound.agentId, transport, source, cachedReplica: needsAttach ? undefined : cachedReplica, pending: pending || resolving || !current, enabled, connect: following?.attachmentAvailable !== false });
+  if (stale) return { ...view, sessionState: waitingForLocator(view.sessionState), sendQueuedInput: undefined, imageRecipient: undefined, operationScope: undefined,
+    boundSession: bound, operationBinding: { source: bound, scope: undefined, historical } };
   return { ...view, boundSession: bound, operationBinding: { source: bound, scope: view.operationScope, historical } };
+}
+
+/** The session as its input sees it while the locator is stale: still recovering, so input queues instead of being sent. */
+function waitingForLocator(session: RemoteSessionState): RemoteSessionState {
+  return { ...session, synchronized: false, recovering: !session.readOnly && session.connection !== 'unavailable',
+    operations: remoteSessionState(undefined, session.connection).operations };
 }

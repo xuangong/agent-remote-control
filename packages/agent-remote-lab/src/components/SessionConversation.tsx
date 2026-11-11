@@ -53,13 +53,14 @@ export function SessionConversation(props: SessionConversationProps) {
   const { target, baseUrl, attachmentEnabled = true } = props;
   const operations = useContext(SessionViewOperationsContext);
   const [inputOwner, setInputOwner] = useState<{ source: SessionWindowTarget; target: SessionWindowTarget; count: number }>();
-  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined, synchronizing = false;
+  let currentTarget = target, historyRoleId: string | undefined, resolutionError: string | undefined, synchronizing = false, staleLocator = false;
   try {
     const resolved = operations?.resolveTarget(target, { viewId: props.viewId, nativePrefixOnly: props.nativePrefixOnly });
     if (resolved) { currentTarget = { ...target, ...resolved.target, hostId: resolved.target.hostId ?? 'local' }; historyRoleId = resolved.historyRoleId; }
   } catch (error) {
     resolutionError = error instanceof Error ? error.message : 'The current session locator is unavailable.';
     synchronizing = error instanceof SessionLocatorSynchronizingError;
+    staleLocator = error instanceof SessionLocatorSynchronizingError && error.stale;
   }
   // A discovery refresh briefly withholds every locator. Keep attaching the target this view last resolved, so a refresh
   // does not cancel an attachment in flight and start another; input still waits until the locator is confirmed again.
@@ -149,7 +150,10 @@ export function SessionConversation(props: SessionConversationProps) {
     return () => { stopped = true; abort.abort(); };
   }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, attachmentError, attempt, connections, enabled, canAttach, directory, props.attachedSession?.agentId, props.attachmentManaged]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
-  const pending = !!resolutionError || !displayedSession;
+  // A view whose locator was restored while the Relay is unreachable keeps showing its last resolved target, attached;
+  // only its input waits (it queues) until a discovery confirms the locator again.
+  const locatorWaiting = !!retainedResolution && staleLocator && !retainingInput;
+  const pending = !!resolutionError && !locatorWaiting || !displayedSession;
   return <FamilyChat {...props} onPendingInputChange={count => {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
@@ -245,3 +249,4 @@ function familyDisplayBinding({ displayBinding, target, entries, viewId, windowV
   return displayBinding && { ...displayBinding, key: target.nativeSessionId === entries[0]?.nativeSessionId
     ? displayBinding.key : (displayBinding.key === viewId || displayBinding.key === windowViewId) ? displayBinding.key : `${displayBinding.key}:${target.nativeSessionId}` };
 }
+

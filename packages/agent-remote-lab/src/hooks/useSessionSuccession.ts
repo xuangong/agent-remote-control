@@ -50,9 +50,14 @@ interface SuccessionOptions {
   failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
 const selectionFor = compositionSelection;
-/** The request never got a Relay answer: the network failed or the request timed out. */
-const unreachable = (error: unknown) => error instanceof DOMException && error.name === 'TimeoutError'
-  || !!error && typeof error === 'object' && 'code' in error && error.code === 'network_error';
+/**
+ * The request never reached the Relay: the network failed or the browser is offline. A timeout is not: a slow Relay
+ * that is online may be answering with a succession this page has not seen yet.
+ */
+const unreachable = (error: unknown) => !(error instanceof DOMException && error.name === 'TimeoutError')
+  && (!!error && typeof error === 'object' && 'code' in error && error.code === 'network_error' || globalThis.navigator?.onLine === false);
+/** Delays before refreshing locators restored from an unreachable Relay. */
+const staleRetryDelays = [1000, 2000, 5000, 10000, 30000];
 const identityConfirmationError = 'The native session identity could not be confirmed.';
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
 
@@ -116,6 +121,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
       historyEvidence: new Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }>(),
       // The locators the last completed discovery confirmed, kept while a later refresh cannot read the replay.
       confirmedEvidence: undefined as Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }> | undefined,
+      // Restored evidence keeps views attached, but input waits for a discovery that reaches the Relay.
+      evidenceStale: false, staleRetry: undefined as ReturnType<typeof setTimeout> | undefined, staleAttempts: 0,
       historyTitles: new Map<string, string>(),
       refreshObservers: new Set<() => void>(),
       favoritesHints: new Map<string, { revision: number; operationId: string; status: string }>(),
@@ -132,6 +139,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.authority = { active: options.enabled };
     runtime.applications.clear();
     runtime.discovered = false;
+    // Evidence confirmed under another authority does not speak for this one.
+    runtime.confirmedEvidence = undefined; runtime.evidenceStale = false;
+    clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.staleAttempts = 0;
   }
   const live = () => currentRuntime.current === runtime && runtime.mounted && runtime.authority.active
     && latest.current.scope === options.scope && latest.current.transport === options.transport
@@ -493,7 +503,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
         latest.current.failed(error, { hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); publish(); }
     }
   }
-  async function discover(attachExplicit = false): Promise<void> {
+  /** `notified`: a succession notification or favorites progress says the locators changed; never fall back to old ones. */
+  async function discover(attachExplicit = false, notified = false): Promise<void> {
     if (!live()) return;
     const sequence = ++runtime.sequence, authority = runtime.authority;
     runtime.metadata?.abort(); const controller = new AbortController(); runtime.metadata = controller;
@@ -616,6 +627,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }
       if (!current()) return;
       runtime.discovered = true; runtime.confirmedEvidence = new Map(runtime.historyEvidence);
+      runtime.evidenceStale = false; clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.staleAttempts = 0;
       if (!runtime.desired) runtime.active = false;
       if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
       else {
@@ -631,12 +643,16 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (!runtime.desired && !runtime.document.roles.length && error && typeof error === 'object' && 'code' in error && ['http_404', 'route_not_found'].includes(String(error.code))) {
           runtime.unsupported = true;
           queueMicrotask(() => { if (current()) void discover(); });
-        } else if (!replayRead && runtime.confirmedEvidence && unreachable(error)) {
+        } else if (!notified && !replayRead && runtime.confirmedEvidence && unreachable(error)) {
           // A refresh that cannot reach the Relay (offline after a resume, for instance) is not evidence that the
-          // locators changed: keep the ones the last discovery confirmed, so views stay attached and input can wait.
-          // The next resume, succession notice or retry refreshes them again. A Relay answer still applies as before.
+          // locators changed: restore the ones the last discovery confirmed, marked stale, so views stay attached
+          // while input waits (resolveTarget). A retry with backoff, a resume or a succession notice refreshes them.
+          // A Relay answer, a timeout or a notified refresh still applies as before.
           for (const [key, evidence] of runtime.confirmedEvidence) runtime.historyEvidence.set(key, evidence);
-          runtime.discovered = true;
+          runtime.discovered = true; runtime.evidenceStale = true;
+          clearTimeout(runtime.staleRetry);
+          const delay = staleRetryDelays[Math.min(runtime.staleAttempts++, staleRetryDelays.length - 1)]!;
+          runtime.staleRetry = setTimeout(() => { runtime.staleRetry = undefined; if (live() && runtime.evidenceStale) void discover(); }, delay);
         } else {
           runtime.error = runtime.discoveryError = error instanceof Error ? error.message : 'Session succession could not be recovered.';
           if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') runtime.discovered = true;
@@ -838,7 +854,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.favoritesHints.set(key, { revision: progress.roleRevision, operationId: progress.operationId, status: progress.status });
       newer = true;
     }
-    if (newer) void discover();
+    if (newer) void discover(false, true);
   }
   function ownerFor(viewId: string): string {
     const owner = runtime.document.asks.find(owner => owner.sourceSlot === viewId);
@@ -847,6 +863,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
     if (!live() || !runtime.discovered || runtime.discovering) throw new SessionLocatorSynchronizingError();
+    if (runtime.evidenceStale) throw new SessionLocatorSynchronizingError(true);
     if (selection.parentNativeSessionId) return { target: selection };
     const slot = requested.viewId ? runtime.document.slots.find(slot => slot.id === requested.viewId) : undefined;
     const matches = [...runtime.historyEvidence.values()].filter(evidence => evidence.replays.some(replay =>
@@ -947,13 +964,13 @@ export function useSessionSuccession(options: SuccessionOptions) {
     }
     const stopConnections = options.connections.subscribe(reconcileAskRecipients);
     const stop = options.transport.onSessionSuccession?.(() => {
-      if (live() && supported) void discover();
+      if (live() && supported) void discover(false, true);
     });
     const resume = watchPageResume(() => { if (live()) { runtime.binding?.resumeRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.update(); void discover(); } }, () => {
       runtime.binding?.retireRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.retire();
     });
     return () => {
-      runtime.mounted = false; runtime.sequence++; runtime.navigation?.abort(); runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();
+      runtime.mounted = false; runtime.sequence++; clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.navigation?.abort(); runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();
       for (const observer of runtime.refreshObservers) observer();
       runtime.navigationLease?.release();
       if (runtime.activeAttempt) runtime.attempted.delete(runtime.activeAttempt);

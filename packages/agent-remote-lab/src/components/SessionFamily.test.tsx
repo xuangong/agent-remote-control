@@ -671,6 +671,37 @@ it('shows a view whose locator is still synchronizing as opening, without an ale
   expect(attach).not.toHaveBeenCalled();
 });
 
+it('keeps showing a view whose locator is stale while its input waits, without attaching again', async () => {
+  const { SessionConversation } = await import('./SessionConversation.js');
+  const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');
+  const directory = new (await import('../directory-client.js')).SessionDirectoryClient('http://fixture');
+  const attach = vi.spyOn(directory, 'attach').mockResolvedValue({ agentId: 'stale-agent', nativeSessionId: 'stale' });
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'stale', title: 'Stale' };
+  const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () => {}, connect: () => ({ close() {}, send() {} }) } as unknown as RemoteAgentTransport;
+  let setStale!: (value: boolean) => void;
+  const ready = vi.fn();
+  function Harness() {
+    const [stale, set] = useState(false); setStale = set;
+    return <SessionViewOperationsContext.Provider value={{ storageScope: 'http://fixture', transport, enabled: true,
+      resolveTarget: () => { if (stale) throw new SessionLocatorSynchronizingError(true); return { target }; }, directory: () => { throw new Error('Unused'); }, refreshSettled: async () => {} }}>
+      <SessionConversation target={target} viewId="slot" familyRoot={false} entries={[target]} onNavigate={async () => {}} onSessionReady={ready}
+        directoryFor={() => directory} baseUrl="http://fixture" storageScope="stale-locator" hostLabel="Host" compact={false} active offline={false}
+        transport={transport} draftStore={new DraftStore('stale-locator')} />
+    </SessionViewOperationsContext.Provider>;
+  }
+  const container = await render(<Harness />);
+  await act(async () => { await Promise.resolve(); });
+  expect(attach).toHaveBeenCalledOnce();
+  await act(async () => setStale(true));
+  // The view stays on its session (not "Opening session"), and its input cannot be dispatched until the locator is confirmed.
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(ready.mock.calls.at(-1)?.[0]?.sessionState.operations.send_message.allowed).toBe(false);
+  expect(ready.mock.calls.at(-1)?.[0]?.sendQueuedInput).toBeUndefined();
+  expect(ready.mock.calls.at(-1)?.[0]?.operationBinding.source.agentId).toBe('stale-agent');
+  await act(async () => setStale(false));
+  expect(attach).toHaveBeenCalledOnce();
+});
+
 it('keeps an attachment in flight while a discovery refresh withholds the locator and attaches only once', async () => {
   const { SessionConversation } = await import('./SessionConversation.js');
   const { SessionLocatorSynchronizingError, SessionViewOperationsContext } = await import('../session-view-operations.js');

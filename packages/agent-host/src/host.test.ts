@@ -671,6 +671,46 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); await first.close(); await second.close(); }
   });
 
+  it('lists Codex only on explicit request while cached reads and creation stay responsive over the uplink', async () => {
+    const broker = await uplinkBroker('host');
+    const codex = fixture('codex');
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    const listSessions = vi.fn(async () => { await blocked; return { sessions: [summary('codex', 'saved')] }; });
+    const readSessionSummary = vi.fn(async (id: string) => summary('codex', id));
+    const directory = createCodexSessionDirectory({ listSessions, readSessionSummary,
+      createSession: async () => new Session('codex', 'created'), resumeSession: async () => new Session('codex', 'saved'),
+      openChildSession: async () => new Session('codex', 'child') }, []);
+    const host = createAgentHost({ registrations: [{ adapter: codex.adapter, directory }], installationId: 'installation', name: 'Host',
+      uplink: { url: broker.url, remoteKey: 'key' } });
+    try {
+      await host.ready;
+      expect(JSON.parse((await broker.rpc('GET', '/remote/catalog?providerId=codex')).body).items).toEqual([]);
+      await broker.rpc('GET', '/remote/catalog/revision?providerId=codex');
+      expect(JSON.parse((await broker.rpc('GET', '/remote/catalog/listing?providerId=codex')).body).refreshing).toBe(false);
+      expect(listSessions).not.toHaveBeenCalled();
+      const direct = await broker.rpc('GET', '/remote/catalog/session?providerId=codex&nativeSessionId=known');
+      expect(JSON.parse(direct.body).nativeSessionId).toBe('known');
+      expect(readSessionSummary).toHaveBeenCalledWith('known');
+      expect(listSessions).not.toHaveBeenCalled();
+      const started = await broker.rpc('POST', '/remote/catalog/listing', undefined, { providerId: 'codex' });
+      expect(started.status).toBe(202);
+      expect(JSON.parse(started.body).refreshing).toBe(true);
+      await broker.rpc('POST', '/remote/catalog/listing', undefined, { providerId: 'codex' });
+      const created = await broker.rpc('POST', '/remote/create', 'created-agent', { providerId: 'codex', operationId: operationId('during-listing') });
+      expect(created.status).toBe(200);
+      const cached = JSON.parse((await broker.rpc('GET', '/remote/catalog?providerId=codex')).body);
+      expect(cached.items.map((item: { nativeSessionId: string }) => item.nativeSessionId)).toContain('created');
+      expect(listSessions).toHaveBeenCalledTimes(1);
+      release();
+      await directory.listing!.refresh();
+      const complete = JSON.parse((await broker.rpc('GET', '/remote/catalog/listing?providerId=codex')).body);
+      expect(complete).toMatchObject({ refreshing: false, complete: true });
+      await broker.rpc('GET', '/remote/catalog?providerId=codex');
+      expect(listSessions).toHaveBeenCalledTimes(1);
+    } finally { release(); await host.close(); await broker.close(); }
+  });
+
   it('preserves catalog errors through a real uplink', async () => {
     const broker = await uplinkBroker('host');
     const codex = fixture('codex'); const dsh = fixture('dsh'); const failing = fixture('failing');

@@ -115,6 +115,12 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
   }
   return {
     providerId: directory.providerId,
+    listing: directory.listing,
+    ...(directory.sessionSummary ? { async sessionSummary(id: string) {
+      const summary = await directory.sessionSummary!(id);
+      if (summary) await allowedWorkspace(policy, summary.workspace);
+      return summary;
+    } } : {}),
     supportsSourceReferences: directory.supportsSourceReferences,
     ...(directory.supportsBoundedSourceCreate ? { async supportsBoundedSourceCreate(input: Parameters<AgentHostDirectory['create']>[0]) {
       return directory.supportsBoundedSourceCreate!(await createInput(input));

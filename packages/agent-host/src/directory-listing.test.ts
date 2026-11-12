@@ -33,41 +33,30 @@ function store(count: number) {
   };
 }
 
-it('reads only the newest sessions between full listings while reflecting new, updated and recently removed sessions', async () => {
-  let clock = 0;
-  vi.spyOn(Date, 'now').mockImplementation(() => clock);
+it('serves an empty catalog until explicitly listed and never probes automatically', async () => {
   const codex = store(300);
-  expect((await codex.directory.list())).toHaveLength(300);
+  expect(await codex.directory.list()).toEqual([]);
+  expect(codex.reads()).toBe(0);
+  await codex.directory.listing!.refresh();
+  expect(await codex.directory.list()).toHaveLength(300);
   expect(codex.reads()).toBe(300);
-  codex.add('new'); codex.touch('thread-5'); codex.remove('thread-298');
-  clock += 15_000;
+  codex.add('new'); codex.remove('thread-298');
+  await codex.directory.list(); await codex.directory.list();
+  expect(codex.reads()).toBe(0);
+  await codex.directory.listing!.refresh();
   const listed = await codex.directory.list();
-  expect(codex.reads()).toBe(10);
   expect(listed).toHaveLength(300);
-  expect(listed.slice(0, 2).map(item => item.nativeSessionId)).toEqual(['thread-5', 'new']);
-  expect(listed.find(item => item.nativeSessionId === 'thread-5')?.updatedAt).toBe(new Date(1_301 * 1000).toISOString());
+  expect(listed.some(item => item.nativeSessionId === 'new')).toBe(true);
   expect(listed.some(item => item.nativeSessionId === 'thread-298')).toBe(false);
+  expect(codex.reads()).toBe(300);
+  await codex.directory.close?.();
 });
 
-it('falls back to a full listing when too many sessions changed or the last full listing is old', async () => {
-  let clock = 0;
-  vi.spyOn(Date, 'now').mockImplementation(() => clock);
-  const codex = store(150);
-  await codex.directory.list(); codex.reads();
-  for (let index = 0; index < 12; index++) codex.touch(`thread-${index}`);
-  clock += 15_000;
-  expect(await codex.directory.list()).toHaveLength(150);
-  expect(codex.reads()).toBe(160);
-  clock += 5 * 60_000;
-  codex.remove('thread-0');
-  expect(await codex.directory.list()).toHaveLength(149);
-  expect(codex.reads()).toBe(149);
-});
-
-it('reads a renamed session again on the next listing', async () => {
+it('updates a renamed session without listing native sessions', async () => {
   const codex = store(50);
-  await codex.directory.list(); codex.reads();
+  await codex.directory.listing!.refresh(); codex.reads();
   await codex.directory.renameSession!('thread-0', 'Renamed');
   expect((await codex.titles()).get('thread-0')).toBe('Renamed');
-  expect(codex.reads()).toBe(50);
+  expect(codex.reads()).toBe(0);
+  await codex.directory.close?.();
 });

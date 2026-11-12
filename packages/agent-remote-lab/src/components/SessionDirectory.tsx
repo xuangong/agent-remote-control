@@ -1,3 +1,4 @@
+import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { StarButton } from './SessionFavorites.js';
 import type { SessionStars } from '../hooks/useSessionStars.js';
 import { useFeedbackToast } from './Toast.js';
@@ -31,6 +32,8 @@ interface Props {
 
 export function SessionDirectory({ quickOpen, favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], sideStore, askStore, hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('');
+  const [listing, setListing] = useState<SessionListingStatus>();
+  const [requestingListing, setRequestingListing] = useState(false);
   const [, refreshRelations] = useState(0);
   useEffect(() => {
     const refresh = () => refreshRelations(value => value + 1);
@@ -84,9 +87,50 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
     setFailure(undefined);
     setExpired(false);
     setUpdates(false);
+    setRequestingListing(false);
     if (!directory.cachedPages.get(providerId)) void load();
     return () => { generation.current += 1; inFlight.current = false; };
   }, [providerId, directory]);
+
+  useEffect(() => {
+    let retired = false;
+    setListing(undefined);
+    if (providerId === 'codex' && hostId !== 'local') {
+      void directory.listing(providerId).then(status => { if (!retired) setListing(status); }).catch(() => undefined);
+    }
+    return () => { retired = true; };
+  }, [providerId, directory, hostId]);
+
+  useEffect(() => {
+    if (!listing?.refreshing) return;
+    let retired = false;
+    const timer = window.setTimeout(() => {
+      void directory.listing(providerId).then(status => {
+        if (retired) return;
+        setListing(status);
+        void load();
+      }).catch(error => {
+        if (retired) return;
+        setFailure(error instanceof Error ? error.message : 'Could not check the session listing.');
+        setListing({ ...listing, refreshing: false });
+      });
+    }, 2000);
+    return () => { retired = true; window.clearTimeout(timer); };
+  }, [listing, directory, providerId]);
+
+  async function listNativeSessions() {
+    const request = generation.current;
+    setRequestingListing(true);
+    setFailure(undefined);
+    try {
+      const status = await directory.listing(providerId, true);
+      if (generation.current !== request) return;
+      setListing(status);
+      void load();
+    } catch (error) {
+      if (generation.current === request) setFailure(error instanceof Error ? error.message : 'Could not start the session listing.');
+    } finally { if (generation.current === request) setRequestingListing(false); }
+  }
 
   useEffect(() => {
     if (revision > 0) setUpdates(true);
@@ -141,6 +185,15 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
     <section className="lab-session-directory" aria-label="Discover sessions">
       <div className="lab-directory-heading"><h2>Discover sessions</h2><div className="lab-directory-actions">{quickOpen}<button type="button" onClick={() => void load()} disabled={loading || !providerId}>Refresh</button></div></div>
       <p className="agent-visually-hidden">Roots by activity · Expand to see Subagents, Ask and Side sessions</p>
+      {listing ? <div className="lab-directory-listing">
+        <button type="button" onClick={() => void listNativeSessions()} disabled={requestingListing || listing.refreshing}>
+          {listing.refreshing ? 'Listing native sessions…' : 'List native sessions'}
+        </button>
+        <p role="status">{listing.refreshing ? 'Reading native sessions. You can keep using existing sessions.'
+          : listing.error ? `Listing stopped: ${listing.error} Previously found sessions are still available.`
+          : listing.listedAt ? `Last listed ${new Date(listing.listedAt).toLocaleString()}.`
+          : 'Native sessions are listed only when you click List native sessions. Sessions opened here appear automatically.'}</p>
+      </div> : null}
       {updates && !expired ? <button type="button" className="lab-directory-updates" onClick={() => void load()} disabled={loading}>Updates available · Refresh</button> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       {loading ? <p className="lab-control-note" role="status">Loading sessions…</p> : null}

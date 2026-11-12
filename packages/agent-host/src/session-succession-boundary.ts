@@ -284,7 +284,10 @@ export class SessionSuccessionBoundary {
       if (acceptance.disposition === 'started' || acceptance.disposition === 'handled') effect.settled();
     };
     try {
-      const result = await work({ ...options, onAcceptance: acceptance => { confirm(acceptance); options?.onAcceptance?.(acceptance); } });
+      const result = await work({ ...options,
+        onAcceptance: acceptance => { confirm(acceptance); options?.onAcceptance?.(acceptance); },
+        onWithdrawn: withdrawal => { effect.settled(); options?.onWithdrawn?.(withdrawal); },
+      });
       if (result) confirm(result);
       effect.unresolved(); return result;
     } catch (error) {

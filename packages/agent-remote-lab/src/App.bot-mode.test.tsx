@@ -337,6 +337,15 @@ it('keeps the desktop sidebar when a session opens from the sessions page, and c
     await until(() => expect(page.querySelector('[aria-label="Discover sessions"] .lab-session-row')).not.toBeNull());
     await act(async () => page.querySelector<HTMLButtonElement>('[aria-label="Discover sessions"] .lab-session-row')!.click());
     await until(() => expect(page.hidden).toBe(true));
+    expect(app.workspace().readGroup('A')?.window.views.map(view => view.binding?.nativeSessionId)).toContain('Other');
+    await until(() => expect(app.attachments).toContain('Other'));
+    const group = app.workspace().readGroup('A')!;
+    expect(group.window.views.find(view => view.id === 'A1')?.binding).toEqual(botTarget('A1'));
+    expect(group.window.views.find(view => view.id === 'A2')?.binding).toEqual(botTarget('A2'));
+    const added = group.window.views.find(view => view.binding?.nativeSessionId === 'Other');
+    expect(added?.placement).toBe('primary');
+    expect(group.window.selectedViewId).toBe(added?.id);
+    expect(app.container.textContent).not.toContain('A bot keeps its conversation');
     expect(context().hidden).toBe(false);
     expect(app.container.querySelector('.lab-shell')!.classList.contains('lab-context-hidden')).toBe(false);
   } finally { await app.close(); }

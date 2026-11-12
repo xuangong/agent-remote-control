@@ -21,7 +21,7 @@ import { isRecord, readString, spawnCodexAppServer } from './native.js';
 import { CodexAppServerSession } from './session.js';
 import { installCodexSkills } from './host-access.js';
 import { initializeCodexTransport } from './initialize.js';
-import { readCodexSessionPage, type CodexSessionListOptions, type CodexSessionPage } from './catalog.js';
+import { readCodexSessionPage, readCodexThreadSummary, type CodexSessionListOptions, type CodexSessionPage, type CodexSessionSummary } from './catalog.js';
 import type { CodexSharedRecoveryPlan, CodexSharedRecoverySettings } from './shared-recovery.js';
 import { CodexToolBridge } from './tool-bridge.js';
 import { windowsCodexSharedEndpoint } from './platform/windows/daemon.js';
@@ -121,6 +121,19 @@ export class CodexAppServerProvider implements AgentProviderAdapter {
         sortKey: 'updated_at', modelProviders: [], sourceKinds: ['cli', 'vscode', 'appServer'], archived: false,
       }));
     } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); } finally { await transport.dispose(); }
+  }
+
+  /** One session's catalog summary, read from its own metadata so that no catalog listing is needed. */
+  async readSessionSummary(nativeSessionId: string): Promise<CodexSessionSummary | undefined> {
+    const transport = await this.createTransport();
+    try {
+      await initializeCodexTransport(transport);
+      const response = await transport.request('thread/read', { threadId: nativeSessionId, includeTurns: false })
+        .catch(error => { throw sessionLookupError(error, nativeSessionId, 'thread/read'); });
+      if (!isRecord(response) || !isRecord(response.thread) || response.thread.id !== nativeSessionId) throw new Error('Native session metadata is unavailable.');
+      return readCodexThreadSummary(response.thread, 'thread/read');
+    } catch (error) { throw runtimeError(error, this.options.connectionMode === 'shared'); }
+    finally { await transport.dispose(); }
   }
 
   async readSessionTitle(nativeSessionId: string): Promise<string | undefined> {

@@ -1,3 +1,4 @@
+import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
@@ -77,6 +78,12 @@ export class SessionDirectoryClient {
     const query = new URLSearchParams({ providerId, limit: '30' });
     if (cursor) query.set('cursor', cursor);
     return this.request(`catalog?${query}`, undefined, signal);
+  }
+  async listing(providerId: string, refresh = false): Promise<SessionListingStatus> {
+    const value = await this.request(`catalog/listing${refresh ? '' : '?' + new URLSearchParams({ providerId })}`,
+      refresh ? { providerId } : undefined, AbortSignal.timeout(15000));
+    if (!isSessionListingStatus(value)) throw new DirectoryError('The session listing status is invalid.');
+    return value;
   }
   revision(providerId: string): Promise<{ revision: string }> { return this.request(`catalog/revision?${new URLSearchParams({ providerId })}`); }
   workspaces(providerId: string): Promise<{ workspaces: SessionWorkspace[] }> { return this.request(`workspaces?${new URLSearchParams({ providerId })}`); }

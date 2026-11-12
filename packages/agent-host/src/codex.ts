@@ -28,5 +28,5 @@ export async function createCodexHostRegistration(options: CodexHostRegistration
     ? new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'codex', scope)) : undefined;
   return { preservesWorkOnDisconnect: options.connectionMode === 'shared', nativeVersion: `${match[1]}.${match[2]}.${match[3]}`,
     nativePermissionControl: options.connectionMode === 'shared' && !options.restrictedNative,
-    adapter: provider, directory: createCodexSessionDirectory(provider, options.workspaces ?? [], references) };
+    adapter: provider, directory: createCodexSessionDirectory(provider, options.workspaces ?? [], references, { file: join(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'codex', scope), 'listing.json') }) };
 }

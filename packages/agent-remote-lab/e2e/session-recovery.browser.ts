@@ -87,6 +87,9 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     const key = Object.keys(localStorage).find(key => key.startsWith(`agent-remote:recovery:${base}:outbox:`))!;
     return JSON.parse(localStorage.getItem(key)!)[0].operationId;
   }, baseUrl);
+  // On this short phone conversation the floating TPM, Window and Team capsules sit over the message actions (handoff §5.4).
+  // When that is fixed, this check fails: remove it and pressMessageAction, and click the actions directly.
+  expect(await page.getByRole('button', { name: 'Retry message', exact: true }).click({ trial: true, timeout: 1000 }).then(() => 'reachable', () => 'covered')).toBe('covered');
   await pressMessageAction('Retry message');
   await expect.poll(() => page.locator('.agent-message-delivery').textContent()).toContain('Sent');
   expect(await page.evaluate(() => (window as any).attempts[0].operationId)).toBe(savedOperation);

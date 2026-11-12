@@ -105,8 +105,11 @@ test('keeps one View entry in the visible title while toggling panels and preser
   const options = page.getByRole('region', { name: 'View options', exact: true });
   // Show all and Hide all act on the panels; the feature views listed after them keep their own setting.
   const checkedPanels = options.getByRole('checkbox', { name: /^(Header|Sidebar|Replica Inspector)$/, checked: true });
+  const checkedFeatureViews = options.getByRole('checkbox', { name: /^(Ask|Window|TPM|Team) view$/, checked: true });
+  const featureViewsShown = await checkedFeatureViews.count();
   await options.getByRole('button', { name: 'Hide all', exact: true }).click();
   await expect(checkedPanels).toHaveCount(0);
+  await expect(checkedFeatureViews).toHaveCount(featureViewsShown);
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   await expect(page.locator('#lab-context')).toBeHidden();
   await expect(page.locator('#lab-inspector')).toBeHidden();
@@ -115,6 +118,7 @@ test('keeps one View entry in the visible title while toggling panels and preser
   if (testInfo.project.name === 'chromium-desktop') {
     await options.getByRole('button', { name: 'Show all', exact: true }).click();
     await expect(checkedPanels).toHaveCount(3);
+    await expect(checkedFeatureViews).toHaveCount(featureViewsShown);
     await expect(page.locator('.lab-app-bar')).toBeVisible();
     await expect(page.locator('#lab-context')).toBeVisible();
     await expect(page.locator('#lab-inspector')).toBeVisible();

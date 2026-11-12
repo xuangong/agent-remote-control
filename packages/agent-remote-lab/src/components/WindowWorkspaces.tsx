@@ -1,11 +1,13 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, hasWindowAppearance, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
-import { useWindowManager } from '../hooks/useWindowManager.js';
+import { useWindowActions, windowCatalog } from '../hooks/useWindowActions.js';
+import { AgentControl } from './AgentControl.js';
 import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
 import { windowOutline } from '../window-outline.js';
 import { IconButton } from '../ui/IconButton.js';
+import { revealView, viewSelection } from '../window-view-selection.js';
 
 export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
@@ -21,19 +23,27 @@ function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, placement = 'panel' }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
+  /**
+   * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
+   * owner shows the notice; without them the list runs its own actions and shows their notices itself.
+   */
+  actions?: ReturnType<typeof useWindowActions>;
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
   /** Shows all Windows; with it the sidebar's Windows heading offers a "Show all Windows" button (the floating panel's WindowMenu has its own). */
   onOverview?(): void;
   /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
   onNavigate?(): void;
+  /** Called when a view of the open Window is chosen, once its selection is sent. */
+  onChooseView?(view: WindowView): void;
   /** Where the list sits: the floating Windows panel, or the desktop sidebar, where headings and rows follow its flat rows and icon actions. */
   placement?: 'panel' | 'sidebar';
 }) {
   const sidebar = placement === 'sidebar';
-  const [notice, setNotice] = useState<string>();
+  const ownActions = useWindowActions(workspace);
+  const { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
   // The Window whose title is being edited in the list, and the scope it belongs to.
   const [renaming, setRenaming] = useState<{ id: string; client: typeof workspace.client }>(), [title, setTitle] = useState(''), [saving, setSaving] = useState(false);
   const [agentControl, setAgentControl] = useState(false);
@@ -42,40 +52,15 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   const renameReturn = useRef<string>();
   const root = useRef<HTMLDivElement>(null);
   const options = useRef<HTMLDetailsElement>(null);
-  const manager = useWindowManager(workspace.client, workspace.window?.id, active && agentControl);
   const currentScope = useRef({ client: workspace.client, id: workspace.window?.id });
   currentScope.current = { client: workspace.client, id: workspace.window?.id };
-  const pending = useRef<{ client: typeof workspace.client; id?: string }>();
-  const [running, setRunning] = useState<typeof pending.current>();
-  const busy = !!running && running.client === workspace.client && running.id === workspace.window?.id;
   useEffect(() => {
-    setNotice(undefined); setAgentControl(false);
+    setAgentControl(false);
     if (options.current) options.current.open = false;
   }, [workspace.client, workspace.window?.id]);
   useEffect(() => { if (!active) setRenaming(undefined); }, [active]);
   useEffect(() => { setRenaming(current => current && current.client !== workspace.client ? undefined : current); }, [workspace.client]);
-  async function run(action: () => Promise<unknown>): Promise<boolean> {
-    const scope = currentScope.current;
-    if (pending.current && pending.current.client === scope.client && pending.current.id === scope.id) return false;
-    pending.current = scope; setRunning(scope); setNotice(undefined);
-    try { await action(); return true; }
-    catch (error) {
-      if (currentScope.current.client === scope.client && currentScope.current.id === scope.id) setNotice(error instanceof Error ? error.message : String(error));
-      return false;
-    } finally { if (pending.current === scope) { pending.current = undefined; setRunning(undefined); } }
-  }
-  function background(action: () => Promise<unknown>): boolean {
-    const scope = currentScope.current;
-    const failed = (error: unknown) => {
-      if (currentScope.current.client === scope.client && currentScope.current.id === scope.id) setNotice(error instanceof Error ? error.message : String(error));
-    };
-    setNotice(undefined);
-    try { void action().catch(failed); return true; }
-    catch (error) { failed(error); return false; }
-  }
-  function edit(operation: WindowOperation): boolean { return background(() => workspace.operate(operation)); }
-  const catalog = [...new Map([...(workspace.windows ?? []), ...(workspace.window ? [workspace.window] : [])].map(window => [window.id, window])).values()]
-    .filter(window => { const group = workspace.readGroup?.(window.id); return !group || hasWindowAppearance(group); });
+  const catalog = windowCatalog(workspace);
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
     setOpeningId(id); setNotice(undefined);
@@ -85,11 +70,9 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     } finally { if (generation === navigation.current) setOpeningId(undefined); }
   }
   function chooseView(view: WindowView) {
-    const select: WindowOperation = { type: 'view.select', viewId: view.id };
-    if (!edit(view.collapsed ? { type: 'batch', operations: [{ type: 'view.collapse', viewId: view.id, collapsed: false }, select] } : select)) return;
-    // The pane may render or expand on the next frame; bring it into view then.
-    requestAnimationFrame(() => [...document.querySelectorAll<HTMLElement>('[data-view-id]')].find(element => element.dataset.viewId === view.id)
-      ?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
+    if (!edit(viewSelection(view))) return;
+    onChooseView?.(view);
+    revealView(view.id);
     onNavigate?.();
   }
   function startRename(window: { id: string; title: string }) {
@@ -103,17 +86,11 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     [...root.current?.querySelectorAll<HTMLButtonElement>('[data-window-rename]') ?? []].find(button => button.dataset.windowRename === id)?.focus({ preventScroll: true });
   }, [renaming]);
   async function saveRename(id: string) {
-    const next = title.trim(), client = workspace.client;
+    const next = title.trim();
     if (!next || saving) return;
     if (next === catalog.find(window => window.id === id)?.title) { closeRename(); return; }
-    const report = (error: unknown) => { if (currentScope.current.client === client) setNotice(error instanceof Error ? error.message : String(error)); };
-    setSaving(true); setNotice(undefined);
-    try {
-      // The title applies at once; like other layout edits, saving continues in the background and reports failures.
-      const { saved } = await workspace.rename(id, next);
-      void saved.catch(report);
-      if (currentScope.current.client === client) closeRename();
-    } catch (error) { report(error); }
+    setSaving(true);
+    try { if (await save(id, next)) closeRename(); }
     finally { setSaving(false); }
   }
   const createWindow = () => void run(workspace.create);
@@ -132,7 +109,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       const renameDisabled = !!renaming || (window.id === workspace.window?.id && workspace.unavailable);
       const deleteTitle = !workspace.hasActiveWindow ? 'Open or create a Window before deleting another one.' : window.id === workspace.window?.id ? 'Switch to another Window before deleting this one.' : 'Delete this layout. Agent sessions keep running.';
       const deleteDisabled = busy || !workspace.hasActiveWindow || window.id === workspace.window?.id;
-      const remove = () => void run(() => workspace.remove(window.id));
+      const remove = () => void deleteWindow(window.id);
       return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={`Rename Window: ${window.title}`} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
@@ -186,35 +163,15 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open one from {sidebar ? 'All sessions' : 'Sessions'}.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
-          <button type="button" onClick={() => void run(async () => {
-            const id = workspace.window!.id, client = workspace.client;
-            const url = new URL(location.href); url.searchParams.set('window', id);
-            for (const key of ['mode', 'section', 'bot']) url.searchParams.delete(key);
-            await navigator.clipboard.writeText(url.href);
-            if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.');
-          })}>Copy link</button>
-          {!workspace.group?.bots ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void run(async () => {
-            const id = workspace.window!.id, client = workspace.client;
-            const rank = workspace.groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
-            await workspace.operateGroup(id, { type: 'bots.add', rank: !rank ? 'm' : rank.length < 64 ? `${rank}m` : rank });
-            if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Shown as a section in Bot mode.');
-          })}>Show as section</button> : null}
+          <button type="button" onClick={() => void copyLink()}>Copy link</button>
+          {!workspace.group?.bots ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void showAsSection()}>Show as section</button> : null}
         </div>
         {workspace.client ? <details className="lab-window-agent" open={agentControl} onToggle={event => setAgentControl(event.currentTarget.open)}>
           <summary>Agent control</summary>
-          <p className="lab-window-note">Name the session that arranges this Window. Agents arrange Windows with agent-remote-controller window, signed in as you.</p>
-          {manager.status === 'loading' ? <p role="status">Checking manager…</p> : manager.status === 'error' ? <p role="alert">{manager.error} <button type="button" onClick={manager.refresh}>Retry</button></p>
-            : <p className="lab-window-note">Manager: {manager.manager?.title || manager.manager?.nativeSessionId || 'Unassigned'}</p>}
-          <div className="lab-window-actions">
-            <button type="button" disabled={!current || manager.pending} onClick={() => void manager.assign(current!).catch(() => {})}>Use current session</button>
-            <button type="button" disabled={!manager.manager || manager.pending} onClick={() => void manager.assign(null).catch(() => {})}>Clear manager</button>
-          </div>
-          {!current ? <p className="lab-window-note">Select a bound session view to assign its Agent.</p> : null}
-          {manager.pending ? <p role="status">Updating manager…</p> : null}
-          {manager.error && manager.status !== 'error' ? <p role="alert">{manager.error}</p> : null}
+          <AgentControl client={workspace.client} windowId={workspace.window.id} current={current} active={active && agentControl} />
         </details> : null}
       </details>
     </> : null}
-    {workspace.error || notice ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}
+    {workspace.error || notice && !sharedActions ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}
   </div>;
 }

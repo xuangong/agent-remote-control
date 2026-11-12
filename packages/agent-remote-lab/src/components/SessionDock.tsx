@@ -12,7 +12,8 @@ interface DockItem { id: string; title: string; host: HTMLElement; visible: bool
 interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number; mainMinimized?: boolean }
 interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
-  leadingControls?: ReactNode;
+  /** Dock panes stay mounted and attached but are not shown; the main area takes their width. */
+  docksHidden: boolean;
   register(item: Omit<DockItem, 'width'>): void;
   unregister(id: string, host: HTMLElement): void;
   add(id: string): void;
@@ -24,13 +25,6 @@ interface DockContext {
   minimizeMain(minimized: boolean): void;
 }
 const Context = createContext<DockContext | undefined>(undefined);
-const HeadingStartContext = createContext<ReactNode>(undefined);
-
-/** Layout controls belong to the first visible dock's root heading. */
-export function useSessionDockHeadingStart(): ReactNode { return useContext(HeadingStartContext); }
-export function SessionDockHeadingStart() {
-  return <>{useSessionDockHeadingStart()}</>;
-}
 const clampWidth = (width: number, minimum = minimumWidth) => Math.max(minimum, Math.min(maximumWidth, width));
 function readLayout(key?: string): DockLayout {
   try {
@@ -46,7 +40,12 @@ function readLayout(key?: string): DockLayout {
 }
 
 /** Placement preferences outlive DOM registrations and main-session navigation. */
-export function SessionDockProvider({ enabled, storageScope, leadingControls, children }: { enabled: boolean; storageScope?: string; leadingControls?: ReactNode; children: ReactNode }) {
+export function SessionDockProvider({ enabled, docksHidden = false, storageScope, children }: {
+  enabled: boolean;
+  /** Hides the dock panes, a view preference of this browser rather than a Window edit; the panes stay mounted. */
+  docksHidden?: boolean;
+  storageScope?: string; children: ReactNode;
+}) {
   const key = storageScope ? `agent-remote:recovery:${storageScope}:workspace-dock` : undefined;
   const shared = useWindowLayout();
   const [localLayout, setLayout] = useState<DockLayout>(() => readLayout(key));
@@ -100,7 +99,7 @@ export function SessionDockProvider({ enabled, storageScope, leadingControls, ch
     });
     if (operations.length) shared.operate({ type: 'batch', operations });
   }
-  const value: DockContext = shared ? { enabled, items, layout, leadingControls, register, unregister,
+  const value: DockContext = shared ? { enabled, docksHidden, items, layout, register, unregister,
     add: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'dock' }),
     remove: id => shared.operate({ type: 'view.place', viewId: resolve(id), placement: 'float' }),
     resize: (id, width) => shared.operate({ type: 'view.resize', viewId: resolve(id), width: clampWidth(width, 240) }),
@@ -118,7 +117,7 @@ export function SessionDockProvider({ enabled, storageScope, leadingControls, ch
       const panes = [...layout.panes]; panes.splice(target, 0, panes.splice(source, 1)[0]!);
       orderSharedDocks(panes);
     },
-  } : { enabled, items, layout, leadingControls, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
+  } : { enabled, docksHidden, items, layout, register, unregister, add, remove, move, reorder, resize, resizeBase, minimizeMain };
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
 
@@ -161,16 +160,15 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, dock
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x={docked ? '5' : '3'} y={docked ? '5' : '4'} width="16" height="16" rx="2" />{docked ? <path d="M3 16V3h13" /> : <path d="M13 4v16" />}</svg>
     </button>
   </> : null;
-  const headingStart = docked && dock.items.find(item => item.visible)?.id === id ? dock.leadingControls : undefined;
   return <><div ref={home} className="lab-session-placement-home" />{mounted ? createPortal(
-    <SessionTitleInteractionContext.Provider value={titleInteraction}><HeadingStartContext.Provider value={headingStart}>
+    <SessionTitleInteractionContext.Provider value={titleInteraction}>
       {children({ docked, controls })}
-    </HeadingStartContext.Provider></SessionTitleInteractionContext.Provider>, host) : null}</>;
+    </SessionTitleInteractionContext.Provider>, host) : null}</>;
 }
 
 export function MinimizeMainSession() {
   const dock = useContext(Context);
-  if (!dock?.enabled || !dock.items.some(item => item.visible)) return null;
+  if (!dock?.enabled || dock.docksHidden || !dock.items.some(item => item.visible)) return null;
   return <button type="button" className="lab-session-main-minimize" aria-label="Minimize main session area" title="Minimize main session and subagents"
     onClick={event => { event.stopPropagation(); dock.minimizeMain(true); }}>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M8 4v16m8-12-4 4 4 4" /></svg>
@@ -202,7 +200,10 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   const contentId = useId();
   const preferredBaseWidth = dock?.layout.baseWidth;
   const active = dock?.enabled ? dock.items.filter(item => item.visible) : [];
-  const minimized = active.length > 0 && dock?.layout.mainMinimized === true;
+  const docksHidden = !!dock?.docksHidden;
+  // Hidden docks stay mounted, but the main area lays out as if there were none.
+  const shown = docksHidden ? [] : active;
+  const minimized = shown.length > 0 && dock?.layout.mainMinimized === true;
   useLayoutEffect(() => {
     if (minimized && content.current?.contains(document.activeElement)) restore.current?.focus({ preventScroll: true });
     if (!minimized && restoreFocus.current) {
@@ -220,8 +221,8 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
     return () => observer.disconnect();
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
-  return <div ref={rail} className="lab-session-dock-rail" data-docked={active.length > 0 || primaryGroups && !compact || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
-    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={active.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+  return <div ref={rail} className="lab-session-dock-rail" data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-docks-hidden={docksHidden || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
+    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -229,10 +230,10 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
         <span className="lab-session-main-label">Main</span><span className="lab-session-main-title">{mainTitle}</span>
       </button> : null}
-      {active.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
+      {shown.length && !minimized ? <DockResize title="Main conversation area" width={baseWidth} minimum={minimumBaseWidth} onResize={width => dock?.resizeBase(width)} /> : null}
     </div>}
     {dock?.enabled && onCreateView ? <button type="button" className="lab-session-dock-add" style={{ order: active.length + 1 }} aria-label="New session view" title="New session view" onClick={onCreateView}>+</button> : null}
-    {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} />)}
+    {[...active].sort((a, b) => a.id.localeCompare(b.id)).map(item => <DockPane key={item.id} item={item} order={active.indexOf(item) + 1} hidden={docksHidden} />)}
   </div>;
 }
 
@@ -265,7 +266,7 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
   </section>;
 }
 
-function DockPane({ item, order }: { item: DockItem; order: number }) {
+function DockPane({ item, order, hidden }: { item: DockItem; order: number; hidden: boolean }) {
   const target = useRef<HTMLDivElement>(null);
   const dock = useContext(Context)!;
   const shared = useWindowLayout();
@@ -275,7 +276,7 @@ function DockPane({ item, order }: { item: DockItem; order: number }) {
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
-  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} style={{ width: item.width + (item.additionalWidth ?? 0), minWidth: shared ? 240 : undefined, order }}>
+  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} hidden={hidden} style={{ width: item.width + (item.additionalWidth ?? 0), minWidth: shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
     <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />
   </section>;

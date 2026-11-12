@@ -104,12 +104,14 @@ async function expectGlobalView(page: Page) {
   await expect(options).toHaveCount(0);
 }
 
-async function expectDockHeadingView(page: Page, id: string) {
-  const heading = page.locator(`.lab-bindable-session-window[data-view-id="${id}"] .lab-session-heading`).first();
-  const view = heading.getByRole('button', { name: 'View options', exact: true });
+/** With the sidebar hidden, a desktop Window keeps View options in its toolbar, beside the Window name, whatever the dock order. */
+async function expectToolbarView(page: Page, id: string) {
+  const toolbar = page.locator('#lab-workbench > header.lab-window-toolbar');
+  const view = toolbar.getByRole('button', { name: 'View options', exact: true });
   await expect(view).toBeVisible();
+  await expect(page.locator(`.lab-bindable-session-window[data-view-id="${id}"] .lab-session-heading`).getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
   await expect.poll(async () => {
-    const [button, title] = await Promise.all([view.boundingBox(), heading.locator('.lab-session-heading-title').boundingBox()]);
+    const [button, title] = await Promise.all([view.boundingBox(), toolbar.locator('.ui-toolbar-heading').boundingBox()]);
     if (!button || !title) return Number.POSITIVE_INFINITY;
     return Math.abs(button.y + button.height / 2 - title.y - title.height / 2);
   }).toBeLessThanOrEqual(1);
@@ -218,15 +220,15 @@ test('closing the selected and final primary leaves usable independent docks and
       const options = page.getByRole('region', { name: 'View options', exact: true });
       await options.getByRole('button', { name: 'Hide all', exact: true }).click();
       if (await options.isVisible()) await options.press('Escape');
-      await expectDockHeadingView(page, 'dock-one');
-      await test.info().attach('dock-heading-view', { body: await page.screenshot(), contentType: 'image/png' });
+      await expectToolbarView(page, 'dock-one');
+      await test.info().attach('toolbar-view', { body: await page.screenshot(), contentType: 'image/png' });
       await first.locator('[data-session-title-draggable]').press('Alt+ArrowRight');
       await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['dock-two', 'dock-one']);
       await expect.poll(async () => page.locator('[data-dock-id="dock-two"]').evaluate(element => Number((element as HTMLElement).style.order))).toBe(1);
-      await expectDockHeadingView(page, 'dock-two');
+      await expectToolbarView(page, 'dock-two');
       await first.locator('[data-session-title-draggable]').press('Alt+ArrowLeft');
       await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['dock-one', 'dock-two']);
-      await expectDockHeadingView(page, 'dock-one');
+      await expectToolbarView(page, 'dock-one');
       await expect(first.getByTestId('prompt-input')).toHaveText('A surviving dock remains interactive');
     }
     const panel = await openWindows(page);
@@ -249,7 +251,7 @@ test('closing the selected and final primary leaves usable independent docks and
       const view = document.querySelector('[aria-label="View options"]');
       const heading = document.querySelector('.lab-bindable-session-window .lab-session-heading');
       return { viewRect: view?.getBoundingClientRect().toJSON(), headingRect: heading?.getBoundingClientRect().toJSON(),
-        dockId: view?.closest('[data-view-id]')?.getAttribute('data-view-id'), standalone: !!view?.closest('.lab-window-controls') };
+        dockId: view?.closest('[data-view-id]')?.getAttribute('data-view-id'), toolbar: !!view?.closest('.lab-window-toolbar') };
     }), null, 2), contentType: 'application/json' });
     throw error;
   } finally { await workspace.close(); }

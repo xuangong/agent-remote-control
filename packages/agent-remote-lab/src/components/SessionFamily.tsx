@@ -5,7 +5,7 @@ import { isBotView } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { useWindowSessionBridgeContext } from '../window-session-bridge-context.js';
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
-import { DockResize, useSessionDockHeadingStart } from './SessionDock.js';
+import { DockResize } from './SessionDock.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { conversationSessionStorage } from '../conversation-storage.js';
@@ -41,7 +41,6 @@ function restore(key: string, root: SessionWindowTarget): Layout {
 export function SessionFamily(props: Props) {
   const { target, compact, active } = props;
   const titleInteraction = useContext(SessionTitleInteractionContext);
-  const dockHeadingStart = useSessionDockHeadingStart();
   const storageKey = `agent-remote:recovery:${props.storageScope}:session-family:${props.displayBinding && !props.displayBinding.key.startsWith('session:') ? `${props.displayBinding.key}:` : ''}${sessionKey(target)}`;
   const [layoutKey, setLayoutKey] = useState(storageKey);
   const shared = useWindowLayout();
@@ -219,7 +218,7 @@ export function SessionFamily(props: Props) {
           slotId={index === 0 ? rootView && isBotView(rootView) ? sessionBridge?.slotForView(rootView.id)?.id : undefined : childSlot?.id}
           onSelectWindowPane={() => focusPane(index)} familyActive={active} retainHidden={index > 0}
           visible={active && (!compact || focus === index) && !(index > 0 && attached[index - 1]?.collapsed)}
-          dockHeadingStart={index === 0 ? dockHeadingStart : undefined} familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
+          familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
           attachedSession={index === 0 ? props.attachedSession : openedChildren[sessionKey(item)]}
           attachmentManaged={index === 0 ? props.attachmentManaged : undefined} attachmentNotice={index === 0 ? props.attachmentNotice : undefined}

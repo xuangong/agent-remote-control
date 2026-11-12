@@ -27,17 +27,23 @@ export function visibleButton(container: ParentNode, label: string) {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
     (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label && !button.closest('[hidden]'))!;
 }
-export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[] } = {}) {
+export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
   const workspaceSpy = vi.spyOn(workspaceHooks, 'useWindowWorkspace').mockImplementation((...args) => { workspace = useWorkspace(...args); return workspace; });
   const successionSpy = vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = useSuccession(...args); return succession; });
   const hostedGroups = new Map<string, WindowGroup>();
+  let releaseInspect!: () => void;
+  const inspectGate = new Promise<void>(resolve => { releaseInspect = resolve; });
   for (let index = 0; index < localStorage.length; index++) { const key = localStorage.key(index)!; if (key.startsWith(`agent-remote:recovery:${scope}:shared-window:`)) { try { const group = JSON.parse(localStorage.getItem(key)!); if (group.window) hostedGroups.set(group.window.id, group); } catch {} } }
   if (options.hosted) {
     vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockImplementation(async () => [...hostedGroups.values()]);
-    vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => { const group = hostedGroups.get(id); if (!group) throw new Error('Group unavailable'); return group; });
+    vi.spyOn(WindowWorkspaceClient.prototype, 'inspect').mockImplementation(async id => {
+      // A held read keeps a cached Window provisional (a cold start) until the test releases it.
+      if (options.holdInspect) await inspectGate;
+      const group = hostedGroups.get(id); if (!group) throw new Error('Group unavailable'); return group;
+    });
     vi.spyOn(WindowWorkspaceClient.prototype, 'changes').mockImplementation((_id, _revision, signal) => new Promise((_resolve, reject) => { signal.addEventListener('abort', () => reject(signal.reason), { once: true }); }));
     vi.spyOn(WindowWorkspaceClient.prototype, 'mutate').mockImplementation(async (id, mutation) => { const group = applyGroupOperation(hostedGroups.get(id)!, mutation.operation); hostedGroups.set(id, group); return { ...group, result: { operationId: mutation.operationId, status: 'committed', revision: group.window.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } }; });
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: 'Fixture route unavailable.' }, { status: 404 })));
@@ -95,7 +101,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   }
   const container = await render(createElement(Access));
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
-    activityListeners,
+    activityListeners, releaseInspect: () => releaseInspect(),
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     button: (label: string) => visibleButton(container, label),
     async switchMode(mode: 'window' | 'bot') {

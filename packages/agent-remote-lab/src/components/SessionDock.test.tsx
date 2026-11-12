@@ -235,3 +235,68 @@ it.each([['A', 'keyboard'], ['B', 'keyboard'], ['B', 'drag'], [null, 'keyboard']
   expect(snapshot.views.filter(item => item.placement === 'dock').map(item => item.id)).toEqual(['D1', 'D2']);
   expect(view.querySelector('[data-dock-id="D2"] textarea')).toBe(editor);
 });
+
+it('hides dock panes without detaching them, gives the main area the width, and keeps the add button', async () => {
+  let hide!: (value: boolean) => void;
+  function Harness() {
+    const [docksHidden, setDocksHidden] = useState(false); hide = setDocksHidden;
+    return <SessionDockProvider enabled docksHidden={docksHidden}>
+      <SessionDockRail onCreateView={() => {}}><MinimizeMainSession />Main</SessionDockRail>
+      {['one', 'two'].map(id => <SessionViewPlacement key={id} id={id} title={id} visible>{({ controls }) => <section><SessionHeading trailing={controls}>{id}</SessionHeading><textarea defaultValue={id} /></section>}</SessionViewPlacement>)}
+    </SessionDockProvider>;
+  }
+  const view = await render(<Harness />);
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock one"]')!.click());
+  await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="Dock two"]')!.click());
+  const panes = [...view.querySelectorAll<HTMLElement>('.lab-session-dock-pane')], inputs = [...view.querySelectorAll('textarea')];
+  expect(panes).toHaveLength(2);
+  await act(async () => hide(true));
+  const rail = view.querySelector<HTMLElement>('.lab-session-dock-rail')!;
+  expect(rail.hasAttribute('data-docks-hidden')).toBe(true);
+  expect([...view.querySelectorAll<HTMLElement>('.lab-session-dock-pane')]).toEqual(panes);
+  for (const pane of panes) expect(pane.hidden).toBe(true);
+  expect(panes.map(pane => pane.querySelector('textarea'))).toEqual(inputs);
+  // The main area takes the width: no fixed basis, no resize handle, and nothing to minimize it for.
+  expect(rail.hasAttribute('data-docked')).toBe(false);
+  const base = view.querySelector<HTMLElement>('.lab-session-dock-base')!;
+  expect(base.style.flexBasis).toBe('');
+  expect(base.querySelector('[role="separator"]')).toBeNull();
+  expect(view.querySelector('[aria-label="Minimize main session area"]')).toBeNull();
+  const add = view.querySelector<HTMLButtonElement>('.lab-session-dock-add')!;
+  expect(add.hidden).toBe(false);
+  expect(add.closest('[hidden]')).toBeNull();
+  await act(async () => hide(false));
+  for (const pane of panes) expect(pane.hidden).toBe(false);
+  expect([...view.querySelectorAll('textarea')]).toEqual(inputs);
+  expect(rail.hasAttribute('data-docks-hidden')).toBe(false);
+});
+
+it('hides and shows the docks of a shared Window without editing it, keeping the main area minimized', async () => {
+  let hide!: (value: boolean) => void;
+  const operate = vi.fn();
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'window', revision: 0, title: 'Window', selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [{ ...createWindowView('main', undefined, 'primary'), collapsed: true }, createWindowView('one', undefined, 'dock')] };
+  function Harness() {
+    const [docksHidden, setDocksHidden] = useState(false); hide = setDocksHidden;
+    return <WindowLayoutContext.Provider value={{ window, operate }}><SessionDockProvider enabled docksHidden={docksHidden}>
+      <SessionDockRail><MinimizeMainSession /><textarea defaultValue="Main draft" /></SessionDockRail>
+      <SessionViewPlacement id="one" title="one" visible>{({ controls }) => <section><SessionHeading trailing={controls}>one</SessionHeading><textarea defaultValue="one" /></section>}</SessionViewPlacement>
+    </SessionDockProvider></WindowLayoutContext.Provider>;
+  }
+  const view = await render(<Harness />);
+  const base = () => view.querySelector<HTMLElement>('.lab-session-dock-base')!;
+  const pane = view.querySelector<HTMLElement>('[data-dock-id="one"]')!;
+  const main = view.querySelector('.lab-session-dock-main-content textarea');
+  expect(base().hasAttribute('data-minimized')).toBe(true);
+  await act(async () => hide(true));
+  expect(pane.hidden).toBe(true);
+  // With its docks hidden, the main area is shown in full.
+  expect(base().hasAttribute('data-minimized')).toBe(false);
+  expect(view.querySelector<HTMLElement>('.lab-session-dock-main-content')!.hidden).toBe(false);
+  await act(async () => hide(false));
+  expect(pane.hidden).toBe(false);
+  expect(view.querySelector('[data-dock-id="one"]')).toBe(pane);
+  expect(base().hasAttribute('data-minimized')).toBe(true);
+  expect(view.querySelector('.lab-session-dock-main-content textarea')).toBe(main);
+  expect(operate).not.toHaveBeenCalled();
+});

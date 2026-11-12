@@ -44,7 +44,7 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   compact: boolean; active: boolean; offline: boolean; controls?: ReactNode; menuActions?: ReactNode;
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; navigation?: SessionViewNavigationFactory;
   displayBinding?: DisplayPreferenceBinding;
-  visible?: boolean; fixedDisplayMode?: TimelineDisplayMode; dockHeadingStart?: ReactNode;
+  visible?: boolean; fixedDisplayMode?: TimelineDisplayMode;
   attachmentEnabled?: boolean; mutationBlocked?: boolean; onPendingInputChange?(count: number): void;
   familyRoot: boolean; entries: SessionWindowTarget[];
   onNavigate(destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession): Promise<void>;
@@ -173,7 +173,7 @@ export function SessionConversation(props: SessionConversationProps) {
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!!session} target={currentTarget} pending={pending} preview={preview} availabilityError={owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined)} />;
 }
-function FamilyChat({ visible = true, fixedDisplayMode, dockHeadingStart, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
+function FamilyChat({ visible = true, fixedDisplayMode, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
   const nativeIdentityMatches = state?.agent?.id === session.agentId && state.agent.providerId === session.providerId
@@ -253,7 +253,7 @@ function FamilyChat({ visible = true, fixedDisplayMode, dockHeadingStart, mutati
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
     visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={mutationBlocked || presentation?.mutationBlocked}
     draftOnly={pending || !nativeIdentityMatches || !!presentation?.draftOnly}
-    onPendingInputChange={reportPendingInput} headingStart={<>{familyRoot ? dockHeadingStart : null}{presentation?.headingStart}</>}
+    onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
     composerNotice={<>{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 

@@ -9,6 +9,7 @@ import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { WindowWorkspaces } from '../components/WindowWorkspaces.js';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { until } from '../test/bot-mode-fixtures.js';
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
 async function mount(scope: string, hosted = false, initialComposition?: CompositionDocument, showControls = false) {
@@ -105,6 +106,26 @@ it.each(['source', 'side'])('imports an explicit historical %s link without clai
     .toMatchObject({ hostId: 'host', providerId: 'recorded', nativeSessionId, sessionIntent: 'history' });
   expect(composition.windowBindings?.some(binding => binding.viewId === 'main' && [main.id, side.id].includes(binding.slotId)) ?? false).toBe(false);
   expect(main.intent.kind).toBe('fixed'); expect(side.intent.kind).toBe('fixed');
+});
+
+it.each([false, true])('creates an empty Window on request instead of carrying the page sessions (hosted %s)', async hosted => {
+  const scope = hosted ? 'https://empty-create.example/' : 'empty-create';
+  const service = hosted ? hostedWindows() : undefined;
+  const main = createCompositionSlot('page-main', { hostId: 'host', providerId: 'recorded', nativeSessionId: 'page', title: 'Page' }, scope);
+  const composition = createCompositionDocument(scope, [main]); composition.primary = main.id;
+  const read = await mount(scope, hosted, composition);
+  await until(() => expect(read().hasActiveWindow).toBe(true));
+  const bound = (window?: WorkspaceWindow) => window?.views.some(view => view.binding?.nativeSessionId === 'page');
+  await act(async () => read().create());
+  expect(bound(read().window)).toBe(true);
+  const previous = read().window!.id;
+  await act(async () => read().create({ empty: true }));
+  const created = read().window!;
+  expect(created.id).not.toBe(previous);
+  expect(created.views).toHaveLength(1);
+  expect(created.views[0]).toMatchObject({ id: 'main', placement: 'primary' });
+  expect(created.views[0]!.binding).toBeUndefined();
+  if (service) expect(bound(service.create.mock.calls.at(-1)![0])).toBe(false);
 });
 
 it('keeps an explicitly selected Window authoritative over a legacy history link', async () => {

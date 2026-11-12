@@ -609,10 +609,11 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
       }
       setError(undefined); choose(next);
     },
-    async create() {
+    /** Creates a Window from this page's sessions, or an empty one on request; a pending creation is recovered first. */
+    async create(options?: { empty?: boolean }) {
       const generation = ++selection.generation;
       let created: WindowGroup;
-      const candidate = () => unavailable ? emptyWindow() : importCompositionWindow(composition);
+      const candidate = () => options?.empty === true || unavailable ? emptyWindow() : importCompositionWindow(composition);
       if (client) { const { candidate: original, snapshot } = await createHosted(candidate, true); if (generation !== selection.generation) return; created = toWindowGroup(snapshot); commitImportedWindowComposition(composition, original, created.window); }
       else created = { window: candidate() };
       choose(created, true); setError(undefined); updateCatalog(created);

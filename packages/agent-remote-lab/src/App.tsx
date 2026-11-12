@@ -2,13 +2,13 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
 import { projectBotRoster } from './bot-roster.js';
-import { parseWorkbenchRoute, type BotPlace } from './workbench-mode.js';
+import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
 import { BotPicture, botDisplayName } from './components/BotRoster.js';
@@ -18,9 +18,14 @@ import { useWindowWorkspace } from './hooks/useWindowWorkspace.js';
 import { useWindowSessionRetention } from './hooks/useWindowSessionRetention.js';
 import { WindowLayoutContext, WindowPresentationContext } from './window-workspace-context.js';
 import { WindowWorkspaces } from './components/WindowWorkspaces.js';
+import { AgentControl } from './components/AgentControl.js';
+import { useWindowActions, windowCatalog } from './hooks/useWindowActions.js';
+import { WindowToolbar } from './shell/WindowToolbar.js';
+import { Sheet } from './ui/Sheet.js';
+import { Button } from './ui/Button.js';
 import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
-import { touchWindow } from './window-recency.js';
+import { byRecentUse, touchWindow } from './window-recency.js';
 import { useSessionStates } from './hooks/useSessionStates.js';
 import { sessionActivity } from './session-activity-status.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
@@ -181,6 +186,14 @@ import { HostVscodeTunnel } from './components/HostVscodeTunnel.js';
 import { HttpVscodeTunnelClient, VscodeTunnelScope } from './vscode-tunnel.js';
 import { useDeploymentUpdate } from './hooks/useDeploymentUpdate.js';
 import { useShellShortcuts } from './hooks/useShellShortcuts.js';
+import { CommandPalette } from './shell/CommandPalette.js';
+import type { CommandItem } from './shell/command-search.js';
+import { commandSessions, sessionSubtitle, sessionViewLocation, type CommandSession } from './shell/command-items.js';
+import { revealView, viewSelection } from './window-view-selection.js';
+import { applePlatform } from './platform.js';
+
+/** A step that search runs once `mode` is in front; `confirmed` steps also wait for a confirmed Window. */
+type ModeStep = { mode: WorkbenchMode; run(): void; confirmed: boolean };
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -376,8 +389,7 @@ function AppContent({
   const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
   const [minimizedViewTarget, setMinimizedViewTarget] = useState<HTMLDivElement | null>(null);
   const [sessionViewTarget, setSessionViewTarget] = useState<HTMLDivElement | null>(null);
-  const [windowViewTarget, setWindowViewTarget] = useState<HTMLDivElement | null>(null);
-  const [dockViewTarget, setDockViewTarget] = useState<HTMLDivElement | null>(null);
+  const [windowToolbarViewTarget, setWindowToolbarViewTarget] = useState<HTMLDivElement | null>(null);
   const [mobileViewTarget, setMobileViewTarget] = useState<HTMLDivElement | null>(null);
   const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
   const [pageViewTarget, setPageViewTarget] = useState<HTMLDivElement | null>(null);
@@ -458,6 +470,30 @@ function AppContent({
   const windowWorkspace = { ...workspaceController,
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
   };
+  // One set of Window actions for the sidebar's Windows list and the Window toolbar: one busy state, one notice, shown as a toast.
+  const windowActions = useWindowActions(windowWorkspace, baseUrl);
+  // A notice is cleared once a toast shows it; while toasts are inactive (Bot mode) it waits.
+  useEffect(() => {
+    if (!windowActions.notice || !toast) return;
+    toast.show('window-action', 'Window', windowActions.notice, windowActions.noticeTone ?? 'error');
+    windowActions.setNotice(undefined);
+  }, [windowActions.notice, windowActions.noticeTone, toast]);
+  const [docksHidden, setDocksHidden] = useState(() => { try { return localStorage.getItem(DOCKS_HIDDEN_KEY) === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem(DOCKS_HIDDEN_KEY, docksHidden ? '1' : '0'); } catch { /* Keep the choice for this page without storage. */ } }, [docksHidden]);
+  const [agentControlOpen, setAgentControlOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // Docking a view in the open Window shows the docks again, and so does closing its last dock; switching Windows keeps the choice.
+  const dockViews = useRef<{ windowId?: string; ids: Set<string> }>({ ids: new Set() });
+  const dockIds = (sharedWindow?.views ?? []).filter(view => view.placement === 'dock').map(view => view.id);
+  const dockKey = dockIds.join('\n');
+  useEffect(() => {
+    const previous = dockViews.current, ids = new Set(dockIds);
+    dockViews.current = { windowId: sharedWindow?.id, ids };
+    if (!sharedWindow || previous.windowId !== sharedWindow.id) return;
+    if (dockIds.some(id => !previous.ids.has(id)) || previous.ids.size > 0 && ids.size === 0) setDocksHidden(false);
+  }, [sharedWindow?.id, dockKey]);
+  // A docked view that is chosen (sidebar row, search) would stay invisible behind hidden docks, so they show again.
+  const showDockOf = useCallback((view: Pick<WindowView, 'placement'>) => { if (view.placement === 'dock') setDocksHidden(false); }, []);
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
   if (!accessReady) botPresentation.recovering = true;
@@ -555,20 +591,28 @@ function AppContent({
   // Compact layouts have no page; the page does not reappear when the window widens again.
   useEffect(() => { if (compactLayout) setSessionsPage(false); }, [compactLayout]);
   const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
-  const contextFocusHidden = useRef(false);
+  const sidebarShown = useRef(desktopContextVisible);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
-  useShellShortcuts({
-    setMode: navigation.setMode,
-    toggleSidebar: compactLayout ? undefined : windowMode ? () => {
-      contextFocusHidden.current = focusWithinContext();
-      setDesktopContextVisible(value => !value);
-    } : () => setBotRosterCollapsed(value => !value),
-  });
-  // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
+  const toggleSidebar = compactLayout ? undefined : windowMode
+    ? () => setDesktopContextVisible(value => !value)
+    : () => setBotRosterCollapsed(value => !value);
+  // ⌘K opens the command palette, which serves both modes.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  useShellShortcuts({ setMode: navigation.setMode, toggleSidebar, openSearch });
+  // Steps that search runs once a mode has taken over (see inMode); they run after the Window workspace's own effects.
+  const modeSteps = useRef<ModeStep[]>([]);
+  const [queuedModeSteps, setQueuedModeSteps] = useState(0);
+  // Palette items and deferred steps call the functions of the latest render, not of the render that built them.
+  const searchRuns = useRef({ inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode });
+  searchRuns.current = { inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode };
+  // Focus inside a sidebar that hides would fall to the page; it goes to the View trigger, else into the main stage. The
+  // check runs when the sidebar hides, not when it is toggled: the palette's Hide sidebar returns focus to the sidebar's
+  // Search button only as it closes, in the same commit.
   useLayoutEffect(() => {
-    const lost = contextFocusHidden.current;
-    contextFocusHidden.current = false;
-    if (!lost || desktopContextVisible || !(document.activeElement === document.body || focusWithinContext())) return;
+    const hidden = sidebarShown.current && !desktopContextVisible;
+    sidebarShown.current = desktopContextVisible;
+    if (!hidden || !(document.activeElement === document.body || focusWithinContext())) return;
     const trigger = viewTriggerRef.current;
     if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
     if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
@@ -1130,7 +1174,9 @@ function AppContent({
   const windowStageVisible = windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen;
   // Compact layouts keep only the floating Windows list.
   const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
-  const windowOverviewAvailable = windowMode && !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  // Whether All Windows can show, whatever the mode; the palette offers it from Bot mode too.
+  const windowOverviewSupported = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  const windowOverviewAvailable = windowMode && windowOverviewSupported;
   const backgroundInert = supportingRailOpen ? { inert: '' } : {};
 
   const activeAgentId = state?.agent?.id ?? (succession.active ? undefined : attachingAgentId);
@@ -1208,12 +1254,15 @@ function AppContent({
     if (panel === 'favorites') void favorites.refresh();
   }
   const sessionsPageTitle = sessionPanel === 'list' ? 'All sessions' : sessionPanel === 'favorites' ? 'Favorites' : sessionPanel === 'new' ? 'New session' : 'Settings';
-  /** Shows the new-session form: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
-  function openNewSessionPanel() {
-    if (!compactLayout) { openPage('new'); return; }
-    setActiveView('workbench'); setSessionPanel('new');
+  /** Shows a sidebar panel: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
+  function showPanel(panel: typeof sessionPanel) {
+    if (!compactLayout) { openPage(panel); return; }
+    setActiveView('workbench'); setSessionPanel(panel);
     setInspectorOpen(false); setContextOpen(true);
+    if (panel === 'favorites') void favorites.refresh();
   }
+  /** Shows the new-session form. */
+  function openNewSessionPanel() { showPanel('new'); }
   function createWindowFromMenu() {
     if (creatingWindowRef.current) return;
     creatingWindowRef.current = true; setCreatingWindow(true);
@@ -1234,6 +1283,15 @@ function AppContent({
     try { sessionWindows.create(); showWindowSessionChooser(); }
     catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
+  /** Adds an empty session view and selects it, without opening the sessions page. */
+  function addSessionView() {
+    try { sessionWindows.create(); }
+    catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
+  }
+  /** The desktop Window toolbar, above the session views of an available shared Window. */
+  const windowToolbarShown = !!sharedWindow && !compactLayout && !windowWorkspace.unavailable;
+  // The toolbar's sheets belong to its Window: switching Windows, or the toolbar going away (a compact layout, Bot mode, an unavailable Window), closes them.
+  useEffect(() => { setAgentControlOpen(false); setDeleteConfirmOpen(false); }, [windowWorkspace.client, sharedWindow?.id, windowToolbarShown, windowMode]);
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
     const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
     if (slot && entry.managed) {
@@ -1708,6 +1766,108 @@ function AppContent({
   }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, windowSessionStatus);
+  /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
+  function selectWindowView(view: WindowView) {
+    showDockOf(view);
+    const failed = (error: unknown) => windowActions.setNotice(message(error, 'The session view was not selected.'));
+    try { void windowWorkspace.operate(viewSelection(view)).catch(failed); } catch (error) { failed(error); return; }
+    revealView(view.id); closePage();
+  }
+  /**
+   * Queues a step for when `mode` is in front; a step for another mode than the one shown is dropped. Entering Window
+   * mode restores the page's Window, which would supersede a Window opened or created in the same turn, so steps never
+   * run in the turn that switches. A step that edits the open Window (`confirmed`) also waits until the Window is
+   * confirmed, since a cached Window shown while it loads is read-only.
+   */
+  function inMode(mode: WorkbenchMode, run: () => void, confirmed = false) {
+    modeSteps.current.push({ mode, run, confirmed }); setQueuedModeSteps(value => value + 1);
+  }
+  /** Shows a mode; when the mode changes, focus moves into it once it shows (the palette's opener is in the hidden mode). */
+  function switchMode(mode: WorkbenchMode) {
+    if (navigation.mode === mode) return;
+    navigation.setMode(mode); inMode(mode, () => searchRuns.current.focusShownMode(mode));
+  }
+  /** Focuses the shown mode's Search button, else its main heading, unless focus is already inside it. */
+  function focusShownMode(mode: WorkbenchMode) {
+    const root = document.querySelector<HTMLElement>(`[data-workbench-mode="${mode}"]`);
+    if (!root || root.hidden || root.contains(document.activeElement)) return;
+    const shown = (element: HTMLElement) => !element.closest('[hidden], [inert]');
+    const target = [...root.querySelectorAll<HTMLElement>('button[aria-label="Search"]')].find(shown)
+      ?? [...root.querySelectorAll<HTMLElement>('.ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown);
+    target?.focus({ preventScroll: true });
+  }
+  const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
+  useEffect(() => {
+    if (!modeSteps.current.length) return;
+    modeSteps.current = modeSteps.current.filter(step => {
+      if (step.mode !== navigation.mode) return false;
+      if (step.confirmed && step.mode === 'window' && !windowConfirmed) return true;
+      step.run(); return false;
+    });
+  }, [navigation.mode, queuedModeSteps, windowConfirmed]);
+  async function openWindowFromSearch(id: string) {
+    try { await windowWorkspace.open(id); closePage(); }
+    catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); }
+  }
+  /**
+   * Opens a session from search: in the view that shows it (in the open Window first, else opening the Window that
+   * has it), or else in the presented view, as All sessions does.
+   */
+  async function openSessionFromSearch(session: CommandSession) {
+    const key = sessionKey(session), current = windowWorkspace.readWindow();
+    const location = sessionViewLocation(windowCatalog(windowWorkspace), current?.id, key);
+    if (!location) { void openDirectorySession(session); return; }
+    if (location.windowId !== current?.id) {
+      try { await windowWorkspace.open(location.windowId); }
+      catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); return; }
+    }
+    // Only select once that Window is open: a newer navigation may have replaced it while it loaded.
+    const open = windowWorkspace.readWindow();
+    const view = open?.id === location.windowId ? open.views.find(candidate => candidate.binding && sessionKey(candidate.binding) === key) : undefined;
+    if (view) selectWindowView(view);
+  }
+  // The palette's Windows and sessions are built only while it is open, and again only when their sources change.
+  const searchCatalog = useMemo(() => searchOpen ? windowCatalog(windowWorkspace) : [],
+    [searchOpen, windowWorkspace.windows, windowWorkspace.window, windowWorkspace.readGroup]);
+  const windowItems = useMemo(() => byRecentUse(baseUrl, searchCatalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
+    subtitle: `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`,
+    run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openWindowFromSearch(window.id)); } })),
+  [baseUrl, searchCatalog]);
+  const sessionItems = useMemo(() => !searchOpen ? [] : commandSessions(sessionEntries, favorites.stars, searchCatalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
+    .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
+      return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}),
+        run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openSessionFromSearch(session), true); } }; }),
+  [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers]);
+  /** The palette's items, built from what the page already knows, and only while it is open. */
+  function commandItems(): CommandItem[] {
+    const apple = applePlatform(), toWindow = () => switchMode('window');
+    /** Runs a step in Window mode, switching to it first; see inMode. */
+    const inWindow = (step: () => void, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); };
+    const sidebarShown = windowMode ? desktopContextVisible : !botRosterCollapsed;
+    const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
+      ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
+    const actions: CommandItem[] = [
+      action('new-session', 'New session', () => { toWindow(); openNewSessionPanel(); }),
+      action('new-window', 'New Window', inWindow(() => searchRuns.current.createWindowFromMenu())),
+      ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }, true))] : []),
+      action('all-sessions', 'All sessions', () => { toWindow(); showPanel('list'); }),
+      ...(userScoped ? [action('favorites', 'Favorites', () => { toWindow(); showPanel('favorites'); })] : []),
+      action('settings', 'Settings', () => { toWindow(); showPanel('settings'); }),
+      ...(toggleSidebar ? [action('toggle-sidebar', sidebarShown ? 'Hide sidebar' : 'Show sidebar', toggleSidebar,
+        apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
+      windowMode ? action('bot-mode', 'Switch to Bot mode', () => switchMode('bot'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' })
+        : action('window-mode', 'Switch to Window mode', toWindow, apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
+      ...(windowOverviewSupported ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
+    ];
+    const bots = botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
+      title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
+      run: () => {
+        const switching = windowMode;
+        navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
+        if (switching) inMode('bot', () => searchRuns.current.focusShownMode('bot'));
+      } })));
+    return [...actions, ...windowItems, ...bots, ...sessionItems];
+  }
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
   const applySessionTitle = useCallback((session: StarInput) => {
     setConfirmedTitleState(current => {
@@ -2472,7 +2632,6 @@ function AppContent({
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
     return {
       headingMode: compactLayout ? 'toolbar' as const : 'inline' as const,
-      headingStart: !botPresentation && !compactLayout && view?.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined,
       state: botPresentation ? context.state : forkDisplayState(context.state, fork),
       questionDrafts: questionDrafts[source.agentId] ?? {},
       onQuestionDraftChange: (requestId: string, draft: QuestionDraft) => setQuestionDrafts(current => ({
@@ -2668,7 +2827,7 @@ function AppContent({
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
     successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
-    leadingControls={sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setDockViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : undefined}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
+    docksHidden={!!sharedWindow && !compactLayout && docksHidden}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}
     {activated ? tracking.observers : null}
     {!windowWorkspace.unavailable ? <>
@@ -2713,7 +2872,9 @@ function AppContent({
     <ViewOptions modeControls={<WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />} attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget : sharedWindow && !primaryGroups.length ? dockViewTarget ?? windowViewTarget : minimizedViewTarget ?? sessionViewTarget}
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget
+      // A desktop Window keeps View options in one place, its toolbar, rather than in the first pane heading.
+      : windowToolbarShown ? windowToolbarViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={!windowMode || supportingRailOpen}
       onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
@@ -2780,7 +2941,7 @@ function AppContent({
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
       onClose={() => setContextOpen(false)}
     >
-      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<Menu label="New" icon="plus" items={[
+      {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={openSearch} actions={<Menu label="New" icon="plus" items={[
         { label: 'New session', onSelect: openNewSessionPanel },
         { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
       ]} />} /> : null}
@@ -2796,7 +2957,7 @@ function AppContent({
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
-            <WindowWorkspaces workspace={windowWorkspace} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
+            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf}
               onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
@@ -2841,7 +3002,16 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench' || pageOpen}
       >
-        {sharedWindow && !primaryGroups.length && !compactLayout ? <div ref={setWindowViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-window-controls" /> : null}
+        {windowToolbarShown && sharedWindow ? <WindowToolbar windowId={sharedWindow.id} title={sharedWindow.title} viewCount={sharedWindow.views.length}
+          leading={<div ref={setWindowToolbarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />}
+          // The title is not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
+          readOnly={windowWorkspace.provisional} deleteDisabled={windowActions.busy}
+          onRename={title => void windowActions.saveRename(sharedWindow.id, title)}
+          onNewView={addSessionView} onOpenSession={createSessionView}
+          hasDocks={sharedWindow.views.some(view => view.placement === 'dock')} docksHidden={docksHidden} onToggleDocks={() => setDocksHidden(value => !value)}
+          canShowAsSection={!windowWorkspace.group?.bots} onShowAsSection={() => void windowActions.showAsSection()}
+          onCopyLink={() => void windowActions.copyLink()} onAgentControl={windowWorkspace.client ? () => setAgentControlOpen(true) : undefined}
+          onDelete={() => setDeleteConfirmOpen(true)} /> : null}
         <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={entry.id} entry={entry} baseUrl={baseUrl}
           // Not windowStageVisible: `visible` also decides docking (a hidden view leaves the dock) and, through SessionFamily, keeps the
           // conversation attached. The sessions page hides #lab-workbench instead, and visibleWindows leaves these views unseen.
@@ -2865,7 +3035,6 @@ function AppContent({
         {promptMigrations.notice}
         {uncertainMutation ? <p className="lab-control-note" role="alert">The previous action may have completed before the connection was interrupted. Its result is unknown. It will not be replayed automatically.</p> : null}
         {sharedWindow ? <SessionDockRail compact={compactLayout} onCreateView={createSessionView}
-          minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />}
           onSelectPrimaryGroup={selectPrimaryGroup}
           onResizePrimaryGroup={(viewId, width) => windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width })}
           onCollapsePrimaryGroup={(viewId, collapsed) => windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed })}
@@ -2897,7 +3066,6 @@ function AppContent({
                 sessionPresentation={presentSessionView} />
                 : <div className="lab-empty-session-view" role="status" data-view-id={view.id} aria-current={view.id === presentedViewId || undefined}>
                   <header className="lab-empty-session-heading">
-                    {!compactLayout && view.id === primaryGroups[0]?.id ? <div ref={setSessionViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
                     <strong>Select session</strong>
                     <button type="button" data-pane-selection-ignore aria-label="Close primary group: Select session" title="Close session view"
                       onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button>
@@ -3014,7 +3182,21 @@ function AppContent({
     </SupportingRail>
     </WindowPresentationContext.Provider>
     </> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} /></SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
+    {/* Mounted only while open, so other dialogs on the page stay the only ones there. */}
+    {sharedWindow && windowToolbarShown && windowMode && agentControlOpen ? <Sheet open title="Agent control" onClose={() => setAgentControlOpen(false)}>
+      <AgentControl client={windowWorkspace.client} windowId={sharedWindow.id} current={menuCurrentBinding} active />
+    </Sheet> : null}
+    {sharedWindow && windowToolbarShown && windowMode && deleteConfirmOpen ? <Sheet open title="Delete this Window?" onClose={() => setDeleteConfirmOpen(false)}>
+      <p className="lab-sheet-message">{`“${sharedWindow.title}” and its layout are deleted. Its agent sessions keep running and stay in All sessions.`}
+        {windowCatalog(windowWorkspace).every(window => window.id === sharedWindow.id) ? ' A new empty Window opens in its place.' : null}</p>
+      <div className="lab-sheet-actions">
+        <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+        <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
+      </div>
+    </Sheet> : null}
+  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch} />
+    {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
+    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {
@@ -3041,6 +3223,9 @@ function focusWithinContext(): boolean {
 function createAgentId(): string {
   return `lab-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
 }
+
+/** Whether the desktop Window toolbar hides the dock rail's panes; one choice for every Window. */
+const DOCKS_HIDDEN_KEY = 'agent-remote:docks-hidden';
 
 function isCompactLayout(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1180px)').matches;

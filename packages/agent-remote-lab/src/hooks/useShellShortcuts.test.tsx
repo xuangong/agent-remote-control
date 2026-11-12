@@ -119,3 +119,59 @@ it('stops listening once unmounted', async () => {
   expect(toggleSidebar).not.toHaveBeenCalled();
   expect(setMode).not.toHaveBeenCalled();
 });
+
+it('opens search with Command-K on Apple platforms and Control-K elsewhere, also from a text field or the composer', async () => {
+  onPlatform('MacIntel');
+  const openSearch = vi.fn(), setMode = vi.fn();
+  const container = await render(<Harness setMode={setMode} openSearch={openSearch} />);
+  const field = document.createElement('input'), composer = document.createElement('div');
+  composer.contentEditable = 'true'; container.append(field, composer);
+  const pressIn = async (target: Element, init: KeyboardEventInit) => {
+    const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    await act(async () => { target.dispatchEvent(event); });
+    return event;
+  };
+  expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect((await pressIn(field, { key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect((await pressIn(composer, { key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(3);
+  // Not with Alt or Shift, not with the other primary modifier, and not on a different layout's K position by `key` alone.
+  await press({ key: '˚', code: 'KeyK', metaKey: true, altKey: true });
+  await press({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true });
+  await press({ key: 'k', code: 'KeyK', ctrlKey: true });
+  expect(openSearch).toHaveBeenCalledTimes(3);
+  expect(setMode).not.toHaveBeenCalled();
+
+  // Other layouts: Dvorak types K from the QWERTY V position; `key` decides there.
+  expect((await press({ key: 'k', code: 'KeyV', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+  // Another Latin letter at the K position is that letter's shortcut (Colemak types E there); a non-Latin layout falls back to the position.
+  expect((await press({ key: 'e', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+  expect((await press({ key: 'л', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(5);
+
+  onPlatform('Win32');
+  expect((await press({ key: 'k', code: 'KeyK', ctrlKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(6);
+});
+
+it('leaves Command-K alone without a search, and while a dialog such as the palette itself is open', async () => {
+  onPlatform('MacIntel');
+  const setMode = vi.fn();
+  await unmount(await render(<Harness setMode={setMode} />).then(async container => {
+    expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+    return container;
+  }));
+  const openSearch = vi.fn();
+  await render(<Harness setMode={setMode} openSearch={openSearch} />);
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('open', '');
+  document.body.append(dialog);
+  try {
+    expect((await press({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+    expect(openSearch).not.toHaveBeenCalled();
+  } finally { dialog.remove(); }
+  await press({ key: 'k', code: 'KeyK', metaKey: true });
+  expect(openSearch).toHaveBeenCalledOnce();
+});

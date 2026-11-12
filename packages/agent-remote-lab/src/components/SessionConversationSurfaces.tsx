@@ -12,12 +12,12 @@ import { TpmViewScope } from '../hooks/useTpmVisibility.js';
 import { TeamViewScope } from '../hooks/useTeamVisibility.js';
 import { sessionKey } from '../session-tree.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
-import { moveSessionHost, useSessionDockHeadingStart } from './SessionDock.js';
+import { moveSessionHost } from './SessionDock.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
 import { ToastActivity } from './Toast.js';
 
 interface ConversationPresentation {
-  visible: boolean; fixedDisplayMode?: TimelineDisplayMode; dockHeadingStart?: ReactNode;
+  visible: boolean; fixedDisplayMode?: TimelineDisplayMode;
   onPendingInputChange?(count: number): void;
 }
 export interface SessionSurfaceDescriptor {
@@ -182,15 +182,14 @@ export function SessionConversationMount({ mode, descriptor, active }: { mode: W
   const layout = useContext(WindowLayoutContext), bridge = useContext(WindowSessionBridgeContext);
   const presentedViewId = useContext(WindowPresentationContext), titleInteraction = useContext(SessionTitleInteractionContext);
   const track = useContext(TrackViewScope), ask = useContext(AskViewScope), tpm = useContext(TpmViewScope), team = useContext(TeamViewScope);
-  const dockHeadingStart = useSessionDockHeadingStart();
   const destination = useRef<HTMLDivElement>(null), token = useRef(Symbol('conversation destination'));
   const captured: CapturedDescriptor = mode === 'window' ? { ...descriptor,
     layout: descriptor.layout ?? layout, bridge: descriptor.bridge ?? bridge,
     presentedViewId: descriptor.presentedViewId ?? presentedViewId, titleInteraction: descriptor.titleInteraction ?? titleInteraction,
-    props: { ...descriptor.props, dockHeadingStart: descriptor.props.dockHeadingStart ?? dockHeadingStart }, track, ask, tpm, team,
+    track, ask, tpm, team,
   } : { ...descriptor, layout: undefined, bridge: undefined, presentedViewId: undefined, titleInteraction: undefined,
     track: undefined, ask: undefined, tpm: undefined, team: undefined,
-    props: { ...descriptor.props, familyRoot: false, dockHeadingStart: undefined },
+    props: { ...descriptor.props, familyRoot: false },
   };
   useLayoutEffect(() => {
     if (scope && destination.current) scope.registry.register(token.current, { mode, descriptor: captured, active, destination: destination.current });
@@ -199,6 +198,6 @@ export function SessionConversationMount({ mode, descriptor, active }: { mode: W
     const owner = token.current;
     return () => scope?.registry.unregister(descriptor.slotId, owner);
   }, [scope?.registry, descriptor.slotId]);
-  if (!scope) return <SessionConversation {...descriptor.props} dockHeadingStart={captured.props.dockHeadingStart} visible={active && descriptor.props.visible} />;
+  if (!scope) return <SessionConversation {...descriptor.props} visible={active && descriptor.props.visible} />;
   return <div ref={destination} className="lab-session-conversation-destination" style={{ display: 'flex', flex: 1, flexDirection: 'column', minHeight: 0, minWidth: 0, height: '100%' }} />;
 }

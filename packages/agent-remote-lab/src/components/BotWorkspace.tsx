@@ -24,8 +24,10 @@ export interface BotWorkspaceProps {
   describeConversation(place: BotPlace): SessionSurfaceDescriptor | undefined;
   /** Whether the desktop roster is hidden; the state lives in App so the shell shortcut can toggle it. Compact layouts ignore it. */
   rosterCollapsed: boolean; onToggleRoster(): void;
+  /** Opens search; the roster's header offers it. */
+  onSearch?(): void;
 }
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch }: BotWorkspaceProps) {
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [creating, setCreating] = useState(false), [title, setTitle] = useState(''), [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -82,7 +84,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     }}>
     <h1 className={compact && !showConversation ? 'lab-bot-title' : 'lab-bot-title agent-visually-hidden'}>Bots</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster" hidden={(compact && showConversation) || rosterHidden}>
-      <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
+      <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={onSearch} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
       {unavailable ? availabilityNotice : null}
       {creating ? <form className="lab-bot-new-section" aria-label="New section" onSubmit={event => { event.preventDefault(); void save(); }}
         onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreating(false); } }}>

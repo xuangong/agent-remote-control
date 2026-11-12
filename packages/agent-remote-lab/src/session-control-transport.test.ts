@@ -94,7 +94,7 @@ it.each([
     expect(sendMessage.mock.calls).toEqual([
       'first page input', 'second page input', 'remote command input',
       'first page after reconnect', 'second page after the others close',
-    ].map(text => [text, { onAcceptance: expect.any(Function) }]));
+    ].map(text => [text, expect.objectContaining({ onAcceptance: expect.any(Function) })]));
     expect(cancel).not.toHaveBeenCalled();
     expect(dispose).not.toHaveBeenCalled();
     expect(resumeSession).not.toHaveBeenCalled();

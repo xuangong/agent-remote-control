@@ -31,11 +31,16 @@ export function SessionTimelineTools({ collapsible, searchOpen, searchPanel, tim
       if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.target !== timelineRef.current) return;
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) dismissOutside(event);
     };
-    ownerDocument.addEventListener('pointerdown', dismissOutside, true);
+    // The entry a search result revealed may exist only while the search is open (a hidden letter); a tap on it must reach it.
+    const dismissOnPointerDown = (event: Event) => {
+      if (event.composedPath().some(target => target instanceof Element && target.matches('[data-inspected="true"]'))) return;
+      dismissOutside(event);
+    };
+    ownerDocument.addEventListener('pointerdown', dismissOnPointerDown, true);
     ownerDocument.addEventListener('wheel', dismissOnWheel, { capture: true, passive: true });
     ownerDocument.addEventListener('keydown', dismissOnScrollKey);
     return () => {
-      ownerDocument.removeEventListener('pointerdown', dismissOutside, true);
+      ownerDocument.removeEventListener('pointerdown', dismissOnPointerDown, true);
       ownerDocument.removeEventListener('wheel', dismissOnWheel, true);
       ownerDocument.removeEventListener('keydown', dismissOnScrollKey);
     };

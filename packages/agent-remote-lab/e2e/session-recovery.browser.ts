@@ -38,7 +38,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
       };
       return socket;
     }});
-    createRoot(document.getElementById('root')).render(<App baseUrl={base} transport={transport} directory={new SessionDirectoryClient(base)} />);
+    createRoot(document.getElementById('root')).render(<App baseUrl={base} transport={transport} directory={new SessionDirectoryClient(base, undefined, ${JSON.stringify(fixture.hostId)})} />);
   `;
   // The page gets the product's styles, including those the components import, from the bundle.
   const bundle = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
@@ -54,6 +54,8 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   page.on('pageerror', error => errors.push(error.message)); page.on('websocket', () => sockets++);
   await page.goto(fixture.url + '/');
   const input = page.getByTestId('prompt-input');
+  // The movable TPM, Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.
+  const pressMessageAction = (name: string) => page.getByRole('button', { name, exact: true }).evaluate(button => (button as HTMLElement).click());
   await expect.poll(() => input.isEnabled()).toBe(true);
   expect(await page.locator('#lab-context').count()).toBe(0);
   await input.fill('Keep draft across background');
@@ -64,7 +66,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   });
   await expect.poll(() => sockets).toBe(before + 1);
   await expect.poll(() => input.isEnabled()).toBe(true);
-  expect(await input.inputValue()).toBe('Keep draft across background');
+  expect(await input.textContent()).toBe('Keep draft across background');
   expect(await page.evaluate(() => (window as any).attempts.length)).toBe(0);
   await page.clock.install();
   await page.evaluate(() => { (window as any).dropNext = true; });
@@ -85,7 +87,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     const key = Object.keys(localStorage).find(key => key.startsWith(`agent-remote:recovery:${base}:outbox:`))!;
     return JSON.parse(localStorage.getItem(key)!)[0].operationId;
   }, baseUrl);
-  await page.getByRole('button', { name: 'Retry message', exact: true }).click();
+  await pressMessageAction('Retry message');
   await expect.poll(() => page.locator('.agent-message-delivery').textContent()).toContain('Sent');
   expect(await page.evaluate(() => (window as any).attempts[0].operationId)).toBe(savedOperation);
   expect(await page.locator('.agent-outgoing-message').count()).toBe(1);
@@ -95,7 +97,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await expect.poll(() => input.isEnabled()).toBe(true);
   await expect.poll(() => page.getByRole('button', { name: 'Delete message', exact: true }).isEnabled()).toBe(true);
   await page.screenshot({ path: `/tmp/arc-mobile-recovery-${engine.name()}.png` });
-  await page.getByRole('button', { name: 'Delete message', exact: true }).click();
+  await pressMessageAction('Delete message');
   expect(await page.locator('.agent-outgoing-message').count()).toBe(0);
   await page.goto(fixture.url + '/');
   await expect.poll(() => input.isEnabled()).toBe(true);

@@ -350,7 +350,7 @@ Scope:
 Found while clearing the browser tests (§4.5), to settle in this phase:
 
 - **Capsules over the first message.** In a short conversation at 390px, the TPM, Window and Team capsules sit over the first message's Retry and Delete. Keep their placement and dragging, but they must not cover message actions.
-- **42px session actions.** Below 480px the expanded session actions are 42px wide, so that all of them fit beside their toggle at 402px. Restore 44px targets when the pane header moves these actions into its ⋯ menu (phase 4).
+- **42px session actions.** Below 480px the expanded session actions are 42px wide, and they wrap instead of running under their toggle. On a real Host, with the VS Code entry, they take two rows at 402px and cover the top of the conversation while expanded. Restore 44px targets and one row when the pane header moves these actions into its ⋯ menu (phase 4).
 
 Run chromium-mobile, webkit-mobile-viewport and webkit-ask-mobile as part of verification, after §4.4 has cleared their baseline.
 

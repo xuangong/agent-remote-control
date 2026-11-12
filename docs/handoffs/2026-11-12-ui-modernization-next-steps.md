@@ -236,6 +236,26 @@ These worktrees are merged and safe to remove:
 
 Check the others in `git worktree list` with `git rev-list --count main..<branch>` before removing them.
 
+### 4.8 chromium-desktop still fails 23 tests on main
+
+A full chromium-desktop run on 2026-11-12 (main at `22f1ead1`) failed 29 of 493 tests. fix/clean-baseline clears 6 of them (the `modernization` spec and `mobile-keyboard-controls`) and adds none; `toast-placement` failed once in the full run and passes alone. The other 23 fail on main too. They are not environmental: like §4.4, they follow product changes the tests never caught up with. First error per spec:
+
+| Spec | Tests | First error |
+|---|---|---|
+| `image-input` | 10 | `toHaveAttribute` / `toContainText` on the composer's image atoms and upload feedback |
+| `image-viewer` | 2 | the content-only image count; a timeout opening thumbnails |
+| `content-only-view` | 2 (320px, 390px) | "Session view options" sits behind "Expand session actions" (§4.4) |
+| `copilot-handoff` | 2 | an equality on the handed-off session |
+| `composer-send-press` | 1 | `setSelectionRange` on the ProseMirror composer |
+| `host-environment` | 1 | an environment filter count |
+| `mobile-sidebar` | 1 | strict mode: two `.lab-tracking-floating .lab-session-popover-panel` (the sidebar and floating hosts from 2b) |
+| `resource-input` | 1 | `toHaveText` on the transferred resource |
+| `seamless-access` | 1 | a timing bound on the cached startup |
+| `security` | 1 | a control not visible on a narrow screen |
+| `session-view-ownership` | 1 | "View and the owning title share one row in reading order" |
+
+Handle them like §4.4, one spec at a time, before phase 3 merges, so that each phase compares against a clean chromium-desktop run.
+
 ## 5. How to carry out the remaining phases
 
 ### 5.1 Process for every phase

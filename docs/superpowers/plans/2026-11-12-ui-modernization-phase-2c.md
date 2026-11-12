@@ -512,3 +512,26 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
      - ⌘K in Bot mode selects a bot.
   4. Take screenshots in light and dark mode, plus the palette and the phone layout, which should be unchanged. Read each image.
 - [ ] **Step 6:** Record deviations under "Changes made during execution" at the end of this file, and commit.
+
+---
+
+## Changes made during execution
+
+- **Deletion (Task 1–2).** `useWindowWorkspace.create({ empty: true })` was added so deleting the last Window can switch to a fresh empty Window first. Deletion errors are reported through the shared notice, not swallowed (97473018).
+- **Toolbar heading (Task 3).** The title button is named by its visible text, with `aria-description` "Rename this Window", so screen readers read the Window name first (4f9de136). An open rename ends when the toolbar switches to another Window (9b75ea9f).
+- **Cold start (Task 4).** While the cached Window is still provisional, the toolbar is `readOnly`: rename, Add, docks and Window actions are disabled. Its sheets close when the toolbar hides. Toasts carry a tone, and Delete shows a busy state. Hidden docks unhide on their own when a dock gains a new pane. The toolbar sits at z-index 61, above the floating capsules (23cce0b9).
+- **`leadingControls` removed (Task 5).** View options moves into the toolbar slot when the sidebar is hidden, so the dock heading's layout-controls slot had no users left (12674b24).
+- **Palette (Task 6–7).**
+  - The input is named "Search Windows, Bots, sessions and actions". The Search buttons carry `aria-keyshortcuts`.
+  - Arrow keys wrap, and Home and End work.
+  - The active option scrolls into view and has a visible focus ring (62a4cd54).
+  - Steps that depend on a Window (open a view, open a session) run only once the mode switch is done and the Window is confirmed. "All Windows" is offered only when `windowOverviewSupported` is true.
+  - Focus moves into the new mode after a mode switch (25b70fb1).
+- **Shared helpers.** `src/shell/command-items.ts` builds the palette items. `src/window-view-selection.ts` holds the expand/select/scroll batch shared by the sidebar and the palette.
+- **Verification results.**
+  - Typecheck passed in both configs.
+  - Unit tests: 260 files, 2632 tests, all passed.
+  - The primitives browser test passed (4/4).
+  - The chromium-desktop e2e specs all passed: `window-pane-lifecycle`, `window-workspaces`, `bot-mode`, `tpm-dock`, `session-view-binding`, `workspace-layout`, `sidebar`, `ask-session`, `session-succession` and `team`.
+  - The local instance checks passed, including the Copy link toast and clipboard.
+  - The `modernization` spec still has its 5 failures from main (a TPM 404 console error, the timeline width, the "Load resource" button); they are not caused by 2c.

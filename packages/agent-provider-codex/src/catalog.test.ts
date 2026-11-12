@@ -49,3 +49,24 @@ it('renames persisted native metadata without resuming or forking the session', 
   expect(name).toBe('New title');
   expect(app.child.killed).toBe(true);
 });
+
+it('reads one thread summary without listing the native catalog', async () => {
+  const app = createScriptedAppServer({
+    'thread/read': (params) => ({ thread: { id: (params as { threadId: string }).threadId, name: 'Saved task', cwd: '/project', createdAt: 100, updatedAt: 200,
+      source: 'cli', status: { type: 'active', activeFlags: ['waitingOnApproval'] } } }),
+  });
+  const provider = new CodexAppServerProvider({ spawn: () => app.child });
+  expect(await provider.readSessionSummary('saved')).toEqual({ nativeSessionId: 'saved', providerId: 'codex', title: 'Saved task', workspace: '/project',
+    createdAt: '1970-01-01T00:01:40.000Z', updatedAt: '1970-01-01T00:03:20.000Z', state: 'waiting' });
+  expect(app.requests.find((request) => request.method === 'thread/read')?.params).toEqual({ threadId: 'saved', includeTurns: false });
+  expect(app.requests.some((request) => request.method === 'thread/list')).toBe(false);
+  expect(app.child.killed).toBe(true);
+});
+
+it('reads no catalog summary for a subagent thread', async () => {
+  const app = createScriptedAppServer({
+    'thread/read': () => ({ thread: { id: 'child', source: { subAgent: { thread_spawn: {} } }, createdAt: 100, updatedAt: 200 } }),
+  });
+  const provider = new CodexAppServerProvider({ spawn: () => app.child });
+  expect(await provider.readSessionSummary('child')).toBeUndefined();
+});

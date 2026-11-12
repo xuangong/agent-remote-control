@@ -103,3 +103,24 @@ it('keeps registered workspace selection without offering folder browsing to sha
   const label = [...container.querySelectorAll('label')].find(label => label.textContent === 'Workspace')!;
   expect(label.control?.textContent).toContain('Project');
 });
+
+it('lists native sessions only after the explicit button and retains partial results after failure', async () => {
+  const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
+  const status = vi.spyOn(directory, 'listing').mockResolvedValue({ refreshing: false, complete: false, version: 0 });
+  vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
+  const container = await render(<SessionDirectory directory={directory} providerId="codex" hostId="host" opened={[]} busy={false} revision={0} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
+  expect(status).toHaveBeenCalledWith('codex');
+  expect(status.mock.calls.some(call => call[1] === true)).toBe(false);
+  await act(async () => button(container, 'Refresh').click());
+  expect(status.mock.calls.some(call => call[1] === true)).toBe(false);
+  status.mockResolvedValueOnce({ refreshing: true, complete: false, version: 1 });
+  await act(async () => button(container, 'List native sessions').click());
+  expect(status).toHaveBeenLastCalledWith('codex', true);
+  expect(button(container, 'Listing native sessions…').disabled).toBe(true);
+  status.mockResolvedValue({ refreshing: false, complete: false, error: 'Native deadline exceeded.', version: 2 });
+  vi.mocked(directory.list).mockResolvedValue({ items: [{ ...summary('saved'), providerId: 'codex' }], hasMore: false, revision: '2' });
+  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('Listing stopped:'); }, { timeout: 4000 });
+  expect(container.textContent).toContain('Previously found sessions are still available.');
+  expect(container.querySelector('.lab-session-row')?.textContent).toContain('saved');
+  expect(button(container, 'List native sessions').disabled).toBe(false);
+});

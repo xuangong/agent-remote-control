@@ -1328,6 +1328,18 @@ function AppContent({
     const current = windowWorkspace.readWindow(), view = current?.views.find(view => view.id === destination.viewId);
     if (current?.id !== destination.windowId || !view) return false;
     const expectedBinding = JSON.parse(destination.binding) as WindowSessionBinding | null;
+    if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error('The target session view changed. Choose a session again.');
+    if (windowWorkspace.readGroup(current.id)?.bots && isBotView(view)
+      && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session))) {
+      const binding = windowSessionBinding(session);
+      const existing = current.views.find(candidate => candidate.placement === 'primary' && candidate.binding && windowBindingKey(candidate.binding) === windowBindingKey(binding));
+      const beside = existing ?? createWindowView(crypto.randomUUID(), binding, 'primary');
+      await windowWorkspace.operate({ type: 'batch', operations: [
+        ...(existing ? [] : [{ type: 'view.create' as const, view: beside }]), { type: 'view.select', viewId: beside.id },
+      ] });
+      return windowSession.openPrimary(session, session.agentId ? session as OpenedSession : undefined, false, undefined, undefined, beside.id, session.sessionIntent);
+    }
+
     if (view.placement === 'primary') {
       const pending = trackedView?.read ? { scope: baseUrl, transport, slotId: trackedView.primarySlot, read: trackedView.read } : undefined;
       if (trackedView) pendingViewRestore.current = pending;

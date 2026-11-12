@@ -1913,6 +1913,19 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!owner(subject) && (!binding || !sessionAllowed(binding, subject))) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
       return rawJson(result);
     }
+    const listing = /^\/v1\/remote\/hosts\/([^/]+)\/catalog\/listing$/.exec(url.pathname);
+    if (listing) {
+      requireOwner(subject); requireAccess(listing[1]!, subject);
+      const host = requireHost(listing[1]!);
+      if (request.method !== 'GET' && request.method !== 'POST') throw new BrokerError(405, 'method_not_allowed', 'Use GET or POST.');
+      const input = request.method === 'POST' ? await readBody(request) : undefined;
+      const providerId = required(input?.providerId ?? url.searchParams.get('providerId'), 'providerId');
+      if (host.legacyDsh || !host.providers.some(provider => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
+      if (input && Object.keys(input).some(key => key !== 'providerId')) throw new BrokerError(400, 'invalid_request', 'Only providerId is accepted.');
+      const result = await rpc(host, request.method, `/remote/catalog/listing${input ? '' : '?' + new URLSearchParams({ providerId })}`, undefined, input ? JSON.stringify({ providerId }) : undefined);
+      requireOwner(principal(context)); requireAccess(host.id, principal(context));
+      return rawJson(result);
+    }
     const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders(?:\/create)?|models|child\/attach|attach|create)$/.exec(url.pathname);
     if (directory) {
       requireAccess(directory[1]!, subject);

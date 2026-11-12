@@ -358,3 +358,37 @@ test('drains an admitted setter and its final readback during shutdown', async (
  const cold=new SessionSuccessionContextStore(f.root);await cold.ready;
  expect(cold.read('handoff').resumeHandle?.opaque).toBe('{"effort":"medium"}');
 });
+
+test.each(['sendMessage', 'steer', 'sendMessageContent'] as const)('settles %s input only after native withdrawal proof and preserves newer work', async method => {
+  const f = await fixture(), cache = createOperationCache();
+  const boundary = new SessionSuccessionBoundary(f.contexts, () => {}, () => undefined, cache);
+  const target = ref('ordinary'), key = nativeSessionRefKey(target);
+  const callbacks: import('@orchardworks/agent-provider-sdk').AgentMessageOptions[] = [];
+  const native = { [method]: async (_input: unknown, options: import('@orchardworks/agent-provider-sdk').AgentMessageOptions) => {
+    callbacks.push(options); options.onAcceptance?.({ disposition: 'queued' });
+  } } as unknown as AgentSession;
+  const session = boundary.wrap(target, native), withdrawn = vi.fn();
+  const send = (operationId: string) => {
+    const op = { ...operation(operationId), ...(method === 'steer' ? { kind: 'steer' as const } : {}) };
+    return cache.execute({ operationId, scope: 'browser', kind: op.kind, target: key, parameters: op.parameters }, {
+      mutationTargets: [key], admit: entry => boundary.admit([target], entry.key),
+      run: (entry, work) => boundary.run(op, 'browser', work, entry),
+      dispatch: () => method === 'sendMessageContent' ? session.sendMessageContent!([{ type: 'text', text: 'hello' }], { onWithdrawn: withdrawn })
+        : session[method]!('hello', { onWithdrawn: withdrawn }),
+    });
+  };
+  try {
+    await send('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(cache.hasUnsettledMutation(key)).toBe(true);
+    await send('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    callbacks[0]!.onWithdrawn?.({ reason: 'stopped' });
+    expect(withdrawn).toHaveBeenCalledWith({ reason: 'stopped' });
+    expect(cache.hasUnsettledMutation(key)).toBe(true);
+    callbacks[1]!.onWithdrawn?.({ reason: 'stopped' });
+    expect(cache.hasUnsettledMutation(key)).toBe(false);
+    await boundary.reconcileCoverage(target);
+    expect(() => boundary.checkSource(target)).not.toThrow();
+    const restored = new SessionSuccessionContextStore(f.root); await restored.ready;
+    expect(restored.coverageAvailable(target)).toBe(true);
+  } finally { await boundary.close(); await cache.close(); }
+});

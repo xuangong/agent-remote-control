@@ -744,7 +744,7 @@ it('does not expose Controller folder browsing to a shared session user', async 
 it.each([
   ['/v1/remote/hosts/host/attach', { providerId: 'codex', nativeSessionId: 'native-session' }, 'session_attach_timeout'],
   ['/v1/remote/hosts/host/catalog?providerId=codex', undefined, 'host_read_timeout'],
-  ['/v1/remote/hosts/host/create', { providerId: 'codex', operationId: operationOne }, 'host_timeout'],
+  ['/v1/remote/hosts/host/create', { providerId: 'codex', operationId: operationOne }, 'session_create_pending'],
 ] as const)('classifies the deadline for %s without claiming native failure', async (path, body, code) => {
   const { broker } = await restoredFixture({ rpcTimeoutMs: 20 });
   const response = await broker.handleRequest(new Request(`https://relay.example${path}`, body ? {
@@ -752,7 +752,7 @@ it.each([
   } : undefined));
   expect(response?.status).toBe(504);
   const error = await response!.json();
-  expect(error).toMatchObject({ code, requestId: expect.any(String) });
+  expect(error).toMatchObject({ code, ...(code === 'session_create_pending' ? {} : { requestId: expect.any(String) }) });
   if (code === 'session_attach_timeout') expect(error.error).toContain('may still be opening');
   if (code === 'host_read_timeout') expect(error.error).not.toContain('operation outcome');
 });

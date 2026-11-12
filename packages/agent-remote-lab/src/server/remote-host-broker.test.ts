@@ -154,6 +154,46 @@ describe('Remote Host broker', () => {
     expect(messages.filter((message) => message.type === 'rpc_request')).toHaveLength(1);
     expect((await f.post(path, { operationId, workspaceId: 'different' })).status).toBe(409);
   });
+  it('recovers a late creation result on retry without dispatching another native creation', async () => {
+    const f = await setup({ rpcTimeoutMs: 100, creationTimeoutMs: 2000 });
+    const pair = await (await f.post('/v1/remote/pairings')).json();
+    const native = await providerHost(f.url, pair.key);
+    const messages: Array<{ type: string; requestId: string }> = [];
+    native.socket.on('message', raw => messages.push(JSON.parse(raw.toString())));
+    const path = `/v1/remote/hosts/${native.id}/create`;
+    const intent = { providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001', cwd: '/work/project' };
+    const waiting = await f.post(path, intent);
+    expect(waiting.status).toBe(504);
+    expect(await waiting.json()).toMatchObject({ code: 'session_create_pending' });
+    expect((await f.post(path, intent)).status).toBe(504);
+    const request = messages.find(message => message.type === 'rpc_request')!;
+    native.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId,
+      status: 200, body: JSON.stringify({ agentId: 'late-agent', nativeSessionId: 'late-native' }) }));
+    const retry = await f.post(path, intent);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toEqual({ agentId: 'late-agent', nativeSessionId: 'late-native' });
+    expect(messages.filter(message => message.type === 'rpc_request')).toHaveLength(1);
+    expect(messages.filter(message => message.type === 'rpc_cancel')).toHaveLength(0);
+    expect((await f.post(path, { ...intent, cwd: '/different' })).status).toBe(409);
+  });
+  it('bounds retained creation waits and preserves uncertainty after the Host deadline', async () => {
+    const f = await setup({ rpcTimeoutMs: 30, creationTimeoutMs: 150 });
+    const pair = await (await f.post('/v1/remote/pairings')).json();
+    const native = await providerHost(f.url, pair.key);
+    const messages: Array<{ type: string; requestId: string }> = [];
+    native.socket.on('message', raw => messages.push(JSON.parse(raw.toString())));
+    const path = `/v1/remote/hosts/${native.id}/create`;
+    const intent = { providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000001' };
+    expect((await f.post(path, intent)).status).toBe(504);
+    await vi.waitFor(() => expect(messages.some(message => message.type === 'rpc_cancel')).toBe(true));
+    const request = messages.find(message => message.type === 'rpc_request')!;
+    native.socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: request.requestId,
+      status: 200, body: JSON.stringify({ agentId: 'too-late-agent', nativeSessionId: 'too-late-native' }) }));
+    const retry = await f.post(path, intent);
+    expect(retry.status).toBe(504);
+    expect(await retry.json()).toMatchObject({ code: 'host_timeout' });
+    expect(messages.filter(message => message.type === 'rpc_request')).toHaveLength(1);
+  });
   it('forwards provider-scoped discovery and adopts conflict-checked Host identities', async () => {
     const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json(); const native = await providerHost(f.url, pair.key);
     const calls: any[] = [];

@@ -50,6 +50,8 @@ The managed daemon appends startup, runtime, and native Codex diagnostics to `~/
 
 ## Inspect and troubleshoot
 
+A new-session HTTP request waits up to 30 seconds. If it returns `session_create_pending`, the Relay continues waiting for the original Host creation result for up to three minutes from dispatch. Retry with the same operation identity and settings to join that operation or receive its completed result; no second native creation is sent. A Host disconnect, Relay restart, native rejection with an uncertain outcome, or the final Host deadline still requires inspecting the original session. This recovery window does not make slow native `thread/start`, `thread/read`, or `thread/resume` calls faster. Compare their `codex_request` durations in the Controller diagnostics before changing native runtime state.
+
 Use the public Agent ID shown in the workbench header:
 
 ```bash

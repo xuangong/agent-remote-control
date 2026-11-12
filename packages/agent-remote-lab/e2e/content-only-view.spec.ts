@@ -5,7 +5,11 @@ for (const width of [320, 390, 1440]) {
     await page.setViewportSize({ width, height: 850 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    const open = () => page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    const open = async () => {
+      const expand = page.getByRole('button', { name: 'Expand session actions', exact: true });
+      if (await expand.count()) await expand.click();
+      await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+    };
     await page.goto('/e2e/fixtures/view-overflow.html?view=content');
     await expect(page.locator('.agent-tool')).toHaveCount(3);
     await open();

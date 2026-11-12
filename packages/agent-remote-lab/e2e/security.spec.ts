@@ -6,7 +6,7 @@ test('security supports narrow screens, keyboard return, draft preservation and 
   await page.route('**/auth/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/auth/status') return route.fulfill({ json: { basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: now + 120000 } });
-    if (path === '/auth/sessions') return route.fulfill({ json: { sessions: [{ id: 'current', label: 'Chrome on this device', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: true }, { id: 'other', label: 'Safari on Mac', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: false }], authenticatedAt: now, recentAuthentication: true } });
+    if (path === '/auth/sessions') return route.fulfill({ json: { sessions: [{ id: 'current', label: 'Chrome on this device', createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: true }, { id: 'other', label: 'Safari on Mac', identified: true, createdAt: now, lastSeenAt: now, expiresAt: now + 3600000, current: false }], authenticatedAt: now, recentAuthentication: true } });
     if (path === '/auth/audit') return route.fulfill({ json: { events: [{ id: 'one', at: now, action: 'device_rotated', outcome: 'success', hostId: 'studio' }] } });
     mutations.push(path); return route.fulfill({ json: { ok: true } });
   });

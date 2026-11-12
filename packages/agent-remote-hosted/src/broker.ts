@@ -100,6 +100,8 @@ export interface HostBrokerOptions {
   controllerReleases?: Pick<typeof controllerReleases, 'latest'> & Partial<Pick<typeof controllerReleases, 'version'>>;
   origin: string;
   rpcTimeoutMs?: number;
+  /** Keep the original native creation result receivable after an HTTP caller stops waiting. */
+  creationTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
   keyLifetimeMs?: number;
@@ -754,7 +756,8 @@ export function createHostBroker(options: HostBrokerOptions) {
           ? 'The Host did not confirm opening the session before the Relay deadline. It may still be opening; wait briefly and reopen the same session.'
           : method === 'GET' ? 'The Host did not return the requested data before the Relay deadline. Try reading it again.'
           : 'The Host did not confirm the operation before the Relay deadline. Its outcome is unknown; check the session before retrying.', false, requestId));
-      }, diagnosticRequest ? 5000 : options.rpcTimeoutMs ?? (path === '/remote/provider-settings' ? 45000 : 30000));
+      }, diagnosticRequest ? 5000 : path === '/remote/create' ? options.creationTimeoutMs ?? 180_000
+        : options.rpcTimeoutMs ?? (path === '/remote/provider-settings' ? 45000 : 30000));
       host.pending.set(requestId, { resolve(value) {
         try { assertHostCurrent(host, generation); resolve(value); } catch (error) { reject(error as Error); }
       }, reject, timer, method, path, diagnostic: diagnosticRequest, startedAt });
@@ -1360,6 +1363,17 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (shared && exactSharedReceipt(snapshot()).agentId !== binding.agentId) throw new BrokerError(409, 'creation_outcome_unknown', 'The shared completion requires reconciliation.');
     assertMutationAccess(); await recoverBinding(host, binding); return binding;
   }
+  /** The caller's deadline does not cancel or replace the shared creation promise. */
+  async function waitForCreation(result: Promise<Binding>): Promise<Binding> {
+    let timer: unknown;
+    try {
+      return await Promise.race([result, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new BrokerError(504, 'session_create_pending',
+          'The Host is still opening this session. Retry checks the same pending creation without creating another session.')),
+        options.rpcTimeoutMs ?? 30_000);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
   async function userMutation(host: Host, action: string, body: Record<string, unknown>, subject?: string): Promise<Binding> {
     assertHostCurrent(host);
     if (action === 'create' && body.conversationKind !== undefined && (!['side', 'ask'].includes(String(body.conversationKind)) || typeof body.sourceNativeSessionId !== 'string' || body.editNativeSessionId !== undefined)) {
@@ -1955,7 +1969,9 @@ export function createHostBroker(options: HostBrokerOptions) {
         requireAccess(host.id, subject); requireOwner(subject);
         return rawJson(result);
       }
-      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') { const binding = await userMutation(host, action, await readBody(request), subject);
+      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') {
+        const operation = userMutation(host, action, await readBody(request), subject);
+        const binding = await (action === 'create' ? waitForCreation(operation) : operation);
         if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
         return json(200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
     }

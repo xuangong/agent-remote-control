@@ -1554,9 +1554,11 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-tools button:active:not(:disabled) { transform: none; }
 .lab-timeline-tools .lab-session-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 @media (hover: hover) and (pointer: fine) { .lab-timeline-tools button:hover:not(:disabled) { color: var(--obs-action); } }
-@media (max-width: 480px) {
+/* In a narrow session view the expanded actions fit beside their toggle: the toolbar's own buttons narrow to 42px. The session
+   switcher shown in the toolbar keeps its own sizes. */
+@container session-view (max-width: 480px) {
   .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { gap: 0; }
-  .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content button { flex: 0 0 42px; width: 42px; min-width: 42px; }
+  .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content button:not(.lab-chat-sessions button) { flex: 0 0 42px; width: 42px; min-width: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lab-timeline-tools[data-collapsible], .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content,

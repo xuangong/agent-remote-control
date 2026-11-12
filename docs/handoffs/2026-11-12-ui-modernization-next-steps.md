@@ -27,7 +27,7 @@ Each plan ends with "Changes made during execution", which records what differed
 | Phases | 1, 2a, 2b and 2c are done, merged and deployed |
 | Worker (Cloudflare) | Version `1a30aa8c` is live (2c). Roll back to `750bd262` (fix/e2e-repair) if needed |
 | Controller | No release is needed for phases 1–2. Every change so far is in the website (Lab) |
-| origin/main | Pushed with this document. Before it, main was 188 commits ahead. If `git log origin/main..main` is not empty on the new computer, the push did not complete; see §3.1 |
+| origin/main | The user pushes main by hand from the first computer; before that, main was about 190 commits ahead. On the new computer, `git log origin/main..main` should be empty after cloning, and the latest commits should include this document; if they don't, the push has not happened yet (§4.1) |
 
 What phases 1–2 delivered:
 
@@ -55,11 +55,11 @@ What phases 1–2 delivered:
 
 ## 2. Setting up the new computer
 
-1. **Node 24, not Node 26.** Use Node 24 (nvm `v24.22.1` worked). Node 26 has a built-in `localStorage` global, which hides jsdom's: every Lab unit test that touches `localStorage` then fails with `Cannot read properties of undefined (reading 'setItem')`. This also breaks the pre-push hook. Check with `node --version` before running tests.
+1. **Node 24, not Node 26.** Use Node 24 (nvm `v24.22.1` worked). Node 26 has a built-in `localStorage` global, which hides jsdom's: every Lab unit test that touches `localStorage` then fails with `Cannot read properties of undefined (reading 'setItem')`. This also breaks `pnpm verify` and `pnpm verify:changed`. Check with `node --version` before running tests.
 2. **Clone and install.**
    1. Clone, then run `pnpm install` at the root.
    2. Run `pnpm exec playwright install chromium webkit` in `packages/agent-remote-lab`.
-   3. Install the git hooks: `pre-commit install && pre-commit install --hook-type pre-push`.
+   3. No git hooks are needed. Pushing runs no checks since 2026-11-12; see §3.
 3. **Deploy access.** Run `pnpm exec wrangler login` in `packages/agent-remote-cloudflare`. Deploying needs a Cloudflare account that can reach the `agent-remote-control` Worker. The site is `https://agents.xianliao.de5.net`.
 4. **Local instance.** Use the `prepare-arc-local` skill (`.claude/skills/prepare-arc-local/`), then `pnpm local up` in a worktree. It needs a session that may listen on ports and start background processes.
 5. **Claude memory is per computer.** The facts that mattered are repeated here (§3, §4, §6). The older notes in `.claude` memory on the first computer are not carried over.
@@ -115,11 +115,17 @@ What phases 1–2 delivered:
 
 Push, deploy and publish only with the user's go-ahead. They approve each milestone separately.
 
-**Pushing main**
+**Pushing and checks**
 
-- The pre-push hook runs the full verify (about 10–20 minutes).
-- Run it in the background with a log, for example `nohup git push origin main > /tmp/push.log 2>&1 &`, and poll it.
-- If the hook fails, rerun the failing test file alone. If it passes alone, it is a known flake: push again. Otherwise, fix it.
+- Tests are decoupled from pushing: there is no pre-push hook, and `git push` is quick. This was the user's decision on 2026-11-12.
+- Before a merge or a push, when you want the checks, run `pnpm verify:changed` (`scripts/verify-changed.sh`). It covers:
+  - the compatibility check;
+  - the build and the type check;
+  - the unit tests of the packages changed since the merge base with `origin/main`, and of their dependents;
+  - the full `pnpm verify` when files outside `packages/` and `docs/` changed.
+
+  Releases still run `pnpm verify`.
+- If a test fails, rerun its file alone. If it passes alone, it is a known flake (§3); otherwise, fix it.
 
 **Secrets**
 
@@ -131,7 +137,13 @@ The user's rule: an issue that was not introduced by the current change still ge
 
 ### 4.1 Push main (do first)
 
-If this document's commit is not on `origin/main`, push as in §3. Pushes failed earlier only on two flakes: cloudflare `authority-renewal` timed out, and agent-host `team-resource-files` failed on mkfifo. Each passes 3 out of 3 times when run alone.
+If this document's commit is not on `origin/main`, push it. The push runs no tests (§3). Before 2026-11-12 the push hook failed only on flakes:
+
+- cloudflare `authority-renewal` timed out;
+- agent-host `team-resource-files` failed on mkfifo;
+- debugger `cli-process` reported `wait_timeout` instead of `command_timeout`. This one is fixed: `withinDeadline` maps it.
+
+The first two pass 3 out of 3 times when run alone.
 
 ### 4.2 The `modernization` e2e spec: 5 failures, also on main
 

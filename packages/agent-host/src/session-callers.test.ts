@@ -46,7 +46,7 @@ async function temporary(prefix: string) {
 
 function provider(providerId: string, cwd: string, listed: RemoteSessionSummary[] = [], sessionHostAccess = true) {
   const created: AgentSessionConfig[] = [], resumed: Array<AgentSessionResumeOptions | undefined> = [], histories: Array<[string, AgentHistoryQuery]> = [];
-  const sessions = new Map<string, FakeSession>();
+  const sessions = new Map<string, FakeSession>(), titles = new Map<string, string>();
   const track = (session: FakeSession) => { sessions.set(session.nativeSessionId, session); return session; };
   let next = 0;
   const native = {
@@ -56,6 +56,8 @@ function provider(providerId: string, cwd: string, listed: RemoteSessionSummary[
       resumed.push(options); return track(new FakeSession(providerId, handle.sessionId, cwd));
     },
     async listSessions() { return [...listed, ...[...sessions.keys()].filter(id => id.includes('-created-')).map(id => summary(providerId, id, '2026-11-04T00:00:00.000Z', cwd))]; },
+    async renameSession(id: string, title: string) { titles.set(id, title); return title; },
+    async readSessionTitle(id: string) { return titles.get(id); },
     async readSessionHistory(id: string, query: AgentHistoryQuery) {
       histories.push([id, query]);
       return { entries: [{ id: 'entry', turnId: 'turn', role: 'assistant', text: `history of ${id}`, textOffset: 0, totalChars: 11 + id.length }], nextCursor: 'older' };
@@ -208,6 +210,13 @@ describe('session commands', () => {
     };
     return { ...context, claude, codex, token, run };
   }
+
+  it('renames another session once per operation identity', async () => {
+    const { run } = await commands();
+    const renamed = await run(['set', 'host-1/codex/thread', '--title', 'Release plan', '--operation-id', 'rename-thread']);
+    expect(renamed).toEqual({ code: 0, output: { session: { address: 'host-1/codex/thread', title: 'Release plan' } } });
+    expect(await run(['set', 'host-1/codex/thread', '--title', 'Release plan', '--operation-id', 'rename-thread'])).toEqual(renamed);
+  });
 
   it('reads its own session and lists the Host\'s sessions newest first, without share recipients\' sessions', async () => {
     const { run, claude } = await commands();

@@ -23,11 +23,11 @@ Each plan ends with "Changes made during execution", which records what differed
 
 | Item | State |
 |---|---|
-| main | `a05b4266` (phase 2c merged), plus this document |
+| main | `3cf3adf8`: phase 2c, plus fix/clean-baseline (the cleared failures, the switch timing baseline and this document's updates), pushed on 2026-11-12 |
 | Phases | 1, 2a, 2b and 2c are done, merged and deployed |
-| Worker (Cloudflare) | Version `1a30aa8c` is live (2c). Roll back to `750bd262` (fix/e2e-repair) if needed |
-| Controller | No release is needed for phases 1–2. fix/clean-baseline fixes `session set --title`, which always failed with "operationId is required"; it reaches users with the next Controller release |
-| origin/main | The user pushes main by hand from the first computer; before that, main was about 190 commits ahead. On the new computer, `git log origin/main..main` should be empty after cloning, and the latest commits should include this document; if they don't, the push has not happened yet (§4.1) |
+| Worker (Cloudflare) | Version `83f1644d` is live (`3cf3adf8`). Roll back to `1a30aa8c` (2c) if needed |
+| Controller | No release is needed for phases 1–2. Main fixes `session set --title`, which always failed with "operationId is required"; the fix reaches users with the next Controller release |
+| origin/main | Equal to main. Work now continues on the second computer |
 
 What phases 1–2 delivered:
 

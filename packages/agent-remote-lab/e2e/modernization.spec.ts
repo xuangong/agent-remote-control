@@ -1,3 +1,4 @@
+import { openSessionsPage } from './all-sessions';
 import { showNewSession, showSessions } from './session-navigation';
 import { toggleViewPanel } from './view-options';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -69,10 +70,12 @@ test('keeps one View entry in the visible title while toggling panels and preser
   await assertReachable();
   await expect(trigger).toBeFocused();
   if (testInfo.project.name === 'chromium-desktop') {
-    const width = (await timeline.boundingBox())!.width;
+    // Window views keep their own widths, so the room the sidebar gives up goes to the Window.
+    const workbench = page.locator('#lab-workbench');
+    const width = (await workbench.boundingBox())!.width;
     await toggleViewPanel(page, 'Sidebar');
     await expect(page.locator('#lab-context')).toBeHidden();
-    expect((await timeline.boundingBox())!.width).toBeGreaterThan(width);
+    expect((await workbench.boundingBox())!.width).toBeGreaterThan(width);
     await assertReachable();
     await toggleViewPanel(page, 'Header');
     await assertReachable();
@@ -100,8 +103,10 @@ test('keeps one View entry in the visible title while toggling panels and preser
   await trigger.click();
   await expect(page.getByRole('checkbox', { name: 'Header', exact: true })).toBeChecked();
   const options = page.getByRole('region', { name: 'View options', exact: true });
+  // Show all and Hide all act on the panels; the feature views listed after them keep their own setting.
+  const checkedPanels = options.getByRole('checkbox', { name: /^(Header|Sidebar|Replica Inspector)$/, checked: true });
   await options.getByRole('button', { name: 'Hide all', exact: true }).click();
-  await expect(options.locator('input:checked')).toHaveCount(0);
+  await expect(checkedPanels).toHaveCount(0);
   await expect(page.locator('.lab-app-bar')).toBeHidden();
   await expect(page.locator('#lab-context')).toBeHidden();
   await expect(page.locator('#lab-inspector')).toBeHidden();
@@ -109,14 +114,14 @@ test('keeps one View entry in the visible title while toggling panels and preser
   await expect(page.locator('#lab-trace').getByRole('button', { name: 'View options', exact: true })).toHaveCount(1);
   if (testInfo.project.name === 'chromium-desktop') {
     await options.getByRole('button', { name: 'Show all', exact: true }).click();
-    await expect(options.locator('input:checked')).toHaveCount(3);
+    await expect(checkedPanels).toHaveCount(3);
     await expect(page.locator('.lab-app-bar')).toBeVisible();
     await expect(page.locator('#lab-context')).toBeVisible();
     await expect(page.locator('#lab-inspector')).toBeVisible();
     await options.getByRole('button', { name: 'Show all', exact: true }).click();
-    await expect(options.locator('input:checked')).toHaveCount(3);
+    await expect(checkedPanels).toHaveCount(3);
     await options.getByRole('button', { name: 'Hide all', exact: true }).click();
-    await expect(options.locator('input:checked')).toHaveCount(0);
+    await expect(checkedPanels).toHaveCount(0);
     await options.getByRole('button', { name: 'Show all', exact: true }).click();
   } else {
     await expect(options.getByRole('button', { name: 'Show all', exact: true })).toHaveCount(0);
@@ -246,19 +251,24 @@ test('renders default control boundaries with three-to-one contrast', async ({ p
   test.skip(testInfo.project.name !== 'chromium-desktop');
   const browserErrors = collectBrowserErrors(page);
   await openRecordedSession(page);
-  await page.getByRole('button', { name: 'Sidebar settings', exact: true }).click();
-  await page.getByTestId('playback-advance').click();
-  await showNewSession(page);
+  const settings = await openSessionsPage(page, 'Settings');
+  await settings.getByTestId('playback-advance').click();
+  // The Settings and New session pages cover the Window, so the conversation's controls are measured back in the Window.
+  await settings.getByRole('button', { name: 'Back to Window', exact: true }).click();
+  await expect(settings).toBeHidden();
 
-  const controls = {
-    button: page.getByRole('button', { name: 'Load resource', exact: true }),
-    select: page.getByTestId('provider-select'),
-    input: page.locator('.agent-question-custom input'),
+  const assertBoundaries = async (controls: Record<string, Locator>) => {
+    for (const [name, control] of Object.entries(controls)) {
+      await expect(control).toBeVisible();
+      expect(await renderedBorderContrast(control), name).toBeGreaterThanOrEqual(3);
+    }
   };
-  for (const [name, control] of Object.entries(controls)) {
-    await expect(control).toBeVisible();
-    expect(await renderedBorderContrast(control), name).toBeGreaterThanOrEqual(3);
-  }
+  await assertBoundaries({
+    button: page.getByRole('button', { name: 'Load resource', exact: true }),
+    input: page.locator('.agent-question-custom input'),
+  });
+  await showNewSession(page);
+  await assertBoundaries({ select: page.getByTestId('provider-select') });
   expectBrowserErrors(browserErrors);
 });
 

@@ -43,14 +43,14 @@ for (const cold of [false, true]) test(`takes a running native CLI session back 
     await input.fill('Keep this draft');
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
-    cli=spawn(process.execPath,[resolve('../agent-host/dist/cli.js'),'copilot','resume',nativeId,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
+    cli=spawn(process.execPath,[resolve('../agent-host/dist/cli.js'),'copilot','--resume='+nativeId,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
       cwd:f.cwd,env:{...process.env,AGENT_HOST_STATE_DIR:state,AGENT_HOST_COPILOT:undefined,AGENT_HOST_COPILOT_HOME:undefined,GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined,COPILOT_PROVIDER_BASE_URL:f.baseUrl,COPILOT_MODEL:'native-fixture'},stdio:['ignore','pipe','pipe'],
     });
     let stderr='';cli.stderr!.on('data',chunk=>stderr+=chunk);cli.stdout!.resume();
     const exited=new Promise<number|null>(resolve=>cli!.once('exit',resolve));
     await expect.poll(()=>f.requests.length,{message:stderr}).toBe(2);
     const composer=page.getByRole('region',{name:'Live provider controls'});
-    await expect(input).not.toBeEditable();await expect(input).toHaveValue('Keep this draft');
+    await expect(input).not.toBeEditable();await expect(input).toHaveText('Keep this draft');
     await expect(composer).toContainText('Native CLI');
     let controllingPage=page;
     if (cold) {
@@ -73,8 +73,9 @@ for (const cold of [false, true]) test(`takes a running native CLI session back 
     await controllingComposer.getByRole('button',{name:'Interrupt and take control',exact:true}).click();
     await expect.poll(()=>cli!.exitCode,{timeout:12000}).toBe(0);
     expect(await exited).toBe(0);
-    await expect(controllingInput).toBeEditable();await expect(input).toHaveValue('Keep this draft');
-    if (cold) await expect(input).not.toBeEditable();
+    await expect(controllingInput).toBeEditable();await expect(input).toHaveText('Keep this draft');
+    // Authorized pages share the Host-owned session, so the page that first saw the native owner is writable again too.
+    if (cold) await expect(input).toBeEditable();
     await expect(controllingComposer.locator('.lab-session-control')).toHaveCount(0);
     await controllingInput.fill('WEB_CONTINUES');await controllingInput.press('Enter');
     await expect(page.getByText('CONTINUED_IN_PRODUCT',{exact:true})).toBeVisible();

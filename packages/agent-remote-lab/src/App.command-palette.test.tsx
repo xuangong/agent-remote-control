@@ -1,5 +1,5 @@
 import { act } from 'react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
 
@@ -46,6 +46,7 @@ async function search(container: ParentNode, text: string) {
   await act(async () => { field(container).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
   await act(async () => { await new Promise(resolve => setTimeout(resolve)); });
 }
+const releaseAndSettle = (app: Awaited<ReturnType<typeof mountBotApp>>) => act(async () => { app.releaseInspect(); await new Promise(resolve => setTimeout(resolve, 20)); });
 const currentBot = (container: ParentNode) => container.querySelector('[aria-label="Bots"] [aria-current="true"]')?.getAttribute('aria-label');
 
 it('opens with Control-K from the composer, switches Windows and opens pages, and closes on Escape', async () => {
@@ -131,6 +132,13 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     await search(app.container, 'Research');
     await until(() => expect(app.workspace().window?.id).toBe('R'));
     expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="window"]')!.hidden).toBe(false);
+    // The opener was in Bot mode, now hidden: focus moves to the shown mode's Search button.
+    expect(document.activeElement).toBe(visibleButton(app.container, 'Search'));
+    expect(document.activeElement!.closest('[data-workbench-mode="window"]')).not.toBeNull();
+    await shortcut();
+    await search(app.container, 'Switch to Bot mode');
+    await until(() => expect(document.activeElement?.closest('[data-workbench-mode="bot"]')).not.toBeNull());
+    expect(document.activeElement).toBe(visibleButton(app.container, 'Search'));
 
     // A Window made from Bot mode stays open once Window mode restores its Window.
     await app.switchMode('bot');
@@ -141,4 +149,60 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     expect(app.workspace().window?.id).toMatch(/^(?!(A|R|S)$)/);
     expect(app.workspace().windows.map(window => window.id)).toEqual(expect.arrayContaining(['A', 'R', app.workspace().window!.id]));
   } finally { await app.close(); }
+});
+
+describe('from Bot mode while the hosted Window is still loading', () => {
+  const start = async (scope: string) => {
+    seedGroup(scope, windowGroup('A', 'Alpha'));
+    history.replaceState(null, '', '/?window=A');
+    const app = await mountBotApp(scope, { hosted: true, holdInspect: true });
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    expect(app.workspace().provisional).toBe(true);
+    await app.switchMode('bot');
+    return app;
+  };
+  const notices = (container: ParentNode) => [...(container.ownerDocument ?? document).querySelectorAll('[role="status"], [role="alert"]')].map(node => node.textContent).join(' ');
+
+  it('opens a session shown in the restored Window once the Window loads', async () => {
+    const app = await start('http://localhost/palette-held-session/');
+    try {
+      await shortcut();
+      await search(app.container, 'A1');
+      expect(app.container.querySelector<HTMLElement>('[data-workbench-mode="window"]')!.hidden).toBe(false);
+      expect(app.workspace().window?.selectedViewId).toBe('A2');
+      await releaseAndSettle(app);
+      await until(() => expect(app.workspace().provisional).toBe(false));
+      await until(() => expect(app.workspace().window?.selectedViewId).toBe('A1'));
+      expect(notices(app.container)).not.toContain('Wait for this Window to load');
+    } finally { await app.close(); }
+  });
+
+  it('adds a session view once the Window loads', async () => {
+    const app = await start('http://localhost/palette-held-view/');
+    try {
+      await shortcut();
+      await search(app.container, 'New session view');
+      expect(app.workspace().window?.views).toHaveLength(2);
+      await releaseAndSettle(app);
+      await until(() => expect(app.workspace().window?.views).toHaveLength(3));
+      const added = app.workspace().window!.views.find(view => !['A1', 'A2'].includes(view.id))!;
+      expect(app.workspace().window?.selectedViewId).toBe(added.id);
+    } finally { await app.close(); }
+  });
+
+  it('drops the step when Window mode is left before the Window loads', async () => {
+    const app = await start('http://localhost/palette-held-left/');
+    try {
+      await shortcut();
+      await search(app.container, 'A1');
+      await app.switchMode('bot');
+      await releaseAndSettle(app);
+      await until(() => expect(app.workspace().readGroup('A')?.window.revision).toBeDefined());
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      await app.switchMode('window');
+      await until(() => expect(app.workspace().provisional).toBe(false));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+      expect(app.workspace().window?.selectedViewId).toBe('A2');
+    } finally { await app.close(); }
+  });
 });

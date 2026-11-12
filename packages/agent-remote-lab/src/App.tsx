@@ -8,7 +8,7 @@ import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
 import { projectBotRoster } from './bot-roster.js';
-import { parseWorkbenchRoute, type BotPlace } from './workbench-mode.js';
+import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
 import { BotPicture, botDisplayName } from './components/BotRoster.js';
@@ -191,6 +191,9 @@ import type { CommandItem } from './shell/command-search.js';
 import { commandSessions, sessionSubtitle, sessionViewLocation, type CommandSession } from './shell/command-items.js';
 import { revealView, viewSelection } from './window-view-selection.js';
 import { applePlatform } from './platform.js';
+
+/** A step that search runs once `mode` is in front; `confirmed` steps also wait for a confirmed Window. */
+type ModeStep = { mode: WorkbenchMode; run(): void; confirmed: boolean };
 
 export interface LabTransport extends RemoteAgentTransport {
   listProviders(): Promise<readonly AgentProviderDescriptor[]>;
@@ -596,13 +599,12 @@ function AppContent({
   const [searchOpen, setSearchOpen] = useState(false);
   const openSearch = useCallback(() => setSearchOpen(true), []);
   useShellShortcuts({ setMode: navigation.setMode, toggleSidebar, openSearch });
-  // Steps that search runs once Window mode has taken over (see inWindowMode); after the Window workspace's own effects.
-  const afterWindowMode = useRef<Array<() => void>>([]);
-  // A deferred step uses the functions of the render that runs it, not of the render that queued it.
-  const searchRuns = useRef({ openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView });
-  searchRuns.current = { openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView };
-  const [windowModeSteps, setWindowModeSteps] = useState(0);
-  useEffect(() => { if (windowMode) for (const step of afterWindowMode.current.splice(0)) step(); }, [windowMode, windowModeSteps]);
+  // Steps that search runs once a mode has taken over (see inMode); they run after the Window workspace's own effects.
+  const modeSteps = useRef<ModeStep[]>([]);
+  const [queuedModeSteps, setQueuedModeSteps] = useState(0);
+  // Palette items and deferred steps call the functions of the latest render, not of the render that built them.
+  const searchRuns = useRef({ inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode });
+  searchRuns.current = { inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode };
   // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
   useLayoutEffect(() => {
     const lost = contextFocusHidden.current;
@@ -1169,7 +1171,9 @@ function AppContent({
   const windowStageVisible = windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen;
   // Compact layouts keep only the floating Windows list.
   const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
-  const windowOverviewAvailable = windowMode && !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  // Whether All Windows can show, whatever the mode; the palette offers it from Bot mode too.
+  const windowOverviewSupported = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  const windowOverviewAvailable = windowMode && windowOverviewSupported;
   const backgroundInert = supportingRailOpen ? { inert: '' } : {};
 
   const activeAgentId = state?.agent?.id ?? (succession.active ? undefined : attachingAgentId);
@@ -1766,13 +1770,37 @@ function AppContent({
     revealView(view.id); closePage();
   }
   /**
-   * Runs a step in Window mode. Entering Window mode restores the page's Window, which would supersede a Window opened
-   * or created in the same turn, so from Bot mode the step waits until Window mode has taken over.
+   * Queues a step for when `mode` is in front; a step for another mode than the one shown is dropped. Entering Window
+   * mode restores the page's Window, which would supersede a Window opened or created in the same turn, so steps never
+   * run in the turn that switches. A step that edits the open Window (`confirmed`) also waits until the Window is
+   * confirmed, since a cached Window shown while it loads is read-only.
    */
-  function inWindowMode(step: () => void) {
-    if (windowMode) { step(); return; }
-    afterWindowMode.current.push(step); navigation.setMode('window'); setWindowModeSteps(value => value + 1);
+  function inMode(mode: WorkbenchMode, run: () => void, confirmed = false) {
+    modeSteps.current.push({ mode, run, confirmed }); setQueuedModeSteps(value => value + 1);
   }
+  /** Shows a mode; when the mode changes, focus moves into it once it shows (the palette's opener is in the hidden mode). */
+  function switchMode(mode: WorkbenchMode) {
+    if (navigation.mode === mode) return;
+    navigation.setMode(mode); inMode(mode, () => searchRuns.current.focusShownMode(mode));
+  }
+  /** Focuses the shown mode's Search button, else its main heading, unless focus is already inside it. */
+  function focusShownMode(mode: WorkbenchMode) {
+    const root = document.querySelector<HTMLElement>(`[data-workbench-mode="${mode}"]`);
+    if (!root || root.hidden || root.contains(document.activeElement)) return;
+    const shown = (element: HTMLElement) => !element.closest('[hidden], [inert]');
+    const target = [...root.querySelectorAll<HTMLElement>('button[aria-label="Search"]')].find(shown)
+      ?? [...root.querySelectorAll<HTMLElement>('.ui-toolbar-title[tabindex="-1"], #lab-workbench')].find(shown);
+    target?.focus({ preventScroll: true });
+  }
+  const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
+  useEffect(() => {
+    if (!modeSteps.current.length) return;
+    modeSteps.current = modeSteps.current.filter(step => {
+      if (step.mode !== navigation.mode) return false;
+      if (step.confirmed && step.mode === 'window' && !windowConfirmed) return true;
+      step.run(); return false;
+    });
+  }, [navigation.mode, queuedModeSteps, windowConfirmed]);
   async function openWindowFromSearch(id: string) {
     try { await windowWorkspace.open(id); closePage(); }
     catch (error) { windowActions.setNotice(message(error, 'The Window was not opened.')); }
@@ -1794,35 +1822,47 @@ function AppContent({
     const view = open?.id === location.windowId ? open.views.find(candidate => candidate.binding && sessionKey(candidate.binding) === key) : undefined;
     if (view) selectWindowView(view);
   }
+  // The palette's Windows and sessions are built only while it is open, and again only when their sources change.
+  const searchCatalog = useMemo(() => searchOpen ? windowCatalog(windowWorkspace) : [],
+    [searchOpen, windowWorkspace.windows, windowWorkspace.window, windowWorkspace.readGroup]);
+  const windowItems = useMemo(() => byRecentUse(baseUrl, searchCatalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
+    subtitle: `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`,
+    run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openWindowFromSearch(window.id)); } })),
+  [baseUrl, searchCatalog]);
+  const sessionItems = useMemo(() => !searchOpen ? [] : commandSessions(sessionEntries, favorites.stars, searchCatalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
+    .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
+      return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}),
+        run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openSessionFromSearch(session), true); } }; }),
+  [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers]);
   /** The palette's items, built from what the page already knows, and only while it is open. */
   function commandItems(): CommandItem[] {
-    const apple = applePlatform(), toWindow = () => navigation.setMode('window');
-    const inWindow = (step: () => void) => () => inWindowMode(step);
+    const apple = applePlatform(), toWindow = () => switchMode('window');
+    /** Runs a step in Window mode, switching to it first; see inMode. */
+    const inWindow = (step: () => void, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); };
     const sidebarShown = windowMode ? desktopContextVisible : !botRosterCollapsed;
-    const overview = !compactLayout && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
-    const action = (id: string, title: string, run: () => void, shortcut?: string): CommandItem => ({ id: `action:${id}`, kind: 'action', title, run, ...(shortcut ? { shortcut } : {}) });
+    const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
+      ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
     const actions: CommandItem[] = [
       action('new-session', 'New session', () => { toWindow(); openNewSessionPanel(); }),
       action('new-window', 'New Window', inWindow(() => searchRuns.current.createWindowFromMenu())),
-      ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }))] : []),
+      ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }, true))] : []),
       action('all-sessions', 'All sessions', () => { toWindow(); showPanel('list'); }),
       ...(userScoped ? [action('favorites', 'Favorites', () => { toWindow(); showPanel('favorites'); })] : []),
       action('settings', 'Settings', () => { toWindow(); showPanel('settings'); }),
-      ...(toggleSidebar ? [action('toggle-sidebar', sidebarShown ? 'Hide sidebar' : 'Show sidebar', toggleSidebar, apple ? '⌘\\' : 'Ctrl+\\')] : []),
-      windowMode ? action('bot-mode', 'Switch to Bot mode', () => navigation.setMode('bot'), apple ? '⌥⌘2' : 'Ctrl+Alt+2')
-        : action('window-mode', 'Switch to Window mode', toWindow, apple ? '⌥⌘1' : 'Ctrl+Alt+1'),
-      ...(overview ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
+      ...(toggleSidebar ? [action('toggle-sidebar', sidebarShown ? 'Hide sidebar' : 'Show sidebar', toggleSidebar,
+        apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
+      windowMode ? action('bot-mode', 'Switch to Bot mode', () => switchMode('bot'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' })
+        : action('window-mode', 'Switch to Window mode', toWindow, apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
+      ...(windowOverviewSupported ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
     ];
-    const catalog = windowCatalog(windowWorkspace);
-    const windows = byRecentUse(baseUrl, catalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
-      subtitle: `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`, run: inWindow(() => void searchRuns.current.openWindowFromSearch(window.id)) }));
     const bots = botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
       title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
-      run: () => navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId }) })));
-    const sessions = commandSessions(sessionEntries, favorites.stars, catalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
-      .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
-        return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}), run: inWindow(() => void searchRuns.current.openSessionFromSearch(session)) }; });
-    return [...actions, ...windows, ...bots, ...sessions];
+      run: () => {
+        const switching = windowMode;
+        navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
+        if (switching) inMode('bot', () => searchRuns.current.focusShownMode('bot'));
+      } })));
+    return [...actions, ...windowItems, ...bots, ...sessionItems];
   }
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
   const applySessionTitle = useCallback((session: StarInput) => {

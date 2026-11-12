@@ -34,7 +34,7 @@ const log: string[] = [];
 const item = (id: string, title: string, kind: CommandItem['kind'], extra: Partial<CommandItem> = {}): CommandItem =>
   ({ id, kind, title, run: () => { log.push(`run ${id}`); }, ...extra });
 const allKinds = [
-  item('new-session', 'New session', 'action', { shortcut: '⌘N' }),
+  item('new-session', 'New session', 'action', { shortcut: '⌘N', keyShortcuts: 'Meta+N' }),
   item('new-window', 'New Window', 'action'),
   item('research', 'Research', 'window', { subtitle: '3 session views' }),
   item('helper', 'Helper', 'bot'),
@@ -82,7 +82,11 @@ it('opens as a modal dialog with a focused combobox that controls a grouped list
   expect([...listbox.querySelectorAll('[role="group"]')].map(group => group.getAttribute('aria-label'))).toEqual(['Actions', 'Windows', 'Bots', 'Sessions']);
   expect(listbox.querySelectorAll('[role="group"] > [role="option"]')).toHaveLength(5);
   expect(titles()).toEqual(['New session', 'New Window', 'Research', 'Helper', 'Fix the parser']);
+  expect(input.getAttribute('aria-label')).toBe('Search Windows, Bots, sessions and actions');
   expect(options()[0]!.querySelector('kbd')!.textContent).toBe('⌘N');
+  expect(options()[0]!.querySelector('kbd')!.getAttribute('aria-hidden')).toBe('true');
+  expect(options()[0]!.getAttribute('aria-keyshortcuts')).toBe('Meta+N');
+  expect(options()[1]!.hasAttribute('aria-keyshortcuts')).toBe(false);
   expect(options()[2]!.textContent).toContain('3 session views');
   expect(active()).toBe(options()[0]);
   expect(selected()).toEqual([options()[0]]);
@@ -137,10 +141,37 @@ it('runs the active item on Enter, closing first', async () => {
   expect(dialog.open).toBe(false);
 });
 
-it('leaves Enter to an input method that is composing', async () => {
+it('leaves every key to an input method that is composing', async () => {
   await palette();
-  await press('Enter', { isComposing: true });
+  for (const key of ['ArrowDown', 'End', 'Enter']) {
+    const event = new KeyboardEvent('keydown', { key, isComposing: true, bubbles: true, cancelable: true });
+    await act(async () => { combobox().dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+  }
   expect(log).toEqual([]);
+  expect(active()).toBe(options()[0]);
+});
+
+it('closes on Command-K or Control-K, by key as well as by position, so the shortcut toggles it', async () => {
+  const platform = Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform');
+  try {
+    Object.defineProperty(Navigator.prototype, 'platform', { configurable: true, get: () => 'MacIntel' });
+    await palette();
+    const shortcut = (init: KeyboardEventInit) => act(async () => {
+      const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+      combobox().dispatchEvent(event); return event;
+    });
+    // Control-K on an Apple system is the text field's own (kill to end of line).
+    expect((await shortcut({ key: 'k', code: 'KeyK', ctrlKey: true })).defaultPrevented).toBe(false);
+    expect(log).toEqual([]);
+    // Dvorak types K from the QWERTY V position.
+    expect((await shortcut({ key: 'k', code: 'KeyV', metaKey: true })).defaultPrevented).toBe(true);
+    expect(log).toEqual(['close']);
+    await act(async () => setOpen(true)); log.length = 0;
+    expect((await shortcut({ key: 'k', code: 'KeyK', metaKey: true, shiftKey: true })).defaultPrevented).toBe(false);
+    expect((await shortcut({ key: 'k', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+    expect(log).toEqual(['close']);
+  } finally { if (platform) Object.defineProperty(Navigator.prototype, 'platform', platform); }
 });
 
 it('runs an option that is clicked', async () => {
@@ -157,12 +188,20 @@ it('asks to close on Escape and on a press on the backdrop', async () => {
   expect(log).toEqual(['close']);
   await act(async () => setOpen(true));
   log.length = 0;
-  await act(async () => dialog.click());
+  const pressOn = (down: Element, up: Element) => act(async () => {
+    down.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    up.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await pressOn(dialog, dialog);
   expect(log).toEqual(['close']);
   await act(async () => setOpen(true));
   log.length = 0;
-  await act(async () => combobox().click());
+  await pressOn(combobox(), combobox());
+  // A drag that starts in the field (selecting its text) and ends on the backdrop does not close.
+  await pressOn(combobox(), dialog);
   expect(log).toEqual([]);
+  await pressOn(dialog, dialog);
+  expect(log).toEqual(['close']);
 });
 
 it('says when nothing matches', async () => {
@@ -221,4 +260,20 @@ it('closes the modal itself, also when it unmounts open, so the browser returns 
   expect(close).toHaveBeenCalledTimes(2);
   expect(mounted.open).toBe(false);
   host.remove();
+});
+
+it('scrolls the active option into view only when it changes, not when the page renders again', async () => {
+  const scroll = vi.fn();
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scroll });
+  try {
+    await palette();
+    scroll.mockClear();
+    await act(async () => setItems([...allKinds]));
+    expect(scroll).not.toHaveBeenCalled();
+    await press('ArrowDown');
+    expect(scroll).toHaveBeenCalledOnce();
+    expect(scroll.mock.contexts[0]).toBe(options()[1]);
+    await type('pars');
+    expect(scroll).toHaveBeenCalledTimes(2);
+  } finally { delete (Element.prototype as Partial<Element>).scrollIntoView; }
 });

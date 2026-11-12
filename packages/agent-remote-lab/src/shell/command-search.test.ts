@@ -33,3 +33,10 @@ it('caps each kind', () => {
   expect(searchCommands(items, 'session', { perKind: 8 })).toHaveLength(8);
   expect(searchCommands([...items, item('w', 'Session window', 'window')], 'session', { perKind: 8 }).map(entry => entry.id)).toContain('w');
 });
+
+it('ranks the same after many distinct titles have passed through its folding cache', () => {
+  const run = () => {};
+  const many = Array.from({ length: 5000 }, (_, index) => ({ id: `s${index}`, kind: 'session' as const, title: `Séance ${index}`, run }));
+  expect(searchCommands(many, 'seance 4999', { perKind: 1 }).map(item => item.id)).toEqual(['s4999']);
+  expect(searchCommands([{ id: 'c', kind: 'action', title: 'Café', run }], 'cafe').map(item => item.id)).toEqual(['c']);
+});

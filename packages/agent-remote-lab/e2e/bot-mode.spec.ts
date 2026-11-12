@@ -568,14 +568,14 @@ test('opens a Window and a bot from the command palette, and returns focus when 
   await input.click();
   await pressSearchShortcut(page);
   await expect(palette).toBeVisible();
-  await expect(palette.getByRole('combobox', { name: 'Search' })).toBeFocused();
+  await expect(palette.getByRole('combobox', { name: 'Search Windows, Bots, sessions and actions', exact: true })).toBeFocused();
   await screenshot(page, 'command-palette');
   await page.keyboard.press('Escape');
   await expect(palette).toHaveCount(0);
   await expect(input).toBeFocused();
 
   await pressSearchShortcut(page);
-  await palette.getByRole('combobox', { name: 'Search' }).fill('Palette Alpha');
+  await palette.getByRole('combobox', { name: 'Search Windows, Bots, sessions and actions', exact: true }).fill('Palette Alpha');
   await page.keyboard.press('Enter');
   await expect(palette).toHaveCount(0);
   await expect(toolbar.locator('h2')).toHaveText('Palette Alpha');
@@ -588,7 +588,7 @@ test('opens a Window and a bot from the command palette, and returns focus when 
   await mode(page, 'window');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   // The recorded bot is named like the New session action, which ranks first; its section's name, its subtitle, narrows to it.
-  await palette.getByRole('combobox', { name: 'Search' }).fill(`${name} Palette Alpha`);
+  await palette.getByRole('combobox', { name: 'Search Windows, Bots, sessions and actions', exact: true }).fill(`${name} Palette Alpha`);
   await expect(palette.getByRole('option')).toHaveCount(1);
   await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');

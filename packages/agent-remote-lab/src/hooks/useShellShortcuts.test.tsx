@@ -142,9 +142,13 @@ it('opens search with Command-K on Apple platforms and Control-K elsewhere, also
   expect(openSearch).toHaveBeenCalledTimes(3);
   expect(setMode).not.toHaveBeenCalled();
 
+  // Other layouts: Dvorak types K from the QWERTY V position; `key` decides there.
+  expect((await press({ key: 'k', code: 'KeyV', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+
   onPlatform('Win32');
   expect((await press({ key: 'k', code: 'KeyK', ctrlKey: true })).defaultPrevented).toBe(true);
-  expect(openSearch).toHaveBeenCalledTimes(4);
+  expect(openSearch).toHaveBeenCalledTimes(5);
 });
 
 it('leaves Command-K alone without a search, and while a dialog such as the palette itself is open', async () => {

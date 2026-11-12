@@ -1,10 +1,22 @@
 export type CommandKind = 'action' | 'window' | 'bot' | 'session';
-export type CommandItem = { id: string; kind: CommandKind; title: string; subtitle?: string; keywords?: readonly string[]; shortcut?: string; run(): void };
+/** `shortcut` is shown (for example "⌘\\"); `keyShortcuts` names the same keys for assistive technology, in `aria-keyshortcuts` form. */
+export type CommandItem = { id: string; kind: CommandKind; title: string; subtitle?: string; keywords?: readonly string[]; shortcut?: string; keyShortcuts?: string; run(): void };
 
 /** The order kinds are listed and grouped in: actions, Windows, Bots, sessions. */
 export const commandKinds: readonly CommandKind[] = ['action', 'window', 'bot', 'session'];
 const kindOrder: Record<CommandKind, number> = { action: 0, window: 1, bot: 2, session: 3 };
-const fold = (text: string) => text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+// Folded titles repeat from query to query; a bounded cache keeps typing cheap with many items.
+const folded = new Map<string, string>();
+const FOLD_CACHE_LIMIT = 4096;
+function fold(text: string): string {
+  let value = folded.get(text);
+  if (value === undefined) {
+    value = text.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    if (folded.size >= FOLD_CACHE_LIMIT) folded.clear();
+    folded.set(text, value);
+  }
+  return value;
+}
 
 /** How well one query word matches a title: 3 title prefix, 2 word prefix, 1 substring, 0 none. */
 function wordScore(title: string, word: string): number {

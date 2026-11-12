@@ -107,7 +107,8 @@
 }
 .lab-command-input.lab-command-input::placeholder { color: var(--ui-label-secondary); }
 /* The caret and the active option show where the keys go; a ring around the whole field would only frame the dialog again. */
-.lab-command-input.lab-command-input:focus-visible { outline: none; }
+/* The field fills the top of the dialog: its focus shows as a ring along its bottom edge rather than an outline. */
+.lab-command-input.lab-command-input:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--ui-focus-ring); }
 .lab-command-results { flex: 1; min-height: 0; padding: 6px; overflow-y: auto; overscroll-behavior: contain; }
 .lab-command-results:empty { display: none; }
 .lab-command-group + .lab-command-group { margin-top: 6px; }
@@ -125,6 +126,7 @@
 /* Forced colors drop the shadow and the selection fill: keep the dialog's edge and mark the active option with system colors. */
 @media (forced-colors: active) {
   .lab-command-palette { border: 1px solid CanvasText; }
+  .lab-command-input.lab-command-input:focus-visible { outline: 2px solid Highlight; outline-offset: -2px; }
   .lab-command-option[aria-selected="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
   .lab-command-option[aria-selected="true"] :is(.lab-command-subtitle, .lab-command-shortcut) { color: HighlightText; }
 }

@@ -519,7 +519,7 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
 
 - **Deletion (Task 1–2).** `useWindowWorkspace.create({ empty: true })` was added so deleting the last Window can switch to a fresh empty Window first. Deletion errors are reported through the shared notice, not swallowed (97473018).
 - **Toolbar heading (Task 3).** The title button is named by its visible text, with `aria-description` "Rename this Window", so screen readers read the Window name first (4f9de136). An open rename ends when the toolbar switches to another Window (9b75ea9f).
-- **Cold start (Task 4).** While the cached Window is still provisional, the toolbar is `readOnly`: rename, Add, docks and Window actions are disabled. Its sheets close when the toolbar hides. Toasts carry a tone, and Delete shows a busy state. Hidden docks unhide on their own when a dock gains a new pane. The toolbar sits at z-index 61, above the floating capsules (23cce0b9).
+- **Cold start (Task 4).** While the cached Window is still provisional, the toolbar is `readOnly`: rename, Add, Show as section and Delete are disabled; Hide docks, Copy link and Agent control stay available, since they change nothing in the Window. Its sheets close when the toolbar hides. Toasts carry a tone, and Delete shows a busy state. Hidden docks unhide on their own when a dock gains a new pane. The toolbar sits at z-index 61, above the floating capsules (23cce0b9).
 - **`leadingControls` removed (Task 5).** View options moves into the toolbar slot when the sidebar is hidden, so the dock heading's layout-controls slot had no users left (12674b24).
 - **Palette (Task 6–7).**
   - The input is named "Search Windows, Bots, sessions and actions". The Search buttons carry `aria-keyshortcuts`.
@@ -535,3 +535,9 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
   - The chromium-desktop e2e specs all passed: `window-pane-lifecycle`, `window-workspaces`, `bot-mode`, `tpm-dock`, `session-view-binding`, `workspace-layout`, `sidebar`, `ask-session`, `session-succession` and `team`.
   - The local instance checks passed, including the Copy link toast and clipboard.
   - The `modernization` spec still has its 5 failures from main (a TPM 404 console error, the timeline width, the "Load resource" button); they are not caused by 2c.
+- **Final review fixes.**
+  - Choosing a docked view, from a sidebar row or from the palette, shows hidden docks again. Before this, the docked view was selected but stayed invisible, and later sessions opened into it.
+  - The sidebar's focus rescue now runs when the sidebar hides, not when it is toggled. So the palette's "Hide sidebar" no longer drops focus to the page when the palette returns focus to the sidebar's Search button.
+  - The docks toggle only changes its name ("Hide docks" / "Show docks") and no longer sets `aria-pressed`, which had contradicted the name.
+  - ⌘K matches by `key` on Latin layouts, and falls back to the K position only on layouts that type no Latin letter there (`isSearchKey`).
+  - Not changed: the palette rebuilds its items on each App render while it is open. Its search over a few hundred items costs little.

@@ -145,10 +145,15 @@ it('opens search with Command-K on Apple platforms and Control-K elsewhere, also
   // Other layouts: Dvorak types K from the QWERTY V position; `key` decides there.
   expect((await press({ key: 'k', code: 'KeyV', metaKey: true })).defaultPrevented).toBe(true);
   expect(openSearch).toHaveBeenCalledTimes(4);
+  // Another Latin letter at the K position is that letter's shortcut (Colemak types E there); a non-Latin layout falls back to the position.
+  expect((await press({ key: 'e', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(false);
+  expect(openSearch).toHaveBeenCalledTimes(4);
+  expect((await press({ key: 'л', code: 'KeyK', metaKey: true })).defaultPrevented).toBe(true);
+  expect(openSearch).toHaveBeenCalledTimes(5);
 
   onPlatform('Win32');
   expect((await press({ key: 'k', code: 'KeyK', ctrlKey: true })).defaultPrevented).toBe(true);
-  expect(openSearch).toHaveBeenCalledTimes(5);
+  expect(openSearch).toHaveBeenCalledTimes(6);
 });
 
 it('leaves Command-K alone without a search, and while a dialog such as the palette itself is open', async () => {

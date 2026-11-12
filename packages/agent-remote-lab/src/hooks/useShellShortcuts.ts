@@ -5,7 +5,8 @@ import { applePlatform } from '../platform.js';
 /**
  * Shell shortcuts that browsers leave free: Command-Backslash (Control elsewhere) shows or hides the sidebar, and
  * Option-Command-1 / 2 (Control-Alt elsewhere) choose Window mode and Bot mode in the order of the mode switch, and
- * Command-K (Control-K elsewhere) opens search, matched by position or by key so other layouts such as Dvorak reach it;
+ * Command-K (Control-K elsewhere) opens search, matched by key, or by position where the layout types no Latin letter
+ * there (see isSearchKey);
  * the open palette closes on the same keys itself. Search is global, so it also works while focus is in a text field or the
  * composer, whose keymaps leave Mod-K alone. Browser extensions such as password managers may claim Command-Backslash before the page sees it.
  *
@@ -26,7 +27,7 @@ export function useShellShortcuts(actions: { toggleSidebar?(): void; setMode(mod
       if (!primary || event.shiftKey) return;
       if (!event.altKey && event.code === 'Backslash' && current.current.toggleSidebar) {
         event.preventDefault(); current.current.toggleSidebar();
-      } else if (!event.altKey && (event.code === 'KeyK' || event.key.toLowerCase() === 'k') && current.current.openSearch) {
+      } else if (!event.altKey && isSearchKey(event) && current.current.openSearch) {
         event.preventDefault(); current.current.openSearch();
       } else if (event.altKey && (event.code === 'Digit1' || event.code === 'Digit2')) {
         const digit = event.code === 'Digit1' ? '1' : '2';
@@ -37,4 +38,13 @@ export function useShellShortcuts(actions: { toggleSidebar?(): void; setMode(mod
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
   }, []);
+}
+
+/**
+ * Whether a key press is the K of the search shortcut: `key` decides on Latin layouts (Dvorak types K elsewhere, and
+ * Colemak types E at the QWERTY K position, which stays Command-E); a non-Latin layout falls back to the K position.
+ */
+export function isSearchKey(event: Pick<KeyboardEvent, 'key' | 'code'>): boolean {
+  const key = event.key.toLowerCase();
+  return key === 'k' || !/^[a-z]$/.test(key) && event.code === 'KeyK';
 }

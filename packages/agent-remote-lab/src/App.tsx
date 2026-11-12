@@ -492,6 +492,8 @@ function AppContent({
     if (!sharedWindow || previous.windowId !== sharedWindow.id) return;
     if (dockIds.some(id => !previous.ids.has(id)) || previous.ids.size > 0 && ids.size === 0) setDocksHidden(false);
   }, [sharedWindow?.id, dockKey]);
+  // A docked view that is chosen (sidebar row, search) would stay invisible behind hidden docks, so they show again.
+  const showDockOf = useCallback((view: Pick<WindowView, 'placement'>) => { if (view.placement === 'dock') setDocksHidden(false); }, []);
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
   if (!accessReady) botPresentation.recovering = true;
@@ -589,12 +591,11 @@ function AppContent({
   // Compact layouts have no page; the page does not reappear when the window widens again.
   useEffect(() => { if (compactLayout) setSessionsPage(false); }, [compactLayout]);
   const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
-  const contextFocusHidden = useRef(false);
+  const sidebarShown = useRef(desktopContextVisible);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
-  const toggleSidebar = compactLayout ? undefined : windowMode ? () => {
-    contextFocusHidden.current = focusWithinContext();
-    setDesktopContextVisible(value => !value);
-  } : () => setBotRosterCollapsed(value => !value);
+  const toggleSidebar = compactLayout ? undefined : windowMode
+    ? () => setDesktopContextVisible(value => !value)
+    : () => setBotRosterCollapsed(value => !value);
   // ⌘K opens the command palette, which serves both modes.
   const [searchOpen, setSearchOpen] = useState(false);
   const openSearch = useCallback(() => setSearchOpen(true), []);
@@ -605,11 +606,13 @@ function AppContent({
   // Palette items and deferred steps call the functions of the latest render, not of the render that built them.
   const searchRuns = useRef({ inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode });
   searchRuns.current = { inMode, switchMode, openWindowFromSearch, openSessionFromSearch, createWindowFromMenu, addSessionView, focusShownMode };
-  // Focus inside a sidebar that ⌘\ hides would fall to the page; it goes to the View trigger, else into the main stage.
+  // Focus inside a sidebar that hides would fall to the page; it goes to the View trigger, else into the main stage. The
+  // check runs when the sidebar hides, not when it is toggled: the palette's Hide sidebar returns focus to the sidebar's
+  // Search button only as it closes, in the same commit.
   useLayoutEffect(() => {
-    const lost = contextFocusHidden.current;
-    contextFocusHidden.current = false;
-    if (!lost || desktopContextVisible || !(document.activeElement === document.body || focusWithinContext())) return;
+    const hidden = sidebarShown.current && !desktopContextVisible;
+    sidebarShown.current = desktopContextVisible;
+    if (!hidden || !(document.activeElement === document.body || focusWithinContext())) return;
     const trigger = viewTriggerRef.current;
     if (trigger?.isConnected && !trigger.closest('[hidden], [inert]')) trigger.focus({ preventScroll: true });
     if (document.activeElement !== trigger) focusableElements(document.querySelector<HTMLElement>('.lab-main-stage'))[0]?.focus({ preventScroll: true });
@@ -1765,6 +1768,7 @@ function AppContent({
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, windowSessionStatus);
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
+    showDockOf(view);
     const failed = (error: unknown) => windowActions.setNotice(message(error, 'The session view was not selected.'));
     try { void windowWorkspace.operate(viewSelection(view)).catch(failed); } catch (error) { failed(error); return; }
     revealView(view.id); closePage();
@@ -2953,7 +2957,7 @@ function AppContent({
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
-            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus}
+            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf}
               onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">

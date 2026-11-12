@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { commandKinds, searchCommands, type CommandItem, type CommandKind } from './command-search.js';
 import { applePlatform } from '../platform.js';
+import { isSearchKey } from '../hooks/useShellShortcuts.js';
 import './shell.css';
 
 const groupLabels: Record<CommandKind, string> = { action: 'Actions', window: 'Windows', bot: 'Bots', session: 'Sessions' };
@@ -33,7 +34,7 @@ export function CommandPalette({ open, items, onClose }: { open: boolean; items:
       if (event.nativeEvent.isComposing || event.altKey || event.shiftKey) return;
       const apple = applePlatform();
       const primary = apple ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
-      if (!primary || (event.code !== 'KeyK' && event.key.toLowerCase() !== 'k')) return;
+      if (!primary || !isSearchKey(event)) return;
       event.preventDefault(); onClose();
     }}
     onPointerDown={event => { pressedBackdrop.current = event.target === event.currentTarget; }}

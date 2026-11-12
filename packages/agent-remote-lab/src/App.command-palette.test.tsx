@@ -206,3 +206,23 @@ describe('from Bot mode while the hosted Window is still loading', () => {
     } finally { await app.close(); }
   });
 });
+
+it('keeps focus on the page when Hide sidebar runs from the sidebar Search button', async () => {
+  const scope = 'http://localhost/palette-hide-sidebar/';
+  seedGroup(scope, windowGroup('A', 'Alpha'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    const searchButton = app.container.querySelector<HTMLButtonElement>('#lab-context button[aria-label="Search"]')!;
+    searchButton.focus();
+    await act(async () => searchButton.click());
+    expect(paletteOpen(app.container)).toBe(true);
+    await search(app.container, 'Hide sidebar');
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(paletteOpen(app.container)).toBe(false);
+    expect(app.container.querySelector<HTMLElement>('#lab-context')!.closest('[hidden]')).not.toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.getElementById('lab-context')!.contains(document.activeElement)).toBe(false);
+  } finally { await app.close(); }
+});

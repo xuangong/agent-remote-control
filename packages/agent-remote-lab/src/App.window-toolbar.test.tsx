@@ -141,14 +141,13 @@ it('hides and shows the docks, remembering the choice, without dropping focus fr
     await until(() => expect(app.container.querySelector('.lab-session-dock-pane')).not.toBeNull());
     expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).toBeNull();
     const hide = toggle(app.container, 'Hide docks')!;
-    expect(hide.getAttribute('aria-pressed')).toBe('false');
     // Focus inside a dock pane moves to the toggle rather than falling to the page when the pane hides.
     const inside = app.container.querySelector<HTMLElement>('.lab-session-dock-pane button, .lab-session-dock-pane [tabindex]')!;
     inside.focus();
     expect(document.activeElement).toBe(inside);
     await act(async () => hide.click());
     expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).not.toBeNull();
-    expect(toggle(app.container, 'Show docks')?.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle(app.container, 'Show docks')).not.toBeNull();
     expect(document.activeElement).toBe(toggle(app.container, 'Show docks'));
   } finally { await app.close(); }
 
@@ -289,6 +288,24 @@ it('shows hidden docks again when a view is docked, and when the last dock close
     await until(() => expect(app.workspace().window?.views.some(view => view.placement === 'dock')).toBe(false));
     expect(toggle('Show docks') ?? null).toBeNull();
     expect(localStorage.getItem('agent-remote:docks-hidden')).toBe('0');
+  } finally { await app.close(); }
+});
+
+it('shows hidden docks again when a docked view is chosen in the sidebar', async () => {
+  const scope = 'http://localhost/window-toolbar-dock-choose/';
+  seedGroup(scope, windowGroup('A', [createWindowView('A-dock', botTarget('Adock'), 'dock')]));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  const toggle = (label: string) => toolbar(app.container)?.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  try {
+    await until(() => expect(toggle('Hide docks')).not.toBeNull());
+    await act(async () => toggle('Hide docks')!.click());
+    expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).not.toBeNull();
+    const row = app.container.querySelector<HTMLElement>('#lab-context [data-window-view-id="A-dock"]');
+    expect(row).not.toBeNull();
+    await act(async () => row!.click());
+    await until(() => expect(app.container.querySelector('.lab-session-dock-pane[hidden]')).toBeNull());
+    expect(toggle('Hide docks')).not.toBeNull();
   } finally { await app.close(); }
 });
 

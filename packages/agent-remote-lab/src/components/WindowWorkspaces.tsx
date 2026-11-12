@@ -23,7 +23,7 @@ function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, placement = 'panel', actions: sharedActions }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /**
    * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
@@ -36,6 +36,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   onOverview?(): void;
   /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
   onNavigate?(): void;
+  /** Called when a view of the open Window is chosen, once its selection is sent. */
+  onChooseView?(view: WindowView): void;
   /** Where the list sits: the floating Windows panel, or the desktop sidebar, where headings and rows follow its flat rows and icon actions. */
   placement?: 'panel' | 'sidebar';
 }) {
@@ -69,6 +71,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   }
   function chooseView(view: WindowView) {
     if (!edit(viewSelection(view))) return;
+    onChooseView?.(view);
     revealView(view.id);
     onNavigate?.();
   }

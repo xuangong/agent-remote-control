@@ -84,8 +84,8 @@ export function WindowToolbar({ windowId, title, viewCount, leading, disabled, r
         { label: 'New session view', icon: 'plus', disabled: readOnly, onSelect: onNewView },
         { label: 'Open session…', icon: 'sessions', disabled: readOnly, onSelect: onOpenSession },
       ]} />
-      {hasDocks ? <IconButton icon="dock" label={docksHidden ? 'Show docks' : 'Hide docks'} aria-pressed={docksHidden}
-        // Hiding the docks may hide the focused control; focus stays on the toggle, even where a click does not focus buttons (Safari).
+      {hasDocks ? <IconButton icon="dock" label={docksHidden ? 'Show docks' : 'Hide docks'}
+        // The name says what a press does, so the button is not also a pressed toggle. Hiding the docks may hide the focused control; focus stays on the toggle, even where a click does not focus buttons (Safari).
         onClick={event => { event.currentTarget.focus({ preventScroll: true }); onToggleDocks(); }} /> : null}
       <Menu label="Window actions" items={actions} />
     </>} />;

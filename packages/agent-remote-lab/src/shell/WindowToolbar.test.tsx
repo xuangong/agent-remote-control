@@ -152,11 +152,11 @@ it('adds a new session view or opens a session from the Add menu', async () => {
 it('toggles the docks, showing whether they are hidden', async () => {
   const shown = await toolbar();
   const hide = shown.bar.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!;
-  expect(hide.getAttribute('aria-pressed')).toBe('false');
+  expect(hide.hasAttribute('aria-pressed')).toBe(false);
   await act(async () => hide.click());
   expect(shown.props.onToggleDocks).toHaveBeenCalledTimes(1);
   const hidden = await toolbar({ docksHidden: true });
-  expect(hidden.bar.querySelector('button[aria-label="Show docks"]')?.getAttribute('aria-pressed')).toBe('true');
+  expect(hidden.bar.querySelector('button[aria-label="Show docks"]')?.hasAttribute('aria-pressed')).toBe(false);
   expect(hidden.bar.querySelector('button[aria-label="Hide docks"]')).toBeNull();
   const none = await toolbar({ hasDocks: false });
   expect(none.bar.querySelector('button[aria-label$=" docks"]')).toBeNull();

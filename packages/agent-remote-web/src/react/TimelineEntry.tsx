@@ -9,6 +9,8 @@ interface TimelineEntryProps {
   readonly timestamp: string;
   readonly sent: boolean;
   readonly inspected: boolean;
+  /** The entry the open session search revealed; a press on it does not dismiss the search. */
+  readonly searchSelected?: boolean;
   readonly inspect?: () => void;
   readonly sequence: number;
   readonly children: ReactNode;
@@ -18,7 +20,7 @@ interface TimelineEntryProps {
 }
 const interactive = 'a, button, input, select, textarea, summary, label, [role="button"], [contenteditable="true"]';
 
-export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, inspect, sequence, children, selection, selectionLabel = 'Select', onSelect }: TimelineEntryProps) {
+export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, searchSelected, inspect, sequence, children, selection, selectionLabel = 'Select', onSelect }: TimelineEntryProps) {
   const selecting = !!onSelect && (selection === 'selected' || selection === 'unselected');
   const startSelection = onSelect && selection === 'available' ? <button type="button" className="agent-select-entry" aria-label={`${selectionLabel} this message`} title={`${selectionLabel}: select messages`}
     onClick={() => onSelect(false)}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 6h5v5H6.5L4 14V6Zm7 0h5v5h-2.5L11 14V6Z" /></svg></button> : null;
@@ -39,7 +41,7 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, in
   const timeContext = useMemo(() => localTime ? { ...localTime, timestamp, visible: timeVisible, toggle: toggleTimelineTime } : undefined, [localTime, timestamp, timeVisible]);
   const { ref, reveal } = useTimelineTimeSwipe(!!localTime, sent ? -1 : 1, !!onEdit);
   return <div ref={ref} className="agent-timeline-entry" data-entry-key={entryKey}
-    data-inspected={inspected || undefined} tabIndex={inspect || inspected ? -1 : undefined}
+    data-inspected={inspected || undefined} data-search-selected={searchSelected || undefined} tabIndex={inspect || inspected ? -1 : undefined}
     data-prompt-editable={!!onEdit || undefined}
     data-selecting={selecting || undefined} data-selected={selection === 'selected' || undefined}
     // Shift-click would extend the page's text selection instead of selecting a range of messages.

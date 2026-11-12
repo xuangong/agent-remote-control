@@ -43,7 +43,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
     const dismissOutside = (event: PointerEvent) => {
       const path = event.composedPath();
       // The entry a result revealed may exist only while search is open, so interacting with it must not remove it.
-      if (path.includes(element) || path.some(target => target instanceof Element && target.matches('[data-inspected="true"]'))) return;
+      if (path.includes(element) || path.some(target => target instanceof Element && target.matches('[data-search-selected="true"]'))) return;
       latest.current.onClose({ restoreFocus: false });
     };
     ownerDocument.addEventListener('pointerdown', dismissOutside, true);

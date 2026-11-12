@@ -7,6 +7,7 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { createTimelineRenderModel } from '@orchardworks/agent-remote-web/react';
 
 it('uses only the containing toolbar disclosure when heading actions move into the timeline', async () => {
   const change = vi.fn();
@@ -204,6 +205,27 @@ it('keeps session search open when a collapsible toolbar view is tapped on the e
   expect(container.querySelector('.agent-session-search')).not.toBeNull();
   expect(container.querySelector('.agent-timeline-entry[data-inspected="true"]')).not.toBeNull();
   await act(async () => { container.querySelector('.agent-timeline-entry:not([data-inspected])')!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('.agent-session-search')).toBeNull();
+});
+
+it('collapses the session actions and closes search for a press on an entry highlighted from Trace', async () => {
+  const state: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false,
+    entries: ['First runtime notice', 'Second runtime notice'].map((message, index) => ({
+      providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-03T00:00:00Z',
+      sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'error', message },
+    })),
+  } };
+  const traced = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries)[0]!.key;
+  const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} headingMode="toolbar" revealEntry={{ key: traced, requestId: 1 }} />);
+  const highlighted = container.querySelector<HTMLElement>(`.agent-timeline-entry[data-entry-key="${traced}"]`)!;
+  expect(highlighted.dataset.inspected).toBe('true');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  await act(async () => { highlighted.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('[aria-label="Expand session actions"]')).not.toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!.click());
+  expect(container.querySelector('.agent-session-search')).not.toBeNull();
+  await act(async () => { highlighted.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
   expect(container.querySelector('.agent-session-search')).toBeNull();
 });
 

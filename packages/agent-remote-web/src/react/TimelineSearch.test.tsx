@@ -90,3 +90,16 @@ it('reveals and expands a matching hidden item without changing Content only for
   await act(async () => container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle')!.click());
   expect(container.querySelector('.agent-reasoning-toggle')?.getAttribute('aria-expanded')).toBe('false');
 });
+
+it('stays open for a press on the entry its result revealed, and closes for any other highlighted entry', async () => {
+  const close = vi.fn();
+  const container = await render(<>
+    <TimelineSearch state={state()} search={async () => ({ matches: [], scanned: 0 })} onSelect={async () => {}} onClose={close} />
+    <div className="agent-timeline-entry" data-inspected="true" data-search-selected="true" id="revealed" />
+    <div className="agent-timeline-entry" data-inspected="true" id="traced" />
+  </>);
+  await act(async () => { container.querySelector('#revealed')!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => { container.querySelector('#traced')!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(close).toHaveBeenCalledWith({ restoreFocus: false });
+});

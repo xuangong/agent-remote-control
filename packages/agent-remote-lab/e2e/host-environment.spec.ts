@@ -22,7 +22,7 @@ test('filters execution environments without confusing same-name Hosts or overfl
   const search = context.getByRole('searchbox', { name: 'Find an execution environment' });
   await search.fill('linux chromium');
   const selector = context.getByLabel('Connected Host');
-  await expect(selector.locator('option:enabled')).toHaveCount(2); // Prompt plus one match.
+  await expect(selector.locator('option:enabled')).toHaveCount(1); // The current selection stays listed but disabled; one match is enabled.
   await selector.selectOption('linux');
   await expect(context.getByTestId('provider-select')).toHaveValue(JSON.stringify(['linux', 'codex']));
   await expect(context.getByLabel('Host environment')).toContainText('Ubuntu 24.04 LTS');

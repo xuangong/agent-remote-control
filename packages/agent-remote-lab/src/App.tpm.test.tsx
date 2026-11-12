@@ -70,3 +70,23 @@ it.each(['fixed', 'legacy', 'role', 'stale-role', 'missing-provider'] as const)(
   expect(current).toHaveBeenCalledTimes(mode.includes('role') ? 1 : 0);
   expect(work.document).toBe('Retained TPM document');
 });
+it('asks only paired Hosts for TPM works, never the Lab server', async () => {
+  const scope = 'http://localhost/u/tpm-hosts/';
+  const tpmList = vi.fn(async (_hostId: string) => ({ supported: false, works: [] }));
+  vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], revision: '1', hasMore: false });
+  vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });
+  const transport = { listProviders: async () => [{ providerId: 'recorded', displayName: 'Recorded semantic Provider' }],
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as LabTransport;
+  const hostService = { hosts: async () => ({ hosts: [{ id: 'host', name: 'Fixture', online: true, providers: [] }] }),
+    pair: async () => { throw new Error('No pairing'); }, revoke: async () => {}, tpmList,
+    tpmWork: async () => { throw new Error('No TPM detail expected'); }, tpmCreate: async () => { throw new Error('No work creation'); },
+    tpmAction: async () => { throw new Error('No work mutation'); } };
+  const view = await render(<App baseUrl={scope} userScoped transport={transport} directory={new SessionDirectoryClient(scope)} hostService={hostService} />);
+  // The Lab server's local providers make it selectable for new sessions, but it is not a Controller and has no TPM.
+  await vi.waitFor(() => expect([...view.querySelectorAll('option')].some(option => option.textContent?.startsWith('Lab server'))).toBe(true));
+  const before = tpmList.mock.calls.length;
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  await vi.waitFor(() => expect(tpmList.mock.calls.length).toBeGreaterThan(before));
+  expect(tpmList).toHaveBeenCalledWith('host');
+  expect(tpmList.mock.calls.map(([hostId]) => hostId)).not.toContain('local');
+});

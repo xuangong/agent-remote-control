@@ -25,6 +25,14 @@ async function openMarkdown(page: Page): Promise<Locator> {
   return preview(page);
 }
 
+async function chooseContentOnly(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Session view options', exact: true }).click();
+  const options = page.getByRole('region', { name: 'Session view options', exact: true });
+  await options.getByRole('radio', { name: 'Content only', exact: true }).check();
+  await options.press('Escape');
+  await expect(options).toHaveCount(0);
+}
+
 async function canvasCenter(dialog: Locator): Promise<{ x: number; y: number }> {
   const box = (await dialog.getByRole('group', { name: 'Image canvas', exact: true }).boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -349,7 +357,8 @@ test('supports dragging to dismiss with reduced motion and restores focus', asyn
 
 test('renders bound native images in content-only view and opens a zoomable fullscreen preview', async ({ page }, info) => {
   for (const provider of ['codex', 'claude']) {
-    await page.goto(`/e2e/fixtures/image-viewer.html?content=1&native-image=${provider}`);
+    await page.goto(`/e2e/fixtures/image-viewer.html?native-image=${provider}`);
+    await chooseContentOnly(page);
     const timeline = page.getByTestId('timeline');
     await timeline.dispatchEvent('wheel', { deltaY: -1 });
     await timeline.getByRole('heading', { name: 'Conversation image', exact: true }).scrollIntoViewIfNeeded();
@@ -400,7 +409,7 @@ test('opens a Markdown image across the viewport and restores reading position a
 
 test('opens resource thumbnails, sent image tags and image file links in the shared viewer', async ({ page }) => {
   const targets = [
-    page.getByRole('region', { name: 'Referenced resources' }).getByRole('img', { name: './viewer.png', exact: true }),
+    page.getByRole('region', { name: 'Referenced resources' }).getByRole('img', { name: 'viewer.png', exact: true }),
     page.getByRole('button', { name: 'Preview image #1', exact: true }),
     page.getByRole('button', { name: 'Open diagram file', exact: true }),
   ];

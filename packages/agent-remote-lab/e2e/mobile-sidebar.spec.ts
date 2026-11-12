@@ -284,7 +284,7 @@ test('reorders floating tracking rows without opening them, persists order, and 
   await page.goto('/e2e/fixtures/session-stars.html?switching=1');
   const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
   await trigger.click();
-  const panel = page.locator('.lab-tracking-floating .lab-session-popover-panel');
+  const panel = page.locator('.lab-tracking-floating').getByRole('region', { name: 'Tracked sessions' });
   const rows = panel.locator('.lab-tracked-row > button');
   const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem(`agent-remote-tracking:${location.origin}/u/alice/`)!).map((s: { nativeSessionId: string }) => s.nativeSessionId));
   await expect(rows).toHaveCount(3);

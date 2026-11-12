@@ -23,11 +23,11 @@ Each plan ends with "Changes made during execution", which records what differed
 
 | Item | State |
 |---|---|
-| main | `a05b4266` (phase 2c merged), plus this document |
+| main | `3cf3adf8`: phase 2c, plus fix/clean-baseline (the cleared failures, the switch timing baseline and this document's updates), pushed on 2026-11-12 |
 | Phases | 1, 2a, 2b and 2c are done, merged and deployed |
-| Worker (Cloudflare) | Version `1a30aa8c` is live (2c). Roll back to `750bd262` (fix/e2e-repair) if needed |
-| Controller | No release is needed for phases 1–2. fix/clean-baseline fixes `session set --title`, which always failed with "operationId is required"; it reaches users with the next Controller release |
-| origin/main | The user pushes main by hand from the first computer; before that, main was about 190 commits ahead. On the new computer, `git log origin/main..main` should be empty after cloning, and the latest commits should include this document; if they don't, the push has not happened yet (§4.1) |
+| Worker (Cloudflare) | Version `83f1644d` is live (`3cf3adf8`). Roll back to `1a30aa8c` (2c) if needed |
+| Controller | No release is needed for phases 1–2. Main fixes `session set --title`, which always failed with "operationId is required"; the fix reaches users with the next Controller release |
+| origin/main | Equal to main. Work now continues on the second computer |
 
 What phases 1–2 delivered:
 
@@ -236,25 +236,25 @@ These worktrees are merged and safe to remove:
 
 Check the others in `git worktree list` with `git rev-list --count main..<branch>` before removing them.
 
-### 4.8 chromium-desktop still fails 23 tests on main
+### 4.8 chromium-desktop is clean (resolved)
 
-A full chromium-desktop run on 2026-11-12 (main at `22f1ead1`) failed 29 of 493 tests. fix/clean-baseline clears 6 of them (the `modernization` spec and `mobile-keyboard-controls`) and adds none; `toast-placement` failed once in the full run and passes alone. The other 23 fail on main too. They are not environmental: like §4.4, they follow product changes the tests never caught up with. First error per spec:
+On 2026-11-12 a full chromium-desktop run passed 422 of 493 tests, with 71 skipped and none failing (fix/e2e-desktop). The 23 failures that main still had were all outdated tests or fixtures; no product code changed:
 
-| Spec | Tests | First error |
-|---|---|---|
-| `image-input` | 10 | `toHaveAttribute` / `toContainText` on the composer's image atoms and upload feedback |
-| `image-viewer` | 2 | the content-only image count; a timeout opening thumbnails |
-| `content-only-view` | 2 (320px, 390px) | "Session view options" sits behind "Expand session actions" (§4.4) |
-| `copilot-handoff` | 2 | an equality on the handed-off session |
-| `composer-send-press` | 1 | `setSelectionRange` on the ProseMirror composer |
-| `host-environment` | 1 | an environment filter count |
-| `mobile-sidebar` | 1 | strict mode: two `.lab-tracking-floating .lab-session-popover-panel` (the sidebar and floating hosts from 2b) |
-| `resource-input` | 1 | `toHaveText` on the transferred resource |
-| `seamless-access` | 1 | a timing bound on the cached startup |
-| `security` | 1 | a control not visible on a narrow screen |
-| `session-view-ownership` | 1 | "View and the owning title share one row in reading order" |
+| Spec | Cause |
+|---|---|
+| `image-input` (10) | The fixture page passed no image recipient, so uploads never started. Its failure toggle was also read through a closure the upload pump had already captured. |
+| `image-viewer` (2) | The workbench's own display preference overrides the fixture's content-only flag; the test now chooses Content only in View options. The resource thumbnail is named by its file name. |
+| `resource-input` (1) | It needs the native fixture Relay of `playwright.resources.config.ts` and is skipped elsewhere. |
+| `content-only-view` (2) | At 320/390px the session actions are expanded first. |
+| `session-view-ownership` (1) | With the chrome hidden, View sits in the Window toolbar, and views start below it. |
+| `security` (1) | The mock browser needs an identity, or it is grouped under "Earlier sign-ins". |
+| `copilot-handoff` (2) | The command line takes `copilot --resume=<id>`. Shared session control makes the first page writable again. |
+| `composer-send-press` (1) | The ProseMirror composer has no `setSelectionRange`: the test uses DOM ranges. |
+| `seamless-access` (1) | The cached display has no tool and reasoning details, so the restored scroll offset is approximate. The test now checks that the read entry stays in view and does not move while the live details arrive. |
+| `host-environment` (1) | A current Host selection replaces the "Select a Host" prompt. |
+| `mobile-sidebar` (1) | The Track panel is located by its region; a hidden Windows panel shares the floating host. |
 
-Handle them like §4.4, one spec at a time, before phase 3 merges, so that each phase compares against a clean chromium-desktop run.
+Possible product improvement found on the way: restoring the reading position by entry key and offset, instead of by scroll distance, would put a cached session exactly where the reader left it.
 
 ## 5. How to carry out the remaining phases
 
@@ -393,9 +393,9 @@ These items come from the spec or earlier plans but are not assigned to any phas
 
 ## 7. Suggested order
 
-1. **Set up and push.** §2, then §4.1. Confirm that `git log origin/main..main` is empty.
-2. **Clear known failures.** §4.2 (`modernization` spec), §4.5 (browser builds) and §4.3 (succession flake), so the next phase starts from a clean chromium-desktop baseline.
-3. **Record the performance baseline** (§6).
+1. **Set up and push.** Done on 2026-11-12.
+2. **Clear known failures.** Done on 2026-11-12: §4.2, §4.3, §4.5 and §4.8. chromium-desktop passes completely.
+3. **Record the performance baseline.** Done on 2026-11-12 (§6).
 4. **Phase 3**, as 3a → 3d, each merged and deployed.
 5. **Sweep the other projects** (§4.4): mobile and WebKit, before phase 5.
 6. **Phase 4.**

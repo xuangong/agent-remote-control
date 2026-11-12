@@ -73,7 +73,8 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
     function App(){const[url,setUrl]=useState();return <><button onClick={async()=>{try{setUrl(await client.enter(await client.open(${JSON.stringify(f.hostId)},${JSON.stringify(f.registration.id)},${JSON.stringify(f.target + '/')}),${JSON.stringify(f.registration.id)}))}catch(e){document.body.dataset.error=e.message}}}>Open tunnel</button>{url&&<PreviewBrowser url={url} target="Local app" visible browserKey="fixture" onClose={()=>setUrl(undefined)} onMinimize={()=>{}}/>}</>};createRoot(document.getElementById('root')).render(<App/>);`,
     loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
   script = bundle.outputFiles[0]!.text;
-  const browser = await chromium.launch({ headless: true, args: ['--host-resolver-rules=MAP *.arc.test 127.0.0.1', '--no-proxy-server'] });
+  // Connect directly, bypassing every proxy: under a system proxy, --no-proxy-server alone still left the mapped names unreachable.
+  const browser = await chromium.launch({ headless: true, args: ['--host-resolver-rules=MAP *.arc.test 127.0.0.1', '--proxy-server=direct://', '--proxy-bypass-list=*'] });
   onPreviewCleanup(() => browser.close()); const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const separator = f.alice.cookie.indexOf('=');
   await context.addCookies([{ name: f.alice.cookie.slice(0, separator), value: f.alice.cookie.slice(separator + 1), url: f.url, httpOnly: true, sameSite: 'Strict', secure: true }]);

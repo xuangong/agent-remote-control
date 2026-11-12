@@ -1,5 +1,4 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, webkit, expect as browserExpect } from '@playwright/test';
@@ -40,9 +39,9 @@ const server = createServer((request, response) => {
 beforeAll(async () => {
   const source = `
     import React, { useEffect, useState } from 'react'; import { createRoot } from 'react-dom/client';
+    import './session-view-styles.ts';
     import { AgentReplica, RemoteSessionClient, HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
     import { SessionWorkbench } from './components/SessionWorkbench.tsx';
-    import { TimelineDisplay } from '@orchardworks/agent-remote-web/react';
     function View({ id }) {
       const [replica] = useState(() => {
         const replica = new AgentReplica();
@@ -56,17 +55,19 @@ beforeAll(async () => {
       const [client] = useState(() => new RemoteSessionClient(id, new HttpWebSocketTransport(location.origin), replica, { historyPageSize: 20 }));
       const [state, setState] = useState(replica.getState());
       useEffect(() => replica.subscribe(() => setState(replica.getState())), [replica]);
-      return <div data-view={id}><TimelineDisplay.Provider value="content"><SessionWorkbench state={state} readOnly sessionStatus="ready" actions={{
+      return <div data-view={id}><SessionWorkbench defaultDisplayMode="content" state={state} readOnly sessionStatus="ready" actions={{
         searchTimeline: (query, options) => client.searchTimeline(query, options),
         loadSearchMatch: (match, options) => client.loadSearchMatch(match, options),
         loadOlder: () => client.loadOlder(),
-      }} /></TimelineDisplay.Provider></div>;
+      }} /></div>;
     }
     createRoot(document.getElementById('root')).render(<><View id="one" />{innerWidth >= 900 ? <View id="two" /> : null}</>);
   `;
-  script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
-    format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;
-  css = (await Promise.all(['../src/ui/tokens.css', '../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
+  // The page gets the product's styles, including those the components import, from the bundle.
+  const bundle = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) }, bundle: true, write: false,
+    outfile: 'fixture.js', loader: { '.woff2': 'dataurl' }, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
+  script = bundle.outputFiles.find(file => file.path.endsWith('.js'))!.text;
+  css = bundle.outputFiles.find(file => file.path.endsWith('.css'))!.text;
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });

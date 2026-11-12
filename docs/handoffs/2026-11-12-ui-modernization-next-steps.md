@@ -26,7 +26,7 @@ Each plan ends with "Changes made during execution", which records what differed
 | main | `a05b4266` (phase 2c merged), plus this document |
 | Phases | 1, 2a, 2b and 2c are done, merged and deployed |
 | Worker (Cloudflare) | Version `1a30aa8c` is live (2c). Roll back to `750bd262` (fix/e2e-repair) if needed |
-| Controller | No release is needed for phases 1–2. Every change so far is in the website (Lab) |
+| Controller | No release is needed for phases 1–2. fix/clean-baseline fixes `session set --title`, which always failed with "operationId is required"; it reaches users with the next Controller release |
 | origin/main | The user pushes main by hand from the first computer; before that, main was about 190 commits ahead. On the new computer, `git log origin/main..main` should be empty after cloning, and the latest commits should include this document; if they don't, the push has not happened yet (§4.1) |
 
 What phases 1–2 delivered:
@@ -145,33 +145,36 @@ If this document's commit is not on `origin/main`, push it. The push runs no tes
 
 The first two pass 3 out of 3 times when run alone.
 
-### 4.2 The `modernization` e2e spec: 5 failures, also on main
+### 4.2 The `modernization` e2e spec (resolved)
 
-The failures are in `e2e/modernization.spec.ts`, chromium-desktop:
+The spec passes in chromium-desktop (fix/clean-baseline). The five failures had three causes:
 
-- **A TPM 404 console error.** The spec forbids console errors; a TPM request returns 404 in the fixture.
-  - Find the request in the trace: run with `--trace on`, then open it with `npx playwright show-trace`.
-  - If the fixture server lacks the TPM route, add it to the fixture.
-  - If the Lab requests TPM data while TPM is unavailable, gate the request on the capability instead.
-- **The timeline width stays at 440.** The test expects the timeline to widen with the pane.
-  - Measure in the browser which ancestor caps it: a `max-width` or a container size left over from the 2b layout move.
-  - If the cap is intended (the reading width), update the test to the intended width and say so in the commit.
-- **No "Load resource" button.** It was either renamed or moved into a menu during phases 1–2.
-  - Search `packages/agent-remote-lab/src` and `packages/agent-remote-web/src/react` for the old and new names.
-  - If it moved, update the test to open the menu.
-  - If the button is gone by mistake, restore it.
+- **TPM 404 (product).** The TPM catalog polled every selectable Host, including the "Lab server" that local providers add. The Lab server is not a Controller and has no TPM route, so a workbench with local providers logged a 404 every ten seconds. TPM now polls paired Hosts only.
+- **Timeline width (test).** Window views have their own width (440px by default) since multiple primary groups, so hiding the sidebar widens the Window and not the timeline.
+- **"Load resource" (test).** The button exists; the Settings and New session pages cover the Window, so the test now returns to the Window before measuring it. The test also counted the feature-view switches (Ask, Window, TPM, Team) as panels.
 
-Done when the spec passes in chromium-desktop and the failures are removed from this list.
+In chromium-mobile the spec still fails 4 tests (main failed 8): "opens session settings…", "keeps one View entry…", "meets AA contrast…" and "provides coarse-pointer controls…". They belong to §4.4.
 
-### 4.3 `App.succession.test.tsx` cascades under load
+### 4.3 `App.succession.test.tsx` cascades under load (resolved)
 
-The file passes alone but fails in cascades during the full parallel run, on main too.
+**Cause.** Under load, a test ran past its deadline. Vitest moved on, but the test kept running, and its `act()` calls overlapped the next test's ("overlapping act() calls"). That broke React's act environment for every later test in the file. Load set it off because 40 waits used `vi.waitFor`'s 1 s default.
 
-1. Reproduce with `npx vitest run src/App.succession.test.tsx --maxWorkers=50%`, alongside a CPU load (run the whole suite at the same time), or with `--repeat-each`-style loops.
-2. Usual causes: fixed `setTimeout` waits, an `until()` with a short timeout, and state leaking between tests (localStorage, IndexedDB from `fake-indexeddb`, module-level caches).
-3. Replace the time-based waits with waits on conditions. Make sure every test resets the stores in `afterEach`.
+**Fix.**
+- Waits share one loop. It finishes each attempt before the next, gives up after 5 s, and stops once its test has ended.
+- `act` is tracked, and the cleanup lets running work finish before it unmounts.
+- The file's tests have a 30 s deadline.
 
-The same approach applies to the other flakes in §3. Fix them one file at a time.
+**Result.** Running alone, the file takes as long as before. With the full Lab suite and three more copies of the file running at once, it passes 163 of 163, where it failed 151.
+
+**Reproducing the cascade.** Make one test outlive its deadline while a wait loop runs, then run it with the next tests (`-t "first|second|third"`); the later tests fail at once with `succession` undefined.
+
+**Other load-sensitive tests.** Under that same load, these other tests still timed out; they pass under a normal run:
+- "keeps Window A/A2 and both display settings while Bot B1 shares its exact view draft";
+- "rejects new owners beyond the durable catalogue bounds…";
+- "refuses a near-ceiling handoff…";
+- "keeps a native Codex session usable when an independent Host pairs to a restarted backend".
+
+Treat them one file at a time, in the same way: first look for a test outliving its deadline, then for short waits.
 
 ### 4.4 Sweep the mobile and WebKit e2e projects
 
@@ -198,12 +201,18 @@ Method:
 
 Phase 5 (phones) changes these layouts again, so prefer locators by accessible name and region over CSS structure.
 
-### 4.5 `e2e/*.browser.ts` files that do not build
+### 4.5 `e2e/*.browser.ts` files (resolved)
 
-`session-letters`, `session-search`, `session-recovery` and `pending-send` (run with `npx vitest run -c vitest.preview.config.ts`) have failed to build since 41a6661a. `SessionSuccessionDialog` imports CSS, and their esbuild call has no output path.
+All 14 browser test files pass (`npx vitest run -c vitest.preview.config.ts`, about 60 tests in Chromium and WebKit). Rebuild agent-remote-web first: the fixtures bundle its `dist`.
 
-- Give the esbuild call an `outdir`, or a loader that ignores `.css`.
-- Then fix `session-search.browser.ts:124`. After the search closes, a result's reasoning stays expanded, because `useItemDisclosure` (agent-remote-web `TimelineDisplay.ts`) keeps the `choice` that the search reveal set.
+- **Build.** `pending-send` and `session-search` had no esbuild output path. They now take the product's styles from the bundle (`session-view-styles.ts`), as the other fixtures do.
+- **`pending-send`.** Its session state predated the rule that a session is synchronized only once its Timeline is initialized.
+- **`session-search`.** The reasoning stayed shown because the workbench chooses its own display mode from the view's preferences, so the outer content-only context no longer applied. `useItemDisclosure` was not at fault: in the content display, closing the search hides the revealed reasoning.
+- **`session-recovery`.** The fixture's directory pointed at the legacy `local` route, so the session never connected. In the 390px view, the floating TPM, Window and Team capsules cover the first message's Retry and Delete (see §5.4).
+- **`session-letters`.** Besides test updates, there were two product fixes:
+  - Tapping the entry that a search revealed closed the search and removed a hidden letter.
+  - At 402px the expanded session actions overflowed under their toggle. They are now 42px wide below 480px; see §5.4.
+- **`preview-subdomain`** failed on this machine only: a system proxy and a resolver that answers every name kept Chromium from honoring `--host-resolver-rules`. The test now connects directly and bypasses proxies.
 
 ### 4.6 Smaller items found in the 2c review
 
@@ -226,6 +235,26 @@ These worktrees are merged and safe to remove:
 - `e2e-baseline` (detached)
 
 Check the others in `git worktree list` with `git rev-list --count main..<branch>` before removing them.
+
+### 4.8 chromium-desktop still fails 23 tests on main
+
+A full chromium-desktop run on 2026-11-12 (main at `22f1ead1`) failed 29 of 493 tests. fix/clean-baseline clears 6 of them (the `modernization` spec and `mobile-keyboard-controls`) and adds none; `toast-placement` failed once in the full run and passes alone. The other 23 fail on main too. They are not environmental: like §4.4, they follow product changes the tests never caught up with. First error per spec:
+
+| Spec | Tests | First error |
+|---|---|---|
+| `image-input` | 10 | `toHaveAttribute` / `toContainText` on the composer's image atoms and upload feedback |
+| `image-viewer` | 2 | the content-only image count; a timeout opening thumbnails |
+| `content-only-view` | 2 (320px, 390px) | "Session view options" sits behind "Expand session actions" (§4.4) |
+| `copilot-handoff` | 2 | an equality on the handed-off session |
+| `composer-send-press` | 1 | `setSelectionRange` on the ProseMirror composer |
+| `host-environment` | 1 | an environment filter count |
+| `mobile-sidebar` | 1 | strict mode: two `.lab-tracking-floating .lab-session-popover-panel` (the sidebar and floating hosts from 2b) |
+| `resource-input` | 1 | `toHaveText` on the transferred resource |
+| `seamless-access` | 1 | a timing bound on the cached startup |
+| `security` | 1 | a control not visible on a narrow screen |
+| `session-view-ownership` | 1 | "View and the owning title share one row in reading order" |
+
+Handle them like §4.4, one spec at a time, before phase 3 merges, so that each phase compares against a clean chromium-desktop run.
 
 ## 5. How to carry out the remaining phases
 
@@ -338,6 +367,11 @@ Scope:
 - **Type size.** 17px body text on phones, from phase 1's leftovers.
 - **Medium width.** The spec wants three bands (desktop ≥900, medium 700–900 with a slide-over sidebar, phone <700), but the code has one 1180px compact breakpoint. Decide with the user whether to adopt the spec's bands before planning. Dozens of tests pin the 1180px breakpoint.
 
+Found while clearing the browser tests (§4.5), to settle in this phase:
+
+- **Capsules over the first message.** In a short conversation at 390px, the TPM, Window and Team capsules sit over the first message's Retry and Delete. Keep their placement and dragging, but they must not cover message actions.
+- **42px session actions.** Below 480px the expanded session actions are 42px wide, and they wrap instead of running under their toggle. On a real Host, with the VS Code entry, they take two rows at 402px and cover the top of the conversation while expanded. Restore 44px targets and one row when the pane header moves these actions into its ⋯ menu (phase 4).
+
 Run chromium-mobile, webkit-mobile-viewport and webkit-ask-mobile as part of verification, after §4.4 has cleared their baseline.
 
 ## 6. More work beyond phases 3–5
@@ -353,7 +387,7 @@ These items come from the spec or earlier plans but are not assigned to any phas
 - **Literal values.** `ui.css` still has literal radii and sizes (7px, 10px, 15px). `--ui-size-large-title`, `--ui-size-title` and `--ui-radius-input` are unused. Clean these up when phases 3–4 touch the files.
 - **Forced colors** (Windows high contrast) for SegmentedControl, Button, IconButton, StatusBadge and ListRow; check what 2a covered.
 - **New-result sync.** Syncing the "new result" state to the account is out of scope for phase 3 ("later"). It needs a Relay field, a Worker deploy, and possibly a Controller change.
-- **Performance baseline.** The spec asks for before/after measurements of Window switching and bot switching for each phase. No numbers were recorded for phases 2a–2c. Record them for main now, so phases 3–5 have something to compare against.
+- **Performance baseline (recorded).** [`docs/investigations/2026-11-12-switch-timing-baseline.md`](../investigations/2026-11-12-switch-timing-baseline.md) has the numbers for main at `22f1ead1` and how to measure a phase on the same data. `perf-fixture.mjs` and `switch-timing.mjs` are in the `prepare-arc-local` skill's scripts. Window switches cost about 210 ms at 4× CPU throttling, mostly long tasks, and bot switches about 45 ms. Measure on an idle machine.
 - **An accessibility pass**, after phase 5: keyboard-only walkthroughs of both modes, VoiceOver on macOS and iOS, and contrast checks in both appearances.
 - **`App.tsx` is about 3,300 lines.** Phases 2a–2c moved UI into `src/shell/` and `src/hooks/`. Phase 4 should keep extracting pane and dock wiring rather than adding to `App.tsx`; the spec lists this as a risk.
 

@@ -1528,7 +1528,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 
 .lab-timeline-controls { display: contents; }
 .lab-timeline-tools { position: absolute; z-index: 7; top: 8px; right: 12px; display: flex; align-items: stretch; max-width: calc(100% - 12px); pointer-events: none; }
-.lab-timeline-tools-content { display: flex; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
+.lab-timeline-tools-content { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; pointer-events: auto; }
 .lab-timeline-session-tools { display: contents; }
 .lab-timeline-session-tools > * { background: var(--obs-surface); border-radius: 8px; }
 .lab-timeline-tools-content:has(.lab-timeline-session-tools:not(:empty)) { padding: 2px; border: 1px solid var(--obs-border); border-radius: 10px; background: var(--obs-surface); box-shadow: 0 2px 8px color-mix(in oklab, var(--ui-shadow-ink) 6%, transparent); }
@@ -1554,6 +1554,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-timeline-tools button:active:not(:disabled) { transform: none; }
 .lab-timeline-tools .lab-session-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }
 @media (hover: hover) and (pointer: fine) { .lab-timeline-tools button:hover:not(:disabled) { color: var(--obs-action); } }
+/* In a narrow session view the expanded actions fit beside their toggle: the toolbar's own buttons narrow to 42px. The session
+   switcher shown in the toolbar keeps its own sizes. */
+@container session-view (max-width: 480px) {
+  .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content { gap: 0; }
+  .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content button:not(.lab-chat-sessions button) { flex: 0 0 42px; width: 42px; min-width: 42px; }
+}
 @media (prefers-reduced-motion: reduce) {
   .lab-timeline-tools[data-collapsible], .lab-timeline-tools[data-collapsible] > .lab-timeline-tools-content,
   .lab-timeline-tools-toggle::before, .lab-timeline-tools-toggle::after, .lab-timeline-tools-toggle > svg,

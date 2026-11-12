@@ -1441,8 +1441,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (!agent.setPlanning) throw Object.assign(new Error('This session has no planning mode.'), { code: 'unsupported_configuration' });
       await cliExecute(agent, operationId, 'set_planning', { active }, async () => { await agent.setPlanning!(active); return { accepted: true }; });
     }),
-    async rename(ref, title) {
-      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', body: JSON.stringify({ ...ref, title }) });
+    async rename(ref, title, operationId) {
+      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', operationScope: 'host:cli',
+        body: JSON.stringify({ ...ref, title, operationId: cliOperation(operationId) }) });
       const renamed = JSON.parse(result.body) as { title?: string; error?: string; code?: string };
       if (result.status >= 400 || typeof renamed.title !== 'string') throw Object.assign(new Error(renamed.error ?? 'The session could not be renamed.'), { code: renamed.code ?? 'rename_failed' });
       return renamed.title;

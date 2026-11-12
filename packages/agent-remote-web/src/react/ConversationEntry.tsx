@@ -41,7 +41,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
   return <TimelineSearchReveal.Provider value={!!searchSelected}><TimelineEntry entryKey={entryKey}
     onEdit={onEditPrompt && !entry.item.background && entry.item.type === 'user_message' && !entry.item.withdrawn && entry.item.messageId && entry.turnId ? () => onEditPrompt(entry) : undefined}
     timestamp={entry.timestamp} sent={entry.item.type === 'user_message'} sequence={entry.seqStart}
-    inspected={inspected || !!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}
+    inspected={inspected || !!searchSelected} searchSelected={!!searchSelected} inspect={!contentOnly && onInspectEntry ? () => onInspectEntry(entryKey) : undefined}
     selection={selection} selectionLabel={selectionLabel} onSelect={onSelect ? extend => onSelect(entryKey, extend) : undefined}>
     {entry.item.type === 'error' && noticeExpanded !== undefined && noticeDetailsId !== undefined
       ? <RuntimeNoticeItem item={entry.item} expanded={noticeExpanded} count={noticeCount} toggle={onToggleNotice}

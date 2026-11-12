@@ -182,7 +182,5 @@ function collectBrowserErrors(page: Page): { console: string[]; page: string[] }
   const errors = { console: [] as string[], page: [] as string[] };
   page.on('console', (message) => { if (message.type() === 'error') errors.console.push(`${message.text()} (${message.location().url})`); });
   page.on('pageerror', (error) => errors.page.push(error.message));
-  // The workbench probes each Host for TPM works; the recorded Relay has none, which the probe treats as unsupported.
-  void page.route('**/v1/remote/hosts/*/tpm', route => route.fulfill({ json: { supported: false, works: [] } }));
   return errors;
 }

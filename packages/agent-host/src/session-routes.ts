@@ -49,7 +49,7 @@ export interface SessionActions {
   answer(ref: SessionCallerRef, requestId: string, response: AgentInteractionResponse, operationId: string): Promise<void>;
   setting(ref: SessionCallerRef, id: string, value: string, operationId: string): Promise<void>;
   planning(ref: SessionCallerRef, active: boolean, operationId: string): Promise<void>;
-  rename(ref: SessionCallerRef, title: string): Promise<string>;
+  rename(ref: SessionCallerRef, title: string, operationId: string): Promise<string>;
   /** Lets the Controller close the session's native process; false while something still needs it. */
   release(ref: SessionCallerRef): Promise<boolean>;
 }
@@ -255,7 +255,7 @@ export async function handleSessionRequest(input: unknown, caller: SessionCaller
         const operationId = operation();
         for (const [id, value] of Object.entries(settings as Record<string, string>)) await actions().setting(ref, id, value, `${operationId}:${id}`);
         if (typeof request.planning === 'boolean') await actions().planning(ref, request.planning, `${operationId}:planning`);
-        const renamed = title === undefined ? undefined : await actions().rename(ref, title);
+        const renamed = title === undefined ? undefined : await actions().rename(ref, title, `${operationId}:title`);
         return { result: { session: { address: address(ref), ...(renamed !== undefined ? { title: renamed } : {}) } } };
       }
       case 'release': {

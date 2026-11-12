@@ -7,6 +7,7 @@ import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { createTimelineRenderModel } from '@orchardworks/agent-remote-web/react';
 
 it('uses only the containing toolbar disclosure when heading actions move into the timeline', async () => {
   const change = vi.fn();
@@ -179,6 +180,53 @@ it('reopens a collapsed runtime notice group when the same search result is requ
   await act(async () => next.click());
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector(target)?.textContent).toContain('Second runtime notice');
+});
+
+it('keeps session search open when a collapsible toolbar view is tapped on the entry a search result revealed', async () => {
+  const state: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false,
+    entries: ['First runtime notice', 'Second runtime notice'].map((message, index) => ({
+      providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-03T00:00:00Z',
+      sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'error', message },
+    })),
+  } };
+  const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} headingMode="toolbar" />);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!.click());
+  await act(async () => {
+    const input = container.querySelector<HTMLInputElement>('[aria-label="Search session history"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Second runtime');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const scope = container.querySelector<HTMLSelectElement>('[aria-label="Search scope"]')!;
+    scope.value = 'all'; scope.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Next search result"]')!.click());
+  const revealed = container.querySelector<HTMLElement>('.agent-timeline-entry[data-inspected="true"]')!;
+  await act(async () => { revealed.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('.agent-session-search')).not.toBeNull();
+  expect(container.querySelector('.agent-timeline-entry[data-inspected="true"]')).not.toBeNull();
+  await act(async () => { container.querySelector('.agent-timeline-entry:not([data-inspected])')!.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('.agent-session-search')).toBeNull();
+});
+
+it('collapses the session actions and closes search for a press on an entry highlighted from Trace', async () => {
+  const state: AgentReplicaState = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false,
+    entries: ['First runtime notice', 'Second runtime notice'].map((message, index) => ({
+      providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-10-03T00:00:00Z',
+      sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'error', message },
+    })),
+  } };
+  const traced = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries)[0]!.key;
+  const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} headingMode="toolbar" revealEntry={{ key: traced, requestId: 1 }} />);
+  const highlighted = container.querySelector<HTMLElement>(`.agent-timeline-entry[data-entry-key="${traced}"]`)!;
+  expect(highlighted.dataset.inspected).toBe('true');
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  await act(async () => { highlighted.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('[aria-label="Expand session actions"]')).not.toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Expand session actions"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Search this session"]')!.click());
+  expect(container.querySelector('.agent-session-search')).not.toBeNull();
+  await act(async () => { highlighted.dispatchEvent(new Event('pointerdown', { bubbles: true })); });
+  expect(container.querySelector('.agent-session-search')).toBeNull();
 });
 
 it('retains an editable draft and history tools while handoff blocks native mutations', async () => {

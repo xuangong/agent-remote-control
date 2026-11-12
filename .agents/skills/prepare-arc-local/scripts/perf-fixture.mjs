@@ -1,8 +1,8 @@
 // Prepares the fixed data set that switch-timing.mjs measures, on this checkout's local instance.
 // Usage, from the checkout root: node .agents/skills/prepare-arc-local/scripts/perf-fixture.mjs
 // It creates six Claude Code sessions, shown as "Perf 1" to "Perf 6", with three turns each, three Windows ("Perf A": 1-3,
-// "Perf B": 4-6, "Perf C": 2 and 5) and shows Perf A and Perf B as sections in Bot mode. Parts that exist are kept,
-// so a second run only completes what is missing. It prints the Windows and sessions as JSON.
+// "Perf B": 4-6, "Perf C": 2 and 5) and shows Perf A and Perf B as sections in Bot mode. Parts that exist are kept and
+// missing views are added, so a second run only completes what is missing. It prints the Windows and sessions as JSON.
 import { execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -28,11 +28,13 @@ const turns = (topic) => [
   `Give three common mistakes with ${topic} and how to avoid each, as a numbered list.`,
   `Summarize ${topic} in two sentences.`,
 ];
-const windows = [
+const plans = [
   { title: 'Perf A', sessions: [1, 2, 3], section: true },
   { title: 'Perf B', sessions: [4, 5, 6], section: true },
   { title: 'Perf C', sessions: [2, 5], section: false },
 ];
+const sessionName = (index) => `Perf ${index}`;
+const ref = (binding) => ({ hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId });
 
 async function waitForIdle(address, previous) {
   const deadline = Date.now() + 180_000;
@@ -48,44 +50,68 @@ async function waitForIdle(address, previous) {
   }
 }
 
-async function ensureSession(index, existing) {
-  const title = `Perf ${index}`;
+const listWindows = async () => (await controller('window', 'list')).windows ?? [];
+const known = await listWindows();
+// The sessions the Perf Windows already show, by the name their views carry.
+const placed = new Map();
+for (const window of known.filter(item => plans.some(plan => plan.title === item.title))) {
+  for (const view of window.views ?? []) if (view.binding && /^Perf \d$/.test(view.binding.title)) placed.set(view.binding.title, ref(view.binding));
+}
+let listing;
+/** Every Claude Code session of the instance, across pages. */
+const listSessions = () => listing ??= (async () => {
+  const sessions = [];
+  let cursor;
+  do {
+    const page = await controller('session', 'list', '--provider', 'claude', '--limit', '50', ...(cursor ? ['--cursor', cursor] : []));
+    sessions.push(...(page.sessions ?? []));
+    cursor = page.nextCursor;
+  } while (cursor);
+  return sessions;
+})();
+
+async function ensureSession(index) {
+  const existing = placed.get(sessionName(index));
+  if (existing) return existing;
   const [first, ...rest] = turns(topics[index - 1]);
-  // A session is named after its first prompt.
-  let address = existing.find(session => session.providerId === 'claude' && session.title?.startsWith(first))?.address;
+  // A session that was never placed in a Window is found by its first prompt, which names it until it is renamed.
+  let address = (await listSessions()).find(session => session.title?.startsWith(first))?.address;
   if (!address) {
     address = (await controller('session', 'create', '--provider', 'claude', '--message', first)).session.address;
     let last = await waitForIdle(address, undefined);
     for (const prompt of rest) { await controller('session', 'send', address, prompt); last = await waitForIdle(address, last); }
   }
   const [hostId, providerId, nativeSessionId] = address.split('/');
-  // The Window views carry the name; Bot mode shows a bot by its view's title.
-  return { hostId, providerId, nativeSessionId, title, address };
+  return { hostId, providerId, nativeSessionId };
 }
+const sessions = await Promise.all(topics.map((_, index) => ensureSession(index + 1)));
 
-const listed = await controller('session', 'list', '--provider', 'claude', '--limit', '50');
-const existing = (listed.sessions ?? []).map(session => {
-  const address = session.address ?? [session.hostId, session.providerId, session.nativeSessionId].join('/');
-  const [hostId, providerId, nativeSessionId] = address.split('/');
-  return { hostId, providerId, nativeSessionId, title: session.title, address };
-});
-const sessions = await Promise.all(topics.map((_, index) => ensureSession(index + 1, existing)));
-
-const known = (await controller('window', 'list')).windows ?? [];
-const created = [];
-for (const plan of windows) {
+for (const plan of plans) {
   let window = known.find(item => item.title === plan.title);
   if (!window) {
     const result = await controller('window', 'create', '--title', plan.title);
-    window = result.window ?? result;
-    for (const [order, index] of plan.sessions.entries()) {
-      const session = sessions[index - 1];
-      await controller('window', 'view', 'create', window.id, '--mode', order === 0 ? 'primary' : 'dock',
-        '--session', JSON.stringify({ hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, title: session.title }));
-    }
+    window = { ...(result.window ?? result), views: [] };
   }
-  created.push({ ...plan, id: window.id });
+  const shown = new Set((window.views ?? []).flatMap(view => view.binding ? [view.binding.title] : []));
+  let hasPrimary = (window.views ?? []).some(view => view.placement === 'primary' && view.binding);
+  for (const index of plan.sessions) {
+    if (shown.has(sessionName(index))) continue;
+    await controller('window', 'view', 'create', window.id, '--mode', hasPrimary ? 'dock' : 'primary',
+      '--session', JSON.stringify({ ...sessions[index - 1], title: sessionName(index) }));
+    hasPrimary = true;
+  }
 }
+// Every Window must show exactly its planned sessions; a partial one would be measured with fewer views.
+const windows = [];
+for (const window of await listWindows()) {
+  const plan = plans.find(item => item.title === window.title);
+  if (!plan) continue;
+  const titles = (window.views ?? []).flatMap(view => view.binding ? [view.binding.title] : []).sort();
+  const expected = plan.sessions.map(sessionName).sort();
+  if (JSON.stringify(titles) !== JSON.stringify(expected)) throw new Error(`${plan.title} shows ${titles.join(', ') || 'no session'} instead of ${expected.join(', ')}.`);
+  windows.push({ ...plan, id: window.id });
+}
+if (windows.length !== plans.length) throw new Error(`Expected ${plans.length} Perf Windows, found ${windows.length}.`);
 
 // Bot mode sections are a page action: the Window's menu offers "Show as section".
 const { origin } = JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' }));
@@ -95,7 +121,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   try {
     const page = await context.newPage();
-    for (const plan of created.filter(item => item.section)) {
+    for (const plan of windows.filter(item => item.section)) {
       await page.goto(`${origin}/?mode=window&window=${encodeURIComponent(plan.id)}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       const toolbar = page.locator('header.lab-window-toolbar');
       await toolbar.getByRole('heading', { name: plan.title, exact: true }).waitFor({ timeout: 30_000 });
@@ -114,4 +140,5 @@ try {
 } finally {
   await browser.close();
 }
-console.log(JSON.stringify({ windows: created.map(({ title, id, sessions: members }) => ({ title, id, sessions: members.map(index => `Perf ${index}`) })), sessions }, null, 2));
+console.log(JSON.stringify({ windows: windows.map(({ title, id, sessions: members }) => ({ title, id, sessions: members.map(sessionName) })),
+  sessions: sessions.map((session, index) => ({ name: sessionName(index + 1), address: [session.hostId, session.providerId, session.nativeSessionId].join('/') })) }, null, 2));

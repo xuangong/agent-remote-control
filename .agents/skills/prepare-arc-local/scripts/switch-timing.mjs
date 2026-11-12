@@ -1,8 +1,8 @@
 // Times Window switches and bot switches on this checkout's local instance, with the data set of perf-fixture.mjs.
 // Usage, from the checkout root:
 //   node .agents/skills/prepare-arc-local/scripts/switch-timing.mjs [--throttle N] [--rounds N] [--out FILE]
-// Each switch is timed in the page, from the click to the moment the target shows its own conversations: every view of
-// the Window (or the bot's conversation) with its first request and all three replies. Long tasks (over 50 ms) that
+// Each switch is timed in the page, from the click to the moment the target shows its own conversations: each of the
+// Window's own views (or the bot's conversation, with its first request) with all three replies. Long tasks (over 50 ms) that
 // start in that span are counted. The first visit to each target is reported apart from the measured rounds, since it
 // also connects the sessions. --throttle slows the CPU N times (Chromium's emulation); the default is 1.
 import { execFileSync } from 'node:child_process';
@@ -11,7 +11,16 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
 const options = Object.fromEntries(process.argv.slice(2).reduce((pairs, arg, index, all) => arg.startsWith('--') ? [...pairs, [arg.slice(2), all[index + 1]]] : pairs, []));
-const throttle = Number(options.throttle ?? 1), rounds = Number(options.rounds ?? 3);
+const unknown = Object.keys(options).filter(name => !['throttle', 'rounds', 'out'].includes(name));
+if (unknown.length) throw new Error(`Unknown option --${unknown[0]}. Use --throttle N, --rounds N or --out FILE.`);
+const whole = (name, fallback) => {
+  if (!(name in options)) return fallback;
+  const value = Number(options[name]);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`--${name} takes a whole number of at least 1.`);
+  return value;
+};
+const throttle = whole('throttle', 1), rounds = whole('rounds', 3);
+if ('out' in options && (!options.out || options.out.startsWith('--'))) throw new Error('--out takes a file path.');
 const root = process.cwd();
 const topics = ['binary search', 'the TCP handshake', 'CSS grid layout', 'git rebase', 'HTTP caching', 'property-based testing'];
 const controller = (...args) => JSON.parse(execFileSync(process.execPath, [join(root, 'scripts/local/command.mjs'), 'controller', ...args], { encoding: 'utf8', timeout: 60_000 }));
@@ -19,8 +28,8 @@ const { windows: catalog = [] } = controller('window', 'list');
 const windows = ['Perf A', 'Perf B', 'Perf C'].map(title => {
   const window = catalog.find(item => item.title === title);
   if (!window) throw new Error(`${title} is missing: run perf-fixture.mjs first.`);
-  const sessions = window.views.filter(view => view.binding).map(view => Number(view.binding.title.replace('Perf ', '')));
-  return { title, id: window.id, topics: sessions.map(index => topics[index - 1]) };
+  // The Window's own views: a view of the previous Window that shows the same session must not count.
+  return { title, id: window.id, viewIds: window.views.filter(view => view.binding).map(view => view.id) };
 });
 const bots = topics.map((topic, index) => ({ title: `Perf ${index + 1}`, topic }));
 
@@ -34,9 +43,10 @@ async function timeSwitch(page, kind, target) {
     const shown = element => !!element && element.getBoundingClientRect().width > 0 && getComputedStyle(element).visibility !== 'hidden';
     const complete = pane => pane.querySelectorAll('.agent-message-assistant').length >= 3;
     const done = kind === 'window'
-      ? () => document.querySelector('header.lab-window-toolbar h2')?.textContent === target.title && target.topics.every(topic =>
-        [...document.querySelectorAll('#lab-workbench .lab-session-family-pane[data-view-id]')].some(pane => shown(pane) && complete(pane)
-          && pane.querySelector('.agent-message-user, .agent-outgoing-message')?.textContent?.includes(`Explain ${topic}`)))
+      ? () => document.querySelector('header.lab-window-toolbar h2')?.textContent === target.title && target.viewIds.every(id => {
+        const pane = document.querySelector(`#lab-workbench .lab-session-family-pane[data-view-id="${id}"]`);
+        return shown(pane) && complete(pane);
+      })
       : () => {
         const conversation = document.querySelector('.lab-bot-conversation');
         return conversation?.querySelector('.ui-toolbar-title')?.textContent === target.title

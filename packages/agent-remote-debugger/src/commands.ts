@@ -594,7 +594,10 @@ class CommandContext {
         settled = true;
         if (timer) clearTimeout(timer);
         this.signal.removeEventListener('abort', onAbort);
-        reject(error);
+        // Runtime waits are given the command's remaining time, so their timer and this one expire together; either way
+        // the command's deadline passed, and the CLI reports one stable code for it.
+        reject(error instanceof DebuggerError && error.code === 'wait_timeout'
+          ? new DebuggerError(5, 'command_timeout', 'Command timed out.', true) : error);
       };
       this.signal.addEventListener('abort', onAbort, { once: true });
       let pending: Promise<T>;

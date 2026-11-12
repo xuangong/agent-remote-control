@@ -4,6 +4,7 @@ import type { AgentSnapshot, ClientMessage, HistoryPage, ServerMessage, Timeline
 import { AgentReplica, HttpWebSocketTransport, RemoteOperationError, type RemoteAgentTransport, type RemoteConnection, type RemoteProtocolObservation, type RemoteTransportDiagnostic, type RemoteTransportListener } from '@orchardworks/agent-remote-web/headless';
 
 import type { DebuggerRuntime } from './runtime.js';
+import { DebuggerError } from './errors.js';
 
 import { runCli, type CliEnvironment } from './cli.js';
 
@@ -840,6 +841,18 @@ describe('ardb command surface', () => {
 
     expect(await runCli(['provider', 'list', '--json'], h.io, environment)).toBe(4);
     expect(json(h.stderr())).toMatchObject({ error: { code: 'agent_not_found', message: 'Agent was not found.', recoverable: false } });
+  });
+
+  it('reports a runtime wait that expires with the command deadline as the command timeout', async () => {
+    const h = harness();
+    // The runtime's wait timer and the command's own timer share one deadline; here the runtime's fires first.
+    const environment: CliEnvironment = { ...h.environment, createRuntime: async (agentId, options) => {
+      const runtime = await h.environment.createRuntime!(agentId, options);
+      runtime.waitFor = async () => { throw new DebuggerError(5, 'wait_timeout', 'Timed out waiting for the requested condition.', true); };
+      return runtime;
+    } };
+    expect(await runCli(['wait', 'agent-one', '--for', 'failed', '--timeout', '1000', '--json'], h.io, environment)).toBe(5);
+    expect(json(h.stderr())).toMatchObject({ error: { code: 'command_timeout' } });
   });
 
   it('closes a runtime that resolves after SIGINT has retired its command', async () => {

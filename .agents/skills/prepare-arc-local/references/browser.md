@@ -104,3 +104,10 @@ If page code fails only in automation, read the console (`page.on('console', …
 and network before calling it a product defect. A script that signs out while its page
 is still open makes the page's next requests fail with 401: close the page first,
 as the template does, and do not count errors after the sign-out against the page.
+
+## Switch timing
+
+`scripts/perf-fixture.mjs` prepares a fixed set of sessions, Windows and sections, and `scripts/switch-timing.mjs` times
+Window and bot switches with their long tasks. The
+[baseline](../../../../docs/investigations/2026-11-12-switch-timing-baseline.md) explains the method, lists the
+numbers to compare against and shows how to measure another build on the same data.

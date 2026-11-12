@@ -49,9 +49,10 @@ function saveSessionComposition(scope: string, value: { path: OpenedSession[]; f
 // These tests drive a real Relay and the whole App, so a loaded machine can slow every step. A test that ran past its deadline
 // would keep running after Vitest moved on, and React work it started would overlap the next test's, which breaks React's act
 // environment for every later test in the file. So each wait gives up long before the deadline, waits stop once their test
-// has ended, and the cleanup lets React work already running finish before it unmounts.
+// has ended, and the hooks let React work already running finish, for a bounded time, before the next test or the cleanup.
 const testDeadline = 30_000;
-vi.setConfig({ testTimeout: testDeadline });
+const actSettleBound = 5_000;
+vi.setConfig({ testTimeout: testDeadline, hookTimeout: 3 * actSettleBound });
 const runningActs = new Set<Promise<unknown>>();
 let actsAllowed = true;
 function act<T>(callback: () => T | Promise<T>): Promise<T> {
@@ -71,11 +72,20 @@ async function waitFor<T>(callback: () => T | Promise<T>, { timeout = 5000, inte
     if (test.ended) throw new Error('This test has ended.');
   }
 }
+/** Lets React work already running finish, for at most actSettleBound: work that never settles must not stop the cleanup. */
+async function settleRunningActs() {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = await Promise.race([Promise.allSettled([...runningActs]).then(() => true),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), actSettleBound); })]);
+  clearTimeout(timer);
+  // Work that did not settle in that time is abandoned, so the hooks of the following tests do not wait for it again.
+  if (!settled) runningActs.clear();
+}
 const cleanups: Array<() => Promise<void> | void> = [];
-beforeEach(() => { currentTest = { ended: false }; actsAllowed = true; });
+beforeEach(async () => { await settleRunningActs(); currentTest = { ended: false }; actsAllowed = true; });
 afterEach(async () => {
   currentTest.ended = true; actsAllowed = false;
-  await Promise.allSettled([...runningActs]);
+  await settleRunningActs();
   for (const stop of cleanups.splice(0).reverse()) await stop();
   localStorage.clear(); sessionStorage.clear(); configureImageDraftPersistence(() => true); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });

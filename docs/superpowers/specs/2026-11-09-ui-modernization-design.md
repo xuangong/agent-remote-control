@@ -2,6 +2,8 @@
 
 Status: approved in conversation on 2026-11-09, section by section. Mockups are in `.superpowers/brainstorm/` (not committed).
 
+**Scope amendment, 2026-11-13:** The user requires advance review before functional-layout changes and explicitly protects the existing Session View. Do not execute the conversation, tool-activity, approval-card or composer redesign described below in phase 3c or carry it into phase 4. Only targeted small fixes for confirmed Session View problems are allowed. Continue modernization on surrounding navigation, Bot lists and Window management. See [the pending roster layout review](2026-11-13-bot-roster-layout-review.md). The older descriptions below are retained as design history, subject to this amendment.
+
 ## Goal
 
 Make the website feel like a current Apple app, in both modes, on desktop and on phones: a shared shell with a sidebar and a toolbar, a consistent visual language with light and dark appearances, and interaction patterns people already know from macOS and iOS. Bot mode follows Grok Bot's design language (sections of long-lived bots, pictures and labels, approvals in the conversation) expressed with Apple's conventions.

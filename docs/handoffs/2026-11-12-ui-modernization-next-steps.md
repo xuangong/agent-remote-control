@@ -1,6 +1,8 @@
 # UI modernization: state, open issues and next steps
 
-Updated: 2026-11-12. This document hands the work over to another computer. It covers:
+**Scope update, 2026-11-13:** Preserve the existing Session View; no conversation, tool, approval-card or composer redesign. Only targeted small fixes are allowed there. Functional-layout changes require advance user review. The pending [roster proposal](../superpowers/specs/2026-11-13-bot-roster-layout-review.md) and [reference research](../investigations/2026-11-13-agent-workbench-design-references.md) capture the current direction. Phase 3c and the shared Session View restyling in phase 4 below are superseded by this instruction.
+
+Historical handoff updated: 2026-11-12. This document hands the work over to another computer. It covers:
 
 - where things stand;
 - how to set up and work;

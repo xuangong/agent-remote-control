@@ -17,16 +17,19 @@
 .lab-bot-section-head > h2 { flex: 1; min-width: 0; }
 .lab-bot-section h2 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
 .lab-bot-section small, .lab-bot-empty, .lab-bot-row-text > span { color: var(--obs-text-secondary); font-size: 12px; }
-.lab-bot-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 8px; text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+.lab-bot-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; text-align: left; border: 0; border-radius: 8px; background: transparent; color: var(--ui-label); font: inherit;
+  transition: background-color var(--ui-duration-short) var(--ui-ease); -webkit-tap-highlight-color: transparent; }
 /* The canvas color equals the sidebar color in light mode, so rows use the row-hover fill and the Window rail's selection color.
    The hover rule outranks the global button:hover, which would otherwise paint any hovered row as selected. */
 .lab-bot-row:not([aria-current="true"]):hover:not(:disabled) { border-color: transparent; color: inherit; background: var(--ui-row-hover); }
-.lab-bot-row[aria-current="true"] { background: var(--ui-selection); border-color: var(--obs-action); }
+/* Selection is a filled rounded row, as in a native sidebar or chat list; pressing a row darkens it briefly. */
+.lab-bot-row[aria-current="true"] { background: var(--ui-selection); }
+.lab-bot-row:active:not(:disabled) { background: var(--ui-fill); }
 .lab-bot-row-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .lab-bot-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 /* A bot's name with its role and label as tags beside it, like a job title in a chat app; the name never carries them. */
 .lab-bot-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.lab-bot-name-line .lab-bot-name { flex: 0 1 auto; min-width: 0; }
+.lab-bot-name-line .lab-bot-name { flex: 0 1 auto; min-width: 0; color: var(--ui-label); }
 .lab-bot-role, .lab-bot-label { flex: none; max-width: 9em; overflow: hidden; padding: 1px 6px; border-radius: 4px; font-size: 11px; line-height: 16px;
   text-overflow: ellipsis; white-space: nowrap; }
 .lab-bot-role { background: var(--ui-fill); color: var(--ui-label-secondary); font-weight: 500; }
@@ -36,9 +39,12 @@
 .lab-bot-row-text > .lab-bot-status[data-attention] { color: var(--ui-status-attention); font-weight: 600; }
 .lab-bot-row-text > .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
 /* Asks are the only second level: listed under their bot, indented past its picture. */
-.lab-bot-asks { margin: 0 0 2px; padding: 0 0 0 44px; list-style: none; }
-.lab-bot-ask { display: block; width: 100%; overflow: hidden; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ui-label-secondary);
-  font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+/* The Ask's icon lines up with its bot's name. */
+.lab-bot-asks { margin: 0 0 2px; padding: 0 0 0 36px; list-style: none; }
+.lab-bot-ask { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ui-label-secondary); font: inherit; font-size: 12px; text-align: left; transition: background-color var(--ui-duration-short) var(--ui-ease); }
+.lab-bot-ask > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-ask:active:not(:disabled) { background: var(--ui-fill); }
 .lab-bot-ask:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
 .lab-bot-other > summary { list-style: none; cursor: pointer; }
 .lab-bot-other > summary::-webkit-details-marker { display: none; }
@@ -46,6 +52,11 @@
 .lab-bot-other > summary h2::before { content: '›'; display: inline-block; width: 1em; transition: transform var(--ui-duration-short) var(--ui-ease); }
 .lab-bot-other[open] > summary h2::before { transform: rotate(90deg); }
 @media (pointer: coarse) { .lab-bot-ask { min-height: 44px; } }
+/* A phone's roster: larger pictures, taller rows and a larger name, as in a native chat list. */
+.lab-bot-workspace[data-compact] .lab-bot-row { min-height: 56px; padding: 8px 12px; gap: 12px; }
+.lab-bot-workspace[data-compact] .lab-bot-name { font-size: 16px; }
+.lab-bot-workspace[data-compact] .lab-bot-asks { padding-left: 46px; }
+@media (prefers-reduced-motion: reduce) { .lab-bot-row, .lab-bot-ask { transition: none; } }
 .lab-bot-session-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .lab-bot-session-heading > span { display: flex; min-width: 0; flex-direction: column; }
 .lab-bot-session-heading small { font-size: 12px; font-weight: normal; color: var(--obs-text-secondary); }

@@ -193,7 +193,11 @@ it('lists groups with their appearances, and Windows as groups from an older Rel
   await withWindowServer(() => ({ body: { windows: [window] } }), async client => {
     expect(await client.listGroups()).toEqual([{ window }]);
   });
+  // Bot mode shows a group without details, so one hidden only in Window mode is valid; a group hidden in both modes is not.
   await withWindowServer(() => ({ body: { groups: [{ window, presentation: { window: false } }] } }), async client => {
+    expect(await client.listGroups()).toEqual([{ window, presentation: { window: false } }]);
+  });
+  await withWindowServer(() => ({ body: { groups: [{ window, presentation: { window: false, bots: false } }] } }), async client => {
     await expect(client.listGroups()).rejects.toThrow('Invalid Window list.');
   });
 });

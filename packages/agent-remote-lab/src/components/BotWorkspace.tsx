@@ -114,7 +114,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {saving ? <p role="status">Saving section…</p> : null}
       {error || creation.error ? <p role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p role="status">Section creation is not confirmed. <button type="button" onClick={() => void save(true)}>Retry</button></p> : null}
-      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions}
+      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions} compact={compact}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}

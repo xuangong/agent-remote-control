@@ -41,11 +41,13 @@ A group can hold many bots. Opening it as a Window must not open a live conversa
 |---|---|---|---|
 | **Live** | the full Session View | subscribed and rendered | yes |
 | **Folded** | a slim card: picture, name, role tag, status | released; cached history kept | from the shared channel |
-| **Asleep** | dimmed, quiet; wakes when opened | released; cached history kept | quiet (see open questions) |
+| **Asleep** | dimmed, quiet; wakes when opened | released; cached history kept | Needs you shown quietly, with a low-key reminder |
 
 - **Folding is layout.** It is today's collapsed pane, shared with the Window. A folded bot still shows Working, Needs you and the typing indicator from the shared channel, without its own subscription.
-- **Sleep is quiet.** Like sleeping browser tabs: a bot the owner has not looked at for a while, or has put to sleep, releases its conversation and stops live updates and reminders. The agent keeps working on its Host. Opening it shows the cached history at once and catches up.
-- **Expanding a large group** opens the selected bot live and the others folded, then keeps a limited number of live panes: the visible ones and those recently used. A pane that leaves the budget folds or sleeps instead of staying subscribed. The budget is set by measuring a local instance, not guessed.
+- **Sleep is quiet.** Like sleeping browser tabs: a bot the owner has put to sleep, or an idle bot nobody has opened on any device for a while, releases its conversation and stops live updates and ordinary reminders. The agent keeps working on its Host. Opening it on any device wakes it everywhere, shows the cached history at once and catches up.
+- **A sleeping bot that needs you** shows Needs you quietly in its row or card and gives a low-key reminder: visible in the app without sound or an interrupting pop-up (confirmed). It does not wake the bot by itself.
+- **Fold and sleep follow the owner across devices** (confirmed): the workbench is one place, so a bot folded or asleep on the desktop is folded or asleep on the phone. Both are stored with the group, not in the browser.
+- **Expanding a large group** opens the selected bot live and the others folded. Each device then keeps a limited number of live subscriptions: the panes on screen and those recently used. This budget is invisible resource management of one device: a pane outside it keeps its place and state, shows its cached history and status, and resubscribes when it comes into view. It never folds or sleeps a bot, because those are shared states the owner chooses. The budget is set by measuring a local instance, not guessed.
 - **Disconnect goes away.** Its purpose, fewer interruptions and less load, is served by fold and sleep. Its wording (Connect, Disconnect, saved history) describes the network rather than what the owner wants, and is retired.
 
 ## IM feel
@@ -71,7 +73,7 @@ In Bot mode a bot that is responding shows an IM-style typing indicator under it
 | Roster row | name, label, Host · provider, status | name, role tag, status; Host and provider in details |
 | Handoff | view rebinds; title may change | identity and place unchanged and unannounced |
 | Team, TPM, Support creation | views added to the open Window | sessions added to the source bot's group |
-| Reducing load and noise | per-view Disconnect, browser-local | fold (shared layout) and sleep |
+| Reducing load and noise | per-view Disconnect, browser-local | fold and sleep, shared across devices; invisible per-device live budget |
 | Appearances | Show as section, Separate, merge, split | hide in one mode |
 | Unread | not shown | dot, no count |
 
@@ -79,7 +81,6 @@ Existing groups gain their Side, Team, TPM and Support views as bots once member
 
 ## Open questions
 
-- Whether a sleeping bot still shows Needs you, and whether it may notify.
-- Whether sleep is a choice of this device (like today's disconnect) or follows the owner across devices; folding is shared with the Window.
-- When a bot falls asleep on its own, and the live-pane budget, both from measurement.
+- How long an idle bot stays awake before sleeping on its own, and the per-device live budget, both from measurement.
+- The exact form of the low-key reminder (for example a quiet dot on the group and the mode switch), shown in the walkthroughs.
 - Desktop and phone walkthroughs of real work (create, delegate to Team/TPM, answer a request, return) to validate this model before the roster is redesigned.

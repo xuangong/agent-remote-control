@@ -121,6 +121,10 @@ it('shows the explicit Window binding cache before access checks instead of the 
 }, 10000);
 
 it('reuses the same Session client and replica across Windows and releases a deleted Window retention', async () => {
+  const dialogMethods = ['showModal', 'close'] as const;
+  const originalDialog = Object.fromEntries(dialogMethods.map(name => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)]));
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); } });
   const scope = 'http://localhost/window-retention-app/';
   const first = windowFixture('first', 'one'), shared = windowFixture('shared', 'one'), other = windowFixture('other', 'two');
   for (const window of [first, shared, other]) localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${window.id}`, JSON.stringify(window));
@@ -164,15 +168,21 @@ it('reuses the same Session client and replica across Windows and releases a del
     expect(fixture.channels.filter(channel => channel.agentId === 'agent-one' && channel.observation === 'session')).toHaveLength(1);
     await act(async () => workspace.open(other.id));
     await until(() => expect(workspace.window?.id).toBe(other.id));
-    await act(async () => container!.querySelector<HTMLButtonElement>('button[aria-label="Windows"]')!.click());
-    await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Delete Window: first"]')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete Window: first"]')!.click());
+    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete Window')!.click());
     expect(connections.find(target('one'))?.client).toBe(original.client);
-    await act(async () => container!.querySelector<HTMLButtonElement>('[aria-label="Delete Window: shared"]')!.click());
+    await act(async () => container!.querySelector<HTMLButtonElement>('#lab-context [aria-label="Delete Window: shared"]')!.click());
+    await act(async () => [...container!.querySelectorAll<HTMLButtonElement>('dialog button')].find(button => button.textContent === 'Delete Window')!.click());
     await until(() => expect(connections.find(target('one'))).toBeUndefined());
     expect(originalChannel.closed).toBe(1);
     expect(connections.find(target('two'))).toBeDefined();
   } finally {
     if (container) await unmount(container);
+    for (const name of dialogMethods) {
+      const original = originalDialog[name];
+      if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
+      else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
+    }
     vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/');
   }
 }, 10000);

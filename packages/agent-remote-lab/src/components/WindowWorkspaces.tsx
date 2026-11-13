@@ -195,8 +195,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         </details> : null}
       </details>
     </> : null}
-    {deleteTarget ? <Sheet open title="Delete this Window?" onClose={closeDelete}>
-      <p className="lab-sheet-message">{`“${deleteTarget.title}” and its layout are deleted. Its agent sessions keep running and stay in All sessions.`}</p>
+    {deleteTarget ? <Sheet open title="Delete this Window?" detent="content" onClose={closeDelete}>
+      <p className="lab-sheet-message">{`“${deleteTarget.title}” and its layout will be deleted. Its agent sessions keep running and stay in All sessions.`}</p>
       {notice && noticeTone !== 'info' ? <p className="lab-sheet-message" role="alert">{notice}</p> : null}
       <div className="lab-sheet-actions">
         <Button disabled={busy} onClick={closeDelete}>Cancel</Button>

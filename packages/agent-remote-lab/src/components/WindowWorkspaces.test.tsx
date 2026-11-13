@@ -1,5 +1,5 @@
 import { act, useReducer } from 'react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowOperation, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
@@ -14,8 +14,8 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
   Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); } });
 });
-afterEach(() => {
-  vi.restoreAllMocks(); vi.unstubAllGlobals();
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterAll(() => {
   for (const name of dialogMethods) {
     const original = originalDialog[name];
     if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
@@ -334,6 +334,7 @@ it.each(['panel', 'sidebar'] as const)('confirms deletion from the %s and cancel
   expect(test.remove).not.toHaveBeenCalled();
   let dialog = test.container.querySelector('dialog')!;
   expect(dialog?.open).toBe(true);
+  expect(dialog?.dataset.detent).toBe('content');
   expect(dialog?.textContent).toContain('Delete this Window?');
   expect(dialog?.textContent).toContain('“Window”');
   expect(dialog?.textContent).toContain('agent sessions keep running');

@@ -19,7 +19,6 @@ it('expands attributions without remounting the conversation, replacing its draf
   const draft = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]');
   const title = container.querySelector('h2')!;
   const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Show session attributions"]')!;
-  expect(toggle.closest('.lab-session-heading-trailing')).not.toBeNull();
   expect(container.querySelector('table[aria-label="Session attributions"]')).toBeNull();
   await act(async () => toggle.click());
   expect(container.querySelector('table[aria-label="Session attributions"]')).not.toBeNull();

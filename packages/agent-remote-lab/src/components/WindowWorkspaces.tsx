@@ -7,6 +7,8 @@ import { AgentControl } from './AgentControl.js';
 import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
 import { windowOutline } from '../window-outline.js';
 import { IconButton } from '../ui/IconButton.js';
+import { Button } from '../ui/Button.js';
+import { Sheet } from '../ui/Sheet.js';
 import { revealView, viewSelection } from '../window-view-selection.js';
 
 export function viewTitle(view: WindowView): string {
@@ -43,9 +45,11 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
 }) {
   const sidebar = placement === 'sidebar';
   const ownActions = useWindowActions(workspace);
-  const { notice, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
+  const { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
   // The Window whose title is being edited in the list, and the scope it belongs to.
   const [renaming, setRenaming] = useState<{ id: string; client: typeof workspace.client }>(), [title, setTitle] = useState(''), [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState<{ id: string; title: string; client: typeof workspace.client; windowId?: string }>();
+  const pendingDelete = useRef<typeof deleting>();
   const [agentControl, setAgentControl] = useState(false);
   const [openingId, setOpeningId] = useState<string>();
   const navigation = useRef(0);
@@ -60,7 +64,26 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   }, [workspace.client, workspace.window?.id]);
   useEffect(() => { if (!active) setRenaming(undefined); }, [active]);
   useEffect(() => { setRenaming(current => current && current.client !== workspace.client ? undefined : current); }, [workspace.client]);
+  useEffect(() => {
+    setDeleting(undefined); pendingDelete.current = undefined;
+  }, [workspace.client, workspace.window?.id, active]);
   const catalog = windowCatalog(workspace);
+  const deleteTarget = deleting && active && workspace.hasActiveWindow && deleting.client === workspace.client
+    && deleting.windowId === workspace.window?.id && deleting.id !== workspace.window?.id
+    && catalog.some(window => window.id === deleting.id) ? deleting : undefined;
+  function startDelete(window: WorkspaceWindow) {
+    if (!active || busy || !workspace.hasActiveWindow || window.id === workspace.window?.id) return;
+    setNotice(undefined);
+    setDeleting({ id: window.id, title: window.title, client: workspace.client, windowId: workspace.window?.id });
+  }
+  function closeDelete() { if (!busy && !pendingDelete.current) setDeleting(undefined); }
+  async function confirmDelete() {
+    const target = deleteTarget;
+    if (!target || busy || pendingDelete.current) return;
+    pendingDelete.current = target;
+    try { if (await deleteWindow(target.id)) setDeleting(current => current === target ? undefined : current); }
+    finally { if (pendingDelete.current === target) pendingDelete.current = undefined; }
+  }
   async function openWindow(id: string) {
     const client = workspace.client, generation = ++navigation.current;
     setOpeningId(id); setNotice(undefined);
@@ -109,7 +132,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       const renameDisabled = !!renaming || (window.id === workspace.window?.id && workspace.unavailable);
       const deleteTitle = !workspace.hasActiveWindow ? 'Open or create a Window before deleting another one.' : window.id === workspace.window?.id ? 'Switch to another Window before deleting this one.' : 'Delete this layout. Agent sessions keep running.';
       const deleteDisabled = busy || !workspace.hasActiveWindow || window.id === workspace.window?.id;
-      const remove = () => void deleteWindow(window.id);
+      const remove = () => startDelete(window);
       return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={`Rename Window: ${window.title}`} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
@@ -172,6 +195,14 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         </details> : null}
       </details>
     </> : null}
+    {deleteTarget ? <Sheet open title="Delete this Window?" onClose={closeDelete}>
+      <p className="lab-sheet-message">{`“${deleteTarget.title}” and its layout are deleted. Its agent sessions keep running and stay in All sessions.`}</p>
+      {notice && noticeTone !== 'info' ? <p className="lab-sheet-message" role="alert">{notice}</p> : null}
+      <div className="lab-sheet-actions">
+        <Button disabled={busy} onClick={closeDelete}>Cancel</Button>
+        <Button variant="destructive" disabled={busy} aria-busy={busy || undefined} onClick={() => void confirmDelete()}>Delete Window</Button>
+      </div>
+    </Sheet> : null}
     {workspace.error || notice && !sharedActions ? <p className="lab-window-note" role="status">{workspace.error ?? notice}</p> : null}
   </div>;
 }

@@ -1335,9 +1335,10 @@ function AppContent({
     if (current?.id !== destination.windowId || !view) return false;
     const expectedBinding = JSON.parse(destination.binding) as WindowSessionBinding | null;
     if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error('The target session view changed. Choose a session again.');
-    // Rule 6: a bot keeps its conversation in every group Bot mode shows; another session opens beside it as a new bot.
+    // Rule 6 for a group whose bots carry details: a bot keeps its conversation, so another session opens beside it.
+    // Window panes of other groups still take another session in place until stage 2 gives panes the whole rule (close folds, remove is explicit).
     const shownGroup = windowWorkspace.readGroup(current.id);
-    if (shownGroup && hasBotAppearance(shownGroup) && isBotView(view)
+    if (shownGroup?.bots && hasBotAppearance(shownGroup) && isBotView(view)
       && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session))) {
       const binding = windowSessionBinding(session);
       const existing = current.views.find(candidate => candidate.placement === 'primary' && candidate.binding && windowBindingKey(candidate.binding) === windowBindingKey(binding));

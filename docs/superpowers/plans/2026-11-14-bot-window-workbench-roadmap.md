@@ -19,7 +19,7 @@ Each stage ships on its own: tests first, `pnpm verify:changed` (full `pnpm veri
 | # | Stage | Ships | Plan |
 |---|---|---|---|
 | 1 | Bot membership and automatic groups | Side, Team, TPM and Support sessions are first-level bots with role tags; Asks nest under their bot; every group appears in Bot mode unless hidden there; per-mode hiding replaces Show as section; opening a session over a bot opens it beside; Bot mode leases only the selected group | [stage 1](2026-11-14-stage-1-bot-membership.md) |
-| 2 | Working from a bot | A bot's ⋯ menu: new Side, TPM, Team, call for support, hide in one mode, remove from group; new sessions join the bot's group; a new session in Bot mode starts a group named after it; closing a bot's pane folds it | written when stage 1 ships |
+| 2 | Working from a bot | Reading across a handoff in Bot mode (decision 6 of the IM gateway): after a handoff the conversation continues into the previous sessions' content, read-only, behind a quiet divider — a real handoff on 2026-11-14 left the bot's conversation empty; a bot's ⋯ menu: new Side, TPM, Team, call for support, hide in one mode, remove from group; new sessions join the bot's group; a new session in Bot mode starts a group named after it; closing a bot's pane folds it | written when stage 1 ships |
 | 3 | Fold, sleep and the live budget | Folded slim strips with shared-channel status; sleep stored with the group, quiet, dimmed, woken by opening; low-key reminder for a sleeping bot that needs you; per-device live subscription budget; Disconnect retired | written when stage 2 ships |
 | 4 | IM layer, part 1 | Shared read positions and the unread dot (no counts); typing presence in Bot mode; latest-reply previews and times in rows (decision C); phone list → chat with "‹ Bots" | written when stage 3 ships |
 | 5 | IM layer, part 2 | Shared drafts; the outbox for offline Hosts, visible and cancellable on every device | written when stage 4 ships |
@@ -27,6 +27,10 @@ Each stage ships on its own: tests first, `pnpm verify:changed` (full `pnpm veri
 | 7 | Stability | Cross-Host end-to-end coverage (two Hosts, offline Host, handoff across providers), flake removal, soak on the local instance, release notes and docs | written when stage 6 ships |
 
 Later, outside this roadmap unless time allows: notifications without an open page (IM stage 3), group chats for Teams and stored history (IM stage 4).
+
+## UI bar
+
+On 2026-11-14 the owner added: the implementation should feel like a native app and be refined ("要更接近native app的感觉，精致一定"). Every stage is checked on desktop and phone in light and dark against native conventions: filled selections without outlines, label colors, press and hover feedback with short transitions (none with reduced motion), 44-pixel touch targets, roomier phone rows.
 
 ## Decisions taken under the mandate
 
@@ -39,3 +43,4 @@ These fill gaps the specs left open. Each is recorded where it is implemented as
 5. **Group order.** Groups with a rank sort by rank; groups without one follow in catalog order, so places stay stable.
 6. **Leases.** Bot mode keeps a live group lease only for the selected group; every other group is read from the catalog. Enrolling bot views for handoff tracking uses catalog data.
 7. **Rollback.** Once a group is hidden in Bot mode, Worker versions before stage 1 cannot read the Relay state; fix forward.
+8. **Rule 6 in Window panes comes whole, in stage 2.** Stage 1 opens another session beside a bot only in groups whose bots carry details, as before; other Window panes still take another session in place. Applying "open beside" to every pane alone would pile up panes and break in-place navigation (handoff history, Track restore) that 19 Window tests describe. Stage 2 gives panes the whole rule at once: open beside, closing a bot's pane folds it, removing is explicit, and navigation within a bot's own chain (history, return to current) stays in place.

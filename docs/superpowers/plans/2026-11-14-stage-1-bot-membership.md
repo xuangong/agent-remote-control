@@ -267,7 +267,9 @@ Change `ids` to only the selected group (`selectedId && !deleted ? [selectedId] 
 - [ ] **Step 4: Run** `src/App.bot-mode.test.tsx` and `src/components/BotWorkspace.test.tsx`. Expected: PASS.
 - [ ] **Step 5: Commit** `perf(lab): keep a live lease only for the selected bot's group`.
 
-### Task 7: Per-mode hiding replaces Show as section; a bot keeps its conversation everywhere
+### Task 7: Per-mode hiding replaces Show as section
+
+As shipped: "open beside" stays limited to groups with bot details (roadmap decision 8); stage 2 applies rule 6 to every Window pane together with folding on close.
 
 **Files:**
 - Modify: `packages/agent-remote-lab/src/hooks/useWindowActions.ts` (`showAsSection` → `setBotAppearance(shown)`), `packages/agent-remote-lab/src/shell/WindowToolbar.tsx` (menu item "Hide in Bot mode" / "Show in Bot mode"), `packages/agent-remote-lab/src/components/WindowWorkspaces.tsx` (remove the Show as section button), `packages/agent-remote-lab/src/App.tsx` (open-beside condition and confirmed-bot check use `hasBotAppearance` instead of `group.bots`), `packages/agent-remote-lab/src/window-workspace-store.ts` (idempotence for `bots.hide`/`bots.show`)

@@ -323,9 +323,8 @@ it('opens New session from the New menu as a page with the provider controls', a
   } finally { await app.close(); }
 });
 
-// Rule 6 holds in every group Bot mode shows, with or without bot details: another session opens beside a bot.
-it.each([true, false])('keeps the desktop sidebar when a session opens from the sessions page beside the bots (bot details: %s), and closes the page', async details => {
-  const scope = `http://localhost/window-page-open-${details}/`; seedGroup(scope, botGroup('A', details));
+it('keeps the desktop sidebar when a session opens from the sessions page beside the bots, and closes the page', async () => {
+  const scope = 'http://localhost/window-page-open/'; seedGroup(scope, botGroup('A'));
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   try {

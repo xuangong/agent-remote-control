@@ -26,8 +26,10 @@ export interface BotWorkspaceProps {
   rosterCollapsed: boolean; onToggleRoster(): void;
   /** Opens search; the roster's header offers it. */
   onSearch?(): void;
+  /** A Host's display name for a Host ID. */
+  hostName?(hostId: string): string;
 }
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id }: BotWorkspaceProps) {
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [creating, setCreating] = useState(false), [title, setTitle] = useState(''), [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -94,9 +96,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {saving ? <p role="status">Saving section…</p> : null}
       {error || creation.error ? <p role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p role="status">Section creation is not confirmed. <button type="button" onClick={() => void save(true)}>Retry</button></p> : null}
-      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select}
+      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName}
         directoryControls={<div className="lab-bot-directory-controls">
-          {directory.sources.map(source => <div key={source.id}><small>{source.hostId} · {source.providerId}</small>
+          {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
             {source.error ? <p role="alert">{source.error}</p> : null}
             <button type="button" disabled={!source.online || source.loading} onClick={() => void directory.refresh(source.id)}>Refresh</button>
@@ -112,7 +114,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         trailing={compact ? <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /> : undefined} />
       {!unavailable ? availabilityNotice : null}
       {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content' } }} />
-        : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this section.' : 'Choose a bot to continue its conversation.'}</p> : null}
+        : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this group.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>
   </main>;
 }

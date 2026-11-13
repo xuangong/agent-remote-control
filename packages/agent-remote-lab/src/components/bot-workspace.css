@@ -21,6 +21,28 @@
 .lab-bot-row[aria-current="true"] { background: var(--ui-selection); border-color: var(--obs-action); }
 .lab-bot-row-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .lab-bot-row-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* A bot's name with its role and label as tags beside it, like a job title in a chat app; the name never carries them. */
+.lab-bot-name-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lab-bot-name-line .lab-bot-name { flex: 0 1 auto; min-width: 0; }
+.lab-bot-role, .lab-bot-label { flex: none; max-width: 9em; overflow: hidden; padding: 1px 6px; border-radius: 4px; font-size: 11px; line-height: 16px;
+  text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-role { background: var(--ui-fill); color: var(--ui-label-secondary); font-weight: 500; }
+.lab-bot-label { border: 1px solid var(--ui-separator); color: var(--ui-label-secondary); }
+.lab-bot-row-text > .lab-bot-status { color: var(--ui-label-secondary); font-size: 12px; }
+/* Needs you is the one signal that asks for action. */
+.lab-bot-row-text > .lab-bot-status[data-attention] { color: var(--ui-status-attention); font-weight: 600; }
+.lab-bot-row-text > .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
+/* Asks are the only second level: listed under their bot, indented past its picture. */
+.lab-bot-asks { margin: 0 0 2px; padding: 0 0 0 44px; list-style: none; }
+.lab-bot-ask { display: block; width: 100%; overflow: hidden; padding: 4px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ui-label-secondary);
+  font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-ask:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-row-hover); }
+.lab-bot-other > summary { list-style: none; cursor: pointer; }
+.lab-bot-other > summary::-webkit-details-marker { display: none; }
+.lab-bot-other > summary h2 { display: inline-flex; color: var(--ui-label-secondary); }
+.lab-bot-other > summary h2::before { content: '›'; display: inline-block; width: 1em; transition: transform var(--ui-duration-short) var(--ui-ease); }
+.lab-bot-other[open] > summary h2::before { transform: rotate(90deg); }
+@media (pointer: coarse) { .lab-bot-ask { min-height: 44px; } }
 .lab-bot-session-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .lab-bot-session-heading > span { display: flex; min-width: 0; flex-direction: column; }
 .lab-bot-session-heading small { font-size: 12px; font-weight: normal; color: var(--obs-text-secondary); }

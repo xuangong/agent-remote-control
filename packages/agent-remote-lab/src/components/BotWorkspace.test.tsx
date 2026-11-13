@@ -73,7 +73,7 @@ it('creates an empty section only after Save and keeps it out of Windows', async
   await until(() => expect(app.workspace().groups.find(group => group.window.title === 'Review')).toBeDefined());
   const created = app.workspace().groups.find(group => group.window.title === 'Review')!;
   expect(created.presentation).toEqual({ window: false });
-  expect(app.container.textContent).toContain('No bots in this section yet.');
+  expect(app.container.textContent).toContain('No bots in this group yet.');
   expect(new URL(location.href).searchParams.get('section')).toBe(created.window.id);
   await app.close();
 });

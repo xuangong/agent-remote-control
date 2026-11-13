@@ -251,7 +251,13 @@ export class CodexAppServerSession implements AgentSession {
     this.runtimeClosedListeners.clear();
   }
 
-  receiveNotification(method: string, params: unknown): void { this.nativeEvidence.invalidate(); this.handleNotification(method, params); }
+  receiveNotification(method: string, params: unknown): void {
+    // MCP startup progress changes neither session work nor history. Failures still invalidate evidence.
+    const startupProgress = method === 'mcpServer/startupStatus/updated' && isRecord(params)
+      && (params.status === 'starting' || params.status === 'ready');
+    if (!startupProgress) this.nativeEvidence.invalidate();
+    this.handleNotification(method, params);
+  }
   receiveTermination(error: Error): void { this.handleTransportTermination(error); }
   notifyChildrenChanged(): void { this.nativeEvidence.invalidate(); this.emitRuntimeUpdate(); }
   childActivityStatus(): AgentRuntimeInfo['status'] {

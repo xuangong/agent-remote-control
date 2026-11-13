@@ -106,7 +106,8 @@ it('keeps the same visible Bot editor and content while Access suspends and resu
   } finally { await app.close(); }
 });
 
-it.each(['deleted', 'rebound', 'attached', 'managed', 'scope'] as const)('does not retain an Access-suspended Bot presentation after %s replacement', async change => {
+// A Side (attached) or managed view stays a bot, so the changes that end a bot are deletion, another session, history, becoming an Ask and another scope.
+it.each(['deleted', 'rebound', 'history', 'ask', 'scope'] as const)('does not retain an Access-suspended Bot presentation after %s replacement', async change => {
   const scope = `http://localhost/bot-access-${change}/`; seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?mode=bot&section=B&bot=B1');
   const app = await mountBotApp(scope, { hosted: true });
   try {
@@ -118,8 +119,8 @@ it.each(['deleted', 'rebound', 'attached', 'managed', 'scope'] as const)('does n
     else {
       const group = structuredClone(app.hostedGroups.get('B')!); group.window.revision++;
       if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'B1');
-      else if (change === 'attached') { group.window.views[0]!.placement = 'attached'; group.window.views[0]!.attachedTo = 'B2'; group.window.views.reverse(); }
-      else if (change === 'managed') group.window.views[0]!.bindingPolicy = 'managed';
+      else if (change === 'history') group.window.views[0]!.binding = { ...group.window.views[0]!.binding!, sessionIntent: 'history' };
+      else if (change === 'ask') { group.window.views[0]!.feature = { kind: 'ask', id: 'ask-1' }; group.window.views[0]!.bindingPolicy = 'managed'; }
       else group.window.views[0]!.binding = botTarget('replacement');
       app.hostedGroups.set('B', group);
       await act(async () => app.setAccessReady(true));

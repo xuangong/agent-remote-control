@@ -28,9 +28,9 @@ it('retains loaded pages offline and requires explicit refresh after cursor expi
 });
 it('removes newly grouped fallback sessions without another directory request', async () => {
   const list = vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue(page('old')); const harness = await mount([source('h')]); const groups: WindowGroup[] = [];
-  expect(projectBotRoster(groups, harness.read().sessions, () => 'idle').other).toHaveLength(1);
+  expect(projectBotRoster(groups, harness.read().sessions, { status: () => 'idle' }).other).toHaveLength(1);
   groups.push({ window: { schemaVersion: 3, id: 'w', revision: 0, title: 'w', selectedPrimaryViewId: 'main', selectedViewId: 'main', views: [createWindowView('main', { hostId: 'h', providerId: 'p', nativeSessionId: 'old', title: 'old' }, 'primary')] } });
-  expect(projectBotRoster(groups, harness.read().sessions, () => 'idle').other).toEqual([]); expect(list).toHaveBeenCalledTimes(1);
+  expect(projectBotRoster(groups, harness.read().sessions, { status: () => 'idle' }).other).toEqual([]); expect(list).toHaveBeenCalledTimes(1);
 });
 it('aborts and ignores a response after leaving Bot mode', async () => {
   let complete!: (page: SessionCatalogPage) => void, signal!: AbortSignal; const a = source('a');

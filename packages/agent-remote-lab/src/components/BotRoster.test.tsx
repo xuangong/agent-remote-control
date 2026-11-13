@@ -8,7 +8,7 @@ import type { BotPlace } from '../workbench-mode.js';
 
 it('renders accessible metadata and fallback Host identity without hidden members or invented results', async () => {
   const group = botGroup('A'); group.bots!.members = { A1: { label: 'Reviewer', picture: { shape: 'hexagon', color: '#123456' } }, A2: { hidden: true } };
-  const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], () => 'offline');
+  const model = projectBotRoster([group], [{ ...botTarget('Other'), hostId: 'host-a' }, { ...botTarget('Other'), hostId: 'host-b' }], { status: () => 'offline' });
   let selected: BotPlace | undefined;
   const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={place => { selected = place; }} directoryControls={<button>Refresh</button>} />);
   expect(container.querySelector('nav[aria-label="Bots"]')).not.toBeNull();

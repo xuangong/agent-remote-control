@@ -153,7 +153,8 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
 
 describe('from Bot mode while the hosted Window is still loading', () => {
   const start = async (scope: string) => {
-    seedGroup(scope, windowGroup('A', 'Alpha'));
+    // Hidden in Bot mode, the Window's sessions are no bots there, so search offers them as sessions that open in Window mode.
+    seedGroup(scope, { ...windowGroup('A', 'Alpha'), presentation: { bots: false } });
     history.replaceState(null, '', '/?window=A');
     const app = await mountBotApp(scope, { hosted: true, holdInspect: true });
     await until(() => expect(app.workspace().window?.id).toBe('A'));

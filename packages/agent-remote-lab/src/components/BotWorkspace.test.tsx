@@ -18,7 +18,8 @@ it.each(['deleted', 'hidden', 'ineligible'] as const)('shows the compact roster 
     const group = structuredClone(app.hostedGroups.get('A')!); group.window.revision++;
     if (change === 'deleted') group.window.views = group.window.views.filter(view => view.id !== 'A1');
     else if (change === 'hidden') group.bots!.members.A1 = { hidden: true };
-    else group.window.views[0]!.bindingPolicy = 'managed';
+    // A Side or a managed view stays a bot; a history view is no bot.
+    else group.window.views[0]!.binding = { ...group.window.views[0]!.binding!, sessionIntent: 'history' };
     app.hostedGroups.set('A', group); await act(async () => app.workspace().refreshGroups());
     await until(() => expect(editor.isConnected).toBe(false));
     expect(app.container.querySelector<HTMLElement>('.lab-bot-roster')!.hidden).toBe(false);

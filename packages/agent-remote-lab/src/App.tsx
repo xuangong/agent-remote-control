@@ -1730,7 +1730,7 @@ function AppContent({
   // A session under the desktop sessions page is not seen, so it is not acknowledged as read.
   const visibleWindows = openWindows.filter(session => windowStageVisible && isViewVisible(viewKey(session)));
   const botTargets = !windowMode && activated && accessReady
-    ? projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections.flatMap(section => section.rows.map(({ binding }) => {
+    ? projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown' }).sections.flatMap(section => section.rows.map(({ binding }) => {
       const { role: _role, ...session } = binding;
       return session;
     })) : [];
@@ -1743,7 +1743,7 @@ function AppContent({
   const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
     if (!windowMode) {
       if (!latestEligible.current.has(sessionKey(item))) return;
-      const row = projectBotRoster(windowWorkspace.groups, [], () => 'unknown').sections
+      const row = projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown' }).sections
         .flatMap(section => section.rows).find(row => sessionKey(row.binding) === sessionKey(item));
       if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
       return;
@@ -1792,7 +1792,8 @@ function AppContent({
     return [...new Map(sources.map(source => [source.id, source])).values()];
   }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
-  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, windowSessionStatus);
+  const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
+  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId) });
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
     showDockOf(view);
@@ -1886,14 +1887,16 @@ function AppContent({
         : action('window-mode', 'Switch to Window mode', toWindow, apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
       ...(windowOverviewSupported ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
     ];
-    const bots = botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
+    // Each session is one item: a bot in Bot mode, a session (opened in Window mode) otherwise.
+    const bots = windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
       title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
       run: () => {
         const switching = windowMode;
         navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
         if (switching) inMode('bot', () => searchRuns.current.focusShownMode('bot'));
       } })));
-    return [...actions, ...windowItems, ...bots, ...sessionItems];
+    const botSessions = new Set(windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map(row => `session:${sessionKey(row.binding)}`)));
+    return [...actions, ...windowItems, ...bots, ...sessionItems.filter(item => !botSessions.has(item.id))];
   }
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
   const applySessionTitle = useCallback((session: StarInput) => {

@@ -153,10 +153,10 @@ const restoredState: RemoteHostBrokerState = {
   creations: [],
 };
 
-async function restoredFixture(options: Partial<import('./broker.js').HostBrokerOptions> = {}) {
+async function restoredFixture(options: Partial<import('./broker.js').HostBrokerOptions> = {}, query = '') {
   const broker = createHostBroker({ origin: 'https://relay.example', initialState: restoredState, now: () => 10_000, rpcTimeoutMs: 1000, ...options });
   close.push(() => broker.close());
-  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', { headers: { authorization: 'Bearer arc_fixture' } }));
+  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, { headers: { authorization: 'Bearer arc_fixture' } }));
   if (!prepared || prepared instanceof Response) throw new Error('Known SHA-256 credential was rejected');
   const pair = transportPair();
   const registered = new Promise<string>(resolve => pair.native.onMessage(data => {
@@ -168,6 +168,47 @@ async function restoredFixture(options: Partial<import('./broker.js').HostBroker
   expect(await registered).toBe('host');
   return { broker, native: pair.native };
 }
+
+it('asks only a Controller that serves Host status, and tells pages which Hosts do', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
+  let rpcs = 0;
+  native.onMessage(data => { if (JSON.parse(data).type === 'rpc_request') rpcs += 1; });
+  const listed = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts'), { principalSubject: () => 'alice' });
+  expect((await listed!.json()).hosts[0].hostStatus).toBeUndefined();
+  const outdated = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/status'), { principalSubject: () => 'alice' });
+  expect(outdated?.status).toBe(501);
+  expect(await outdated!.json()).toMatchObject({ code: 'unsupported_command' });
+  expect(rpcs).toBe(0);
+});
+
+it('shows a Host\'s status to its owner in full and to people it is shared with as session counts only', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice' }, '?hostStatus=1');
+  const listed = await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts'), { principalSubject: () => 'alice' });
+  expect((await listed!.json()).hosts[0].hostStatus).toBe(true);
+  await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
+  const full = { sampledAt: 5, sessions: { running: 1, waiting: 0, idle: 2, failed: 0 }, cpu: { cores: 8, usage: 0.25 },
+    memory: { total: 100, used: 40 }, disks: [{ path: '/home/alice', total: 1000, used: 600 }] };
+  let reply: { status: number; body: unknown } = { status: 200, body: full };
+  const calls: string[] = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    calls.push(`${message.method} ${message.path}`);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: reply.status, body: JSON.stringify(reply.body) }));
+  });
+  const read = (subject: string) => broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host/status'), { principalSubject: () => subject });
+  const owner = await read('alice');
+  expect(owner?.status).toBe(200);
+  expect(owner?.headers.get('cache-control')).toBe('no-store');
+  expect(await owner!.json()).toEqual(full);
+  expect(await (await read('bob'))!.json()).toEqual({ sampledAt: 5, sessions: full.sessions });
+  expect((await read('mallory'))?.status).toBe(403);
+  expect(calls).toEqual(['GET /remote/host-status', 'GET /remote/host-status']);
+  reply = { status: 200, body: { ...full, memory: { total: 10, used: 40 } } };
+  expect((await read('alice'))?.status).toBe(502);
+  reply = { status: 404, body: { code: 'not_found' } };
+  expect((await read('alice'))?.status).toBe(502);
+});
 
 it('routes VS Code tunnel controls only for the owner and does not cache device codes', async () => {
   const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });

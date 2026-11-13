@@ -25,6 +25,7 @@ export interface HostPairingService {
   codexDaemon?(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus>;
   controllerRelease?(options?: { refresh?: boolean }): Promise<ControllerReleaseDiscovery>;
   controllerUpdate?(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus>;
+  hostStatus?(hostId: string): Promise<import('@orchardworks/agent-remote-protocol').HostStatus>;
   invitation?: PairingInvitation;
   hosts(): Promise<{ hosts: RemoteHost[] }>;
   pair(purpose?: PairingPurpose): Promise<PairingInvitation>;

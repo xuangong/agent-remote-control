@@ -136,6 +136,24 @@ it('queries daemon outcomes and posts one explicit intent with no automatic repl
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
+it('reads a Host status and refuses one it cannot verify', async () => {
+  const requests: Array<string | undefined> = [];
+  let body: unknown = { sampledAt: 1, sessions: { running: 1, waiting: 0, idle: 0, failed: 0 }, cpu: { cores: 4, usage: 0.5 } };
+  const server = createServer((request, response) => {
+    requests.push(request.url);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(body));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const client = new RemoteHostClient(`http://127.0.0.1:${(server.address() as AddressInfo).port}/u/tenant/`);
+    expect((await client.hostStatus('host/one')).cpu).toEqual({ cores: 4, usage: 0.5 });
+    body = { sampledAt: 1, sessions: { running: -1, waiting: 0, idle: 0, failed: 0 } };
+    await expect(client.hostStatus('host/one')).rejects.toThrow(/could not be verified/);
+    expect(requests).toEqual(['/u/tenant/v1/remote/hosts/host%2Fone/status', '/u/tenant/v1/remote/hosts/host%2Fone/status']);
+  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
 it('exposes validated TPM Host methods through the shared control client', async () => {
   const requests: Array<{ method?: string; path?: string; body: string }> = [];
   const work = { id: 'work', revision: 1, title: 'Delivery', providerId: 'codex', mainNativeSessionId: 'main', phase: 'clarifying', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-09', updatedAt: '2026-10-09', nextCheckAt: 0 };

@@ -26,6 +26,7 @@ import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
 import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
+import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
@@ -279,6 +280,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
       ...(options.team ? { teamManagement: true, callForSupport: true,
         readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
+      hostStatus: true,
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
@@ -532,14 +534,18 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
   const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
   const bindings = new SessionBindings();
+  const liveSessionStates = () => [...bindings.values()].flatMap(binding => {
+    const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
+    return state ? [{ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, state }] : [];
+  });
   const sessionStates = createSessionStatePublisher({
-    live: () => [...bindings.values()].flatMap(binding => {
-      const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
-      return state ? [{ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, state }] : [];
-    }),
+    live: liveSessionStates,
     catalogs: () => [...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
   });
+  const hostStatus = createHostStatusReader({ sessions: liveSessionStates,
+    paths: () => hostStatusPaths(async () => (await Promise.all([...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
+      .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
   const uncertainAgents = new Set<string>();
@@ -1082,6 +1088,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
       const url = new URL(request.path, 'http://agent-host.local');
       const payload = request.method === 'POST' ? body(request.body) : undefined;
+      if (request.method === 'GET' && url.pathname === '/remote/host-status') return json(200, await hostStatus.read());
       if (url.pathname === '/remote/succession/enrollment' || options.succession?.enrollment && url.pathname.startsWith('/remote/succession') && request.method === 'POST') return json(403, { code: 'succession_authority_required', error: 'Use the authenticated Relay association reservation.' });
       if (url.pathname.startsWith('/remote/succession')) {
         if (!successionService || !succession) return json(404, { code: 'succession_unavailable', error: 'Session succession is unavailable.' });

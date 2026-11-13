@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { controllerReleases } from '@orchardworks/agent-remote-hosted';
+import { isHostStatus } from '@orchardworks/agent-remote-protocol';
 import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
@@ -82,6 +83,25 @@ function fixture(providerId: string, createSession: (nativeSessionId: string) =>
 }
 
 describe('Agent Host runtime', () => {
+  it('reports its open sessions by state and the machine it runs on', async () => {
+    const registration = fixture('codex');
+    registration.sessions.set('native', new Session('codex', 'native', [{ type: 'history_boundary' }]));
+    registration.directory.workspaces = async () => [{ id: 'workspace', name: 'workspace', path: tmpdir() }];
+    const host = createAgentHostRuntime({ registrations: [registration] });
+    try {
+      const attached = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'status-agent', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
+      expect(attached.status).toBe(200);
+      const result = await host.control({ method: 'GET', path: '/remote/host-status' });
+      expect(result.status).toBe(200);
+      const status = JSON.parse(result.body);
+      expect(isHostStatus(status)).toBe(true);
+      expect(status.sessions).toEqual({ running: 0, waiting: 0, idle: 1, failed: 0 });
+      expect(status.cpu.cores).toBeGreaterThan(0);
+      expect(status.memory.used).toBeLessThanOrEqual(status.memory.total);
+      expect(status.disks.length).toBeGreaterThan(0);
+    } finally { await host.close(); }
+  });
+
   it('wires a durable resource store into an attached native session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'host-resource-'));
     const received: import('@orchardworks/agent-provider-sdk').AgentInputPart[][] = [];
@@ -875,10 +895,10 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
   let pausedSocket: WebSocket | undefined;
   const received: Array<Record<string, unknown>> = [];
   let registrationCount = 0, heartbeatAcknowledgementCount = 0;
-  let resolveConnected!: () => void;
+  let resolveConnected!: () => void, upgrade: URL | undefined;
   const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
-  server.on('connection', (connection) => {
-    socket = connection;
+  server.on('connection', (connection, request) => {
+    socket = connection; upgrade = new URL(request.url ?? '/', 'http://broker');
     resolveConnected();
     let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     connection.on('close', () => clearInterval(heartbeatTimer));
@@ -903,6 +923,8 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
     url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
     connected,
     advertisedProviders: () => providers,
+    /** What the Controller asked for when it connected. */
+    upgradeParameter: (name: string) => upgrade?.searchParams.get(name) ?? null,
     registrations: () => registrationCount,
     heartbeatAcknowledgements: () => heartbeatAcknowledgementCount,
     pauseHeartbeat() { if (!socket) throw new Error('Broker has no Host connection.'); pausedSocket = socket; return socket; },
@@ -1779,6 +1801,20 @@ it.each(['codex', 'copilot', 'claude', 'opencode'])('reconciles an uncertain ren
     title = 'Changed elsewhere';
     expect((await host.control(request)).status).toBe(503); expect(writes).toBe(1);
   } finally { await host.close(); }
+});
+
+it('offers Host status when it connects and answers the Relay\'s read', async () => {
+  const broker = await uplinkBroker('status-host');
+  const host = createAgentHost({ registrations: [fixture('codex')], installationId: 'status-host', name: 'Host', uplink: { url: broker.url, remoteKey: 'test-key' } });
+  try {
+    await host.ready;
+    expect(broker.upgradeParameter('hostStatus')).toBe('1');
+    const result = await broker.rpc('GET', '/remote/host-status');
+    expect(result.status).toBe(200);
+    const status = JSON.parse(result.body);
+    expect(isHostStatus(status)).toBe(true);
+    expect(status.sessions).toEqual({ running: 0, waiting: 0, idle: 0, failed: 0 });
+  } finally { await host.close(); await broker.close(); }
 });
 
 it('keeps daemon restart jobs alive across uplink replacement and reports the same outcome', async () => {

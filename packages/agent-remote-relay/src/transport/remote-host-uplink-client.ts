@@ -51,6 +51,8 @@ export interface RemoteHostUplinkClientOptions {
   readonly environment?: HostEnvironment;
   readonly controller?: ControllerIdentity;
   readonly tpmManagement?: true;
+  /** Answer Host status reads (sessions, CPU, memory and disks); advertised so a Relay asks only Controllers that can. */
+  readonly hostStatus?: true;
   readonly teamManagement?: true;
   /** Request Call For Support groups; honored only with teamManagement. */
   readonly callForSupport?: true;
@@ -148,6 +150,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
     if (options.sessionStates) endpoint.searchParams.set('sessionStates', '1');
+    if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },

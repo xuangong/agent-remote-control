@@ -2,6 +2,7 @@ import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks
 import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
+import { isHostStatus, type HostStatus } from '@orchardworks/agent-remote-protocol';
 import { isSuccessionDescription, isSuccessionActionResult, type SuccessionDescription, type SuccessionActionResult, type NativePrefixSelection } from '@orchardworks/agent-remote-protocol';
 export type { SuccessionDescription, SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
@@ -138,6 +139,11 @@ export class RemoteHostClient implements HostPairingService {
   async codexDaemon(hostId: string, input?: CodexDaemonRestart): Promise<CodexDaemonStatus> {
     const value = await this.request(`hosts/${encodeURIComponent(hostId)}/codex-daemon`, input ? 'POST' : 'GET', input, 15000);
     if (!isCodexDaemonStatus(value)) throw new Error('The daemon result could not be verified. Check status before restarting again.');
+    return value;
+  }
+  async hostStatus(hostId: string): Promise<HostStatus> {
+    const value = await this.request(`hosts/${encodeURIComponent(hostId)}/status`, 'GET', undefined, 15000);
+    if (!isHostStatus(value)) throw new Error('The Host status could not be verified.');
     return value;
   }
   controllerUpdate(hostId: string, input?: { version: string; operationId: string }): Promise<ControllerUpdateStatus> {

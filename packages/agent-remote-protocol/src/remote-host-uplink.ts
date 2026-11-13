@@ -41,7 +41,7 @@ const closeCode = Type.Union([
 
 const requestPath = Type.String({
   maxLength: 8192,
-  pattern: '^/(remote/(catalog(?:/(?:revision|session|listing))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|session/refs(?=\\?|$)|session/call(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
+  pattern: '^/(remote/(catalog(?:/(?:revision|session|listing))?|workspaces|workspace-folders(?:/create)?(?=\\?|$)|models|succession/enrollment(?=$)|diagnostics/relay(?=$)|controller-update(?=$)|codex-daemon(?=$)|host-status(?=$)|team/(?:create-seat|support-bundle|support-patch)(?=$)|tpm(?:/(?:work|create|action))?(?=\\?|$)|provider-settings(?=$)|session/rename(?=$)|session/refs(?=\\?|$)|session/call(?=$)|child/attach|attach|create|stop|vscode-tunnel(?:/(?:start|stop))?(?=$)|previews(?:/unregister)?)|v1/(providers|sessions))(?:[/?][^#]*)?$',
 });
 
 export const RemoteHostUplinkMessage = Type.Union([
@@ -112,7 +112,7 @@ function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplink
       || pathname === '/remote/session/refs' || pathname === '/remote/catalog/listing') return value.method === 'GET' ? value.body === undefined : value.body !== undefined;
     if (pathname.startsWith('/remote/')) {
       const isRead = pathname === '/remote/tpm' || pathname === '/remote/tpm/work' || pathname === '/remote/catalog' || pathname === '/remote/catalog/revision'
-        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel';
+        || pathname === '/remote/catalog/session' || pathname === '/remote/workspaces' || pathname === '/remote/workspace-folders' || pathname === '/remote/models' || pathname === '/remote/vscode-tunnel' || pathname === '/remote/host-status';
       if ((isRead && (value.method !== 'GET' || value.body !== undefined))
         || (!isRead && (value.method !== 'POST' || value.body === undefined))) return false;
     }

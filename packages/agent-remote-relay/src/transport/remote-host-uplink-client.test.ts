@@ -228,6 +228,31 @@ it('keeps an older Team Relay connected and rejects unnegotiated resource calls 
   expect(requests).toBe(0);expect(await client.teamRequest({action:'poll'})).toEqual([]);expect(requests).toBe(1);
 });
 
+it.each([true, false])('advertises Host status reads and answers one from the Relay (served=%s)', async served => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
+  let requested: string | null = null, peer: import('ws').WebSocket | undefined;
+  const responses: unknown[] = [];
+  server.on('connection', (socket, request) => {
+    requested = new URL(request.url!, 'http://relay').searchParams.get('hostStatus'); peer = socket;
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
+      if (message.type === 'rpc_response') responses.push(message);
+    });
+  });
+  const relay = createAgentRemoteRelay({ providers: [] }); closeables.push(() => relay.close());
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [], ...(served ? { hostStatus: true as const } : {}),
+    url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, resolveSession: () => undefined,
+    control: async request => request.path === '/remote/host-status' ? { status: 200, body: '{"sampledAt":1}' } : { status: 404, body: '{}' } });
+  closeables.push(() => client.close()); await client.ready;
+  expect(requested).toBe(served ? '1' : null);
+  peer!.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId: 'status', method: 'GET', path: '/remote/host-status' }));
+  await until(() => responses.length === 1);
+  expect(responses[0]).toMatchObject({ type: 'rpc_response', requestId: 'status', status: 200, body: '{"sampledAt":1}' });
+});
+
 it.each([true, false])('reports session states only to a Relay that acknowledged them (acknowledged=%s)', async acknowledged => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));

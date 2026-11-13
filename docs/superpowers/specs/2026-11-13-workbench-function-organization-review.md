@@ -29,6 +29,20 @@ This example expresses hierarchy, not required membership or ordering for every 
 
 Design around finding and switching among the group's sessions. Roles can provide concise context; management operations stay associated with their actual objects. Attention indicators should lead back to the corresponding session and group. The responsibility categories below describe user intents, not separate navigation areas for each role.
 
+## User-confirmed role visibility across both modes
+
+Sessions should visibly communicate their role in both Bot and Window mode. The same session should use consistent role wording in either presentation. The user also permits expressing the role in the session name; a separate badge is not mandatory.
+
+Candidate presentation for review:
+
+- Use a concise role-bearing title such as `TPM · Release acceptance`, `Team Leader · Platform migration`, or `Reviewer · Authentication changes` when that is the intended session name. Preserve user-authored names; do not bulk-rename existing sessions.
+- Where the name does not communicate the role, a small text label beside the title can supply it. Avoid redundant title prefixes and badges that repeat the same role. The exact placement remains a visual review decision.
+- Keep role distinct from runtime/attention state. `TPM` or `Reviewer` describes the session's responsibility; working, waiting, failed and unread describe its current state. Activity changes should not rewrite its name or move it into a different role group.
+- Use known role and relationship data for role semantics. A word in a custom title is not authority to change permissions, ownership or session type. Avoid assigning an invented role when the actual role is unknown.
+- In narrow layouts, keep the title readable and the role identifiable with a compact treatment; do not rely on hover or color alone. Apply the same semantics in the Bot row and existing Window session heading.
+
+Role visibility does not change the confirmed hierarchy: only Ask is secondary in Bot mode. Any heading adjustment is a targeted Session View polish item, not permission to redesign its header structure, messages or composer. No product implementation is included in this document.
+
 ## Current product evidence
 
 These observations come from the current worktree's implementation and product documentation, not usage analytics or an authenticated competitor evaluation:
@@ -87,7 +101,7 @@ For desktop, persistent surrounding context may help compare and coordinate seve
 
 ## How function should drive appearance
 
-- Stable identity: readable titles and restrained secondary Host/provider context. Do not make identity compete with colorful decoration.
+- Stable identity: readable titles, a recognizable session role (in the name or a concise label), and restrained secondary Host/provider context. Use consistent role wording across Bot and Window. Do not make identity compete with colorful decoration.
 - Urgency: semantic state indicators whose scope is truthful. Avoid constantly reordering familiar rows as activity changes.
 - Primary action: emphasize the next useful action for the current state; make secondary management actions accessible without crowding the title.
 - Continuity: preserve list position, draft and mounted conversation across navigation; transitions should communicate a relationship rather than merely animate.
@@ -98,7 +112,7 @@ For desktop, persistent surrounding context may help compare and coordinate seve
 - Which journey should lead: parallel supervision, familiar Bots, or delegated delivery? No user priority has been inferred from a missing answer.
 - Should attention become easier to reach across both modes, and what exact set of work can it truthfully cover?
 - Which creation outcomes should each existing plus expose, with what wording?
-- How should peer-session roles and relationships be legible within a group, and how should Ask disclosure work without changing Session View?
+- Role visibility across Bot and Window is confirmed. Review the exact title/label treatment, relationship presentation and Ask disclosure without restructuring Session View.
 - Which controls actually need relocation after these journeys have been demonstrated?
 
 Next deliverable after agreeing on the direction: desktop and phone walkthroughs of the same realistic work, showing entry, action, state change and return. Review those flows before an implementation plan, rather than approving a static sidebar alone.

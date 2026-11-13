@@ -6,6 +6,8 @@ Status: proposed, awaiting user review. No functional-layout changes have been i
 
 **User-confirmed hierarchy:** Bot groups contain first-level peer sessions regardless of Side/Team/support/TPM role. Only Ask remains a secondary session under its owner. Do not split the roster into role-specific destinations or nest other sessions by their source relationship. The cross-group Pinned proposal below is also on hold while its effect on group continuity is reviewed. The current prototype does not yet demonstrate this complete hierarchy and must not be treated as its acceptance.
 
+**User-confirmed role visibility:** Both Bot and Window sessions should communicate their role, including through the session name where appropriate. Use consistent role wording, preserve custom names, and distinguish role from live activity state. Review the exact title or compact-label treatment under [the shared role guidance](2026-11-13-workbench-function-organization-review.md#user-confirmed-role-visibility-across-both-modes); a separate badge is optional.
+
 This review narrows the next step of the approved modernization design. The user requested advance review before changes to functional layout, including desktop and phone. Reference research: [agent workbench design references](../../investigations/2026-11-13-agent-workbench-design-references.md).
 
 ## Protected Session View boundary

@@ -291,7 +291,10 @@ it('refuses malformed stored groups and ignores what an older Worker leaves behi
   const saved = structuredClone(f.saved());
   const row = saved.workspaceWindows![0]!;
   expect(validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'm', members: {} } }] }, auth).workspaceWindows![0]!.bots).toEqual({ rank: 'm', members: {} });
-  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false } }] }, auth)).toThrow();
+  // Bot mode shows a group without bot details, so hiding its Window is valid; hiding it in both modes or an empty presentation is not.
+  expect(validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false } }] }, auth).workspaceWindows![0]!.presentation).toEqual({ window: false });
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: { window: false, bots: false } }] }, auth)).toThrow();
+  expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, presentation: {} }] }, auth)).toThrow();
   expect(() => validateRelayState({ ...saved, workspaceWindows: [{ ...row, bots: { rank: 'M', members: {} } }] }, auth)).toThrow();
   // An older Worker keeps details for a view it closed, and keeps the section of a group it deleted.
   const left = { ...saved, workspaceWindows: [
@@ -337,6 +340,36 @@ it('refuses to make a session a bot in a second section, naming the section that
   const created = await f.call('', 'POST', { operationId: 'third', issuedAt: Date.now(), window: { ...second, id: 'third' }, bots: { rank: 'o', members: {} } });
   expect(created.status).toBe(409);
   expect((await f.call()).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window', 'second']);
+});
+
+it('hides a group in Bot mode and shows it again, through storage restart, never hiding it in both modes', async () => {
+  const f = await fixture(); await f.create();
+  const hidden = await f.call('/window/operations', 'POST', f.mutation('hide-in-bots', 0, { type: 'bots.hide' }));
+  expect(hidden.body).toMatchObject({ result: { status: 'committed', revision: 1 }, presentation: { bots: false } });
+  const refused = await f.call('/window/operations', 'POST', f.mutation('hide-window-too', 1, { type: 'window.remove' }));
+  expect(refused.body.result).toMatchObject({ status: 'rejected', code: 'last_appearance' });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/window')).body.presentation).toEqual({ bots: false });
+  // Older pages read the Window list, which still includes a group shown as a Window.
+  expect((await restarted.call('')).body.groups.map((group: { window: WorkspaceWindow }) => group.window.id)).toEqual(['window']);
+  const shown = await restarted.call('/window/operations', 'POST', restarted.mutation('show-in-bots', 1, { type: 'bots.show' }));
+  expect(shown.body.result.status).toBe('committed');
+  expect(shown.body).not.toHaveProperty('presentation');
+  expect(restarted.saved().workspaceWindows![0]).not.toHaveProperty('presentation');
+});
+
+it('counts a Side as a bot, so its session cannot be a bot in another section', async () => {
+  const f = await fixture(); await f.create();
+  expect((await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }))).body.result.status).toBe('committed');
+  const other = { ...binding, nativeSessionId: 'other', title: 'Other' };
+  const sided: WorkspaceWindow = { schemaVersion: 3, id: 'sided', title: 'Sided', revision: 0, selectedPrimaryViewId: 'lead', selectedViewId: 'lead',
+    views: [createWindowView('lead', other, 'primary'), { ...createWindowView('side', binding, 'attached'), attachedTo: 'lead' }] };
+  const created = await f.call('', 'POST', { operationId: 'sided', issuedAt: Date.now(), window: sided, bots: { rank: 'n', members: {} } });
+  expect(created.status).toBe(409);
+  expect(created.body).toEqual({ code: 'bot_session_taken', error: 'This session is already a bot in "Window".' });
+  // Hidden in Bot mode, the same group holds no bots for the rule.
+  const hiddenGroup = await f.call('', 'POST', { operationId: 'sided-hidden', issuedAt: Date.now(), window: sided, bots: { rank: 'n', members: {} }, presentation: { bots: false } });
+  expect(hiddenGroup.body.result.status).toBe('committed');
 });
 
 it('keeps a bot on its conversation whichever client changes it', async () => {

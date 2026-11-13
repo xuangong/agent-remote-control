@@ -3,7 +3,7 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, hasBotAppearance, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
@@ -512,7 +512,7 @@ function AppContent({
     const place = navigation.place, group = windowWorkspace.readGroup(confirmedBot.groupId), view = group?.window.views.find(view => view.id === confirmedBot.viewId);
     if (place?.kind !== 'bot' || place.groupId !== confirmedBot.groupId || place.viewId !== confirmedBot.viewId
       || windowWorkspace.deletedWindowIds.includes(confirmedBot.groupId)
-      || group && (!group.bots || !view || !isBotView(view) || group.bots.members[confirmedBot.viewId]?.hidden || windowBindingKey(view.binding) !== confirmedBot.bindingKey)) botPresentation.confirmed = undefined;
+      || group && (!hasBotAppearance(group) || !view || !isBotView(view) || group.bots?.members[confirmedBot.viewId]?.hidden || windowBindingKey(view.binding) !== confirmedBot.bindingKey)) botPresentation.confirmed = undefined;
   }
   const primaryGroups = sharedWindow ? primaryWindowViews(sharedWindow) : [];
   const [mountedViewSessions, setMountedViewSessions] = useState<Record<string, OpenedSession & { viewId: string }>>({});
@@ -1335,7 +1335,9 @@ function AppContent({
     if (current?.id !== destination.windowId || !view) return false;
     const expectedBinding = JSON.parse(destination.binding) as WindowSessionBinding | null;
     if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error('The target session view changed. Choose a session again.');
-    if (windowWorkspace.readGroup(current.id)?.bots && isBotView(view)
+    // Rule 6: a bot keeps its conversation in every group Bot mode shows; another session opens beside it as a new bot.
+    const shownGroup = windowWorkspace.readGroup(current.id);
+    if (shownGroup && hasBotAppearance(shownGroup) && isBotView(view)
       && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session))) {
       const binding = windowSessionBinding(session);
       const existing = current.views.find(candidate => candidate.placement === 'primary' && candidate.binding && windowBindingKey(candidate.binding) === windowBindingKey(binding));
@@ -2751,7 +2753,7 @@ function AppContent({
     const confirmed = place.kind !== 'bot' || selectedBot.group?.window.id === place.groupId && selectedBot.view?.id === place.viewId && !!selectedBot.slot;
     const retained = botPresentation.recovering && place.kind === 'bot' && botPresentation.confirmed?.groupId === place.groupId && botPresentation.confirmed.viewId === place.viewId
       ? botPresentation.confirmed : undefined;
-    if (!target || !capturedSource && place.kind === 'bot' && (!group?.bots || group.bots.members[place.viewId]?.hidden || !confirmed && !retained)) return;
+    if (!target || !capturedSource && place.kind === 'bot' && (!group || !hasBotAppearance(group) || group.bots?.members[place.viewId]?.hidden || !confirmed && !retained)) return;
     const mappedSlot = capturedSource ? viewKey(capturedSource) : place.kind === 'bot' && view?.binding ? succession.document.windowBindings?.find(entry => entry.windowId === place.groupId && entry.viewId === place.viewId && entry.bindingKey === windowBindingKey(view.binding!))?.slotId : undefined;
     const slot = place.kind === 'bot' ? succession.document.slots.find(slot => slot.id === mappedSlot) : succession.ensureView(target);
     if (!slot || retained && !confirmed && retained.slotId !== slot.id) return;
@@ -3050,7 +3052,7 @@ function AppContent({
           onRename={title => void windowActions.saveRename(sharedWindow.id, title)}
           onNewView={addSessionView} onOpenSession={createSessionView}
           hasDocks={sharedWindow.views.some(view => view.placement === 'dock')} docksHidden={docksHidden} onToggleDocks={() => setDocksHidden(value => !value)}
-          canShowAsSection={!windowWorkspace.group?.bots} onShowAsSection={() => void windowActions.showAsSection()}
+          botAppearance={windowWorkspace.group ? hasBotAppearance(windowWorkspace.group) : undefined} onBotAppearance={shown => void windowActions.setBotAppearance(shown)}
           onCopyLink={() => void windowActions.copyLink()} onAgentControl={windowWorkspace.client ? () => setAgentControlOpen(true) : undefined}
           onDelete={() => setDeleteConfirmOpen(true)} /> : null}
         <div className="lab-session-windows">{sessionWindows.entries.map(entry => <SessionWindow key={entry.id} entry={entry} baseUrl={baseUrl}

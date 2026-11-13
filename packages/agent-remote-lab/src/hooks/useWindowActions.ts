@@ -62,11 +62,11 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     await navigator.clipboard.writeText(url.href);
     if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Window link copied.', 'info');
   });
-  const showAsSection = () => run(async () => {
+  /** Shows or hides the open Window's group in Bot mode; it stays a Window either way. */
+  const setBotAppearance = (shown: boolean) => run(async () => {
     const id = workspace.window!.id, client = workspace.client;
-    const rank = workspace.groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
-    await workspace.operateGroup(id, { type: 'bots.add', rank: !rank ? 'm' : rank.length < 64 ? `${rank}m` : rank });
-    if (currentScope.current.id === id && currentScope.current.client === client) setNotice('Shown as a section in Bot mode.', 'info');
+    await workspace.operateGroup(id, { type: shown ? 'bots.show' : 'bots.hide' });
+    if (currentScope.current.id === id && currentScope.current.client === client) setNotice(shown ? 'Shown in Bot mode.' : 'Hidden in Bot mode. It stays a Window.', 'info');
   });
   /** Renames a Window; resolves whether the edit is finished, so the caller can close its form. */
   async function saveRename(id: string, title: string): Promise<boolean> {
@@ -122,5 +122,5 @@ export function useWindowActions(workspace: Workspace, scope?: string) {
     return false;
   }
   const deleteWindow = (id: string) => run(() => removing(id));
-  return { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename, deleteCurrent, deleteWindow };
+  return { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, setBotAppearance, saveRename, deleteCurrent, deleteWindow };
 }

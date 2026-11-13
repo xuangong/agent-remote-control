@@ -31,7 +31,7 @@ it('does not append a selected section-only group to the Window catalog', async 
 });
 
 it('copies a Window link without Bot route fields and surfaces section conflicts without changing selection', async () => {
-  const scope = 'http://localhost/window-section-options/'; seedGroup(scope, botGroup('A', false)); history.replaceState(null, '', '/?window=A');
+  const scope = 'http://localhost/window-section-options/'; seedGroup(scope, { ...botGroup('A', false), presentation: { bots: false } }); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });
   await until(() => expect(app.workspace().hasActiveWindow).toBe(true));
   await act(async () => app.button('Windows').click());
@@ -46,9 +46,10 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
     operationId: mutation.operationId, status: 'rejected', revision: before!.revision, code: 'bot_session_taken',
     message: 'This session is already a bot in "Release".', committedAt: Date.now(), expiresAt: Date.now() + 86400000,
   } }));
-  await act(async () => app.button('Show as section').click());
+  // Showing a hidden group in Bot mode again may meet a session that is a bot elsewhere: the refusal is the notice.
+  await act(async () => app.button('Show in Bot mode').click());
   expect(app.container.textContent).toContain('This session is already a bot in "Release".');
-  expect(app.workspace().window).toEqual(before); expect(app.workspace().readGroup('A')?.bots).toBeUndefined();
+  expect(app.workspace().window).toEqual(before); expect(app.workspace().readGroup('A')?.presentation).toEqual({ bots: false });
   await app.close(); localStorage.clear(); sessionStorage.clear();
 });
 

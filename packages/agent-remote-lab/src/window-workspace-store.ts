@@ -1,6 +1,6 @@
 import { getLayoutDiagnosticsStatus, recordWindowSelection } from './layout-diagnostics.js';
 import {
-  applyGroupOperation, decodeWindowGroup, hasWindowAppearance, isWindowGroup, isWindowGroupMutation, isWindowGroupOperation, toWindowGroup,
+  applyGroupOperation, decodeWindowGroup, hasBotAppearance, hasWindowAppearance, isWindowGroup, isWindowGroupMutation, isWindowGroupOperation, toWindowGroup,
   type WindowBots, type WindowGroup, type WindowGroupEdit, type WindowGroupMutation, type WindowGroupOperation, type WindowPresentation, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
 import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
@@ -28,6 +28,8 @@ function applied(group: WindowGroup, edit: WindowGroupEdit): boolean {
     case 'bots.remove': return !group.bots;
     case 'window.add': return hasWindowAppearance(group);
     case 'window.remove': return !hasWindowAppearance(group);
+    case 'bots.hide': return !hasBotAppearance(group);
+    case 'bots.show': return hasBotAppearance(group);
     default: return false;
   }
 }

@@ -14,9 +14,7 @@ it('keeps Window A/A2 and both display settings while Bot B1 shares its exact vi
   seedGroup(scope, a); seedGroup(scope, b); history.replaceState(null, '', '/?window=B');
   const app = await mountBotApp(scope);
   await until(() => expect(app.workspace().window?.id).toBe('B'));
-  await act(async () => app.button('Windows').click());
-  await act(async () => app.button('Show as section').click());
-  await until(() => expect(app.workspace().readGroup('B')?.bots).toBeDefined());
+  // Bot mode shows every group, so Window B's bots are there without a step to show them.
   await act(async () => app.workspace().open('A'));
   const before = structuredClone(app.workspace().window);
   const bDisplay = structuredClone(app.workspace().readGroup('B')!.window.views.map(view => view.display));
@@ -325,8 +323,9 @@ it('opens New session from the New menu as a page with the provider controls', a
   } finally { await app.close(); }
 });
 
-it('keeps the desktop sidebar when a session opens from the sessions page, and closes the page', async () => {
-  const scope = 'http://localhost/window-page-open/'; seedGroup(scope, botGroup('A'));
+// Rule 6 holds in every group Bot mode shows, with or without bot details: another session opens beside a bot.
+it.each([true, false])('keeps the desktop sidebar when a session opens from the sessions page beside the bots (bot details: %s), and closes the page', async details => {
+  const scope = `http://localhost/window-page-open-${details}/`; seedGroup(scope, botGroup('A', details));
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   try {

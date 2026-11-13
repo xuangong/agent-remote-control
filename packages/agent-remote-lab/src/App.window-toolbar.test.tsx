@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
 
-/** A Window that is not a Bot section, so the toolbar offers "Show as section". */
+/** A Window without bot details; Bot mode shows it, so the toolbar offers "Hide in Bot mode". */
 const windowGroup = (id: string, extra: WindowGroup['window']['views'] = []): WindowGroup => {
   const group = botGroup(id, false);
   return { ...group, window: { ...group.window, views: [...group.window.views, ...extra] } };
@@ -257,10 +257,10 @@ it('shows a cached Window read-only during a cold start: only Copy link acts, an
     await pick('Add', 'New session view');
     await press(document.querySelector('[role="menu"][aria-label="Add"]') ?? document.body, 'Escape');
     await open('Window actions');
-    expect(disabled('Window actions')).toEqual(['Show as section', 'Delete Window…']);
+    expect(disabled('Window actions')).toEqual(['Hide in Bot mode', 'Delete Window…']);
     await pick('Window actions', 'Delete Window…');
     expect(sheet('Delete this Window?')).toBeUndefined();
-    await pick('Window actions', 'Show as section');
+    await pick('Window actions', 'Hide in Bot mode');
     expect(app.workspace().window?.views).toHaveLength(2);
     expect(mutate).not.toHaveBeenCalled();
     app.releaseInspect();

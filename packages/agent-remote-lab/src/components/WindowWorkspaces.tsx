@@ -1,6 +1,6 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, hasBotAppearance, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowActions, windowCatalog } from '../hooks/useWindowActions.js';
 import { AgentControl } from './AgentControl.js';
@@ -45,7 +45,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
 }) {
   const sidebar = placement === 'sidebar';
   const ownActions = useWindowActions(workspace);
-  const { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, showAsSection, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
+  const { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, setBotAppearance, saveRename: save, deleteWindow } = sharedActions ?? ownActions;
   // The Window whose title is being edited in the list, and the scope it belongs to.
   const [renaming, setRenaming] = useState<{ id: string; client: typeof workspace.client }>(), [title, setTitle] = useState(''), [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<{ id: string; title: string; client: typeof workspace.client; windowId?: string }>();
@@ -187,7 +187,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       <details ref={options} className="lab-window-options"><summary>Window options</summary>
         <div className="lab-window-actions">
           <button type="button" onClick={() => void copyLink()}>Copy link</button>
-          {!workspace.group?.bots ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void showAsSection()}>Show as section</button> : null}
+          {workspace.group ? <button type="button" disabled={busy || workspace.unavailable} onClick={() => void setBotAppearance(!hasBotAppearance(workspace.group!))}>
+            {hasBotAppearance(workspace.group) ? 'Hide in Bot mode' : 'Show in Bot mode'}</button> : null}
         </div>
         {workspace.client ? <details className="lab-window-agent" open={agentControl} onToggle={event => setAgentControl(event.currentTarget.open)}>
           <summary>Agent control</summary>

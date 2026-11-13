@@ -62,17 +62,14 @@ it('copies the Window link without Bot route fields', async () => {
   expect(test.actions().noticeTone).toBe('info');
 });
 
-it('shows the Window as a section after the last ranked section', async () => {
-  const test = await fixture({ groups: [{ window: windowOf('x'), bots: { rank: 'b' } }, { window: windowOf('y'), bots: { rank: 'd' } }] as unknown as WindowGroup[] });
-  await act(async () => { await test.actions().showAsSection(); });
-  expect(test.operateGroup).toHaveBeenCalledWith('a', { type: 'bots.add', rank: 'dm' });
-  expect(test.actions().notice).toBe('Shown as a section in Bot mode.');
-});
-
-it('ranks the first section in the middle', async () => {
+it('hides the Window in Bot mode and shows it there again, with a notice each time', async () => {
   const test = await fixture();
-  await act(async () => { await test.actions().showAsSection(); });
-  expect(test.operateGroup).toHaveBeenCalledWith('a', { type: 'bots.add', rank: 'm' });
+  await act(async () => { await test.actions().setBotAppearance(false); });
+  expect(test.operateGroup).toHaveBeenCalledWith('a', { type: 'bots.hide' });
+  expect(test.actions().notice).toBe('Hidden in Bot mode. It stays a Window.');
+  await act(async () => { await test.actions().setBotAppearance(true); });
+  expect(test.operateGroup).toHaveBeenLastCalledWith('a', { type: 'bots.show' });
+  expect(test.actions().notice).toBe('Shown in Bot mode.');
 });
 
 it('runs one action at a time and reports a failure as the notice', async () => {

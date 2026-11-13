@@ -8,7 +8,7 @@ type Props = ComponentProps<typeof WindowToolbar>;
 async function toolbar(overrides: Partial<Props> = {}) {
   const props: Props = {
     windowId: 'research', title: 'Research', viewCount: 3, onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
-    hasDocks: true, docksHidden: false, onToggleDocks: vi.fn(), canShowAsSection: true, onShowAsSection: vi.fn(),
+    hasDocks: true, docksHidden: false, onToggleDocks: vi.fn(), botAppearance: true, onBotAppearance: vi.fn(),
     onCopyLink: vi.fn(), onAgentControl: vi.fn(), onDelete: vi.fn(), ...overrides,
   };
   const container = await render(<WindowToolbar {...props} />);
@@ -165,20 +165,25 @@ it('toggles the docks, showing whether they are hidden', async () => {
 it('lists the Window actions and runs each', async () => {
   const { bar, props } = await toolbar();
   let menu = await openMenu(bar, 'Window actions');
-  expect(items(menu).map(entry => entry.textContent)).toEqual(['Show as section', 'Copy link', 'Agent control…', 'Delete Window…']);
+  expect(items(menu).map(entry => entry.textContent)).toEqual(['Hide in Bot mode', 'Copy link', 'Agent control…', 'Delete Window…']);
   expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
   expect(item(menu, 'Delete Window…').dataset.destructive).toBe('true');
   await press(menu, 'Escape');
-  for (const [label, callback] of [['Show as section', props.onShowAsSection], ['Copy link', props.onCopyLink],
+  for (const [label, callback] of [['Hide in Bot mode', props.onBotAppearance], ['Copy link', props.onCopyLink],
     ['Agent control…', props.onAgentControl!], ['Delete Window…', props.onDelete]] as const) {
     menu = await openMenu(bar, 'Window actions');
     await act(async () => item(menu, label).click());
     expect(callback).toHaveBeenCalledTimes(1);
   }
+  expect(props.onBotAppearance).toHaveBeenCalledWith(false);
 });
 
-it('leaves out Show as section and Agent control when they do not apply', async () => {
-  const { bar } = await toolbar({ canShowAsSection: false, onAgentControl: undefined });
+it('shows a group hidden in Bot mode there again, and leaves out what does not apply', async () => {
+  const hidden = await toolbar({ botAppearance: false });
+  const hiddenMenu = await openMenu(hidden.bar, 'Window actions');
+  await act(async () => item(hiddenMenu, 'Show in Bot mode').click());
+  expect(hidden.props.onBotAppearance).toHaveBeenCalledWith(true);
+  const { bar } = await toolbar({ botAppearance: undefined, onAgentControl: undefined });
   const menu = await openMenu(bar, 'Window actions');
   expect(items(menu).map(entry => entry.textContent)).toEqual(['Copy link', 'Delete Window…']);
 });
@@ -195,7 +200,7 @@ it('ends an open rename without saving when another Window takes the toolbar, an
   function Harness() {
     const [window, setWindow] = useState({ id: 'research', title: 'Research' }); show = setWindow;
     return <WindowToolbar windowId={window.id} title={window.title} viewCount={1} onRename={onRename} onNewView={vi.fn()} onOpenSession={vi.fn()}
-      hasDocks={false} docksHidden={false} onToggleDocks={vi.fn()} canShowAsSection onShowAsSection={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
+      hasDocks={false} docksHidden={false} onToggleDocks={vi.fn()} botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
   }
   const container = await render(<Harness />);
   const bar = container.querySelector<HTMLElement>('header.lab-window-toolbar')!;
@@ -211,7 +216,7 @@ it('ends an open rename without saving when another Window takes the toolbar, an
   expect(onRename).not.toHaveBeenCalled();
 });
 
-it('offers only safe actions while read-only: no rename, no adding views, no Show as section nor deletion', async () => {
+it('offers only safe actions while read-only: no rename, no adding views, no hiding in Bot mode nor deletion', async () => {
   const { bar, props } = await toolbar({ readOnly: true });
   expect(titleButton(bar).disabled).toBe(true);
   await act(async () => titleButton(bar).click());
@@ -223,7 +228,7 @@ it('offers only safe actions while read-only: no rename, no adding views, no Sho
   expect(props.onNewView).not.toHaveBeenCalled();
   await press(menu, 'Escape');
   menu = await openMenu(bar, 'Window actions');
-  expect(disabled(menu)).toEqual(['Show as section', 'Delete Window…']);
+  expect(disabled(menu)).toEqual(['Hide in Bot mode', 'Delete Window…']);
   await act(async () => item(menu, 'Copy link').click());
   expect(props.onCopyLink).toHaveBeenCalledTimes(1);
 });

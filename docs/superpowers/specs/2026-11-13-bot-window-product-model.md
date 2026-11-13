@@ -87,4 +87,4 @@ A bot's conversation is its agent sessions' content, and the session gateway bec
 
 - How long an idle bot stays awake before sleeping on its own, and the per-device live budget, both from measurement.
 - The exact form of the low-key reminder (for example a quiet dot on the group and the mode switch), shown in the walkthroughs.
-- Desktop and phone walkthroughs of real work (create, delegate to Team/TPM, answer a request, return) to validate this model before the roster is redesigned.
+- Review of the desktop and phone walkthrough, [2026-11-13-bot-window-walkthrough.html](../../design-previews/2026-11-13-bot-window-walkthrough.html), before any roster, pane or navigation change is planned.

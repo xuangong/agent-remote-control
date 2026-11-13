@@ -31,12 +31,12 @@ Design around finding and switching among the group's sessions. Roles can provid
 
 ## User-confirmed role visibility across both modes
 
-Sessions should visibly communicate their role in both Bot and Window mode. The same session should use consistent role wording in either presentation. The user also permits expressing the role in the session name; a separate badge is not mandatory.
+Sessions should visibly communicate their role in both Bot and Window mode. The same session should use consistent role wording in either presentation. The user clarified that role must appear as a separate tag, analogous to a person's job-position tag in office software. This supersedes the earlier suggestion to put the role into the session name. Session name and role are separate pieces of information.
 
 Candidate presentation for review:
 
-- Use a concise role-bearing title such as `TPM · Release acceptance`, `Team Leader · Platform migration`, or `Reviewer · Authentication changes` when that is the intended session name. Preserve user-authored names; do not bulk-rename existing sessions.
-- Where the name does not communicate the role, a small text label beside the title can supply it. Avoid redundant title prefixes and badges that repeat the same role. The exact placement remains a visual review decision.
+- Preserve the session's name. Show a separate compact role tag beside it, for example a `Release acceptance` title with a `TPM` tag, or `Authentication changes` with a `Reviewer` tag. Do not generate role prefixes or suffixes in titles, and do not rewrite existing user-authored names.
+- Treat the role tag like a person's position label: a quiet, readable secondary badge with modest padding and a subtle background or border. It should remain visually distinct from the title without competing with it. Use the same treatment in both modes; review exact size and placement at desktop and phone widths.
 - Keep role distinct from runtime/attention state. `TPM` or `Reviewer` describes the session's responsibility; working, waiting, failed and unread describe its current state. Activity changes should not rewrite its name or move it into a different role group.
 - Use known role and relationship data for role semantics. A word in a custom title is not authority to change permissions, ownership or session type. Avoid assigning an invented role when the actual role is unknown.
 - In narrow layouts, keep the title readable and the role identifiable with a compact treatment; do not rely on hover or color alone. Apply the same semantics in the Bot row and existing Window session heading.
@@ -101,7 +101,7 @@ For desktop, persistent surrounding context may help compare and coordinate seve
 
 ## How function should drive appearance
 
-- Stable identity: readable titles, a recognizable session role (in the name or a concise label), and restrained secondary Host/provider context. Use consistent role wording across Bot and Window. Do not make identity compete with colorful decoration.
+- Stable identity: readable titles, a separate compact role tag, and restrained secondary Host/provider context. Use consistent role wording across Bot and Window. Do not make identity compete with colorful decoration.
 - Urgency: semantic state indicators whose scope is truthful. Avoid constantly reordering familiar rows as activity changes.
 - Primary action: emphasize the next useful action for the current state; make secondary management actions accessible without crowding the title.
 - Continuity: preserve list position, draft and mounted conversation across navigation; transitions should communicate a relationship rather than merely animate.
@@ -112,7 +112,7 @@ For desktop, persistent surrounding context may help compare and coordinate seve
 - Which journey should lead: parallel supervision, familiar Bots, or delegated delivery? No user priority has been inferred from a missing answer.
 - Should attention become easier to reach across both modes, and what exact set of work can it truthfully cover?
 - Which creation outcomes should each existing plus expose, with what wording?
-- Role visibility across Bot and Window is confirmed. Review the exact title/label treatment, relationship presentation and Ask disclosure without restructuring Session View.
+- Separate role tags across Bot and Window are confirmed. Review their exact visual treatment, relationship presentation and Ask disclosure without restructuring Session View.
 - Which controls actually need relocation after these journeys have been demonstrated?
 
 Next deliverable after agreeing on the direction: desktop and phone walkthroughs of the same realistic work, showing entry, action, state change and return. Review those flows before an implementation plan, rather than approving a static sidebar alone.

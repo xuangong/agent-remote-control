@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
-  WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
+  WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, hasBotAppearance, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
 } from './window-groups.js';
 
@@ -40,10 +40,13 @@ it('lets a feature rebind its managed bot through the layout but keeps an ordina
   expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: session('b') }))).toBe('bot_view');
 });
 
-it('requires a Window or a section, and bot details only for bots', () => {
+it('keeps every group visible in at least one mode, with bot details only for bots', () => {
   const window = windowOf('w', createWindowView('main', session('a'), 'primary'), createWindowView('empty'));
   expect(isWindowGroup({ window })).toBe(true);
-  expect(isWindowGroup({ window, presentation: { window: false } })).toBe(false);
+  expect(isWindowGroup({ window, presentation: { window: false } })).toBe(true);
+  expect(isWindowGroup({ window, presentation: { bots: false } })).toBe(true);
+  expect(isWindowGroup({ window, presentation: { window: false, bots: false } })).toBe(false);
+  expect(isWindowGroup({ window, presentation: {} })).toBe(false);
   expect(isWindowGroup({ ...section(window), presentation: { window: false } })).toBe(true);
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { main: { label: 'Release notes' } } } })).toBe(true);
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { empty: { label: 'Nobody' } } } })).toBe(false);
@@ -53,13 +56,37 @@ it('requires a Window or a section, and bot details only for bots', () => {
   expect(isWindowGroup({ window, bots: { rank: 'm', members: { main: { picture: { shape: 'circle', color: 'red' } } } } })).toBe(false);
 });
 
+it('hides and shows a group in Bot mode and never hides it in both modes', () => {
+  const group: WindowGroup = { window: windowOf('w', createWindowView('main', session('a'), 'primary')) };
+  expect(hasBotAppearance(group)).toBe(true);
+  const hidden = applyGroupOperation(group, { type: 'bots.hide' });
+  expect(hidden.presentation).toEqual({ bots: false });
+  expect(hasBotAppearance(hidden)).toBe(false);
+  expect(refusal(() => applyGroupOperation(hidden, { type: 'bots.hide' }))).toBe('bots_hidden');
+  expect(refusal(() => applyGroupOperation(hidden, { type: 'window.remove' }))).toBe('last_appearance');
+  expect(applyGroupOperation(hidden, { type: 'bots.show' }).presentation).toBeUndefined();
+  expect(refusal(() => applyGroupOperation(group, { type: 'bots.show' }))).toBe('bots_shown');
+  const windowHidden = applyGroupOperation(group, { type: 'window.remove' });
+  expect(windowHidden.presentation).toEqual({ window: false });
+  expect(refusal(() => applyGroupOperation(windowHidden, { type: 'bots.hide' }))).toBe('last_appearance');
+  expect(applyGroupOperation(windowHidden, { type: 'window.add' }).presentation).toBeUndefined();
+  // A group hidden in Bot mode keeps its bot details and their checks, but its bots do not count as bots elsewhere.
+  const detailed = applyGroupOperation(section(group.window), { type: 'batch', operations: [{ type: 'bot.update', viewId: 'main', details: { label: 'Writer' } }, { type: 'bots.hide' }] });
+  expect(detailed.bots?.members.main).toEqual({ label: 'Writer' });
+  expect(duplicateBot([detailed], [section(windowOf('other', createWindowView('main', session('a'), 'primary')))])).toBeUndefined();
+});
+
 it('accepts plain Window requests as group requests and checks group creation', () => {
   const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
   expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'rename', title: 'Renamed' } })).toBe(true);
   expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bots.add', rank: 'm' } })).toBe(true);
   expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bots.add', rank: 'm', extra: 1 } })).toBe(false);
   expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window })).toBe(true);
-  expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, presentation: { window: false } })).toBe(false);
+  expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, presentation: { window: false } })).toBe(true);
+  expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, presentation: { window: false, bots: false } })).toBe(false);
+  expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bots.hide' } })).toBe(true);
+  expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bots.show' } })).toBe(true);
+  expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bots.hide', mode: 'bot' } })).toBe(false);
   expect(isWindowGroupCreateRequest({ operationId: 'op', issuedAt: 1, window, bots: { rank: 'm', members: {} }, presentation: { window: false } })).toBe(true);
   expect(refusal(() => { throw new WindowGroupError('bot_view', 'x'); })).toBe('bot_view');
   expect(isWindowGroupMutation({ operationId: 'op', issuedAt: 1, baseRevision: 0, operation: { type: 'bot.update', viewId: 'main' } })).toBe(false);
@@ -79,8 +106,9 @@ it('adds and removes appearances, always keeping one', () => {
   expect(both.window.revision).toBe(1);
   const sectionOnly = applyGroupOperation(both, { type: 'window.remove' });
   expect(sectionOnly.presentation).toEqual({ window: false });
-  expect(refusal(() => applyGroupOperation(sectionOnly, { type: 'bots.remove' }))).toBe('last_appearance');
-  expect(refusal(() => applyGroupOperation(group, { type: 'window.remove' }))).toBe('last_appearance');
+  // Bot mode shows a group without details too, so dropping them or hiding the Window of a plain group keeps one appearance.
+  expect(applyGroupOperation(sectionOnly, { type: 'bots.remove' })).toEqual({ window: { ...sectionOnly.window, revision: 3 }, presentation: { window: false } });
+  expect(applyGroupOperation(group, { type: 'window.remove' }).presentation).toEqual({ window: false });
   expect(refusal(() => applyGroupOperation(both, { type: 'bots.add', rank: 'n' }))).toBe('section_exists');
   expect(applyGroupOperation(sectionOnly, { type: 'window.add' }).presentation).toBeUndefined();
   expect(applyGroupOperation(both, { type: 'section.rank', rank: 'n' }).bots?.rank).toBe('n');
@@ -134,7 +162,7 @@ it('lets a bot change its title but not its conversation', () => {
 
 it('refuses an invalid group or operation and leaves a refused batch without effect', () => {
   const group = section(windowOf('w', createWindowView('main', session('a'), 'primary')));
-  expect(refusal(() => applyGroupOperation({ window: group.window, presentation: { window: false } }, { type: 'window.add' }))).toBe('other:The group or operation is invalid.');
+  expect(refusal(() => applyGroupOperation({ window: group.window, presentation: { window: false, bots: false } }, { type: 'window.add' }))).toBe('other:The group or operation is invalid.');
   const before = JSON.stringify(group);
   expect(refusal(() => applyGroupOperation(group, { type: 'batch', operations: [{ type: 'rename', title: 'Changed' }, { type: 'bots.add', rank: 'n' }] }))).toBe('section_exists');
   expect(JSON.stringify(group)).toBe(before);
@@ -173,7 +201,7 @@ it('separates a linked group into a Window and a section', () => {
   const linked = applyGroupOperation(section(windowOf('w', createWindowView('main', session('a'), 'primary'))),
     { type: 'bot.update', viewId: 'main', details: { label: 'Writer' } });
   const { kept, created } = splitGroup(linked, 'w-section');
-  expect(kept).toEqual({ window: { ...linked.window, revision: 2 } });
+  expect(kept).toEqual({ window: { ...linked.window, revision: 2 }, presentation: { bots: false } });
   expect(created).toEqual({ window: { ...linked.window, id: 'w-section', revision: 0 }, bots: linked.bots, presentation: { window: false } });
   expect(refusal(() => splitGroup(kept, 'again'))).toBe('not_linked');
   expect(refusal(() => splitGroup(linked, 'w'))).toBe('window_exists');

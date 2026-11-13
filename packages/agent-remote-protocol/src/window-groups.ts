@@ -27,8 +27,8 @@ export const WindowBots = Type.Object({
   members: Type.Record(Type.String({ pattern: '^[A-Za-z0-9_.:-]{1,128}$' }), WindowBotDetails, { maxProperties: WINDOW_VIEW_LIMIT, additionalProperties: false }),
 }, strict);
 export type WindowBots = Static<typeof WindowBots>;
-/** Present only for a group that is not shown as a Window. */
-export const WindowPresentation = Type.Object({ window: Type.Literal(false) }, strict);
+/** Present only for a group hidden in a mode: `window: false` hides it in Window mode, `bots: false` in Bot mode. */
+export const WindowPresentation = Type.Object({ window: Type.Optional(Type.Literal(false)), bots: Type.Optional(Type.Literal(false)) }, { ...strict, minProperties: 1 });
 export type WindowPresentation = Static<typeof WindowPresentation>;
 /** One grouping of sessions: a Window document and the appearances it is managed in. */
 export const WindowGroup = Type.Object({ window: WorkspaceWindow, bots: Type.Optional(WindowBots), presentation: Type.Optional(WindowPresentation) }, strict);
@@ -39,6 +39,9 @@ const GroupEdit = Type.Union([
   Type.Object({ type: Type.Literal('bots.remove') }, strict),
   Type.Object({ type: Type.Literal('window.add') }, strict),
   Type.Object({ type: Type.Literal('window.remove') }, strict),
+  /** Hides the group in Bot mode, or shows it there again; the Window and the bot details are unchanged. */
+  Type.Object({ type: Type.Literal('bots.hide') }, strict),
+  Type.Object({ type: Type.Literal('bots.show') }, strict),
   /** Replaces the bot's details. */
   Type.Object({ type: Type.Literal('bot.update'), viewId: id, details: WindowBotDetails }, strict),
   Type.Object({ type: Type.Literal('section.rank'), rank }, strict),
@@ -89,7 +92,8 @@ export function groupBotViews(group: WindowGroup): Array<WindowView & { binding:
 export const isWindowBots = (value: unknown): value is WindowBots => Value.Check(WindowBots, value);
 export const isWindowPresentation = (value: unknown): value is WindowPresentation => Value.Check(WindowPresentation, value);
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;
-export const hasBotAppearance = (group: WindowGroup): boolean => (group.presentation as { bots?: false } | undefined)?.bots !== false;
+/** Bot mode shows every group that is not hidden there, whether or not it carries bot details. */
+export const hasBotAppearance = (group: WindowGroup): boolean => group.presentation?.bots !== false;
 /** The group a Window, a group or a Relay snapshot describes: every Window is a group with only the Window appearance. */
 export function toWindowGroup(value: WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation; manager?: unknown }): WindowGroup {
   if (!('window' in value)) return { window: value };
@@ -106,7 +110,7 @@ export function decodeWindowGroup(value: unknown): WindowGroup | undefined {
 
 export function isWindowGroup(value: unknown): value is WindowGroup {
   if (!Value.Check(WindowGroup, value) || !isWorkspaceWindow(value.window)) return false;
-  if (!hasWindowAppearance(value) && !value.bots) return false;
+  if (!hasWindowAppearance(value) && !hasBotAppearance(value)) return false;
   const bots = new Set(botViews(value).map(view => view.id));
   return Object.keys(value.bots?.members ?? {}).every(viewId => bots.has(viewId));
 }
@@ -119,6 +123,12 @@ export const isWindowSplitRequest = (value: unknown): value is WindowSplitReques
 export const isWindowTransferRequest = (value: unknown): value is WindowTransferRequest => Value.Check(WindowTransferRequest, value);
 
 function fail(code: string, message: string): never { throw new WindowGroupError(code, message); }
+/** The group with this presentation, leaving no empty presentation behind. */
+function present(group: WindowGroup, presentation: WindowPresentation | Record<string, never>): WindowGroup {
+  const { presentation: _previous, ...rest } = group;
+  return Object.keys(presentation).length ? { ...rest, presentation: presentation as WindowPresentation } : rest;
+}
+const LAST_APPEARANCE = 'A group stays visible in Window mode or Bot mode.';
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
 /** Drops the details of views that are no longer bots, such as a closed view or one now showing history. */
@@ -134,20 +144,29 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
       if (group.bots) fail('section_exists', 'This group is already a section.');
       return { ...group, bots: { rank: item.rank, members: {} } };
     case 'bots.remove': {
+      // Drops the bot details; Bot mode still shows the group unless it is hidden there.
       if (!group.bots) fail('section_missing', 'This group is not a section.');
-      if (!hasWindowAppearance(group)) fail('last_appearance', 'A group stays a Window or a section; add the other first.');
       const { bots: _bots, ...rest } = group;
       return rest;
     }
+    case 'bots.hide':
+      if (!hasBotAppearance(group)) fail('bots_hidden', 'This group is already hidden in Bot mode.');
+      if (!hasWindowAppearance(group)) fail('last_appearance', LAST_APPEARANCE);
+      return present(group, { ...group.presentation, bots: false });
+    case 'bots.show': {
+      if (hasBotAppearance(group)) fail('bots_shown', 'This group already appears in Bot mode.');
+      const { bots: _hidden, ...presentation } = group.presentation!;
+      return present(group, presentation);
+    }
     case 'window.add': {
       if (hasWindowAppearance(group)) fail('window_exists', 'This group is already a Window.');
-      const { presentation: _presentation, ...rest } = group;
-      return rest;
+      const { window: _hidden, ...presentation } = group.presentation!;
+      return present(group, presentation);
     }
     case 'window.remove':
       if (!hasWindowAppearance(group)) fail('window_missing', 'This group is not a Window.');
-      if (!group.bots) fail('last_appearance', 'A group stays a Window or a section; add the other first.');
-      return { ...group, presentation: { window: false } };
+      if (!hasBotAppearance(group)) fail('last_appearance', LAST_APPEARANCE);
+      return present(group, { ...group.presentation, window: false });
     case 'bot.update': {
       const view = group.window.views.find(candidate => candidate.id === item.viewId);
       if (!group.bots || !view || !isBotView(view)) fail('bot_not_found', 'This bot no longer exists.');
@@ -231,15 +250,17 @@ export function mergeGroups(targetGroup: WindowGroup, sourceGroup: WindowGroup):
   const window = appendViews(target.window, source.window.views);
   const rankOf = target.bots?.rank ?? source.bots?.rank;
   const bots = rankOf === undefined ? undefined : { rank: rankOf, members: { ...source.bots?.members, ...target.bots?.members } };
-  const shown = hasWindowAppearance(target) || hasWindowAppearance(source);
-  return checked({ window, ...(bots ? { bots } : {}), ...(shown ? {} : { presentation: { window: false as const } }) });
+  // The merged group appears in each mode where either group appeared.
+  const presentation = { ...(hasWindowAppearance(target) || hasWindowAppearance(source) ? {} : { window: false as const }),
+    ...(hasBotAppearance(target) || hasBotAppearance(source) ? {} : { bots: false as const }) };
+  return checked(present({ window, ...(bots ? { bots } : {}) }, presentation));
 }
 
-/** The group keeps the Window; a new group with the same views becomes the section. */
+/** The group keeps the Window, hidden in Bot mode; a new group with the same views becomes the section, hidden in Window mode. */
 export function splitGroup(group: WindowGroup, newId: string): { kept: WindowGroup; created: WindowGroup } {
-  if (!group.bots || !hasWindowAppearance(group)) fail('not_linked', 'Only a group that is both a Window and a section can be separated.');
+  if (!group.bots || !hasWindowAppearance(group) || !hasBotAppearance(group)) fail('not_linked', 'Only a group that is both a Window and a section can be separated.');
   if (newId === group.window.id) fail('window_exists', 'Window identity is already used.');
-  const kept = checked({ window: { ...clone(group.window), revision: nextRevision(group.window) } });
+  const kept = checked({ window: { ...clone(group.window), revision: nextRevision(group.window) }, presentation: { bots: false } });
   const created = checked({ window: { ...clone(group.window), id: newId, revision: 0 }, bots: clone(group.bots), presentation: { window: false } });
   return { kept, created };
 }

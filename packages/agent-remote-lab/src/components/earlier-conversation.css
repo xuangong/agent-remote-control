@@ -1,0 +1,13 @@
+/* A bot's earlier sessions, read-only above its current conversation. They read like the rest of the conversation;
+   only a hairline marks where the current session begins, as a chat app separates earlier history. */
+.lab-earlier-conversation { display: grid; gap: 8px; min-width: 0; }
+.lab-earlier-session { min-width: 0; }
+.lab-earlier-divider { height: 0; margin: 12px 0 16px; border-top: 0.5px solid var(--ui-separator); }
+.lab-earlier-status { margin: 8px 0; color: var(--ui-label-secondary); font-size: 12px; text-align: center; }
+.lab-earlier-status button { padding: 0; border: 0; background: none; color: var(--ui-accent-text); font: inherit; cursor: pointer; }
+.lab-earlier-status button:hover { text-decoration: underline; }
+.lab-earlier-reveal { justify-self: center; min-height: 28px; padding: 4px 12px; border: 0; border-radius: 999px; background: var(--ui-fill);
+  color: var(--ui-label-secondary); font: inherit; font-size: 12px; cursor: pointer; transition: background-color var(--ui-duration-short) var(--ui-ease); }
+.lab-earlier-reveal:hover { color: var(--ui-label); background: var(--ui-fill-strong); }
+@media (pointer: coarse) { .lab-earlier-reveal { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .lab-earlier-reveal { transition: none; } }

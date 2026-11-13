@@ -1,6 +1,6 @@
 import { ResourceDownloadContext, type DownloadResource } from './ResourceDownload.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { useContext, useMemo, useRef, useState } from 'react';
+import { useContext, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
@@ -68,6 +68,11 @@ export interface AgentTimelineProps {
   readonly onQuestionDraftChange?: (requestId: string, draft: QuestionDraft) => void;
   readonly previewController?: PreviewController;
   readonly entrySelection?: TimelineEntrySelection;
+  /**
+   * Content shown above this conversation's own entries once its oldest page is loaded, such as the earlier sessions of a bot
+   * after a handoff. While older pages of its own remain, History controls come first.
+   */
+  readonly timelineStart?: ReactNode;
 }
 
 export function AgentTimeline({
@@ -99,6 +104,7 @@ export function AgentTimeline({
   inspectedEntryKey,
   inspectedRequestId,
   entrySelection,
+  timelineStart,
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
@@ -197,11 +203,11 @@ export function AgentTimeline({
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id, state.timeline.epoch])}
       onLoadOlder={onLoadOlder}
-    /> : null}
+    /> : timelineStart ?? null}
 
     <div className="agent-timeline-entries" aria-live="polite">
       {renderModel.length === 0 && outgoing.length === 0
-        ? <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
+        ? timelineStart && !state.timeline.hasOlder ? null : <p className="agent-timeline-empty">{contentOnly ? 'No conversation content in the loaded history.' : 'No timeline activity.'}</p>
         : rows.map(row => row.type === 'entry' ? renderEntry(row.value) : row.type === 'background' ? <BackgroundActivityGroup key={row.key}
             entries={row.entries} count={row.count} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)} renderEntry={renderEntry} /> : <RuntimeNoticeGroup key={row.key}
             entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}

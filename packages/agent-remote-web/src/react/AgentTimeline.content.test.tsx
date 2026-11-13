@@ -178,6 +178,23 @@ describe('content-only timeline', () => {
     expect(container.querySelector('.agent-content-preview')).toBeNull();
   });
 
+  it('shows earlier content above its own entries once its oldest page is loaded, in place of the empty text', async () => {
+    const earlier = <section data-testid="earlier">Earlier conversation</section>;
+    const loaded = state();
+    let container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={loaded} timelineStart={earlier} /></TimelineDisplay.Provider>);
+    const slot = container.querySelector('[data-testid="earlier"]')!;
+    expect(slot).not.toBeNull();
+    expect(slot.compareDocumentPosition(container.querySelector('[data-entry-key]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // While older pages of its own remain, they come first: the earlier content waits behind History controls.
+    container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={{ ...loaded, timeline: { ...loaded.timeline, hasOlder: true } }} onLoadOlder={async () => {}} timelineStart={earlier} /></TimelineDisplay.Provider>);
+    expect(container.querySelector('[data-testid="earlier"]')).toBeNull();
+    // An empty successor shows the earlier content, not the empty text.
+    const empty = state([]);
+    container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={empty} timelineStart={earlier} /></TimelineDisplay.Provider>);
+    expect(container.querySelector('[data-testid="earlier"]')).not.toBeNull();
+    expect(container.querySelector('.agent-timeline-empty')).toBeNull();
+  });
+
   it('shows an empty message view when a loaded page contains only execution events and keeps older history reachable', async () => {
     const current = state(items.filter(item => ['tool_call', 'reasoning', 'compaction'].includes(item.type)));
     const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline

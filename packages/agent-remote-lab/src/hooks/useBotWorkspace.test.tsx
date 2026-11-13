@@ -79,3 +79,21 @@ it('does not apply a discovered old successor after the current group source cha
   checkpoint.documents.composition.status = 'applied'; harness.succession.document.editRevision++; const operations = vi.spyOn(WindowWorkspaceStore.prototype, 'operate'); await harness.render();
   expect(harness.read().view?.binding?.nativeSessionId).toBe('c'); expect(operations).not.toHaveBeenCalled();
 });
+it('leases only the selected group and enrols the bots of every catalog group for handoffs', async () => {
+  const other = group('other'); other.window.views = [createWindowView('main', { ...binding, nativeSessionId: 'z', title: 'Z' }, 'primary')]; delete other.bots; delete other.presentation;
+  localStorage.setItem('agent-remote:recovery:bot-test:shared-window:other', JSON.stringify(other));
+  const acquired: string[] = [];
+  const acquire = async (id: string): Promise<GroupHandle> => {
+    acquired.push(id); const store = new WindowWorkspaceStore(id === 'other' ? other : group(id));
+    return { getGroup: store.getGroup, getSyncState: store.getSyncState, subscribe: store.subscribe, operate: store.operate.bind(store), retry: store.retry.bind(store), release: () => {} };
+  };
+  const harness = await mount(undefined, acquire);
+  await act(async () => harness.workspace().refreshGroups());
+  await harness.render();
+  expect([...new Set(acquired)]).toEqual(['section']);
+  expect(harness.succession.ensureWindowView).toHaveBeenCalledWith('other', 'main', expect.objectContaining({ nativeSessionId: 'z' }));
+  expect(harness.succession.ensureWindowView).toHaveBeenCalledWith('section', 'main', expect.objectContaining({ nativeSessionId: 'a' }));
+  await harness.render({ kind: 'bot', groupId: 'other', viewId: 'main' });
+  expect([...new Set(acquired)]).toEqual(['section', 'other']);
+  expect(harness.read().view?.binding.nativeSessionId).toBe('z');
+});

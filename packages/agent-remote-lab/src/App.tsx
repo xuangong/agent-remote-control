@@ -77,6 +77,7 @@ import type { StarInput } from './session-stars-client.js';
 import { loadSuccessionIntent, saveSuccessionIntent, clearSuccessionIntent, type SessionSuccessionIntent } from './session-succession-intent.js';
 import { SessionSuccessionDialog } from './components/SessionSuccessionDialog.js';
 import { SessionSuccessionHistory } from './components/SessionSuccessionHistory.js';
+import { EarlierConversation } from './components/EarlierConversation.js';
 import { useSuccessionContext } from './hooks/useSuccessionContext.js';
 import { handoffCommand, handoffProvider } from './handoff-command.js';
 import { RenameSessionDialog } from './components/favorites/RenameSessionDialog.js';
@@ -113,6 +114,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -358,6 +360,10 @@ function AppContent({
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
+  /** Earlier-session elements by chain, so a bot's conversation keeps the same element across renders. */
+  const earlierConversations = useRef(new Map<string, ReactElement>());
+  const earlierDirectory = useRef<(hostId: string) => SessionDirectoryClient>(undefined!);
+  earlierDirectory.current = hostId => hostId === selectedHost.id && directory ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
   const connections = useMemo(() => new ConversationConnections(transport, baseUrl, (agentId, session) => session ? {
     async resumeNative(owner, options) {
       if (!accessReadyRef.current) throw new SessionHandoffRejectedError('Workspace access is restoring.');
@@ -2634,6 +2640,22 @@ function AppContent({
   sessionPresentationRef.current = sessionViewPresentation;
   const presentSessionView = useCallback((context: FamilySessionPresentationContext, options?: Parameters<typeof sessionViewPresentation>[1]) => sessionPresentationRef.current(context, options), []);
   /** team: a Team Leader or Member view, which shows the member's name and offers Handoff like a primary view. */
+  /**
+   * A bot's earlier sessions, read above its current conversation in Bot mode after handoffs. The element is kept per chain so
+   * the memoized timeline does not re-render, and the chain comes from the validated succession history.
+   */
+  function earlierConversationFor(navigation: ReturnType<typeof succession.historyNavigationFor>) {
+    if (!navigation?.predecessor || navigation.history) return undefined;
+    const sessions = [navigation.predecessor, ...navigation.ancestors];
+    const key = JSON.stringify([baseUrl, sessions.map(sessionKey)]);
+    let element = earlierConversations.current.get(key);
+    if (!element) {
+      element = <EarlierConversation baseUrl={baseUrl} transport={transport} directory={hostId => earlierDirectory.current(hostId)} sessions={sessions} />;
+      earlierConversations.current.set(key, element);
+      if (earlierConversations.current.size > 32) earlierConversations.current.delete(earlierConversations.current.keys().next().value!);
+    }
+    return element;
+  }
   function sessionViewPresentation(context: FamilySessionPresentationContext, options: { team?: boolean; bot?: { groupId: string; viewId: string }; fallback?: boolean } = {}) {
     const team = options.team === true, botPresentation = !!options.bot || options.fallback === true;
     const source = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true } : {}) };
@@ -2714,6 +2736,8 @@ function AppContent({
           onQuote={target => void quoteSelected(quoteView, source, context.state!, target)} /> : null}
         {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => setQuoteNotice(undefined)}
           onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; setQuoteNotice(undefined); void open().catch(() => {}); } : undefined} /> : null}</>,
+      // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
+      timelineStart: botPresentation ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
       headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })

@@ -14,29 +14,29 @@
 
 **Files:** `packages/agent-remote-web/src/react/AgentTimeline.tsx`, `packages/agent-remote-lab/src/components/SessionWorkbench.tsx` (`WorkbenchTimeline`), tests beside them.
 
-- [ ] Test: with `timelineStart` and `hasOlder: false`, the slot renders before the entries and the empty-content text is not shown; with `hasOlder: true` the slot is not rendered (History controls are); without the prop nothing changes.
-- [ ] Implement `readonly timelineStart?: ReactNode` rendered as `{state.timeline.hasOlder ? <HistoryControls …/> : timelineStart}`; suppress the empty paragraph when `timelineStart` is present.
-- [ ] Thread `timelineStart` from `SessionWorkbench` props to `WorkbenchTimeline` and keep its memo stable.
-- [ ] Commit `feat(web): let a conversation show earlier content above its own timeline`.
+- [x] Test: with `timelineStart` and `hasOlder: false`, the slot renders before the entries and the empty-content text is not shown; with `hasOlder: true` the slot is not rendered (History controls are); without the prop nothing changes.
+- [x] Implement `readonly timelineStart?: ReactNode` rendered as `{state.timeline.hasOlder ? <HistoryControls …/> : timelineStart}`; suppress the empty paragraph when `timelineStart` is present.
+- [x] Thread `timelineStart` from `SessionWorkbench` props to `WorkbenchTimeline` and keep its memo stable.
+- [x] Commit `feat(web): let a conversation show earlier content above its own timeline`.
 
 ### Task 2: An earlier session, read-only
 
 **Files:** create `packages/agent-remote-lab/src/components/EarlierConversation.tsx` (+ `.css`, `.test.tsx`).
 
-Behavior: given `{ baseUrl, transport, sessions: SessionEntry[] }` (newest first: predecessor, then ancestors), show the newest earlier session's cached display (`readWorkspaceSnapshot`) at once, attach it with `SessionDirectoryClient(baseUrl, undefined, hostId).attach(providerId, nativeSessionId, signal)`, fetch `fetchSnapshot` and `fetchTimeline(agentId, 'tail', undefined, 100)` into a private `AgentReplica`, and render `AgentTimeline` (no header, no interactions, `onLoadOlder` over HTTP `before` pages). When that session has no older pages, a quiet "Earlier" button reveals the next ancestor above it. Between the earlier content and the current conversation, a date divider (the last entry's day, as chat apps separate days); Bot mode does not announce a handoff. Failures show a quiet retry line, never an alert over the conversation.
+Behavior: given `{ baseUrl, transport, sessions: SessionEntry[] }` (newest first: predecessor, then ancestors), show the newest earlier session's cached display (`readWorkspaceSnapshot`) at once, attach it with `SessionDirectoryClient(baseUrl, undefined, hostId).attach(providerId, nativeSessionId, signal)`, fetch `fetchSnapshot` and `fetchTimeline(agentId, 'tail', undefined, 100)` into a private `AgentReplica`, and render `AgentTimeline` (no header, no interactions, `onLoadOlder` over HTTP `before` pages). When that session has no older pages, a quiet "Earlier" button reveals the next ancestor above it. Between the earlier content and the current conversation, a hairline divider (entries keep their own times, so the divider carries no label); Bot mode does not announce a handoff. Failures show a quiet retry line, never an alert over the conversation.
 
-- [ ] Tests with a fake transport and directory: cached entries show before the fetch resolves; the fetched tail replaces them; Load older requests `before` the first entry; the next ancestor appears only after the first has no older pages; no `connect` is ever called; the divider reads the day of the last earlier entry.
-- [ ] Implement; CSS with native restraint (divider: hairline with a small centered label in the secondary color).
-- [ ] Commit `feat(lab): read an earlier session of a bot without opening it`.
+- [x] Tests with a fake transport and directory: cached entries show before the fetch resolves; the fetched tail replaces them; Load older requests `before` the first entry; the next ancestor appears only after the first has no older pages; no `connect` is ever called; the divider is a labelled separator.
+- [x] Implement; CSS with native restraint (divider: hairline with a small centered label in the secondary color).
+- [x] Commit `feat(lab): read an earlier session of a bot without opening it`.
 
 ### Task 3: Bot mode continues into earlier sessions
 
 **Files:** `packages/agent-remote-lab/src/App.tsx` (`sessionViewPresentation`), a test in `src/App.succession.test.tsx` or `src/App.bot-mode.test.tsx` using the fixture's succession replays.
 
-- [ ] Test: after a handoff replay, Bot mode's conversation shows the predecessor's content above the successor's (read-only, content only) and Window mode keeps its "Continued from" link instead.
-- [ ] Implement: in Bot mode, `const navigation = succession.historyNavigationFor(source)`; when it has a predecessor, `timelineStart = <EarlierConversation sessions={[navigation.predecessor, ...navigation.ancestors]} … />`, memoized by those sessions' keys.
-- [ ] Verify on the local instance with a real handoff (the 2026-11-14 check left "Release check" empty).
-- [ ] Commit `feat(lab): continue a bot's conversation into its earlier sessions`.
+- [x] Test: after a handoff replay, Bot mode's conversation shows the predecessor's content above the successor's (read-only, content only) and Window mode keeps its "Continued from" link instead.
+- [x] Implement: in Bot mode, `const navigation = succession.historyNavigationFor(source)`; when it has a predecessor, `timelineStart = <EarlierConversation sessions={[navigation.predecessor, ...navigation.ancestors]} … />`, memoized by those sessions' keys. Earlier sessions attach through the selected Host's directory client like every other session. The chain appears once the handoff's role checkpoint is applied; switching bots while it applies can leave it pending (`image_cancelled`) until the next synchronization, as in Window mode.
+- [x] Verify on the local instance with a real handoff (the 2026-11-14 check left "Release check" empty; it now shows the predecessor's exchange above the divider on desktop and phone, light and dark).
+- [x] Commit `feat(lab): continue a bot's conversation into its earlier sessions`.
 
 ### Task 4: The bot menu
 

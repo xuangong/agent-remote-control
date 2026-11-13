@@ -42,7 +42,7 @@ function EarlierSession({ session, transport, directory, cached, onComplete }: {
     if (!read.agentId || !first || !live.timeline.epoch) return;
     replica.applyHistory(await transport.fetchTimeline(read.agentId, 'before', { epoch: live.timeline.epoch, seq: first.seqStart }, PAGE));
   }
-  return <section className="lab-earlier-session" aria-label={`Earlier conversation: ${session.title || session.nativeSessionId}`} data-session={key}>
+  return <section className="lab-earlier-session" aria-label={session.title ? `Earlier conversation: ${session.title}` : 'Earlier conversation'} data-session={key}>
     {shown ? <AgentTimeline state={readOnly(shown)} showHeader={false} interactionsReadOnly interactionDisabled
       onLoadOlder={read.state === 'ready' ? loadOlder : undefined} /> : null}
     {read.state === 'loading' && !shown ? <p className="lab-earlier-status" role="status">Loading earlier conversation…</p> : null}

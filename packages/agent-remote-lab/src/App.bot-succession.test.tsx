@@ -191,3 +191,20 @@ it.each(['same successor', 'unrelated rebind', 'deleted view', 'wrong operation'
     expect(app.workspace().window).toEqual(beforeWindow); expect(app.sendMessages).toEqual([]);
   } finally { await app.close(); }
 });
+
+it('continues a handed-off bot into its earlier session above the current conversation, without announcing the handoff', async () => {
+  const app = await setup('bot-earlier-session');
+  const attached = app.attachments.length;
+  app.setReplays([replay()]);
+  await act(async () => app.succession().refresh());
+  await until(() => expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.nativeSessionId).toBe('C'));
+  const conversation = () => app.container.querySelector('.lab-bot-conversation')!;
+  // The predecessor is read again, over HTTP, above the successor's conversation.
+  await until(() => expect(conversation().querySelector('.lab-earlier-session')?.getAttribute('aria-label')).toBe('Earlier conversation: B1'));
+  await until(() => expect(app.attachments.slice(attached)).toContain('B1'));
+  expect(conversation().querySelector('.lab-earlier-conversation [role="separator"]')).not.toBeNull();
+  // Bot mode shows no handoff link; the earlier session is read, not opened as a view.
+  expect(conversation().querySelector('.lab-succession-history')).toBeNull();
+  expect(conversation().querySelector('.lab-earlier-session textarea, .lab-earlier-session [role="textbox"]')).toBeNull();
+  await app.close();
+});

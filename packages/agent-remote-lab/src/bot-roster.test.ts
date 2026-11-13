@@ -11,6 +11,7 @@ it('derives Other sessions against every binding in all groups', () => {
   const ordinary = group('ordinary', [createWindowView('history', { ...binding('past'), sessionIntent: 'history' }, 'primary')]); delete ordinary.bots;
   const result = projectBotRoster([section, ordinary], ['one', 'hidden', 'past', 'loose'].map(binding), { status: () => 'starting' });
   expect(result.sections[0]?.rows.map(row => row.viewId)).toEqual(['one']);
+  expect(result.sections[0]?.hidden).toEqual(['hidden']);
   expect(result.sections[0]?.status).toBe('Needs you');
   expect(result.other.map(session => session.nativeSessionId)).toEqual(['loose']);
 });
@@ -30,28 +31,31 @@ it('makes every session a bot with its role, except Asks, history, subagents and
   expect(rows.slice(1).every(row => row.asks.length === 0)).toBe(true);
 });
 
-it('shows every group not hidden in Bot mode, ranked groups first, then the rest in catalog order', () => {
+it('shows every group not hidden in Bot mode in catalog order, ranked or not, so a group never moves when it gains details', () => {
   const plain = (id: string) => { const result = group(id, [createWindowView(`${id}-main`, binding(id), 'primary')]); delete result.bots; return result; };
   const hidden = { ...plain('hidden'), presentation: { bots: false as const } };
   const formed = group('formed-empty', [createWindowView('none')]); delete formed.bots;
   const made = group('made-empty', [createWindowView('none')], 'c');
   const result = projectBotRoster([plain('second'), hidden, made, group('ranked', [createWindowView('r', binding('ranked'), 'primary')], 'b'), plain('first'), formed], [], { status: () => 'idle' });
   // A group formed from sessions appears once it has a bot; one made in Bot mode shows while still empty.
-  expect(result.sections.map(section => section.groupId)).toEqual(['ranked', 'made-empty', 'second', 'first']);
+  expect(result.sections.map(section => section.groupId)).toEqual(['second', 'made-empty', 'ranked', 'first']);
 });
 
-it('shows a session once, in the first group that holds it', () => {
+it('shows a session once: in a group with bot details before a group formed from sessions, else in the first group', () => {
   const ranked = group('ranked', [createWindowView('a', binding('shared'), 'primary')], 'b');
   const later = group('later', [createWindowView('b', binding('shared'), 'primary'), createWindowView('c', binding('own'))]); delete later.bots;
   const onlyDuplicate = group('only-duplicate', [createWindowView('d', binding('shared'), 'primary')]); delete onlyDuplicate.bots;
   const result = projectBotRoster([later, onlyDuplicate, ranked], [], { status: () => 'idle' });
-  expect(result.sections.map(section => [section.groupId, section.rows.map(row => row.viewId)])).toEqual([['ranked', ['a']], ['later', ['c']]]);
+  expect(result.sections.map(section => [section.groupId, section.rows.map(row => row.viewId)])).toEqual([['later', ['c']], ['ranked', ['a']]]);
+  // Between groups formed from sessions, the first in catalog order shows it.
+  expect(projectBotRoster([onlyDuplicate, later], [], { status: () => 'idle' }).sections.map(section => [section.groupId, section.rows.map(row => row.viewId)]))
+    .toEqual([['only-duplicate', ['d']], ['later', ['c']]]);
 });
-it('orders sections lexically with ID ties and bots by pin, rank, then document order', () => {
+it('orders bots by pin, rank, then document order', () => {
   const section = group('b', ['default-two', 'z', 'pin', 'a', 'default-one'].map(id => createWindowView(id, binding(id))));
   section.bots!.members = { z: { rank: 'z' }, a: { rank: 'a' }, pin: { pinned: true, rank: 'z' } };
   const result = projectBotRoster([group('z', [createWindowView('z1', binding('z1'))], 'z'), section, group('a', [createWindowView('a1', binding('a1'))])], [], { status: () => 'unknown' });
-  expect(result.sections.map(section => section.groupId)).toEqual(['a', 'b', 'z']);
+  expect(result.sections.map(section => section.groupId)).toEqual(['z', 'b', 'a']);
   expect(result.sections[1]?.rows.map(row => row.viewId)).toEqual(['pin', 'a', 'z', 'default-two', 'default-one']);
 });
 it('uses live urgency and excludes hidden statuses', () => {

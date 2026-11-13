@@ -12,6 +12,7 @@ import { projectBotRoster } from './bot-roster.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
+import type { BotInfo } from './components/BotActions.js';
 import { BotPicture, botDisplayName } from './components/BotRoster.js';
 import { WorkbenchModeSwitch } from './components/WorkbenchModeSwitch.js';
 import { SessionConversationSurfaces, SessionConversationMount, type SessionSurfaceDescriptor } from './components/SessionConversationSurfaces.js';
@@ -2770,6 +2771,21 @@ function AppContent({
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
     };
   }
+  function providerDisplayName(hostId: string, id: string): string {
+    return remoteHosts.find(host => host.id === hostId)?.providers?.find(provider => provider.providerId === id)?.displayName
+      ?? (hostId === 'local' ? providers.find(provider => provider.providerId === id)?.displayName : undefined) ?? id;
+  }
+  /** Where a bot runs, and the providers of its earlier sessions (oldest first) when its handoff chain is known, for its Info sheet. */
+  function describeBot(place: { groupId: string; viewId: string }): BotInfo | undefined {
+    const binding = windowWorkspace.readGroup(place.groupId)?.window.views.find(view => view.id === place.viewId)?.binding;
+    if (!binding) return;
+    const hostId = binding.hostId ?? 'local', host = remoteHosts.find(candidate => candidate.id === hostId);
+    const slotId = succession.document.windowBindings?.find(entry => entry.windowId === place.groupId && entry.viewId === place.viewId && entry.bindingKey === windowBindingKey(binding))?.slotId;
+    const chain = slotId ? succession.historyNavigationFor({ hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, title: binding.title, viewId: slotId }) : undefined;
+    const earlier = chain?.predecessor && !chain.history ? [...chain.ancestors].reverse().concat(chain.predecessor) : [];
+    return { host: host?.name ?? hostId, ...(host ? { online: host.online } : {}), provider: providerDisplayName(hostId, binding.providerId),
+      earlier: earlier.map(session => providerDisplayName(session.hostId ?? hostId, session.providerId)) };
+  }
   function describeBotConversation(place: BotPlace, capturedSource?: OpenedSession): SessionSurfaceDescriptor | undefined {
     if (place.kind === 'section') return;
     const group = place.kind === 'bot' ? windowWorkspace.readGroup(place.groupId) : undefined;
@@ -3263,7 +3279,7 @@ function AppContent({
       </div>
     </Sheet> : null}
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
-      hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} />
+      hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot} />
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
     {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></WindowConnectionsContext.Provider>;
 }

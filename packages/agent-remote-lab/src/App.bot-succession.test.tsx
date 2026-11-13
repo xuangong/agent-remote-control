@@ -23,6 +23,7 @@ let operations: SessionViewOperations;
 beforeEach(() => {
   leaves.clear();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value() { this.open = true; } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value() { this.open = false; } });
   const Component = workbench.LabWorkbench;
   vi.spyOn(workbench, 'LabWorkbench').mockImplementation(props => {
     operations = useContext(SessionViewOperationsContext)!;
@@ -206,5 +207,10 @@ it('continues a handed-off bot into its earlier session above the current conver
   // Bot mode shows no handoff link; the earlier session is read, not opened as a view.
   expect(conversation().querySelector('.lab-succession-history')).toBeNull();
   expect(conversation().querySelector('.lab-earlier-session textarea, .lab-earlier-session [role="textbox"]')).toBeNull();
+  // Info names the provider of each earlier session.
+  await act(async () => app.container.querySelector<HTMLButtonElement>('button[aria-label="Bot actions: B1"]')!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menu"] [role="menuitem"]')].find(item => item.textContent === 'Info')!.click());
+  const rows = Object.fromEntries([...document.querySelectorAll('dialog .lab-bot-info dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
+  expect(rows).toMatchObject({ Provider: 'Recorded Provider', Earlier: 'Recorded Provider' });
   await app.close();
 });

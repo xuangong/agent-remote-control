@@ -7,6 +7,7 @@ import { captureImportedWindowComposition, restoreImportedWindowComposition, com
 import type { CompositionDocument } from '../session-composition.js';
 import type { WorkbenchMode } from '../workbench-mode.js';
 import type { WindowSaveState } from '../window-workspace-store.js';
+import { appendedRank } from '../bot-roster.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, decodeWindowGroup, decodeWorkspaceWindow, hasWindowAppearance, isWindowCreateRequest, isWindowGroupCreateRequest, toWindowGroup, windowPrimaryViewId, type WindowGroup, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 
 interface PendingCreation { request: WindowCreateRequest; candidate: WorkspaceWindow; bindings: Array<[string, string]> }
@@ -372,8 +373,7 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (sectionCreation.running) return sectionCreation.running;
     const previous = pendingSection();
     if (!previous && title === undefined) return Promise.resolve('');
-    const rank = catalog.groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
-    const group: WindowGroup = previous?.group ?? { window: { ...emptyWindow(), title: title! }, bots: { rank: !rank ? 'm' : rank.length < 64 ? `${rank}m` : rank, members: {} }, presentation: { window: false } };
+    const group: WindowGroup = previous?.group ?? { window: { ...emptyWindow(), title: title! }, bots: { rank: appendedRank(catalog.groups), members: {} }, presentation: { window: false } };
     const pending = previous ?? { group, operationId: crypto.randomUUID(), issuedAt: Date.now() };
     const ticket = admission;
     const clear = () => { sectionCreation.pending = null; try { conversationSessionStorage.removeItem(`${key}:pending-section-create`); } catch { /* A settled request can safely be inspected again. */ } };

@@ -10,12 +10,18 @@ export interface BotRow {
   groupId: string; viewId: string; binding: WindowSessionBinding;
   details: WindowBotDetails; role?: BotRole; asks: BotAsk[]; status?: 'Needs you' | 'Working' | 'Failed';
 }
-export interface BotSection { groupId: string; title: string; rows: BotRow[]; status?: BotRow['status'] }
+/** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
+export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; status?: BotRow['status'] }
 export interface BotRosterModel { sections: BotSection[]; other: SessionEntry[] }
 export interface BotRosterOptions {
   status(binding: WindowSessionBinding): SessionActivityStatus;
   /** Whether a Team is a Support roster (it has a call-for-support configuration); its leader then shows the Support role. */
   supportTeam?(teamId: string): boolean;
+}
+/** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
+export function appendedRank(groups: readonly WindowGroup[]): string {
+  const last = groups.flatMap(group => group.bots ? [group.bots.rank] : []).sort().at(-1);
+  return !last ? 'm' : last.length < 64 ? `${last}m` : last;
 }
 /** Native directory timestamps are metadata, never activity evidence. */
 export type DatedSessionEntry = SessionEntry & { updatedAt?: string };
@@ -43,29 +49,33 @@ export function botRole(view: WindowView, supportTeam?: (teamId: string) => bool
   if (view.placement === 'attached') return 'Side';
 }
 
-/** Groups in roster order: ranked groups by rank, then the others in catalog order, so places stay stable. */
-function rosterOrder(groups: readonly WindowGroup[]): WindowGroup[] {
-  const ranked = groups.filter(group => group.bots).sort((a, b) => lexical(a.bots!.rank, b.bots!.rank) || lexical(a.window.id, b.window.id));
-  return [...ranked, ...groups.filter(group => !group.bots)];
-}
 
 /**
- * Bot mode's roster: every group that is not hidden in Bot mode and has a bot or was made in Bot mode, each session once (in the first group that holds it),
- * bots ordered by pin, rank and place, Asks under their bot. Sessions in no group are Other sessions.
+ * Bot mode's roster: every group that is not hidden in Bot mode and has a bot or was made in Bot mode, in catalog order, each
+ * session once, bots ordered by pin, rank and place, Asks under their bot. Sessions in no group are Other sessions.
  */
 export function projectBotRoster(groups: readonly WindowGroup[], directory: readonly SessionEntry[], options: BotRosterOptions): BotRosterModel {
-  const shown = new Set<string>();
-  const sections = rosterOrder(groups.filter(hasBotAppearance)).flatMap((group): BotSection[] => {
+  const shownGroups = groups.filter(hasBotAppearance);
+  const candidatesOf = new Map(shownGroups.map(group => {
     const members = group.bots?.members ?? {};
-    const candidates = botViews(group).map((view, order) => ({ view, order, details: members[view.id] ?? {} }))
-      .filter(item => !item.details.hidden && !shown.has(windowSessionIdentity(item.view.binding)));
+    const candidates = botViews(group).map((view, order) => ({ view, order, details: members[view.id] ?? {} })).filter(item => !item.details.hidden);
     candidates.sort((a, b) => Number(!!b.details.pinned) - Number(!!a.details.pinned)
       || (a.details.rank && b.details.rank ? lexical(a.details.rank, b.details.rank) : a.details.rank ? -1 : b.details.rank ? 1 : 0) || a.order - b.order);
-    const visible = candidates.filter(item => {
-      const identity = windowSessionIdentity(item.view.binding);
-      if (shown.has(identity)) return false;
-      shown.add(identity); return true;
-    });
+    return [group, candidates] as const;
+  }));
+  // A session shows once: a group with bot details (where the Relay keeps it unique) claims it before a group formed from
+  // sessions, and otherwise the first group in catalog order does.
+  const owner = new Map<string, string>();
+  for (const group of [...shownGroups.filter(group => group.bots), ...shownGroups.filter(group => !group.bots)]) {
+    for (const { view } of candidatesOf.get(group)!) {
+      const identity = windowSessionIdentity(view.binding);
+      if (!owner.has(identity)) owner.set(identity, JSON.stringify([group.window.id, view.id]));
+    }
+  }
+  // Groups keep catalog (creation) order, as Windows do: giving a bot a label or hiding one never moves its group.
+  const sections = shownGroups.flatMap((group): BotSection[] => {
+    const members = group.bots?.members ?? {};
+    const visible = candidatesOf.get(group)!.filter(({ view }) => owner.get(windowSessionIdentity(view.binding)) === JSON.stringify([group.window.id, view.id]));
     // A group formed from sessions appears once it has a bot; a group made in Bot mode (it carries details) appears while still empty.
     if (!visible.length && !group.bots) return [];
     const asks = group.window.views.filter(view => view.feature?.kind === 'ask' && view.closeWith);
@@ -75,7 +85,8 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
       asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
     }));
-    return [{ groupId: group.window.id, title: group.window.title, rows, status: botActivityLabel(windowActivity(activities)) }];
+    const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
+    return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)) }];
   });
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));
   return { sections, other: sortDirectorySessions(directory.filter(entry => !grouped.has(sessionKey(entry)))) };

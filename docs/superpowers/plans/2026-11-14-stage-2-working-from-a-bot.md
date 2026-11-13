@@ -44,9 +44,12 @@ Behavior: given `{ baseUrl, transport, sessions: SessionEntry[] }` (newest first
 
 Entries: Info (Host name, provider, model when known, previous providers from the succession chain), Label… (set or clear `details.label`), Hide in Bot mode (per-bot `details.hidden`; the bot stays a pane in Window mode), Remove from group (closes the view; confirmation sheet, as Window deletion does).
 
-- [ ] Tests for each entry's group operation and for Info's content.
-- [ ] Implement with `ui/Menu`, `ui/Sheet`; a group without details gets `bots.add` in the same batch as `bot.update`.
-- [ ] Commit `feat(lab): manage a bot from its menu`.
+- [x] Tests for each entry's group operation and for Info's content.
+- [x] Implement with `ui/Menu`, `ui/Sheet`; a group without details gets `bots.add` in the same batch as `bot.update`.
+- [x] Hiding confirms with a quiet notice and Undo; the group's menu offers Show hidden bots. Removing names what closes with the bot (its Sides, a leader's members, Asks).
+- [x] Groups keep catalog order in Bot mode (roadmap decision 9), so gaining details never moves a group.
+- [ ] Deferred to the stage 7 polish pass: the same entries as a right-click menu on desktop roster rows (needs a point-anchored `ui/Menu`).
+- [x] Commit `feat(lab): manage a bot from its menu`.
 
 ### Task 5: A new session in Bot mode starts a group
 

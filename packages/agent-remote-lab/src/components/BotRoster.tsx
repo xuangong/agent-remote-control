@@ -59,7 +59,7 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
           {section.status ? <small>{section.status}</small> : null}</h2>
         {groupActions ? <Menu label={`Group actions: ${section.title}`} items={groupActions(section)} /> : null}
       </div>
-      {!section.rows.length ? <p className="lab-bot-empty">No bots in this group yet.</p> : null}
+      {!section.rows.length ? <p className="lab-bot-empty">{section.hidden.length ? 'Its bots are hidden in Bot mode.' : 'No bots in this group yet.'}</p> : null}
       {section.rows.map(row => <BotMember key={row.viewId} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
         current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />)}
     </section>)}

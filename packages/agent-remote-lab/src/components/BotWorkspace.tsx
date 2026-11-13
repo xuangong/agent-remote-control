@@ -6,7 +6,9 @@ import type { useOtherSessions } from '../hooks/useOtherSessions.js';
 import { useVisualViewport } from '../hooks/useVisualViewport.js';
 import type { BotRosterModel } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
-import { BotRoster, botPlaceKey } from './BotRoster.js';
+import { BotRoster, botDisplayName, botPlaceKey } from './BotRoster.js';
+import { useBotActions, type BotInfo } from './BotActions.js';
+import { Menu } from '../ui/Menu.js';
 import { WorkbenchModeSwitch } from './WorkbenchModeSwitch.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 import { SidebarHeader } from '../shell/SidebarHeader.js';
@@ -31,8 +33,10 @@ export interface BotWorkspaceProps {
   onSearch?(): void;
   /** A Host's display name for a Host ID. */
   hostName?(hostId: string): string;
+  /** Where a bot runs, for its Info sheet. */
+  botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
 }
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo }: BotWorkspaceProps) {
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [creating, setCreating] = useState(false), [title, setTitle] = useState(''), [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -52,6 +56,12 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const availabilityNotice = selected.loading ? <p role="status">Opening bot…</p> : selected.error && place?.kind !== 'session'
     ? <p role="alert">{selected.error} <button type="button" onClick={() => void selected.retry()}>Retry</button></p> : null;
   const creation = workspace.sectionCreationState, saving = creation.state === 'saving';
+  const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError, botInfo });
+  const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
+  const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
+  const botMenu = botRow && botSection && descriptor ? <Menu label={`Bot actions: ${botDisplayName(botRow.binding)}`} items={actions.botMenu(botRow, botSection.title)} /> : null;
+  // Choosing another bot dismisses a notice about the last one.
+  useEffect(() => { if (place?.kind === 'bot') actions.clearNotice(); }, [key]);
   useEffect(() => { setCreating(false); setTitle(''); setError(undefined); }, [scope]);
   useEffect(() => {
     if (!visible) return;
@@ -79,11 +89,13 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       const requestScope = scope; setError(undefined);
       void workspace.operateGroup(section.groupId, operation).catch(reason => { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); });
     };
+    const hidden = actions.groupMenu(section);
     return [
       hasWindowAppearance(group)
         ? { label: 'Hide in Window mode', icon: 'eye-off', disabled: !hasBotAppearance(group), onSelect: () => change({ type: 'window.remove' }) }
         : { label: 'Show in Window mode', icon: 'sidebar', onSelect: () => change({ type: 'window.add' }) },
       { label: 'Hide in Bot mode', icon: 'eye-off', disabled: !hasWindowAppearance(group), onSelect: () => change({ type: 'bots.hide' }) },
+      ...hidden.length ? [{ kind: 'separator' as const }, ...hidden] : [],
     ];
   }
   function back() { returning.current = true; navigation.back(); }
@@ -114,6 +126,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {saving ? <p role="status">Saving section…</p> : null}
       {error || creation.error ? <p role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p role="status">Section creation is not confirmed. <button type="button" onClick={() => void save(true)}>Retry</button></p> : null}
+      {actions.notice}
       <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions} compact={compact}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
@@ -129,10 +142,11 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         leading={compact ? <Button ref={backButton} variant="plain" aria-label="Back to bots" onClick={back}>Back</Button>
           : <IconButton ref={toggleRef} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} aria-controls={rosterId} onClick={onToggleRoster} />}
         title={place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}
-        trailing={compact ? <WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /> : undefined} />
+        trailing={compact ? <><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />{botMenu}</> : botMenu ?? undefined} />
       {!unavailable ? availabilityNotice : null}
       {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content' } }} />
         : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this group.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>
+    {actions.sheets}
   </main>;
 }

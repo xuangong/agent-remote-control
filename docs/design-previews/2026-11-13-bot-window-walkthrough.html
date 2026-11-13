@@ -206,6 +206,33 @@ svg.i { display: block; flex: none; fill: none; stroke: currentColor; stroke-wid
 .phone .composer { width: calc(100% - 20px); margin-bottom: 18px; }
 .home-bar { flex: none; height: 22px; display: grid; place-items: center; } .home-bar::after { content: ""; width: 120px; height: 5px; border-radius: 3px; background: var(--ui-label); opacity: .85; }
 
+
+/* Host overview */
+.hosts-grid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; align-content: start; padding: 16px; background: var(--ui-background-grouped); }
+.host-card { display: grid; gap: 12px; align-content: start; padding: 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
+.host-card header { display: flex; align-items: center; gap: 10px; color: var(--ui-label-tertiary); }
+.host-card header div { flex: 1; min-width: 0; }
+.host-card h3 { margin: 0; font-size: 15px; color: var(--ui-label); }
+.host-card header small { display: block; color: var(--ui-label-secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ui-label-tertiary); flex: none; }
+.host-dot.on { background: var(--ui-status-success); }
+.host-card.offline { opacity: .6; }
+.host-sessions { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; }
+.host-sessions b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.host-sessions span { font-size: 13px; color: var(--ui-label-secondary); }
+.host-sessions small { flex-basis: 100%; font-size: 12px; color: var(--ui-label-secondary); }
+.host-sessions em { font-style: normal; color: var(--ui-status-attention); font-weight: 600; }
+.metrics { display: grid; gap: 10px; }
+.metrics.compact { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.meter-line { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ui-label-secondary); }
+.meter-value { color: var(--ui-label); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-value.warn { color: var(--ui-status-attention); font-weight: 600; }
+.bar { height: 4px; margin-top: 5px; border-radius: 2px; background: var(--ui-fill); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 2px; background: var(--ui-accent); }
+.bar i.warn { background: var(--ui-status-attention); }
+.host-note .btn { flex: none; white-space: nowrap; }
+.host-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 12px; color: var(--ui-label-secondary); }
+.host-list { flex: 1; overflow: auto; display: grid; gap: 10px; align-content: start; padding: 4px 14px 16px; }
 /* Numbered review markers */
 .frame-wrap { position: relative; }
 .frame-wrap > .kept-note { position: absolute; right: 2px; top: -22px; font-size: 12px; color: var(--ui-label-secondary); }
@@ -311,7 +338,7 @@ function windowSidebar() {
       <div class="bot" style="min-height:40px;grid-template-columns:1fr"><span>Homelab 运维<br><small style="color:var(--ui-label-secondary)">3 个 Bot</small></span></div>
       <div class="group-head" style="margin-top:12px">In this Window</div>
       ${item('check', '展开')}${item('tpm', '折叠 · 工作中')}${item('lead', '折叠 · 需要你')}${item('member', '折叠')}${item('side', '折叠')}${item('support', '休眠')}
-    </div><div class="footer"><span class="online"></span><span>2 个 Host 在线</span><span class="spacer"></span>${icon('gear', 16)}</div></aside>`;
+    </div><div class="footer"><span class="online"></span><span>4 个 Host 在线</span><span class="spacer"></span>${icon('gear', 16)}</div></aside>`;
 }
 function strip(id, o = {}) {
   const b = BOTS[id];
@@ -341,6 +368,33 @@ function phoneChat() {
     ${sessionView({ bot: 'check', body })}`, '手机 · 对话（Host 离线）', [{ n: 2, sel: '.delivery', at: 'out' }, { n: 3, sel: '.ph-chat-head', at: 'out' }]);
 }
 
+const HOSTS = [
+  { id: 'homelab', name: 'homelab', os: 'macOS 15 · arm64', version: 'Controller 0.2.79', online: true, sessions: { working: 2, waiting: 1, idle: 3 },
+    cpu: { cores: 12, usage: 38 }, memory: { used: 14.2, total: 24 }, disks: [{ label: '系统盘', used: 442, total: 460 }, { label: 'Projects', used: 432, total: 1907 }] },
+  { id: 'mini', name: 'Mac mini', os: 'macOS 15 · arm64', version: 'Controller 0.2.79', online: true, sessions: { working: 1, waiting: 0, idle: 2 },
+    cpu: { cores: 10, usage: 12 }, memory: { used: 9.1, total: 16 }, disks: [{ label: '系统盘', used: 211, total: 494 }] },
+  { id: 'win', name: 'Windows 测试机', os: 'Windows 11 · x64', version: 'Controller 0.2.71', online: true, outdated: true, sessions: { working: 0, waiting: 0, idle: 1 } },
+  { id: 'shared', name: 'xia 的 Linux 服务器', os: 'Ubuntu 24.04 · x64', version: '共享给你', online: true, shared: true, sessions: { working: 1, waiting: 0, idle: 0 } },
+  { id: 'ci', name: 'linux-ci', os: 'Ubuntu 22.04 · x64', version: 'Controller 0.2.79', online: false },
+];
+const sizeText = gb => gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb * 10) / 10} GB`;
+function meter(label, value, total, text, key = '') {
+  const ratio = Math.min(1, value / total), warn = ratio >= 0.9;
+  return `<div class="meter"${key}><div class="meter-line"><span>${label}</span><span class="meter-value${warn ? ' warn' : ''}">${text}</span></div><div class="bar"><i style="width:${(ratio * 100).toFixed(1)}%"${warn ? ' class="warn"' : ''}></i></div></div>`;
+}
+function hostCard(host, compact = false) {
+  const s = host.sessions, total = s ? s.working + s.waiting + s.idle : 0;
+  const sessions = s ? `<div class="host-sessions"><b>${total}</b><span>个 session</span><small>${[s.working ? `${s.working} 工作中` : '', s.waiting ? `<em>${s.waiting} 需要你</em>` : '', s.idle ? `${s.idle} 空闲` : ''].filter(Boolean).join(' · ')}</small></div>` : '';
+  const metrics = host.cpu ? `<div class="metrics${compact ? ' compact' : ''}">${meter('CPU', host.cpu.usage, 100, `${host.cpu.usage}% · ${host.cpu.cores} 核`)}${meter('内存', host.memory.used, host.memory.total, `${host.memory.used} / ${host.memory.total} GB`)}
+      ${host.disks.map((disk, i) => meter(disk.label, disk.used, disk.total, `${sizeText(disk.used)} / ${sizeText(disk.total)}`, ` data-disk="${i}"`)).join('')}</div>` : '';
+  const note = host.outdated ? `<p class="host-note">更新 Controller 后显示 CPU、内存和磁盘。<button class="btn" type="button">更新</button></p>`
+    : host.shared ? `<p class="host-note">共享的 Host 只显示 session 数。</p>` : !host.online ? `<p class="host-note">离线</p>` : '';
+  return `<article class="host-card${host.online ? '' : ' offline'}" data-host="${host.id}"><header><span class="host-dot${host.online ? ' on' : ''}"></span><div><h3>${esc(host.name)}</h3><small>${esc(host.os)} · ${esc(host.version)}</small></div>${icon('chevron-right', 16)}</header>${sessions}${metrics}${note}</article>`;
+}
+function hostsMain() {
+  return `<section class="main"><div class="toolbar"><button class="icon-btn" aria-label="返回">${icon('chevron-left')}</button><span class="who"><span>Hosts</span></span><span class="spacer"></span><button class="btn" type="button">配对新 Host</button></div>
+    <div class="hosts-grid">${HOSTS.map(host => hostCard(host)).join('')}</div></section>`;
+}
 const OVERLAY_MENU = `<div class="menu" data-anchor='[data-bot="check"] .row-menu' data-place="right"><div>${icon('person', 16)}新建 Side</div><div data-hot>${icon('list', 16)}新建 TPM</div><div>${icon('team', 16)}组建 Team</div><div>${icon('question', 16)}请求支持</div><hr><div>${icon('moon', 16)}休眠</div><div><span style="width:16px;flex:none"></span>在 Window 中隐藏</div><div><span style="width:16px;flex:none"></span>在 Bot 中隐藏</div></div>`;
 const OVERLAY_QUIET = `<div class="popover" data-anchor='[data-group="homelab"]' data-place="below" style="width:236px"><b style="font-size:13px">Homelab 运维</b><p style="margin:6px 0 10px;color:var(--ui-label-secondary)">「备份巡检」在休眠中，需要你确认是否清理旧快照。</p><div style="display:flex;gap:8px"><button class="btn primary">查看</button><button class="btn">稍后</button></div></div>`;
 const OVERLAY_INFO = `<div class="popover" data-anchor=".sv-head .info" data-place="below"><dl><dt>Host</dt><dd>homelab</dd><dt>运行</dt><dd>Codex · GPT-6-Astra</dd><dt>目录</dt><dd>~/projects/agent-remote-control</dd><dt>此前</dt><dd>Claude Code（11月12日）</dd></dl></div>`;
@@ -405,6 +459,19 @@ const SCENES = [
       <li><span class="n">2</span><span>Host 离线时也能照常发送：消息显示“尚未发出”，任何设备上都能取消；会话接收后才算对话的一部分。沿用现有的发送中样式。</span></li>
       <li><span class="n">3</span><span>对话页顶部：返回改为“‹ Bots”，名字居中；Window/Bot 切换只放在列表首页。现在这里是“Back + 标题 + 模式切换”。属于布局变化，需要你 review。</span></li></ol>
       <h3>保持不变</h3><ul><li>Session View 与桌面一致，只是更窄。</li></ul>` },
+  { title: 'Host 总览：几台机器，一眼看全', render: () => desktop(windowSidebar(), hostsMain(), '',
+      [{ n: 1, sel: '[data-host="homelab"] .host-sessions', at: 'corner' }, { n: 2, sel: '[data-host="homelab"] [data-disk="0"]', at: 'left' }, { n: 3, sel: '[data-host="win"] .host-note', at: 'right' },
+       { n: 4, sel: '[data-host="shared"] .host-note', at: 'corner' }, { n: 5, sel: '.footer', at: 'out' }], '示例数据'),
+    detail: `<h2>Host 总览：几台机器，一眼看全</h2><p>从侧栏底部的“4 个 Host 在线”进入，所有 Host 以卡片并排显示。页面可见时每 5 秒刷新，离开就停。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>Session：Controller 当前连接的会话数，分为工作中、需要你、空闲。</span></li>
+      <li><span class="n">2</span><span>CPU、内存、磁盘都是“已用 / 总量”。磁盘按用户目录和工作目录所在的盘各显示一行，同一块盘只显示一次；用量超过 90% 用警示色。</span></li>
+      <li><span class="n">3</span><span>旧版 Controller 不提供这些数据，卡片上提示更新。</span></li>
+      <li><span class="n">4</span><span>别人共享给你的 Host 只显示 session 数，机器指标只给拥有者看。</span></li>
+      <li><span class="n">5</span><span>入口：侧栏底部的 Host 状态。现在这里打开的是 All sessions。</span></li></ol>
+      <h3>计算口径</h3><ul><li>内存按系统的“已使用”口径计算（macOS 同活动监视器），可回收的缓存不算已用。</li><li>CPU 是两次采样之间的平均使用率。</li><li>点卡片进入该 Host 的详情：providers、Codex daemon、VS Code、更新、配对，内容沿用现有设置页。</li></ul>` },
+  { title: '手机：Host 列表', render: () => phoneFrame(`<div class="ph-nav"><span class="ph-back">${icon('chevron-left', 22)}<span>返回</span></span><span class="spacer"></span><button class="icon-btn" aria-label="配对新 Host">${icon('plus', 20)}</button></div>
+      <div class="ph-title">Hosts</div><div class="host-list">${HOSTS.map(host => hostCard(host, true)).join('')}</div>`, '手机 · Host 列表'),
+    detail: `<h2>手机：Host 列表</h2><p>同样的卡片纵向排列；指标压缩成两列，数字和进度条都保留。</p><h3>保持不变</h3><ul><li>Host 详情、配对、更新沿用现有功能，只是从卡片进入。</li></ul>` },
 ];
 
 const scenesEl = document.getElementById('scenes'), detailEl = document.getElementById('detail'), devices = document.getElementById('devices'), stage = document.getElementById('stage');
@@ -435,7 +502,7 @@ function placePins() {
       const pin = document.createElement('span');
       pin.className = 'pin'; pin.textContent = spec.n;
       const middle = r.top + r.height / 2 - 11;
-      const [x, y] = spec.at === 'out' ? [f.left - 32, middle] : spec.at === 'right' ? [r.right + 8, middle] : spec.at === 'left' ? [r.left - 30, middle] : [r.left + r.width / 2 - 11, r.top - 28];
+      const [x, y] = spec.at === 'out' ? [f.left - 32, middle] : spec.at === 'right' ? [r.right + 8, middle] : spec.at === 'left' ? [r.left - 30, middle] : spec.at === 'corner' ? [r.right - 26, middle] : [r.left + r.width / 2 - 11, r.top - 28];
       pin.style.left = `${x}px`; pin.style.top = `${y}px`;
       wrap.append(pin);
     }

@@ -50,3 +50,11 @@ Open [the standalone HTML preview](../../design-previews/2026-11-13-bot-roster-r
 ## Review decision
 
 Approve or revise the new Pinned/Hidden groups, collapsed sections/Other sessions, and row action placement before implementation. The current approved visual language, backend boundaries and session ownership remain the basis of the work.
+
+## Visual refinement after feedback
+
+The initial preview used font characters for search, add, ellipsis and disclosure controls. Their unrelated glyph metrics made search look too small and misaligned beside the full-width plus. The preview now uses the existing product's SVG paths, a shared 24-unit grid, rounded 1.75-unit strokes and explicit centering. Header icons render at 18px on desktop and 20px on phones; phone buttons retain 44px targets. Disclosure rotation follows the existing expanded state. Function placement and the protected Session View are unchanged; no production component was modified.
+
+The revised preview was inspected at desktop, phone light/dark and 320px widths. Search/filter, disclosure, action-menu dismissal and phone Back navigation were checked in headless Chromium. The local comparison image is `.tmp/ui-modern-3a/icon-refinement-comparison.png`.
+
+This remains a layout review, not final visual acceptance. Desktop title truncation and the relative weight of activity indicators need further refinement within the eventual approved roster structure. Do not treat this icon correction as approval of the proposed grouping or action placement.

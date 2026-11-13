@@ -15,6 +15,33 @@ vi.mock('./TimelineEntry.js', async original => {
 });
 
 describe('incremental timeline rendering', () => {
+  it.each([128, 256])('keeps history traversal linear with %i alternating background and conversation entries', async count => {
+    let reads = 0;
+    const entries = new Proxy(Array.from({ length: count }, (_, index): ProjectedTimelineEntry => ({
+      providerId: 'codex', seqStart: index + 1, seqEnd: index + 1, turnId: `turn-${index}`,
+      timestamp: '2026-11-13T00:00:00Z', sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }],
+      collapsed: [], resources: [],
+      item: index % 2 === 0
+        ? { type: 'user_message', messageId: String(index), text: `Background ${index}`, background: { id: String(index), kind: 'review', status: 'silent' } }
+        : { type: 'assistant_message', messageId: String(index), text: `Reply ${index}` },
+    })), {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const base = createReplicaState();
+    const state = { ...base, timeline: { ...base.timeline, initialized: true, epoch: 'test', entries, nextSeq: count + 1 } };
+    const container = await render(<AgentTimeline state={state} />);
+    // Count input visits rather than elapsed time so a busy CI machine cannot change the result.
+    expect(reads).toBeLessThan(count * 16);
+    expect(container.querySelectorAll('.agent-background-summary')).toHaveLength(count / 2);
+    expect(container.querySelectorAll('.agent-message-assistant')).toHaveLength(count / 2);
+    expect(container.textContent).toContain(`Reply ${count - 1}`);
+    await act(async () => container.querySelector<HTMLButtonElement>('.agent-background-summary')!.click());
+    expect(container.textContent).toContain('Background 0');
+  });
+
   it('renders only the changing reply while preserving historical rows and their actions', async () => {
     const entries: ProjectedTimelineEntry[] = Array.from({ length: 20 }, (_, index) => ({
       providerId: 'codex', seqStart: index + 1, seqEnd: index + 1, turnId: 'turn-' + index,

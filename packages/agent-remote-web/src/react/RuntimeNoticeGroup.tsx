@@ -12,8 +12,7 @@ type ConversationRow =
   | { readonly type: 'notices'; readonly key: string; readonly entries: NoticeRenderEntry[] };
 
 /** Filtering must not join notices separated by hidden timeline activity. */
-export function groupRuntimeNotices(model: readonly TimelineRenderEntry[], timeline: readonly ProjectedTimelineEntry[]): ConversationRow[] {
-  const positions = new Map(timeline.map((entry, index) => [entry, index]));
+export function groupRuntimeNotices(model: readonly TimelineRenderEntry[], positions: ReadonlyMap<ProjectedTimelineEntry, number>): ConversationRow[] {
   const rows: ConversationRow[] = [];
   let previousPosition = -2;
   for (const row of model) {

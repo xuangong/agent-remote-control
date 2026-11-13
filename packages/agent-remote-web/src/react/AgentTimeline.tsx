@@ -146,8 +146,10 @@ export function AgentTimeline({
   } : undefined);
   const rows = useMemo(() => {
     const result: Array<ReturnType<typeof groupRuntimeNotices>[number] | Extract<BackgroundRow, { type: 'background' }>> = [];
+    // Every segment shares the full history index so hidden activity still separates notices.
+    const positions = new Map(state.timeline.entries.map((entry, index) => [entry, index]));
     let ordinary: TimelineRenderEntry[] = [];
-    const flush = () => { result.push(...groupRuntimeNotices(ordinary, state.timeline.entries)); ordinary = []; };
+    const flush = () => { result.push(...groupRuntimeNotices(ordinary, positions)); ordinary = []; };
     for (const row of groupBackgroundActivity(renderModel, createTimelineRenderModel(state.timeline.epoch, state.timeline.entries))) {
       if (row.type === 'entry') ordinary.push(row.value);
       else { flush(); result.push(row); }

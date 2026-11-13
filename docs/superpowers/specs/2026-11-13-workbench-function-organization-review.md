@@ -43,6 +43,8 @@ Candidate presentation for review:
 
 Role visibility does not change the confirmed hierarchy: only Ask is secondary in Bot mode. Any heading adjustment is a targeted Session View polish item, not permission to redesign its header structure, messages or composer. No product implementation is included in this document.
 
+The user also requested an IM-like speaking indicator in Content only. See [the transient reply-presence proposal](2026-11-13-content-only-reply-indicator.md). Role tags remain identity metadata while the dots express live response activity; neither changes the Bot hierarchy.
+
 ## Current product evidence
 
 These observations come from the current worktree's implementation and product documentation, not usage analytics or an authenticated competitor evaluation:

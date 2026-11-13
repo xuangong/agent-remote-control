@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Content-only reply indicator review</title>
+<style>
+  :root { color-scheme: light dark; --surface: #fff; --page: #f2f2f7; --text: #1d1d1f; --secondary: #636366; --line: #d8d8dc; --accent: #0071e3; }
+  @media (prefers-color-scheme: dark) { :root { --surface: #1c1c1e; --page: #2c2c2e; --text: #f5f5f7; --secondary: #b1b1b8; --line: #49494c; --accent: #72b6ff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 20px; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--page); color: var(--text); }
+  main { max-width: 640px; margin: auto; }
+  h1 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.4px; }
+  p { margin: 0 0 20px; color: var(--secondary); }
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
+  label { display: grid; gap: 5px; font-size: 12px; color: var(--secondary); flex: 1 1 180px; }
+  select { min-height: 44px; width: 100%; padding: 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 14px; }
+  select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .sample { padding: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .existing { margin: 0 0 16px; padding-bottom: 20px; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .presence-slot { min-height: 24px; }
+  .presence { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px; color: var(--secondary); }
+  .presence[hidden] { display: none; }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: respond 1.4s ease-in-out infinite; }
+  .dot:nth-child(2) { animation-delay: .18s; }
+  .dot:nth-child(3) { animation-delay: .36s; }
+  @keyframes respond { 0%, 65%, 100% { opacity: .3; } 30% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; opacity: .7; } }
+  .note { margin-top: 16px; font-size: 13px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+</style>
+<main>
+  <h1>A quiet sign that the Bot is responding</h1>
+  <p>Component study with simulated states. Only the three-dot indicator is proposed; existing messages, role tags, headings and composer stay as they are.</p>
+  <div class="controls">
+    <label>Display mode<select id="mode"><option value="content">Content only</option><option value="full">Other display modes</option></select></label>
+    <label>Simulated session state<select id="state"><option value="running">Responding</option><option value="complete">Complete</option><option value="waiting">Waiting for you</option><option value="failed">Failed</option><option value="reconnecting">Reconnecting</option><option value="history">Saved history</option></select></label>
+  </div>
+  <section class="sample" aria-label="Indicator placement study">
+    <p class="existing">Existing conversation content remains above this point.</p>
+    <div class="presence-slot">
+      <div id="presence" class="presence" role="status" aria-live="polite" aria-atomic="true">
+        <span class="sr-only">Agent is responding</span>
+        <span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>
+      </div>
+    </div>
+  </section>
+  <p id="note" class="note"></p>
+  <p class="note">The frame, dashed separator and controls belong to this study. They are not proposed Session View UI. The indicator is transient and never becomes a message.</p>
+</main>
+<script>
+  const mode = document.querySelector('#mode'), state = document.querySelector('#state'), presence = document.querySelector('#presence'), note = document.querySelector('#note');
+  const messages = {
+    running: 'Live response in progress, including work hidden by Content only. The dots do not claim that text tokens are arriving continuously.',
+    complete: 'Response finished: no dots remain.',
+    waiting: 'Waiting for you: no typing animation. Existing questions and approval controls remain available.',
+    failed: 'Failed: no typing animation. Existing failure and recovery controls remain available.',
+    reconnecting: 'Connection uncertain: no typing animation. Existing connection status remains authoritative.',
+    history: 'Saved history: no live typing animation.'
+  };
+  function render() {
+    presence.hidden = mode.value !== 'content' || state.value !== 'running';
+    note.textContent = mode.value === 'content' ? messages[state.value] : 'Other display modes retain their current presentation.';
+  }
+  mode.addEventListener('change', render); state.addEventListener('change', render); render();
+  document.addEventListener('visibilitychange', () => document.querySelectorAll('.dot').forEach(dot => { dot.style.animationPlayState = document.hidden ? 'paused' : 'running'; }));
+</script>
+</html>

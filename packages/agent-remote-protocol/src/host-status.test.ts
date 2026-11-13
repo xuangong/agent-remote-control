@@ -6,7 +6,7 @@ const status: HostStatus = {
   sessions: { running: 2, waiting: 1, idle: 3, failed: 0 },
   cpu: { cores: 12, usage: 0.38 },
   memory: { total: 25_769_803_776, used: 15_246_000_128 },
-  disks: [{ path: '/Users/xian', total: 494_384_795_648, used: 474_000_000_000 }, { path: '/Volumes/Projects', total: 2_048_000_000_000, used: 464_000_000_000 }],
+  disks: [{ kind: 'home', path: '/Users/xian', total: 494_384_795_648, used: 474_000_000_000 }, { kind: 'workspace', path: '/Volumes/Projects', total: 2_048_000_000_000, used: 464_000_000_000 }],
 };
 
 it('accepts a complete Host status and one with sessions only', () => {
@@ -17,7 +17,8 @@ it('accepts a complete Host status and one with sessions only', () => {
 it('rejects usage outside 0..1, used beyond total and unknown fields', () => {
   expect(isHostStatus({ ...status, cpu: { cores: 12, usage: 1.2 } })).toBe(false);
   expect(isHostStatus({ ...status, memory: { total: 10, used: 11 } })).toBe(false);
-  expect(isHostStatus({ ...status, disks: [{ path: '/', total: 10, used: 11 }] })).toBe(false);
+  expect(isHostStatus({ ...status, disks: [{ kind: 'home', path: '/', total: 10, used: 11 }] })).toBe(false);
+  expect(isHostStatus({ ...status, disks: [{ kind: 'scratch', path: '/', total: 10, used: 1 }] })).toBe(false);
   expect(isHostStatus({ ...status, extra: true })).toBe(false);
 });
 

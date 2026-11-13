@@ -187,7 +187,7 @@ it('shows a Host\'s status to its owner in full and to people it is shared with 
   expect((await listed!.json()).hosts[0].hostStatus).toBe(true);
   await broker.manageShares('alice', 'host', 'share', 'bob', 'Bob', 1);
   const full = { sampledAt: 5, sessions: { running: 1, waiting: 0, idle: 2, failed: 0 }, cpu: { cores: 8, usage: 0.25 },
-    memory: { total: 100, used: 40 }, disks: [{ path: '/home/alice', total: 1000, used: 600 }] };
+    memory: { total: 100, used: 40 }, disks: [{ kind: 'home', path: '/home/alice', total: 1000, used: 600 }] };
   let reply: { status: number; body: unknown } = { status: 200, body: full };
   const calls: string[] = [];
   native.onMessage(data => {

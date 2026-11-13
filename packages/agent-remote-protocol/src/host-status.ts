@@ -6,6 +6,9 @@ const count = Type.Integer({ minimum: 0, maximum: 100_000 });
 const bytes = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const usage = Type.Object({ total: bytes, used: bytes }, object);
 
+/** Which directory a reported volume holds: the user's home directory or a workspace. */
+export const HostDiskKind = Type.Union([Type.Literal('home'), Type.Literal('workspace')]);
+export type HostDiskKind = Static<typeof HostDiskKind>;
 /** The most volumes one Host reports: the home directory's and those of its workspaces. */
 export const HOST_STATUS_DISK_LIMIT = 8;
 
@@ -18,7 +21,8 @@ export const HostStatus = Type.Object({
   sessions: Type.Object({ running: count, waiting: count, idle: count, failed: count }, object),
   cpu: Type.Optional(Type.Object({ cores: Type.Integer({ minimum: 1, maximum: 4096 }), usage: Type.Number({ minimum: 0, maximum: 1 }) }, object)),
   memory: Type.Optional(usage),
-  disks: Type.Optional(Type.Array(Type.Object({ path: Type.String({ minLength: 1, maxLength: 1024 }), total: bytes, used: bytes }, object),
+  /** The volume of the home directory first, then those of workspaces on other volumes. */
+  disks: Type.Optional(Type.Array(Type.Object({ kind: HostDiskKind, path: Type.String({ minLength: 1, maxLength: 1024 }), total: bytes, used: bytes }, object),
     { maxItems: HOST_STATUS_DISK_LIMIT })),
 }, object);
 export type HostStatus = Static<typeof HostStatus>;

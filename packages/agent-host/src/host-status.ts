@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { stat, statfs } from 'node:fs/promises';
 import { cpus, freemem, homedir, totalmem, type CpuInfo } from 'node:os';
 import { promisify } from 'node:util';
-import { HOST_STATUS_DISK_LIMIT, type HostStatus, type SessionActivityState } from '@orchardworks/agent-remote-protocol';
+import { HOST_STATUS_DISK_LIMIT, type HostDiskKind, type HostStatus, type SessionActivityState } from '@orchardworks/agent-remote-protocol';
 
 type Usage = { total: number; used: number };
 
@@ -43,8 +43,8 @@ export function cpuUsage(previous: readonly CpuInfo[], next: readonly CpuInfo[])
 export interface HostStatusSources {
   /** The sessions this Controller has open, with the state each shows. */
   sessions(): readonly { state: SessionActivityState }[];
-  /** Directories whose volumes matter: the home directory and the workspaces. */
-  paths(): Promise<readonly string[]>;
+  /** Directories whose volumes matter: the home directory first, then the workspaces. */
+  paths(): Promise<readonly { path: string; kind: HostDiskKind }[]>;
   platform?: NodeJS.Platform;
   cpus?(): CpuInfo[];
   totalmem?(): number;
@@ -86,7 +86,7 @@ export function createHostStatusReader(sources: HostStatusSources) {
   }
   async function disks(): Promise<NonNullable<HostStatus['disks']>> {
     const seen = new Set<string>(), result: NonNullable<HostStatus['disks']> = [];
-    for (const path of new Set(await sources.paths())) {
+    for (const { path, kind } of await sources.paths()) {
       if (result.length >= HOST_STATUS_DISK_LIMIT) break;
       try {
         const device = String((await (sources.stat ?? stat)(path)).dev);
@@ -94,7 +94,7 @@ export function createHostStatusReader(sources: HostStatusSources) {
         const volume = await (sources.statfs ?? statfs)(path);
         const size = Number(volume.bsize), total = Number(volume.blocks) * size;
         seen.add(device);
-        result.push({ path, total, used: Math.max(0, total - Number(volume.bavail) * size) });
+        result.push({ kind, path, total, used: Math.max(0, total - Number(volume.bavail) * size) });
       } catch { /* A directory that is gone or unreadable has no volume to report. */ }
     }
     return result;
@@ -113,8 +113,8 @@ export function createHostStatusReader(sources: HostStatusSources) {
 }
 
 /** The directories a Controller reports volumes for: its user's home directory, then its workspaces. */
-export async function hostStatusPaths(workspaces: () => Promise<readonly string[]>): Promise<string[]> {
+export async function hostStatusPaths(workspaces: () => Promise<readonly string[]>): Promise<Array<{ path: string; kind: HostDiskKind }>> {
   let listed: readonly string[] = [];
   try { listed = await workspaces(); } catch { /* The home directory still has a volume to report. */ }
-  return [homedir(), ...listed];
+  return [{ path: homedir(), kind: 'home' }, ...listed.map(path => ({ path, kind: 'workspace' as const }))];
 }

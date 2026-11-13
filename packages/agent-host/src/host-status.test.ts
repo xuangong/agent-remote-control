@@ -45,7 +45,8 @@ function sources(overrides: Partial<HostStatusSources> = {}): HostStatusSources 
   return {
     waits,
     sessions: () => [{ state: 'running' }, { state: 'running' }, { state: 'waiting' }, { state: 'idle' }],
-    paths: async () => ['/Users/xian', '/Users/xian/projects', '/Volumes/Projects', '/missing'],
+    paths: async () => [{ path: '/Users/xian', kind: 'home' as const }, { path: '/Users/xian/projects', kind: 'workspace' as const },
+      { path: '/Volumes/Projects', kind: 'workspace' as const }, { path: '/missing', kind: 'workspace' as const }],
     platform: 'darwin',
     cpus: () => { sample += 1; return [times(100 * sample, 900 * sample), times(100 * sample, 900 * sample)]; },
     totalmem: () => 25_769_803_776,
@@ -69,7 +70,7 @@ describe('Host status reader', () => {
       sessions: { running: 2, waiting: 1, idle: 1, failed: 0 },
       cpu: { cores: 2, usage: 0.1 },
       memory: macMemory(VM_STAT, 25_769_803_776),
-      disks: [{ path: '/Users/xian', total: 500 * 4096, used: 480 * 4096 }, { path: '/Volumes/Projects', total: 1000 * 4096, used: 400 * 4096 }],
+      disks: [{ kind: 'home', path: '/Users/xian', total: 500 * 4096, used: 480 * 4096 }, { kind: 'workspace', path: '/Volumes/Projects', total: 1000 * 4096, used: 400 * 4096 }],
     });
     expect(isHostStatus(status)).toBe(true);
     expect(input.waits).toHaveLength(1);

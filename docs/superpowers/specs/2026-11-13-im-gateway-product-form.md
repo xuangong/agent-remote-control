@@ -1,6 +1,6 @@
 # IM gateway: product form
 
-Status: product form for review, 2026-11-13. No implementation is authorized by this document. It builds on [Bot and Window: product model](2026-11-13-bot-window-product-model.md).
+Status: product form confirmed by the owner on 2026-11-13, including every recommendation under Decisions (C-style previews first, outbox, notifications without an open page, stable roster order, bots as gateway entities, reading across a handoff). Each stage still needs its own implementation plan and review. It builds on [Bot and Window: product model](2026-11-13-bot-window-product-model.md).
 
 ## Why
 
@@ -43,7 +43,7 @@ What the owner should experience, independent of storage:
 
 What does not change: the Session View, Window mode's detail, and the Host as the place where agents run and conversations are recorded.
 
-## Decisions for the owner
+## Decisions (confirmed: the recommendations)
 
 1. **How much of the session the gateway caches.** In every option the session stays the only source, and anything cached is a copy that can be rebuilt from it.
    - A. Index only (cursors, times, kinds); previews come from the Host while it is online. An offline Host shows no preview or history beyond the browser cache.

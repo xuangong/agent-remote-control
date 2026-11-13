@@ -79,6 +79,10 @@ In Bot mode a bot that is responding shows an IM-style typing indicator under it
 
 Existing groups gain their Side, Team, TPM and Support views as bots once membership changes, because membership is derived from views. Relay rule checks (one bot per session, `bot_view` rebinding) then apply to them as well and must be reviewed for Team members that are rebound by their manager.
 
+## Conversation and gateway
+
+A bot's conversation is its agent sessions' content, and the session gateway becomes IM-like around that rule. See [IM gateway: product form](2026-11-13-im-gateway-product-form.md).
+
 ## Open questions
 
 - How long an idle bot stays awake before sleeping on its own, and the per-device live budget, both from measurement.

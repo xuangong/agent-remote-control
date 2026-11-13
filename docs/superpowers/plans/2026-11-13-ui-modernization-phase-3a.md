@@ -31,8 +31,8 @@
 
 **Interfaces:** Consume existing `useWindowActions.deleteWindow(id): Promise<boolean>` and `Sheet`, `Button`. Preserve existing workspace actions and scope guards. The existing toolbar confirmation must continue to work.
 
-- [ ] Reproduce the baseline failure in `SessionWorkbench.attributions.test.tsx:22`; inspect `SessionHeading`, `SessionHeadingActions` and current responsive layout to decide whether the product or the structural assertion is wrong. Keep assertions that expansion preserves the timeline DOM, draft and title actions.
-- [ ] Add observable deletion tests before implementation: invoking `Delete Window: <title>` opens `Delete this Window?`, cancellation/Escape does not remove a Window, confirming removes exactly the requested Window, pending confirmation cannot double-submit, and an error remains visible/retryable. Scope or active-panel changes close stale confirmation.
+- [x] Reproduce the baseline failure in `SessionWorkbench.attributions.test.tsx:22`; inspect `SessionHeading`, `SessionHeadingActions` and current responsive layout to decide whether the product or the structural assertion is wrong. Keep assertions that expansion preserves the timeline DOM, draft and title actions.
+- [x] Add observable deletion tests before implementation: invoking `Delete Window: <title>` opens `Delete this Window?`, cancellation/Escape does not remove a Window, confirming removes exactly the requested Window, pending confirmation cannot double-submit, and an error remains visible/retryable. Scope or active-panel changes close stale confirmation.
 
 ```tsx
 await act(async () => deleteButton.click());
@@ -41,9 +41,9 @@ const dialog = container.querySelector('dialog');
 expect(dialog?.textContent).toContain('Delete this Window?');
 ```
 
-- [ ] Run the focused tests red with `timeout 90 pnpm --filter @orchardworks/agent-remote-lab exec vitest run src/components/WindowWorkspaces.test.tsx src/components/SessionWorkbench.attributions.test.tsx --testTimeout=10000`.
-- [ ] Use a scope-bound pending target instead of calling delete immediately. Disable confirmation while pending, close only on success, surface the existing action error inside the sheet if shared toast alone would be obscured. Keep the existing active-Window deletion restrictions. Explain that removing layout leaves agent sessions running.
-- [ ] Run the focused tests green, inspect the diff and commit only Task 1 files. Record red/green commands and results in the task report.
+- [x] Run the focused tests red with `timeout 90 pnpm --filter @orchardworks/agent-remote-lab exec vitest run src/components/WindowWorkspaces.test.tsx src/components/SessionWorkbench.attributions.test.tsx --testTimeout=10000`.
+- [x] Use a scope-bound pending target instead of calling delete immediately. Disable confirmation while pending, close only on success, surface the existing action error inside the sheet if shared toast alone would be obscured. Keep the existing active-Window deletion restrictions. Explain that removing layout leaves agent sessions running.
+- [x] Run the focused tests green, inspect the diff and commit only Task 1 files. Record red/green commands and results in the task report.
 
 ## Roster continuation gate
 

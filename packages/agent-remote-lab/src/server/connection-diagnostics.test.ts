@@ -118,11 +118,13 @@ it('discovers the independent diagnostic capability even when updater status fai
 }, 10_000);
 
 it('delivers bounded business timeout metadata without request payloads or query strings', async () => {
-  const f = await setup();
+  // Expire the native request before the caller's independent creation wait.
+  const f = await setup({ rpcTimeoutMs: 1000, creationTimeoutMs: 80 });
   const pair = await (await f.post('/v1/remote/pairings')).json();
   const native = await connect(f.url, pair.key, 'timeout-installation');
   const response = await f.post(`/v1/remote/hosts/${native.id}/create`, { providerId: 'codex', operationId: '00000000-0000-4000-8000-000000000009', cwd: '/private/secret-workspace' });
   expect(response.status).toBe(504);
+  expect(await response.json()).toMatchObject({ code: 'host_timeout' });
   await expect.poll(() => native.batches.flat().find(entry => entry.event === 'rpc_timeout'), { timeout: 4000 }).toMatchObject({ operation: 'create', hostId: native.id });
   const serialized = JSON.stringify(native.batches);
   expect(serialized).not.toContain('secret-workspace');

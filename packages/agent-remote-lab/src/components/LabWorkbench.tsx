@@ -21,10 +21,10 @@ import type { SessionExcerpt } from '@orchardworks/agent-remote-protocol';
 export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
-export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, fixedDisplayMode, operationBinding, sessionIdentity, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
+export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, fixedDisplayMode, operationBinding, sessionIdentity, hostLabel, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; hostLabel?: string; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {
   const descriptions = useContext(SessionDescriptionsContext);
   const source = sessionIdentity ?? operationBinding?.source;
-  const sessionDescription = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
+  const relationships = showAttributions ? props.sessionDescription ?? (source ? descriptions?.describe(source) ?? describeSession({ session: source }) : undefined) : undefined;
   const trackCommand = useContext(TrackViewScope);
   const tpmCommand = useContext(TpmViewScope);
   const teamCommand = useContext(TeamViewScope);
@@ -41,6 +41,20 @@ export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode,
   const effectiveDisplay = fixedDisplayMode ? { ...displayPreferences, mode: fixedDisplayMode } : displayPreferences;
   const agent = props.state?.agent;
   const reportedSession = agent?.runtimeInfo.sessionId, cwd = agent?.cwd, providerId = agent?.providerId;
+  const identity = source ?? relationships?.identity;
+  const resolvedHostLabel = identity && descriptions?.hostName?.(identity.hostId ?? 'local') || hostLabel;
+  const matchingAgent = identity && agent?.providerId === identity.providerId && reportedSession === identity.nativeSessionId ? agent : undefined;
+  const sessionDescription = showAttributions && identity ? {
+    identity,
+    attributions: [
+      { id: 'identity:host', kind: 'identity', label: 'Host', value: resolvedHostLabel ?? identity.hostId ?? 'local',
+        ...(resolvedHostLabel && identity.hostId && resolvedHostLabel !== identity.hostId ? { detail: identity.hostId } : {}) },
+      { id: 'identity:provider', kind: 'identity', label: 'Provider', value: identity.providerId },
+      { id: 'identity:cwd', kind: 'identity', label: 'cwd', value: matchingAgent?.cwd || 'Not available in saved history' },
+      { id: 'identity:session', kind: 'identity', label: 'Session ID', value: identity.nativeSessionId },
+      ...(relationships?.attributions ?? []),
+    ],
+  } : relationships;
   const workspace = useMemo(() => providerId && reportedSession && cwd ? { providerId, nativeSessionId: reportedSession, cwd } : undefined, [providerId, reportedSession, cwd]);
   return <SessionWorkspaceContext.Provider value={workspace}><SessionWorkbench {...props}
     sessionDescription={sessionDescription} onNavigateAttribution={props.onNavigateAttribution ?? descriptions?.navigate}

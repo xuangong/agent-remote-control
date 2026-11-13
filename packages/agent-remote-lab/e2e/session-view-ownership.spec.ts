@@ -423,16 +423,17 @@ test('account actions belong to the Header and View follows the visible owning t
   await page.screenshot({ path: testInfo.outputPath('header-owned-account-actions.png') });
 });
 
-test('hidden global chrome keeps View in the primary heading without duplicating Side or Ask controls', async ({ page, isMobile }, testInfo) => {
+test('hidden global chrome keeps View in the Window toolbar without duplicating Side or Ask controls', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Uses simultaneously visible desktop Session Views.');
   const { primary, side, select } = await openComposition(page, false);
   await setChromePanel(page, 'Header', false);
   await setChromePanel(page, 'Sidebar', false);
   const globalView = page.getByRole('button', { name: 'View options', exact: true });
+  const windowTitle = page.locator('.lab-window-toolbar .lab-window-toolbar-title');
   for (const width of [1200, 1400, 1900]) {
     await page.setViewportSize({ width, height: 900 });
     await expect(globalView).toHaveCount(1);
-    await expectBeforeTitle(globalView, sourceView(primary).locator('.lab-primary-title'));
+    await expectBeforeTitle(globalView, windowTitle);
     for (const owner of [primary, side]) {
       await expectCenteredHeading(sourceView(owner));
       const heading = sourceView(owner).locator('.lab-workbench-heading');
@@ -443,8 +444,10 @@ test('hidden global chrome keeps View in the primary heading without duplicating
       await expect.poll(async () => (await title.boundingBox())!.width, { message: `Session title remains readable at ${width}px` }).toBeGreaterThan(60);
     }
     await expect(sourceView(side).getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
-    await expect.poll(async () => Math.abs((await primary.boundingBox())!.y - (await page.locator('.lab-shell').boundingBox())!.y))
-      .toBeLessThanOrEqual(1);
+    await expect.poll(async () => {
+      const toolbar = (await page.locator('.lab-window-toolbar').boundingBox())!, view = (await primary.boundingBox())!;
+      return Math.abs(view.y - (toolbar.y + toolbar.height));
+    }, { message: 'Session views start directly below the Window toolbar' }).toBeLessThanOrEqual(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     if (width === 1200) await page.screenshot({ path: testInfo.outputPath('narrow-headings-with-inline-view.png') });
   }
@@ -456,7 +459,7 @@ test('hidden global chrome keeps View in the primary heading without duplicating
   await expect(ask.getByRole('button', { name: 'View options', exact: true })).toHaveCount(0);
   await setDisplay(ask, 'Simple conversation', true);
   await expect(globalView).toHaveCount(1);
-  await expectBeforeTitle(globalView, sourceView(primary).locator('.lab-primary-title'));
+  await expectBeforeTitle(globalView, windowTitle);
   await ask.getByRole('button', { name: 'Minimize Ask', exact: true }).click();
   await expectDisplay(sourceView(primary), 'Preview', true);
   await expectDisplay(sourceView(side), 'Preview', true);

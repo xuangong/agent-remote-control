@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
-import { chromium, webkit, expect as browserExpect, type Page } from '@playwright/test';
+import { chromium, webkit, expect as browserExpect, type Locator, type Page } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
 let script = '', css = '', url = '';
@@ -48,14 +48,28 @@ beforeAll(async () => {
 });
 afterAll(async () => { await new Promise<void>(resolve => server.close(() => resolve())); });
 
+// The session view that is visible on a narrow screen, where the other views of the family stay mounted but hidden.
+function currentSessionView(page: Page) {
+  return page.locator('.lab-session-family:not([hidden]) > .lab-session-family-pane:not([hidden])');
+}
+// On narrow screens the session actions sit behind an edge toggle; opening one expands it first.
+async function expandSessionActions(primary: Locator) {
+  const expand = primary.getByRole('button', { name: 'Expand session actions', exact: true });
+  if (await expand.count()) await expand.click();
+}
+async function toggleView(primary: Locator) {
+  await expandSessionActions(primary);
+  await primary.getByRole('button', { name: 'Session view options', exact: true }).click();
+}
+
 async function revealHiddenLetterFromSearch(page: Page) {
   const primary = page.locator('.lab-primary-conversation');
-  const view = primary.getByRole('button', { name: 'Session view options', exact: true });
   await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(2);
-  await view.click();
+  await toggleView(primary);
   await page.getByRole('checkbox', { name: 'Show letters', exact: true }).uncheck();
-  await view.click();
+  await toggleView(primary);
   await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(0);
+  await expandSessionActions(primary);
   await primary.getByRole('button', { name: 'Search this session', exact: true }).click();
   await primary.getByRole('searchbox').fill('Review the transport.');
   await primary.getByLabel('Search scope').selectOption('all');
@@ -64,9 +78,6 @@ async function revealHiddenLetterFromSearch(page: Page) {
   await results.click();
   await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
   await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(1);
-  await view.click();
-  await browserExpect(primary.getByRole('checkbox', { name: 'Show letters', exact: true })).not.toBeChecked();
-  await view.click();
 }
 
 for (const engine of [chromium, webkit]) it(`keeps child navigation at the content-only tail on mobile ${engine.name()}`, async () => {
@@ -77,10 +88,9 @@ for (const engine of [chromium, webkit]) it(`keeps child navigation at the conte
     await page.goto(url);
     await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
     const primary = page.locator('.lab-primary-conversation');
-    const view = primary.getByRole('button', { name: 'Session view options', exact: true });
-    await view.click();
+    await toggleView(primary);
     await primary.getByRole('radio', { name: 'Content only', exact: true }).check();
-    await view.click();
+    await toggleView(primary);
     await browserExpect(primary.locator('.lab-workbench-heading')).toBeHidden();
     const children = primary.locator('details[aria-label="Session subagents"]');
     await browserExpect(children).toHaveCount(1);
@@ -92,7 +102,9 @@ for (const engine of [chromium, webkit]) it(`keeps child navigation at the conte
     await page.screenshot({ path: `/tmp/arc-content-subagents-${engine.name()}-mobile.png` });
     await child.click();
     await browserExpect(page).toHaveURL(/[?&]session=child(?:&|$)/);
-    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+    // A narrow screen shows one session view at a time: the child replaces the parent in view.
+    await browserExpect(currentSessionView(page)).toHaveAccessibleName('/root/review');
+    await browserExpect(primary).toBeHidden();
   } finally { await browser.close(); }
 }, 30000);
 
@@ -114,9 +126,12 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const title = letter.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true });
     const participants = title.getByText('/root/review → /root', { exact: true });
     const timestamp = details.locator('time');
-    const initialUrl = page.url();
+    await browserExpect(page).toHaveURL(/[?&]window=/);
+    // The app may reorder query parameters while it settles; navigation means a different parameter set.
+    const canonicalUrl = (value: string) => { const parsed = new URL(value); parsed.searchParams.sort(); return parsed.toString(); };
+    const initialUrl = canonicalUrl(page.url());
     const expectNoNavigation = async () => {
-      await browserExpect(page).toHaveURL(initialUrl);
+      await browserExpect.poll(() => canonicalUrl(page.url())).toBe(initialUrl);
       await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
       await browserExpect(primary.locator('[data-inspected="true"]')).toHaveCount(0);
       expect(await page.evaluate(() => (window as unknown as { letterNavigationRequests: string[] }).letterNavigationRequests)).toEqual([]);
@@ -172,7 +187,6 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const primary = page.locator('.lab-primary-conversation');
     const letters = primary.locator('.agent-communication-letter');
     const activity = primary.getByText('Activity 39. This is the work after receiving the task. A longer paragraph keeps each conversation independently scrollable.', { exact: true });
-    const view = primary.getByRole('button', { name: 'Session view options', exact: true });
     const content = page.getByRole('radio', { name: 'Content only', exact: true });
     const simple = page.getByRole('radio', { name: 'Simple conversation', exact: true });
     const showLetters = page.getByRole('checkbox', { name: 'Show letters', exact: true });
@@ -193,7 +207,7 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
     const waitForConversation = async () => {
       await browserExpect(page).toHaveURL(/[?&]session=parent(?:&|$)/);
       await browserExpect(activity).toBeVisible();
-      await view.click();
+      await toggleView(primary);
     };
     await page.goto(url);
     await waitForConversation();
@@ -249,31 +263,26 @@ for (const engine of [chromium, webkit]) for (const mobile of [false, true]) it(
         const title = page.locator('.lab-mobile-session-title');
         expect((await title.boundingBox())!.width).toBeGreaterThanOrEqual(60);
         await page.screenshot({ path: `/tmp/arc-session-heading-${width}-${engine.name()}.png` });
-        await view.click();
-        const more = primary.getByRole('button', { name: 'More session actions', exact: true });
-        await more.click();
-        await browserExpect(more).toHaveAttribute('aria-expanded', 'true');
+        await toggleView(primary);
+        const actions = primary.getByRole('button', { name: /^(Expand|Collapse) session actions$/ });
+        await browserExpect(actions).toHaveAttribute('aria-expanded', 'true');
         await primary.getByRole('button', { name: 'Share session link', exact: true }).click();
         await browserExpect(page.getByRole('dialog', { name: 'Share session', exact: true })).toBeVisible();
         await browserExpect(page.getByRole('img', { name: 'Session QR code', exact: true })).toBeVisible();
         await page.getByRole('button', { name: 'Close session link', exact: true }).click();
         await browserExpect(primary.getByRole('button', { name: 'Share session link', exact: true })).toBeFocused();
-        await page.keyboard.press('Escape');
-        await browserExpect(more).toHaveAttribute('aria-expanded', 'false');
-        await browserExpect(more).toBeFocused();
-        await more.click();
         await title.click();
-        await browserExpect(more).toHaveAttribute('aria-expanded', 'false');
+        await browserExpect(actions).toHaveAttribute('aria-expanded', 'false');
         expect(await page.evaluate(() => window.scrollX)).toBe(0);
-        await view.click();
+        await toggleView(primary);
       }
     }
     if (!mobile) {
-      await view.click();
+      await toggleView(primary);
       await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
       const side = page.locator('.lab-side-conversation');
       await browserExpect(side).toBeVisible();
-      await view.click();
+      await toggleView(primary);
       await showLetters.uncheck();
       await browserExpect(letters).toHaveCount(0);
       await browserExpect(side.locator('.agent-communication-letter')).toHaveCount(2);
@@ -305,10 +314,9 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     await browserExpect(side.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key',/task$/);
     await primary.getByRole('button', { name: 'Close session search', exact: true }).click();
     await browserExpect(primary.locator('.agent-communication-letter')).toHaveCount(0);
-    const view = primary.getByRole('button', { name: 'Session view options', exact: true });
-    await view.click();
+    await toggleView(primary);
     await primary.getByRole('checkbox', { name: 'Show letters', exact: true }).check();
-    await view.click();
+    await toggleView(primary);
     const card=primary.locator('.agent-communication-letter').first();
     await browserExpect(card).toHaveAttribute('data-direction','right');
     await page.waitForTimeout(260);
@@ -331,7 +339,12 @@ for (const engine of [chromium, webkit]) it(`moves letters through available spa
     await reply.click();
     await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key',/reply$/);
     await browserExpect(primary).toBeVisible(); await browserExpect(side).toBeVisible();
-    await page.setViewportSize({width:1400,height:900}); await page.waitForTimeout(260);
+    // A narrower conversation leaves less room to move a letter.
+    const resizer=page.getByRole('separator',{name:'Conversation width',exact:true});
+    await resizer.focus();
+    for(let step=0;step<8;step++) await resizer.press('ArrowLeft');
+    await browserExpect(resizer).toHaveAttribute('aria-valuenow',/^(?!440$)\d+$/);
+    await page.waitForTimeout(260);
     const narrowOffset=await card.evaluate(e=>new DOMMatrixReadOnly(getComputedStyle(e).transform).m41);
     expect(narrowOffset).toBeLessThan(offset);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -352,41 +365,41 @@ for (const engine of [chromium, webkit]) it(`navigates mobile letters in the cur
     await page.goto(url);
     const primary = page.locator('.lab-primary-conversation');
     await revealHiddenLetterFromSearch(page);
+    const current = currentSessionView(page);
     await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true })
       .getByText('/root → /root/review', { exact: true }).click();
-    await browserExpect(primary).toBeVisible();
-    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
-    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
     await browserExpect(page).toHaveURL(/session=child/);
-    const receipt = primary.locator('[data-entry-key$=":task"]');
-    const viewport = primary.locator('.lab-timeline-scroll');
+    await browserExpect(current).toHaveCount(1);
+    await browserExpect(current).toHaveAccessibleName('/root/review');
+    await browserExpect(primary).toBeHidden();
+    await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
+    const receipt = current.locator('[data-entry-key$=":task"]');
+    const viewport = current.locator('.lab-timeline-scroll');
     await browserExpect.poll(async () => {
       const entry = await receipt.boundingBox(), scroll = await viewport.boundingBox();
       return Math.abs(entry!.y - scroll!.y - 12);
     }).toBeLessThan(3);
-    await primary.getByRole('button', { name: 'More session actions', exact: true }).click();
-    await primary.getByRole('button', { name: 'Back to previous conversation', exact: true }).click();
+    await expandSessionActions(current);
+    // An attached child view returns to the view it was opened from.
+    await current.getByRole('button', { name: 'Back to Conversation', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=parent/);
-    await browserExpect(primary.getByRole('button', { name: 'More session actions', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    await primary.getByRole('button', { name: 'More session actions', exact: true }).click();
-    await primary.getByRole('button', { name: 'Forward to next conversation', exact: true }).click();
+    // The parent view hides its letters, so the child is reached through its subagent list.
+    await current.locator('details[aria-label="Session subagents"] summary').click();
+    await current.locator('[data-child-session-id="child"]').click();
     await browserExpect(page).toHaveURL(/session=child/);
-    await browserExpect(primary.getByRole('button', { name: 'More session actions', exact: true })).toHaveAttribute('aria-expanded', 'false');
     // Clicking the received task returns to the sender's copy of the same letter.
-    await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
+    await current.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=parent/);
-    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
-    await primary.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
+    await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /task$/);
+    await current.getByRole('button', { name: 'Open letter from /root to /root/review', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=child/);
-    await primary.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
+    await current.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=parent/);
-    await browserExpect(primary).toBeVisible();
-    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
-    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /reply$/);
-    await primary.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
+    await browserExpect(current).toHaveCount(1);
+    await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /reply$/);
+    await current.getByRole('button', { name: 'Open letter from /root/review to /root', exact: true }).click();
     await browserExpect(page).toHaveURL(/session=child/);
-    await browserExpect(primary.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /reply$/);
-    await browserExpect(page.locator('.lab-side-conversation')).toHaveCount(0);
+    await browserExpect(current.locator('[data-inspected="true"]')).toHaveAttribute('data-entry-key', /reply$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);
   } finally { await browser.close(); }

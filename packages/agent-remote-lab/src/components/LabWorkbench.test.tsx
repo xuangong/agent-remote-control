@@ -525,3 +525,15 @@ it('shows native failure evidence inline when its timeline page is not loaded', 
   expect(container.querySelector('.lab-timeline-scroll [role="alert"]')?.textContent).toContain('Native failure detail');
   expect(document.querySelector('.lab-toast')).toBeNull();
 });
+
+it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info with cached state: %s', async cached => {
+  const session = { hostId: 'host-id', providerId: 'recorded', nativeSessionId: 'native-id', title: 'Saved session' };
+  const state = cached ? { ...replicaState, agent: { ...replicaState.agent!, providerId: session.providerId, cwd: '/saved/workspace',
+    runtimeInfo: { ...replicaState.agent!.runtimeInfo, providerId: session.providerId, sessionId: session.nativeSessionId } } } : undefined;
+  const view = await render(<LabWorkbench sessionIdentity={session} hostLabel="Mac Studio" state={state} sessionStatus="idle" draftOnly actions={{}} />);
+  const toggle = view.querySelector<HTMLButtonElement>('[aria-label="Show session attributions"]')!;
+  expect(toggle.textContent).toContain('Info');
+  await act(async () => toggle.click());
+  const rows = [...view.querySelectorAll('.agent-session-attributions tr')].map(row => row.textContent);
+  expect(rows.slice(0, 4)).toEqual(['HostMac Studiohost-id', 'Providerrecorded', `cwd${cached ? '/saved/workspace' : 'Not available in saved history'}`, 'Session IDnative-id']);
+});

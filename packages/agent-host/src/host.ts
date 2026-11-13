@@ -53,6 +53,8 @@ import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {
   readonly providerId: string;
+  readonly listing?: import('./session-listing.js').HostSessionListing;
+  sessionSummary?(nativeSessionId: string): Promise<RemoteSessionSummary | undefined>;
   readonly supportsSourceReferences?: boolean;
   /** Adapter-owned pre-effect promise for this exact create mode: the authoritative native reader ID
    * has nonempty trim, <=512 UTF-16 units and a valid same-controller/provider NativeSessionRef.
@@ -1213,11 +1215,16 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
           return json(200, await describeSessionRefs({ providerId, nativeSessionId: string(url.searchParams.get('nativeSessionId'), 'nativeSessionId') }, sessionRefs));
         }
         const catalog = catalogs.get(providerId)!;
+        if (url.pathname === '/remote/catalog/listing') {
+          if (!directory.listing) throw new HostRequestError(400, 'unsupported_configuration', 'Manual listing is unavailable for this provider.');
+          await directory.list();
+          return json(200, directory.listing.status());
+        }
         if (url.pathname === '/remote/catalog') return json(200, await catalog.page({ cursor: url.searchParams.get('cursor') ?? undefined,
           limit: url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined }));
         if (url.pathname === '/remote/catalog/session') {
           const nativeSessionId = string(url.searchParams.get('nativeSessionId'), 'nativeSessionId');
-          const summary = await catalog.session(nativeSessionId);
+          const summary = directory.sessionSummary ? await directory.sessionSummary(nativeSessionId) : await catalog.session(nativeSessionId);
           if (!summary) throw new HostRequestError(404, 'session_unavailable', 'The native session is unavailable.');
           return json(200, summary);
         }
@@ -1225,6 +1232,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       if (request.method === 'POST') {
         const payload = body(request.body);
+        if (url.pathname === '/remote/catalog/listing') {
+          const directory = registration(string(payload.providerId, 'providerId')).directory;
+          if (!directory.listing) throw new HostRequestError(400, 'unsupported_configuration', 'Manual listing is unavailable for this provider.');
+          if (Object.keys(payload).some(key => key !== 'providerId')) throw new HostRequestError(400, 'invalid_request', 'Only providerId is accepted.');
+          void directory.listing.refresh().catch(() => undefined);
+          return json(202, directory.listing.status());
+        }
         if (url.pathname === '/remote/session/call') {
           // Through the Relay only the owner asks: the website, the command line it signed in, or a Controller using it.
           if (Object.keys(payload).some(key => key !== 'request') || request.sessionId) throw new HostRequestError(400, 'invalid_request', 'A session command is required.');
@@ -1380,7 +1394,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     async session(ref) {
       if (options.providerEnabled?.(ref.providerId) === false) return undefined;
-      return catalogs.get(ref.providerId)?.session(ref.nativeSessionId);
+      const directory = registrations.get(ref.providerId)?.directory;
+      return directory?.sessionSummary ? directory.sessionSummary(ref.nativeSessionId) : catalogs.get(ref.providerId)?.session(ref.nativeSessionId);
     },
     async history(ref, query) {
       if (options.providerEnabled?.(ref.providerId) === false) throw new AgentRuntimeError('native_session_unavailable', 'The provider is disabled.');
@@ -1441,8 +1456,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (!agent.setPlanning) throw Object.assign(new Error('This session has no planning mode.'), { code: 'unsupported_configuration' });
       await cliExecute(agent, operationId, 'set_planning', { active }, async () => { await agent.setPlanning!(active); return { accepted: true }; });
     }),
-    async rename(ref, title) {
-      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', body: JSON.stringify({ ...ref, title }) });
+    async rename(ref, title, operationId) {
+      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', operationScope: 'host:cli',
+        body: JSON.stringify({ ...ref, title, operationId: cliOperation(operationId) }) });
       const renamed = JSON.parse(result.body) as { title?: string; error?: string; code?: string };
       if (result.status >= 400 || typeof renamed.title !== 'string') throw Object.assign(new Error(renamed.error ?? 'The session could not be renamed.'), { code: renamed.code ?? 'rename_failed' });
       return renamed.title;

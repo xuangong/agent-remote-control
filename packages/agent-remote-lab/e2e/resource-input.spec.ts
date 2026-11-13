@@ -18,6 +18,8 @@ function fixtureArchive(): Buffer {
 const bytes = fixtureArchive();
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 test('transfers a resource through the composer, native file and replay download with retry and draft reload', async ({ page }, info) => {
+  // The native fixture Relay and its evidence directory exist only under playwright.resources.config.ts.
+  test.skip(!info.project.name.startsWith('resource-'), 'Runs under playwright.resources.config.ts.');
   await page.goto(`/e2e/fixtures/resource-input.html?agent=${info.project.name}`);
   await expect(page.getByTestId('connection')).toHaveText('ready');
   await page.getByRole('button', { name: 'Toggle upload rejection' }).click();

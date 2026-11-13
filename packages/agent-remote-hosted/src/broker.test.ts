@@ -744,7 +744,7 @@ it('does not expose Controller folder browsing to a shared session user', async 
 it.each([
   ['/v1/remote/hosts/host/attach', { providerId: 'codex', nativeSessionId: 'native-session' }, 'session_attach_timeout'],
   ['/v1/remote/hosts/host/catalog?providerId=codex', undefined, 'host_read_timeout'],
-  ['/v1/remote/hosts/host/create', { providerId: 'codex', operationId: operationOne }, 'host_timeout'],
+  ['/v1/remote/hosts/host/create', { providerId: 'codex', operationId: operationOne }, 'session_create_pending'],
 ] as const)('classifies the deadline for %s without claiming native failure', async (path, body, code) => {
   const { broker } = await restoredFixture({ rpcTimeoutMs: 20 });
   const response = await broker.handleRequest(new Request(`https://relay.example${path}`, body ? {
@@ -752,7 +752,7 @@ it.each([
   } : undefined));
   expect(response?.status).toBe(504);
   const error = await response!.json();
-  expect(error).toMatchObject({ code, requestId: expect.any(String) });
+  expect(error).toMatchObject({ code, ...(code === 'session_create_pending' ? {} : { requestId: expect.any(String) }) });
   if (code === 'session_attach_timeout') expect(error.error).toContain('may still be opening');
   if (code === 'host_read_timeout') expect(error.error).not.toContain('operation outcome');
 });
@@ -1075,4 +1075,29 @@ it('marks the sessions a share recipient creates or reopens, and only those, for
   expect(calls.map(call => [call.path, call.body.shared ?? false])).toEqual([
     ['/remote/create', true], ['/remote/create', false], ['/remote/attach', true], ['/remote/attach', false],
   ]);
+});
+
+it('routes manual catalog listing reads and starts only for the Host owner', async () => {
+  const { broker, native } = await restoredFixture({ ownerSubject: 'alice' });
+  const calls: Array<{ method: string; path: string; body?: string }> = [];
+  native.onMessage(data => {
+    const message = JSON.parse(data);
+    if (message.type !== 'rpc_request') return;
+    calls.push(message);
+    native.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: message.method === 'POST' ? 202 : 200,
+      body: JSON.stringify({ refreshing: message.method === 'POST', complete: false, version: 1 }) }));
+  });
+  const request = (start = false, extra = {}) => new Request(`https://relay.example/v1/remote/hosts/host/catalog/listing${start ? '' : '?providerId=codex'}`,
+    start ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ providerId: 'codex', ...extra }) } : {});
+  const owner = { principalSubject: () => 'alice' };
+  for (const start of [false, true]) expect((await broker.handleRequest(request(start), { principalSubject: () => 'bob' }))?.status).toBe(403);
+  expect(calls).toHaveLength(0);
+  expect((await broker.handleRequest(request(), owner))?.status).toBe(200);
+  expect((await broker.handleRequest(request(true), owner))?.status).toBe(202);
+  expect(calls.map(({ method, path, body }) => ({ method, path, ...(body ? { body } : {}) }))).toEqual([
+    { method: 'GET', path: '/remote/catalog/listing?providerId=codex' },
+    { method: 'POST', path: '/remote/catalog/listing', body: '{"providerId":"codex"}' },
+  ]);
+  expect((await broker.handleRequest(request(true, { refresh: true }), owner))?.status).toBe(400);
+  expect(calls).toHaveLength(2);
 });

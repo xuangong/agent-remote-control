@@ -154,3 +154,17 @@ describe('Agent Remote uplink codecs', () => {
     expect(protocol.decodeUplinkMessage(JSON.stringify(value)).status).toBe('rejected');
   });
 });
+
+it('encodes manual listing status reads and explicit refreshes without a session target', () => {
+  const read = { uplinkVersion: 2, type: 'rpc_request', requestId: 'listing', method: 'GET', path: '/remote/catalog/listing?providerId=codex' } as const;
+  const refresh = { ...read, method: 'POST', path: '/remote/catalog/listing', body: '{"providerId":"codex"}' } as const;
+  for (const request of [read, refresh]) {
+    expect(protocol.encodeRemoteHostUplinkMessage(request).status).toBe('ok');
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(request))).toEqual({ status: 'ok', value: request });
+  }
+  for (const request of [{ ...read, body: '{}' }, { ...refresh, body: undefined }, { ...refresh, sessionId: 'session' }]) {
+    expect(protocol.decodeRemoteHostUplinkMessage(JSON.stringify(request)).status).toBe('rejected');
+  }
+  expect(protocol.isSessionListingStatus({ refreshing: false, complete: false, version: 0 })).toBe(true);
+  expect(protocol.isSessionListingStatus({ refreshing: true, complete: false, version: -1 })).toBe(false);
+});

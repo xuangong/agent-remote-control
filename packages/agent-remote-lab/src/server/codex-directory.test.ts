@@ -49,6 +49,8 @@ it('creates one native process and attaches it even before Codex persists the th
 it('imports the selected native thread and reconstructs its history without a new thread', async () => {
   const f = fixture();
   closes.push(() => f.directory.close!());
+  expect(await f.directory.list()).toEqual([]);
+  await f.directory.listing!.refresh();
   expect(await f.directory.list()).toEqual([expect.objectContaining({ nativeSessionId: 'saved', title: 'Saved conversation' })]);
   const session = await f.directory.open('saved');
   const iterator = session.observe()[Symbol.asyncIterator]();

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
@@ -7,11 +7,14 @@ import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 
 const scope = new ReadingPositions('image-browser-fixture');
+const recipientLifetime = {};
 function Fixture() {
   const uploadDelay = Number(new URLSearchParams(location.search).get('uploadDelay') ?? 100);
   const [session, setSession] = useState('one');
   const [ready, setReady] = useState(true);
   const [fail, setFail] = useState(false);
+  const failRef = useRef(fail); failRef.current = fail;
+  const recipient = useMemo(() => ({ identity: JSON.stringify(['image-browser-fixture', session]), lifetime: recipientLifetime, isCurrent: () => true }), [session]);
   const [sent, setSent] = useState<readonly MessagePart[]>([]);
   const state = { ...replicaState, timeline: { ...replicaState.timeline, hasOlder: false, entries: sent.length ? [{
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-22T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
@@ -21,14 +24,14 @@ function Fixture() {
     capabilities: { ...replicaState.agent!.capabilities, imageInput: { mediaTypes: ['image/png', 'image/jpeg', 'image/webp'] as const, maxImages: 8, maxImageBytes: 10485760, maxMessageBytes: 20971520 } } } };
   return <RecoveryScope.Provider value={scope}><div style={{ height: '100dvh', display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr) auto' }}>
     <nav><button onClick={() => setSession(value => value === 'one' ? 'two' : 'one')}>Switch session</button><button onClick={() => setReady(value => !value)}>Toggle connection</button><button onClick={() => setFail(value => !value)}>Toggle upload failure</button></nav>
-    <LabWorkbench state={{ ...state, agent: { ...state.agent, capabilities: { ...state.agent.capabilities, imageInput: { ...state.agent.capabilities.imageInput, mediaTypes: [...state.agent.capabilities.imageInput.mediaTypes] } } } }} sessionStatus={ready ? 'ready' : 'catching_up'} draftSessionKey={session} actions={{
+    <LabWorkbench state={{ ...state, agent: { ...state.agent, capabilities: { ...state.agent.capabilities, imageInput: { ...state.agent.capabilities.imageInput, mediaTypes: [...state.agent.capabilities.imageInput.mediaTypes] } } } }} sessionStatus={ready ? 'ready' : 'catching_up'} draftSessionKey={session} imageRecipient={recipient} actions={{
       sendMessage: async text => { setSent([{ type: 'text', text }]); },
       sendMessageContent: async content => { setSent([...content]); },
       uploadImage: async (file, uploadId, options) => {
         options?.onProgress?.(Math.round(file.size / 2), file.size);
         await new Promise(resolve => setTimeout(resolve, uploadDelay));
         if (options?.signal?.aborted) throw new DOMException('Paused', 'AbortError');
-        if (fail) throw new Error('Fixture upload failed. Retry this image.');
+        if (failRef.current) throw new Error('Fixture upload failed. Retry this image.');
         const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), byte => byte.toString(16).padStart(2, '0')).join('');
         const image = new Image();
         const url = URL.createObjectURL(file);

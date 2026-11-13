@@ -166,6 +166,42 @@ it('invalidates readiness tokens on input admission and returns normal started a
   } finally { await session.dispose(); }
 });
 
+it.each(['starting', 'ready'])('keeps readiness valid during MCP startup progress: %s', async status => {
+  const f = fixture();
+  const session = await f.provider.createSession({ sessionId: 'logical', cwd: f.cwd });
+  try {
+    await session.nativeEvidence!.inspectReadiness();
+    const token = session.nativeEvidence!.captureValidity();
+    let reads = 0;
+    f.overrides.set('thread/queue/list', () => {
+      reads++;
+      f.notify('mcpServer/startupStatus/updated', { threadId: 'native-B', name: 'tools', status });
+      return { data: [], nextCursor: null };
+    });
+    expect(await session.nativeEvidence!.inspectReadiness()).toMatchObject({ idle: true, pendingInputs: 0 });
+    expect(reads).toBe(1);
+    expect(session.nativeEvidence!.isCurrent(token)).toBe(true);
+    expect(f.requests.some(request => request.method === 'turn/start')).toBe(false);
+  } finally { await session.dispose(); }
+});
+
+it.each([
+  ['mcpServer/startupStatus/updated', { name: 'tools', status: 'failed', error: 'Connection refused' }],
+  ['mcpServer/startupStatus/updated', { name: 'tools', status: 'unknown' }],
+  ['thread/status/changed', { status: { type: 'idle' } }],
+  ['thread/settings/updated', { threadSettings: { effort: 'high' } }],
+  ['thread/queue/updated', {}],
+])('invalidates retained readiness for a native change: %s %j', async (method, params) => {
+  const f = fixture();
+  const session = await f.provider.createSession({ sessionId: 'logical', cwd: f.cwd });
+  try {
+    await session.nativeEvidence!.inspectReadiness();
+    const token = session.nativeEvidence!.captureValidity();
+    f.notify(method, { threadId: 'native-B', ...params });
+    expect(session.nativeEvidence!.isCurrent(token)).toBe(false);
+  } finally { await session.dispose(); }
+});
+
 it('does not restore creation settings over native changes after the first input', async () => {
   const f = fixture();
   const creation = await f.provider.nativeEvidence.createEmpty({ sessionId: 'logical', cwd: f.cwd });

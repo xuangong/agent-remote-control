@@ -9,14 +9,14 @@ import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';
 import type { SessionHostAccessSource } from './session-callers.js';
 
-const codexProbeLimit = 10;
-const codexFullListingMaxAgeMs = 5 * 60_000;
+import { SessionListing, type SessionListingOptions } from './session-listing.js';
 
 /** Keeps new native sessions alive before and after their relay projection is attached. */
 export function createCodexSessionDirectory(
-  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Pick<AgentProviderAdapter, 'nativePrefix'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
+  provider: Pick<CodexAppServerProvider, 'listSessions' | 'createSession' | 'resumeSession' | 'openChildSession'> & Pick<AgentProviderAdapter, 'nativePrefix'> & Partial<Pick<CodexAppServerProvider, 'createdSessionIdMaxLength' | 'inspectSessionOwner' | 'releaseSessionOwner' | 'readSessionSummary' | 'readSessionTitle' | 'renameSession' | 'readSessionHistory' | 'readSessionWorkspace' | 'canReleaseSession' | 'reconcileIdleSession' | 'forkSession' | 'forkForPromptEdit' | 'validatePromptEdit'>>,
   workspaces: readonly AgentHostWorkspace[],
   references?: SessionReferenceStore,
+  listingOptions: SessionListingOptions = {},
 ): AgentHostDirectory {
   const opened = new Map<string, { session: AgentSession; handle: AgentPersistenceHandle; createdAt: string; extensionIdentity: string; nativeCreation?: string; nativePrefix?: string }>();
   const controllerTools = new Set<string>();
@@ -44,47 +44,9 @@ export function createCodexSessionDirectory(
       return { ...await readSource(source, query), sourceSessionId: source };
     }, sourceReferenceGuard(references, () => canonicalReader ?? reader()));
   }
-  let listing: { sessions: CodexSessionSummary[]; completedAt: number } | undefined;
-  let listingGeneration = 0;
-  const rememberListing = (sessions: CodexSessionSummary[], completedAt: number, generation: number) => {
-    if (generation === listingGeneration) listing = { sessions, completedAt };
-    return sessions;
-  };
-  async function listAll(): Promise<CodexSessionSummary[]> {
-    const generation = listingGeneration;
-    const summaries = new Map<string, CodexSessionSummary>();
-    let cursor: string | undefined;
-    const cursors = new Set<string>();
-    for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
-      const page = await provider.listSessions({ limit: 100, ...(cursor ? { cursor } : {}) });
-      for (const summary of page.sessions) summaries.set(summary.nativeSessionId, summary);
-      cursor = page.nextCursor;
-      if (!cursor) break;
-      if (cursors.has(cursor)) throw new Error('Codex returned a repeated catalog cursor.');
-      cursors.add(cursor);
-    }
-    return rememberListing([...summaries.values()], Date.now(), generation);
-  }
-  /**
-   * Codex reads every listed session, so a full listing costs several seconds per hundred sessions. Sessions sort by
-   * update time, and anything created or updated since the last listing sorts above every session it saw unchanged.
-   * When the newest few sessions end with an unchanged one, the rest of the previous listing is still current, except
-   * for removals below that point, which the next full listing picks up.
-   */
-  async function listChanged(): Promise<CodexSessionSummary[]> {
-    const previous = listing, generation = listingGeneration;
-    if (!previous || Date.now() - previous.completedAt >= codexFullListingMaxAgeMs) return listAll();
-    const probe = await provider.listSessions({ limit: codexProbeLimit });
-    if (!probe.nextCursor) return rememberListing(probe.sessions, Date.now(), generation);
-    const boundary = probe.sessions.at(-1);
-    const known = boundary && previous.sessions.find(summary => summary.nativeSessionId === boundary.nativeSessionId);
-    if (!boundary || known?.updatedAt !== boundary.updatedAt) return listAll();
-    const probed = new Set(probe.sessions.map(summary => summary.nativeSessionId));
-    const unchanged = previous.sessions.filter(summary => !probed.has(summary.nativeSessionId) && Date.parse(summary.updatedAt) <= Date.parse(boundary.updatedAt));
-    return rememberListing([...probe.sessions, ...unchanged], previous.completedAt, generation);
-  }
+  const listing = new SessionListing(query => provider.listSessions(query), listingOptions);
   async function discover(): Promise<CodexSessionSummary[]> {
-    const summaries = new Map((await listChanged()).map(summary => [summary.nativeSessionId, summary]));
+    const summaries = new Map((await listing.sessions()).map(summary => [summary.nativeSessionId, summary]));
     for (const [nativeSessionId, entry] of opened) {
       const info = await entry.session.runtimeInfo();
       const previous = summaries.get(nativeSessionId);
@@ -102,7 +64,12 @@ export function createCodexSessionDirectory(
       const info = await session.runtimeInfo();
       if (closed) throw new Error('Codex directory is closed.');
       if (!info.persistence || !info.sessionId) throw new Error('Codex did not return a native persistence handle.');
-      opened.set(info.sessionId, { session, handle: info.persistence, createdAt: new Date().toISOString(), extensionIdentity });
+      const createdAt = new Date().toISOString();
+      opened.set(info.sessionId, { session, handle: info.persistence, createdAt, extensionIdentity });
+      const previous = (await listing.sessions()).find(item => item.nativeSessionId === info.sessionId);
+      await listing.record({ nativeSessionId: info.sessionId, providerId: 'codex', title: previous?.title ?? 'New Codex session',
+        ...(info.cwd ? { workspace: info.cwd } : {}), ...(info.model ? { model: info.model } : {}),
+        createdAt: previous?.createdAt ?? createdAt, updatedAt: createdAt, state: 'unknown' });
       return info.sessionId;
     } catch (error) {
       try { await session.dispose(); } catch (cleanupError) {
@@ -113,10 +80,17 @@ export function createCodexSessionDirectory(
   }
   return {
     providerId: 'codex',
+    listing,
+    ...(provider.readSessionSummary ? { async sessionSummary(id: string) {
+      const summary = await provider.readSessionSummary!(id);
+      if (summary) await listing.record(summary);
+      return summary;
+    } } : {}),
     ...(provider.readSessionTitle ? { sessionTitle: provider.readSessionTitle.bind(provider) } : {}),
     ...(provider.renameSession ? { async renameSession(nativeSessionId: string, title: string) {
-      // A rename need not move the session in update order, so the next listing must read it again.
-      try { return await provider.renameSession!(nativeSessionId, title); } finally { listing = undefined; listingGeneration++; }
+      const renamed = await provider.renameSession!(nativeSessionId, title);
+      await listing.retitle(nativeSessionId, renamed);
+      return renamed;
     } } : {}),
     requiresController: id => controllerTools.has(id),
     supportsPromptEditing: !!provider.forkForPromptEdit,
@@ -279,7 +253,7 @@ export function createCodexSessionDirectory(
       if (closed) throw new Error('Codex directory is closed.');
       return provider.openChildSession(parentNativeSessionId, nativeSessionId);
     },
-    async close() { closed = true; await discovery?.catch(() => undefined);
+    async close() { closed = true; await discovery?.catch(() => undefined); await listing.close();
       await Promise.allSettled([...opened.values()].map(({ session }) => session.dispose())); opened.clear(); },
   };
 }

@@ -93,3 +93,17 @@
   .lab-global-view-slot .lab-view-options-trigger { width: 44px; }
   .lab-global-view-slot .lab-view-options-trigger > span { display: none; }
 }
+
+.lab-session-connection-toggle { white-space: nowrap; font-size: 11px; }
+.lab-session-disconnected { margin: 4px 0; color: var(--obs-text-secondary); font-size: 12px; }
+
+.lab-session-heading > .lab-session-heading-title { gap: 6px; }
+.lab-session-heading-title > .agent-session-attributions-toggle { flex: 0 0 auto; }
+@container session-view (max-width: 760px) {
+  .lab-workbench-heading.lab-session-heading { flex-wrap: wrap; gap: 2px 6px; }
+  .lab-session-heading > .lab-session-heading-title {
+    position: static; order: -1; flex: 1 0 100%; box-sizing: border-box; min-height: 28px; padding-inline: 34px;
+  }
+  .lab-workbench-heading.lab-session-heading > .lab-session-heading-leading,
+  .lab-workbench-heading.lab-session-heading > .lab-session-heading-trailing { gap: 4px; }
+}

@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, webkit, expect as browserExpect } from '@playwright/test';
@@ -10,9 +10,12 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
     const source = `
       import React, { useState } from 'react';
       import { createRoot } from 'react-dom/client';
+      import './session-view-styles.ts';
       import { createReplicaState } from '@orchardworks/agent-remote-web';
       import { LabWorkbench } from './components/LabWorkbench.tsx';
-      const state = { ...createReplicaState(), agent: {
+      // A synchronized session has received its first Timeline page; until then queued messages keep waiting.
+      const replica = createReplicaState();
+      const state = { ...replica, timeline: { ...replica.timeline, initialized: true }, agent: {
         id: 'one', providerId: 'test', status: 'idle', activeTurn: null, createdAt: '', updatedAt: '',
         capabilities: { sendMessage: true, history: true, steer: false, cancel: false, readResource: false },
         pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' },
@@ -25,12 +28,14 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       }
       createRoot(document.getElementById('root')).render(<View />);
     `;
+    // The page gets the product's styles, including those the components import, from the bundle.
     const bundled = await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) },
-      bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
-    const css = (await Promise.all(['../src/ui/tokens.css', '../../agent-remote-web/src/styles.css', '../src/app.css'].map(path => readFile(new URL(path, import.meta.url), 'utf8')))).join('\n').replace(/^@import.*$/gm, '');
+      bundle: true, write: false, outfile: 'fixture.js', loader: { '.woff2': 'dataurl' }, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } });
+    const script = bundled.outputFiles.find(file => file.path.endsWith('.js'))!.text;
+    const css = bundled.outputFiles.find(file => file.path.endsWith('.css'))!.text;
     const server = createServer((request, response) => {
       response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript' : 'text/html');
-      response.end(request.url === '/fixture.js' ? bundled.outputFiles[0]!.text : `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}\n#root { height: 100dvh; }</style><div id="root"></div><script src="/fixture.js"></script>`);
+      response.end(request.url === '/fixture.js' ? script : `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}\n#root { height: 100dvh; }</style><div id="root"></div><script src="/fixture.js"></script>`);
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const browser = await engine.launch({ headless: true });
@@ -40,9 +45,9 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(`http://127.0.0.1:${(server.address() as { port: number }).port}`);
-      await page.waitForLoadState('networkidle');
-      expect(errors).toEqual([]);
       const input = page.getByRole('textbox', { name: 'Message', exact: true });
+      await browserExpect(input).toBeVisible();
+      expect(errors).toEqual([]);
       for (const text of ['Please check the reconnect logs and summarize the findings.', 'OK', 'Finally explain the result.']) {
         await input.fill(text);
         await input.press('Enter');

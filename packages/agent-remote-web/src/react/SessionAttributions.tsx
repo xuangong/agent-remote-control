@@ -50,7 +50,7 @@ export function SessionAttributions({ description, onNavigate, children }: Sessi
   const label = expanded ? 'Hide session attributions' : 'Show session attributions';
   const toggle = <button type="button" className="agent-session-attributions-toggle" title={label} aria-label={label}
     aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpanded(value => !value)}>
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
+    <span>Info</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"
       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
   </button>;
   const details = expanded ? <div id={detailsId} className="agent-session-attributions">

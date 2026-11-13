@@ -82,7 +82,13 @@ test('cached startup keeps the editor while business traffic waits for access', 
       element.scrollTop = -150;
       element.dispatchEvent(new Event('scroll'));
     });
+    // The reading line is the todo entry: its distance from the viewport top is what the reader sees.
+    const readingLine = () => timeline.evaluate(element => {
+      const entry = element.querySelector('[data-entry-key$=":todo"]')!.getBoundingClientRect();
+      return entry.top - element.getBoundingClientRect().top;
+    });
     const readingTop = await timeline.evaluate(element => element.scrollTop);
+    expect(readingTop).toBeLessThan(-100);
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
     const gate = new Promise<void>(resolve => { release = resolve; });
     let waiting = true;
@@ -93,7 +99,12 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
     await expect(input).toBeVisible();
     await expect(input).toHaveText('My unsent draft');
-    await expect.poll(async () => Math.abs(await timeline.evaluate(element => element.scrollTop) - readingTop)).toBeLessThan(4);
+    // The cached entries do not yet carry the details the live session adds above the reading line, so the restored
+    // position is only approximate: the reader must still be above the latest messages and see the same entry.
+    await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBeLessThan(-60);
+    expect(await readingLine()).toBeGreaterThan(-120);
+    expect(await readingLine()).toBeLessThan(await timeline.evaluate(element => element.clientHeight));
+    const cachedReadingLine = await readingLine();
     await page.screenshot({ path: testInfo.outputPath('cached-workspace.png') });
     const editor = await input.elementHandle();
     await input.fill('Continue typing before authorization');
@@ -102,7 +113,8 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await expect(page.getByTestId('connection-summary')).toContainText('Ready');
     await expect.poll(() => editor!.evaluate(element => element.isConnected)).toBe(true);
     await expect(input).toHaveText('Continue typing before authorization');
-    await expect.poll(async () => Math.abs(await timeline.evaluate(element => element.scrollTop) - readingTop)).toBeLessThan(4);
+    // Authorization and the live details must not move what the reader is looking at.
+    await expect.poll(async () => Math.abs(await readingLine() - cachedReadingLine)).toBeLessThan(4);
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
   } finally { release?.(); await f.close(); }
 });

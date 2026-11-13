@@ -2,6 +2,8 @@
 
 Status: proposed, awaiting user review. No functional-layout changes have been implemented.
 
+**Whole-product review, 2026-11-13:** This roster is a partial exploration. Review [workbench function organization](2026-11-13-workbench-function-organization-review.md) before approving its groupings and entry placement. In particular, the prototype's local Bot filter does not represent the production header's global search contract.
+
 This review narrows the next step of the approved modernization design. The user requested advance review before changes to functional layout, including desktop and phone. Reference research: [agent workbench design references](../../investigations/2026-11-13-agent-workbench-design-references.md).
 
 ## Protected Session View boundary

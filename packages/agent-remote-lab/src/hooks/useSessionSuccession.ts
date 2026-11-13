@@ -40,6 +40,7 @@ interface SuccessionOptions {
   connections: ConversationConnections; replicaFor(id: string): AgentReplica;
   validateTarget?(selection: SessionEntry, viewId: string, document: CompositionDocument): void;
   targetRevision?: string;
+  attachmentAllowed?(slotId: string, document: CompositionDocument): boolean;
   cachedReplicaFor?(selection: Selection): AgentReplica | undefined;
   directory(hostId: string): SessionDirectoryClient;
   textStore(scope: string): DraftStore; tracking(): SessionTracking; ask(): ReturnType<typeof useAskConversations>;
@@ -129,6 +130,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       metadata: undefined as AbortController | undefined, attachment: undefined as AbortController | undefined,
       navigation: undefined as AbortController | undefined,
       askRecipients: new Map<string, { targetKey: string; participant: string; connection: unknown; recipient?: ImageDraftRecipient; retire(): void; update(): void; stop(): void }>(),
+      suspendedSlots: new Set<string>(),
       sides: new Map<string, OpenedSession & { viewId: string }>(), sideRequests: new Map<string, AbortController>(), sideAttempted: new Set<string>(),
       trackPublication: undefined as { revision: number; retainedCurrent(): boolean; context: CompositionApplicationContext } | undefined,
     };
@@ -280,14 +282,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const reusable = cached && !externallyOwned && agent?.id === cached.agentId && agent.providerId === identity.providerId
       && agent.runtimeInfo.providerId === identity.providerId && agent.runtimeInfo.sessionId === identity.nativeSessionId;
     const directory = latest.current.directory(identity.hostId ?? 'local');
-    const attached = runtime.attached && sessionKey(runtime.attached) === sessionKey(identity) ? runtime.attached : undefined;
+    const attached = !runtime.suspendedSlots.has(slot.id) && runtime.attached && sessionKey(runtime.attached) === sessionKey(identity) ? runtime.attached : undefined;
     const activity = latest.current.tracking().observations[sessionKey(identity)];
-    const observed = !externallyOwned && activity?.connection === 'ready' && !activity.error ? activity.agentId : undefined;
+    const observed = !runtime.suspendedSlots.has(slot.id) && !externallyOwned && activity?.connection === 'ready' && !activity.error ? activity.agentId : undefined;
     const response = attached && !takeOver ? { agentId: attached.agentId } : reusable && !takeOver ? { agentId: cached.agentId }
       : observed && !takeOver ? { agentId: observed } : slot.metadata?.parentNativeSessionId
       ? await directory.attachChild(identity.providerId, slot.metadata.parentNativeSessionId, identity.nativeSessionId, signal)
       : await directory.attach(identity.providerId, identity.nativeSessionId, signal, takeOver);
     signal.throwIfAborted();
+    runtime.suspendedSlots.delete(slot.id);
     if (response.nativeSessionId !== undefined && response.nativeSessionId !== identity.nativeSessionId) throw new Error('The Host returned a different native session.');
     const currentSlot = runtime.document.slots.find(candidate => candidate.id === slot.id && sessionKey(selectionFor(candidate)) === sessionKey(identity));
     return { ...slot.metadata, ...identity, agentId: response.agentId, title: currentSlot?.metadata?.title ?? title, viewId: slot.id };
@@ -389,14 +392,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   async function attachDesired(explicit = false): Promise<void> {
     const desired = runtime.desired;
-    if (!live() || !desired || runtime.result?.status !== 'applied') return;
+    if (!live() || !desired || runtime.result?.status !== 'applied' || latest.current.attachmentAllowed?.(desired.slot.id, runtime.document) === false) return;
     const attempt = JSON.stringify([desired.slot.id, desired.target, desired.revision]);
     if (!explicit && runtime.attempted.has(attempt)) return;
     runtime.attempted.add(attempt); retireBinding({ hostId: desired.target.hostId, ...desired.target.native, title: desired.title }); runtime.activeAttempt = attempt;
     const navigationLease = runtime.navigationLease;
     const authority = runtime.authority;
     const controller = new AbortController(); runtime.attachment = controller;
-    const current = () => live() && runtime.authority === authority && runtime.desired === desired && runtime.attachment === controller && !controller.signal.aborted;
+    const current = () => live() && runtime.authority === authority && runtime.desired === desired && runtime.attachment === controller && !controller.signal.aborted
+      && latest.current.attachmentAllowed?.(desired.slot.id, runtime.document) !== false;
     runtime.error = undefined; publish();
     try {
       const identity = { hostId: desired.target.hostId, providerId: desired.target.native.providerId, nativeSessionId: desired.target.native.nativeSessionId };
@@ -947,6 +951,18 @@ export function useSessionSuccession(options: SuccessionOptions) {
       supplier.update();
     }
   }
+  useEffect(() => {
+    const desired = runtime.desired;
+    if (!desired) return;
+    if (latest.current.attachmentAllowed?.(desired.slot.id, runtime.document) === false) {
+      runtime.suspendedSlots.add(desired.slot.id);
+      if (runtime.binding || runtime.attachment || runtime.navigationLease) {
+        retireBinding();
+        runtime.attempted.delete(JSON.stringify([desired.slot.id, desired.target, desired.revision]));
+        publish();
+      }
+    } else if (live() && runtime.discovered && !runtime.discovering && !runtime.binding && !runtime.activeAttempt) void attachDesired();
+  });
   useEffect(() => { reconcileAskRecipients(); restoreSides(); });
   useEffect(() => {
     runtime.mounted = true;
@@ -1058,7 +1074,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   function sourceStale(source: OpenedSession & { viewId?: string }): SourceStaleness | undefined {
     const id = source.viewId, slot = runtime.document.slots.find(slot => slot.id === id);
-    if (!live()) return 'inactive';
+    if (!live() || id && latest.current.attachmentAllowed?.(id, runtime.document) === false) return 'inactive';
     if (!slot || sessionKey(selectionFor(slot)) !== sessionKey(source)) return 'view';
     if (id === desired?.slot.id && runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId) return;
     const connection = latest.current.connections.find(source), agent = connection?.replica.getState().agent;
@@ -1070,7 +1086,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected, displaySlot,
     state: visibleState, sessionState: runtime.binding?.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
     layoutView, layoutRevision: runtime.layoutRevision, captureLayout, binding: bound, imageRecipient: bound?.recipient, error: runtime.error, result: runtime.result,
-    observerReady: live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound),
+    observerReady: live() && runtime.discovered && !runtime.discovering && (!runtime.active || !!bound || !!desired && options.attachmentAllowed?.(desired.slot.id, runtime.document) === false),
     isCurrent: () => !!runtime.binding?.isCurrent(), open,
     restore: (session: OpenedSession) => open(session, undefined, undefined, undefined, undefined, undefined, undefined, true),
     openAttached: (session: OpenedSession, restoreLayout = false) => open(session, undefined, undefined, undefined, undefined, undefined, session, restoreLayout),

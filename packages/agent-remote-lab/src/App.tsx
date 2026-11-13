@@ -1,3 +1,4 @@
+import { useWindowConnections, WindowConnectionsContext } from './hooks/useWindowConnections.js';
 import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
@@ -418,7 +419,9 @@ function AppContent({
     const key = sessionKey(session);
     setMissingSessions(current => current.has(key) ? current : new Set([...current, key]));
   }, []);
+  const windowConnections = useWindowConnections(baseUrl);
   const succession = useSessionSuccession({
+    attachmentAllowed: windowConnections.enabledSlot,
     targetRevision: JSON.stringify(teamRoster),
     validateTarget(selection, viewId, document) {
       const roster = teamRosterRef.current;
@@ -463,7 +466,7 @@ function AppContent({
   // A supplied snapshot is a standalone rendering input; it does not require a Window controller.
   const workspaceController = useWindowWorkspace(baseUrl, userScoped, accessReady, succession.document, !initialState && bootstrapComplete, { mode: navigation.mode, onSectionRoute: navigation.acceptSectionRoute });
   const sharedWindow = initialState ? undefined : workspaceController.window;
-  const windowRetention = useWindowSessionRetention(connections, sharedWindow);
+  const windowRetention = useWindowSessionRetention(connections, sharedWindow, undefined, windowConnections.enabled);
   useEffect(() => {
     for (const id of workspaceController.deletedWindowIds) windowRetention.forgetWindow(id);
   }, [workspaceController.deletedWindowIds, windowRetention]);
@@ -1755,9 +1758,17 @@ function AppContent({
   const observeAttention = useCallback((session: SessionEntry, value: import('./tracking-state.js').SessionObservation) => {
     if (latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
   }, [attention.observe]);
+  const activityConnectionEnabled = useCallback((session: SessionEntry) => {
+    const key = sessionKey(session);
+    const windows = sharedWindow ? [sharedWindow, ...windowWorkspace.groups.filter(group => group.window.id !== sharedWindow.id).map(group => group.window)]
+      : windowWorkspace.groups.map(group => group.window);
+    const views = windows.flatMap(window => window.views.filter(view => view.binding && sessionKey(view.binding) === key)
+      .map(view => windowConnections.enabled(window.id, view.id)));
+    return !views.length || views.some(Boolean);
+  }, [sharedWindow, windowWorkspace.groups, windowConnections]);
   const tracking = useSessionTracking(baseUrl, transport, windowMode && addressSession ? sessionKey(addressSession) : undefined,
     windowMode ? openWindows : [], windowMode ? askActivitySessions : [], connections, accessReady && succession.observerReady,
-    windowMode ? visibleWindows : visibleBots, observeAttention, windowMode ? {} : { includeTracked: false, additionalSessions: botTargets });
+    windowMode ? visibleWindows : visibleBots, observeAttention, { sessionEnabled: activityConnectionEnabled, ...(!windowMode ? { includeTracked: false, additionalSessions: botTargets } : {}) });
   const eligible = attention.enabled ? windowMode ? [...tracking.sessions, ...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
   latestEligible.current = new Set(eligible.map(sessionKey));
   const displayed = attention.enabled ? windowMode ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
@@ -2824,11 +2835,17 @@ function AppContent({
       {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       </div>;
-  return <SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
+  return <WindowConnectionsContext.Provider value={{
+    enabled: slotId => windowConnections.enabledSlot(slotId, succession.document),
+    setEnabled: (slotId, enabled) => {
+      const owner = succession.document.windowBindings?.find(entry => entry.slotId === slotId);
+      if (owner) windowConnections.setEnabled(owner.windowId, owner.viewId, enabled);
+    },
+  }}><SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
     sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
     tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
     hostNames: new Map([['local', 'Lab server'], ...remoteHosts.map(host => [host.id, host.name] as const)]),
-  }), navigate: navigateAttribution }}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
+  }), hostName: id => remoteHosts.find(host => host.id === id)?.name, navigate: navigateAttribution }}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const mapped = currentGroupBinding(requested?.viewId);
     if (mapped && sessionKey(mapped.binding) !== sessionKey(source)) throw new Error('The session view binding changed. Reopen its current conversation.');
     const roster = teamRosterRef.current;
@@ -3209,7 +3226,7 @@ function AppContent({
     </Sheet> : null}
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch} />
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
-    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider>;
+    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></WindowConnectionsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

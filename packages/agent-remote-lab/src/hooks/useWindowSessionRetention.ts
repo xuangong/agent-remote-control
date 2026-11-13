@@ -5,28 +5,34 @@ import { sessionKey, type SessionEntry } from '../session-tree.js';
 
 type Identity = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>;
 const RECENT_SESSION_LIMIT = 24;
+const allConnected = () => true;
 
 /**
  * Retains open conversations by when they were last shown. Each Window's conversations form one unit, and a
  * conversation shown outside its Window's panes (such as one opened from Track and later replaced) is a unit
  * of its own. The most recently shown units are kept whole up to the limit; the current Window is always kept.
  */
-export function useWindowSessionRetention(connections: ConversationConnections, window?: WorkspaceWindow, limit = RECENT_SESSION_LIMIT) {
+export function useWindowSessionRetention(connections: ConversationConnections, window?: WorkspaceWindow, limit = RECENT_SESSION_LIMIT, enabled: (windowId: string, viewId: string) => boolean = allConnected) {
   const retention = useMemo(() => {
     const owner = `window-sessions:${crypto.randomUUID()}`;
-    const windows = new Map<string, { sessions: Map<string, Identity>; shownAt: number }>();
+    const windows = new Map<string, { window: WorkspaceWindow; sessions: Map<string, Identity>; shownAt: number }>();
     const loose = new Map<string, { target: Identity; shownAt: number }>();
     const forgotten = new Set<string>();
+    const disconnectedSessions = new Set<string>();
     let shown = new Map<string, Identity>();
     let current: WorkspaceWindow | undefined, active = false, updating = false;
     // Only the order matters, and several changes can happen within one millisecond.
     let clock = 0;
+    let allowed = allConnected as (windowId: string, viewId: string) => boolean;
+    const disabledTargets = () => new Set([...windows.values()].flatMap(unit => unit.window.views
+      .flatMap(view => view.binding && !allowed(unit.window.id, view.id) ? [sessionKey(view.binding)] : [])));
     const publish = () => {
       // Conversations that closed no longer take a place.
       const open = (targets: Identity[]) => targets.filter(target => connections.find(target));
+      for (const key of disabledTargets()) disconnectedSessions.add(key);
       const units = [
-        ...[...windows].map(([id, unit]) => ({ shownAt: id === current?.id ? Infinity : unit.shownAt, targets: open([...unit.sessions.values()]) })),
-        ...[...loose.values()].map(entry => ({ shownAt: entry.shownAt, targets: open([entry.target]) })),
+        ...[...windows].map(([id, unit]) => ({ shownAt: id === current?.id ? Infinity : unit.shownAt, targets: open([...unit.sessions.values()].filter(target => unit.window.views.some(view => view.binding && sessionKey(view.binding) === sessionKey(target) && allowed(id, view.id)))) })),
+        ...[...loose.values()].filter(entry => !disconnectedSessions.has(sessionKey(entry.target))).map(entry => ({ shownAt: entry.shownAt, targets: open([entry.target]) })),
       ].sort((a, b) => b.shownAt - a.shownAt);
       const retained = new Map<string, Identity>();
       for (const unit of units) {
@@ -51,7 +57,7 @@ export function useWindowSessionRetention(connections: ConversationConnections, 
           const previous = windows.get(current.id);
           // A conversation that left the current Window keeps its own place in the order.
           for (const [key, target] of previous?.sessions ?? []) if (!sessions.has(key)) loose.set(key, { target, shownAt: now });
-          windows.set(current.id, { sessions, shownAt: previous?.shownAt ?? now });
+          windows.set(current.id, { window: current, sessions, shownAt: previous?.shownAt ?? now });
         }
         const inWindows = new Set([...windows.values()].flatMap(unit => [...unit.sessions.keys()]));
         const showing = new Map(connections.shownSessions().map(target => [sessionKey(target), target]));
@@ -67,9 +73,10 @@ export function useWindowSessionRetention(connections: ConversationConnections, 
         active = true;
         const stop = connections.subscribe(observe);
         observe();
-        return () => { active = false; stop(); windows.clear(); loose.clear(); forgotten.clear(); shown = new Map(); publish(); };
+        return () => { active = false; stop(); windows.clear(); loose.clear(); forgotten.clear(); disconnectedSessions.clear(); shown = new Map(); publish(); };
       },
-      setWindow(value?: WorkspaceWindow) {
+      setWindow(value: WorkspaceWindow | undefined, eligibility: typeof allowed) {
+        allowed = eligibility;
         const previous = current && windows.get(current.id);
         if (previous && current?.id !== value?.id) previous.shownAt = ++clock;
         current = value;
@@ -83,6 +90,6 @@ export function useWindowSessionRetention(connections: ConversationConnections, 
     };
   }, [connections, limit]);
   useEffect(() => retention.start(), [retention]);
-  useEffect(() => retention.setWindow(window), [retention, window]);
+  useEffect(() => retention.setWindow(window, enabled), [retention, window, enabled]);
   return useMemo(() => ({ forgetWindow: retention.forgetWindow }), [retention]);
 }

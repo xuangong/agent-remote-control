@@ -20,6 +20,7 @@ export interface AuxiliarySession { session: OpenedSession; liveAgentId?: string
 const noAuxiliarySessions: readonly AuxiliarySession[] = [];
 export interface SessionTrackingScope {
   includeTracked?: boolean;
+  sessionEnabled?(session: SessionEntry): boolean;
   additionalSessions?: readonly SessionEntry[];
 }
 const defaultScope: SessionTrackingScope = {};
@@ -54,8 +55,8 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     for (const session of scope.additionalSessions ?? []) union.set(sessionKey(session), { session });
     for (const session of openSessions) union.set(sessionKey(session), { session, liveAgentId: session.agentId });
     for (const { session, liveAgentId } of auxiliarySessions) union.set(sessionKey(session), { session, liveAgentId: liveAgentId ?? union.get(sessionKey(session))?.liveAgentId });
-    return [...union.values()];
-  }, [sessions, openSessions, auxiliarySessions, scope.includeTracked, scope.additionalSessions]);
+    return [...union.values()].filter(item => scope.sessionEnabled?.(item.session) !== false);
+  }, [sessions, openSessions, auxiliarySessions, scope.includeTracked, scope.additionalSessions, scope.sessionEnabled]);
   const current = useRef(sessions);
   const currentScope = useRef(baseUrl);
   const lifetime = useMemo(() => ({ mounted: true }), [baseUrl, transport]);

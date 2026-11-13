@@ -1,3 +1,4 @@
+import { useWindowConnections } from './useWindowConnections.js';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
@@ -190,4 +191,33 @@ it('retains conversations shown without a Window workspace by when they were las
     const second = f.acquire(t!); second.release(); await act(async () => {});
     expect(f.connections.agentIds).toEqual(['agent-t']);
   } finally { await view.close(); await f.close(); }
+}, 10000);
+
+
+it('drops disabled Window retention without closing another enabled view of the same session', async () => {
+  const f = await fixture(), target = await f.session('shared-disconnect');
+  const first = windowWith('first', [target]), second = windowWith('second', [target]);
+  let choose!: (value: WorkspaceWindow) => void, preferences!: ReturnType<typeof useWindowConnections>;
+  function Harness() {
+    const [window, setWindow] = useState(first); choose = setWindow;
+    preferences = useWindowConnections('retention-disconnect');
+    useWindowSessionRetention(f.connections, window, undefined, preferences.enabled);
+    return null;
+  }
+  const view = await render(<Harness />);
+  try {
+    const lease = f.acquire(target);
+    await vi.waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
+    const sent = vi.spyOn(f.sockets[0]!, 'send');
+    await act(async () => choose(second));
+    lease.release(); await Promise.resolve();
+    await act(async () => preferences.setEnabled('second', 'primary', false));
+    expect(f.connections.find(target)).toBeDefined();
+    await act(async () => preferences.setEnabled('first', 'primary', false));
+    await vi.waitFor(() => expect(f.connections.find(target)).toBeUndefined());
+    await vi.waitFor(() => expect(sent.mock.calls.some(([frame]) => JSON.parse(String(frame)).type === 'unsubscribe')).toBe(true));
+    await act(async () => choose(first));
+    expect(f.connections.find(target)).toBeUndefined();
+    expect(preferences.enabled('first', 'primary')).toBe(false);
+  } finally { await unmount(view); await f.close(); }
 }, 10000);

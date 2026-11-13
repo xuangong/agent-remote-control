@@ -98,3 +98,7 @@
 .lab-window-empty p { margin: 0; }
 
 .lab-primary-group:has(.lab-ask-viewport:not([hidden])) > .lab-primary-group-minimize { visibility: hidden; }
+
+@container session-view (max-width: 760px) {
+  .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-session-family > .lab-session-family-pane:not([hidden]):not(:has(~ .lab-session-family-pane:not([hidden]))) .lab-session-heading-trailing { padding-inline-end: 0; }
+}

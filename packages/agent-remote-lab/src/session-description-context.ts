@@ -4,6 +4,7 @@ import type { SessionEntry } from './session-tree.js';
 
 /** Product owners supply descriptions; containers resolve their navigation. */
 export interface SessionDescriptions {
+  hostName?(hostId: string): string | undefined;
   describe(session: SessionEntry): SessionDescription;
   navigate(attribution: SessionAttribution): void | Promise<void>;
 }

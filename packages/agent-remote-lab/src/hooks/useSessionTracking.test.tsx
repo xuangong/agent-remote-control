@@ -857,3 +857,26 @@ it('reads a shown conversation through its connection and subscribes to activity
     expect(tracking.observations[sessionKey(star)]?.changed).toBe(true);
   } finally { connections.clear(); }
 });
+
+it('stops activity tracking for a disconnected view without removing its tracked membership', async () => {
+  const scope = 'http://localhost/u/disconnected-tracking/'; saveTrackedSessions(scope, [star]);
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockResolvedValue({ agentId: 'agent-native' });
+  const closed = vi.fn(), connected = vi.fn();
+  const transport = { connect: (_id: string, listener: Parameters<RemoteAgentTransport['connect']>[1]) => {
+    connected(); queueMicrotask(() => listener.onOpen()); return { send() {}, close: closed };
+  }, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  let enable!: (value: boolean) => void;
+  function Harness() {
+    const [enabled, setEnabled] = useState(true); enable = setEnabled;
+    const tracking = useSessionTracking(scope, transport, undefined, [], [], undefined, true, [], undefined, { sessionEnabled: () => enabled });
+    return <>{tracking.observers}</>;
+  }
+  await render(<Harness />);
+  await vi.waitFor(() => expect(connected).toHaveBeenCalledOnce());
+  await act(async () => enable(false));
+  expect(closed).toHaveBeenCalledOnce();
+  expect(readTrackedSessions(scope)).toEqual([star]);
+  expect(attach).toHaveBeenCalledOnce();
+  await act(async () => enable(true));
+  await vi.waitFor(() => expect(connected).toHaveBeenCalledTimes(2));
+});

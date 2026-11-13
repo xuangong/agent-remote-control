@@ -1,9 +1,10 @@
 import type { ReactNode } from 'react';
 import type { WindowBotDetails, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
-import type { BotRosterModel, BotRow } from '../bot-roster.js';
+import type { BotRosterModel, BotRow, BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { sessionKey } from '../session-tree.js';
 import { Avatar } from '../ui/Avatar.js';
+import { Menu, type MenuEntry } from '../ui/Menu.js';
 
 /** The name a bot is known by; its avatar letter comes from here. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
@@ -40,15 +41,20 @@ function BotMember({ row, current, hostName, onSelect }: { row: BotRow; current:
   </div>;
 }
 
-export function BotRoster({ model, place, onSelect, directoryControls, hostName = id => id }: {
+export function BotRoster({ model, place, onSelect, directoryControls, hostName = id => id, groupActions }: {
   model: BotRosterModel; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
   /** A Host's display name for a Host ID; rows show names, never raw IDs. */
   hostName?(hostId: string): string;
+  /** The actions of a group's header menu, beside its title. */
+  groupActions?(section: BotSection): readonly MenuEntry[];
 }) {
   return <nav aria-label="Bots" className="lab-bot-roster-list">
     {model.sections.map(section => <section key={section.groupId} className="lab-bot-section" aria-labelledby={`bot-section-${section.groupId}`}>
-      <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
-        {section.status ? <small>{section.status}</small> : null}</h2>
+      <div className="lab-bot-section-head">
+        <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
+          {section.status ? <small>{section.status}</small> : null}</h2>
+        {groupActions ? <Menu label={`Group actions: ${section.title}`} items={groupActions(section)} /> : null}
+      </div>
       {!section.rows.length ? <p className="lab-bot-empty">No bots in this group yet.</p> : null}
       {section.rows.map(row => <BotMember key={row.viewId} row={row} hostName={hostName} onSelect={onSelect}
         current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />)}

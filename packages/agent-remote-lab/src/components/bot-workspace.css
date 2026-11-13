@@ -12,6 +12,9 @@
 .lab-bot-directory-controls small, .lab-bot-directory-controls p { width: 100%; }
 .lab-bot-section { padding: 0 6px 12px; }
 .lab-bot-section h2 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 8px 6px; font-size: 13px; }
+/* A group's title with its actions menu beside it, not inside the heading, so the heading reads as the group's name. */
+.lab-bot-section-head { display: flex; align-items: center; gap: 4px; }
+.lab-bot-section-head > h2 { flex: 1; min-width: 0; }
 .lab-bot-section h2 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
 .lab-bot-section small, .lab-bot-empty, .lab-bot-row-text > span { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-bot-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 8px; text-align: left; border: 1px solid transparent; border-radius: 6px; background: transparent; color: inherit; font: inherit; }

@@ -172,3 +172,24 @@ it('keeps the Bots heading outside the collapsible roster: hidden on desktop, a 
     expect(title().classList.contains('agent-visually-hidden')).toBe(false);
   } finally { await app.close(); }
 });
+
+it('hides a group in Bot mode or Window mode from its roster header', async () => {
+  const scope = 'http://localhost/bot-group-actions/'; seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B', false)); history.replaceState(null, '', '/?mode=bot');
+  const app = await mountBotApp(scope);
+  try {
+    const roster = () => app.container.querySelector<HTMLElement>('nav[aria-label="Bots"]')!;
+    const choose = async (group: string, label: string) => {
+      await act(async () => roster().querySelector<HTMLButtonElement>(`button[aria-label="Group actions: ${group}"]`)!.click());
+      await act(async () => [...document.querySelectorAll<HTMLElement>(`[role="menu"][aria-label="Group actions: ${group}"] [role="menuitem"]`)].find(item => item.textContent === label)!.click());
+    };
+    await until(() => expect(roster().querySelector('button[aria-label="Group actions: B"]')).not.toBeNull());
+    await choose('A', 'Hide in Window mode');
+    await until(() => expect(app.workspace().readGroup('A')?.presentation).toEqual({ window: false }));
+    await choose('A', 'Show in Window mode');
+    await until(() => expect(app.workspace().readGroup('A')?.presentation).toBeUndefined());
+    await choose('B', 'Hide in Bot mode');
+    await until(() => expect(app.workspace().readGroup('B')?.presentation).toEqual({ bots: false }));
+    await until(() => expect(roster().querySelector('button[aria-label="Group actions: B"]')).toBeNull());
+    expect(roster().textContent).not.toContain('B1');
+  } finally { await app.close(); }
+});

@@ -13,6 +13,9 @@ import { SidebarHeader } from '../shell/SidebarHeader.js';
 import { Toolbar } from '../ui/Toolbar.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
+import type { MenuEntry } from '../ui/Menu.js';
+import { hasBotAppearance, hasWindowAppearance } from '@orchardworks/agent-remote-protocol';
+import type { BotSection } from '../bot-roster.js';
 import './bot-workspace.css';
 
 export interface BotWorkspaceProps {
@@ -68,6 +71,21 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     if (showConversation) (backButton.current ?? heading.current)?.focus({ preventScroll: true });
   }, [compact]);
   function startSection() { setCreating(true); setError(undefined); }
+  /** A group's appearance in either mode, from its header menu; a group always stays visible in one of them. */
+  function groupActions(section: BotSection): MenuEntry[] {
+    const group = workspace.readGroup(section.groupId);
+    if (!group) return [];
+    const change = (operation: Parameters<typeof workspace.operateGroup>[1]) => {
+      const requestScope = scope; setError(undefined);
+      void workspace.operateGroup(section.groupId, operation).catch(reason => { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); });
+    };
+    return [
+      hasWindowAppearance(group)
+        ? { label: 'Hide in Window mode', icon: 'eye-off', disabled: !hasBotAppearance(group), onSelect: () => change({ type: 'window.remove' }) }
+        : { label: 'Show in Window mode', icon: 'sidebar', onSelect: () => change({ type: 'window.add' }) },
+      { label: 'Hide in Bot mode', icon: 'eye-off', disabled: !hasWindowAppearance(group), onSelect: () => change({ type: 'bots.hide' }) },
+    ];
+  }
   function back() { returning.current = true; navigation.back(); }
   async function save(retry = false) {
     const requestScope = scope; setError(undefined);
@@ -96,7 +114,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {saving ? <p role="status">Saving section…</p> : null}
       {error || creation.error ? <p role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p role="status">Section creation is not confirmed. <button type="button" onClick={() => void save(true)}>Retry</button></p> : null}
-      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName}
+      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}

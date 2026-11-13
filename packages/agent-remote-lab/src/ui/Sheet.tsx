@@ -2,12 +2,12 @@ import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react
 import { IconButton } from './IconButton.js';
 
 /**
- * A bottom sheet on a modal dialog, half (`medium`) or nearly full (`large`) height; its body scrolls. The owner's `open`
- * drives it. Escape, a press on the backdrop and Close ask the owner to close it through `onClose`, which also hears about a
+ * A bottom sheet on a modal dialog, content-sized (`content`), half (`medium`) or nearly full (`large`) height; its body
+ * scrolls. The owner's `open` drives it. Escape, a press on the backdrop and Close ask the owner to close it through `onClose`, which also hears about a
  * close the browser makes on its own; keep `onClose` idempotent.
  */
 export function Sheet({ open, title, onClose, detent = 'medium', children }: {
-  open: boolean; title: string; onClose(): void; detent?: 'medium' | 'large'; children: ReactNode;
+  open: boolean; title: string; onClose(): void; detent?: 'content' | 'medium' | 'large'; children: ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const heading = useId();
@@ -33,6 +33,8 @@ export function Sheet({ open, title, onClose, detent = 'medium', children }: {
     return () => window.removeEventListener('pointerdown', press, true);
   }, [open]);
   return <dialog ref={dialog} className="ui-sheet" data-detent={detent} aria-labelledby={heading}
+    // Escape belongs to this modal's cancellation policy rather than a containing panel.
+    onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation(); }}
     onCancel={event => { event.preventDefault(); onClose(); }}
     // Browsers queue the close event: ignore one that arrives after the sheet was opened again.
     onClose={event => { if (open && !event.currentTarget.open) onClose(); }}

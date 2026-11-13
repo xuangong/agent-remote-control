@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bot / Window 工作台 · 流程演示</title>
+<style>
+/* Tokens copied from packages/agent-remote-lab/src/ui/tokens.css so the study matches the product. */
+:root {
+  color-scheme: light dark;
+  --ui-background: #ffffff; --ui-background-grouped: #f2f2f7; --ui-sidebar: #f2f2f7; --ui-selection: #e8f0fc;
+  --ui-label: #1d1d1f; --ui-label-secondary: #636366; --ui-label-tertiary: #aeaeb2;
+  --ui-separator: rgb(60 60 67 / 0.18); --ui-fill: rgb(120 120 128 / 0.12); --ui-fill-strong: rgb(120 120 128 / 0.2);
+  --ui-segment-selected: #ffffff; --ui-accent: #0071e3; --ui-accent-text: #0066cc; --ui-row-hover: rgb(120 120 128 / 0.12);
+  --ui-status-attention: #c93400; --ui-status-working: #0066cc; --ui-status-success: #1a7431; --ui-status-failure: #d70015;
+  --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.06);
+  --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.1);
+  --ui-radius-control: 6px; --ui-radius-pane: 10px; --ui-radius-input: 18px;
+  --ui-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --ui-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Session View surface, as the Lab themes it today. */
+  --sv-user: #e8f0fc; --sv-user-border: #c9dcf6; --sv-rule: rgb(60 60 67 / 0.12);
+  --page: #e9e9ee; --note: #ffffff; --pin: #0071e3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ui-background: #1c1c1e; --ui-background-grouped: #000000; --ui-sidebar: #2c2c2e; --ui-selection: #16304d;
+    --ui-label: #f5f5f7; --ui-label-secondary: #98989d; --ui-label-tertiary: #636366;
+    --ui-separator: rgb(255 255 255 / 0.15); --ui-fill: rgb(118 118 128 / 0.24); --ui-fill-strong: rgb(118 118 128 / 0.36);
+    --ui-segment-selected: #636366; --ui-accent-text: #409cff; --ui-row-hover: rgb(118 118 128 / 0.06);
+    --ui-status-attention: #ffb340; --ui-status-working: #409cff; --ui-status-success: #30d158; --ui-status-failure: #ff6961;
+    --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.08);
+    --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.5), 0 0 0 0.5px rgb(255 255 255 / 0.12);
+    --sv-user: #16304d; --sv-user-border: #24476e; --sv-rule: rgb(255 255 255 / 0.1);
+    --page: #111113; --note: #1c1c1e; --pin: #409cff;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; }
+body { font: 14px/1.45 var(--ui-font); color: var(--ui-label); background: var(--page); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+svg.i { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Review layout */
+.study { display: grid; grid-template-columns: 340px minmax(0, 1fr); height: 100%; }
+.notes { overflow: auto; padding: 28px 24px 40px; background: var(--note); border-right: 0.5px solid var(--ui-separator); }
+.notes h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: -0.01em; }
+.notes .lead { margin: 0 0 20px; color: var(--ui-label-secondary); font-size: 13px; }
+.scenes { list-style: none; margin: 0 0 22px; padding: 0; display: grid; gap: 2px; }
+.scenes button { display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: baseline; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; cursor: pointer; }
+.scenes button:hover { background: var(--ui-row-hover); }
+.scenes button[aria-current="step"] { background: var(--ui-selection); }
+.scenes b { font-weight: 600; font-size: 13px; color: var(--ui-label-secondary); font-variant-numeric: tabular-nums; }
+.scenes span { font-size: 14px; }
+.detail h2 { margin: 0 0 6px; font-size: 16px; }
+.detail p { margin: 0 0 14px; font-size: 13px; color: var(--ui-label-secondary); }
+.detail h3 { margin: 18px 0 6px; font-size: 12px; font-weight: 600; color: var(--ui-label-secondary); }
+.detail ol, .detail ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; }
+.detail ol li { display: grid; grid-template-columns: 20px 1fr; gap: 8px; }
+.detail ul li { padding-left: 14px; position: relative; color: var(--ui-label-secondary); }
+.detail ul li::before { content: ""; position: absolute; left: 3px; top: 8px; width: 4px; height: 4px; border-radius: 50%; background: var(--ui-label-tertiary); }
+.n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--pin); color: #fff; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stage { position: relative; overflow: auto; display: grid; place-items: center; padding: 28px; }
+.devices { display: flex; gap: 60px; padding-left: 36px; align-items: flex-start; transform-origin: top center; }
+.caption { margin: 0 0 28px; font-size: 12px; color: var(--ui-label-secondary); text-align: center; }
+
+/* Device frames */
+.desktop { width: 1180px; height: 720px; border-radius: 12px; overflow: hidden; background: var(--ui-background); box-shadow: var(--ui-shadow-overlay); display: grid; grid-template-columns: 284px minmax(0, 1fr); position: relative; }
+.phone { width: 390px; height: 800px; border-radius: 44px; padding: 12px; background: #1d1d1f; box-shadow: var(--ui-shadow-overlay); }
+.phone .screen { position: relative; height: 100%; border-radius: 34px; overflow: hidden; background: var(--ui-background); display: flex; flex-direction: column; }
+.battery { width: 25px; height: 12px; border: 1.5px solid currentColor; border-radius: 4px; opacity: .85; background: linear-gradient(90deg, currentColor 70%, transparent 70%) content-box; padding: 1.5px; }
+.statusbar { height: 44px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 26px 0 30px; font-size: 14px; font-weight: 600; }
+
+/* Shell */
+.sidebar { background: var(--ui-sidebar); border-right: 0.5px solid var(--ui-separator); display: flex; flex-direction: column; min-height: 0; }
+.sidebar-head { height: 52px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px; }
+.segmented { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 2px; border-radius: 8px; background: var(--ui-fill); min-width: 160px; }
+.segmented span { position: relative; padding: 3px 14px; border-radius: 6px; font-size: 13px; text-align: center; color: var(--ui-label); }
+.segmented span[aria-current] { background: var(--ui-segment-selected); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); font-weight: 600; }
+.icon-btn { display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: var(--ui-radius-control); background: transparent; color: var(--ui-label-secondary); }
+.icon-btn:hover { background: var(--ui-row-hover); }
+.spacer { flex: 1; }
+.roster { flex: 1; overflow: auto; padding: 4px 8px 16px; }
+
+.group { margin-top: 10px; }
+.group-head { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px 0 4px; color: var(--ui-label-secondary); font-size: 12px; font-weight: 600; }
+.group-head svg { color: var(--ui-label-tertiary); }
+.group-head .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quiet-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ui-status-attention); opacity: .75; }
+
+.bot { position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 0 10px; align-items: center; width: 100%; min-height: 56px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; text-align: left; cursor: pointer; transition: background var(--ui-ease) 150ms, opacity 200ms; }
+.bot:hover { background: var(--ui-row-hover); }
+.bot[aria-current] { background: var(--ui-selection); }
+.bot .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.bot .name { flex: 0 1 auto; min-width: 4.5em; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot .tag { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.row-menu { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--ui-fill-strong); color: var(--ui-label); }
+.bot[data-unread] .name { font-weight: 650; }
+.bot .preview { font-size: 13px; color: var(--ui-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bot .meta { display: grid; justify-items: end; gap: 4px; align-self: stretch; padding-top: 2px; }
+.bot time { font-size: 11px; color: var(--ui-label-secondary); font-variant-numeric: tabular-nums; }
+.unread { width: 8px; height: 8px; border-radius: 50%; background: var(--ui-accent); }
+.needs { font-size: 11px; font-weight: 600; color: var(--ui-status-attention); white-space: nowrap; }
+.bot[data-asleep] { opacity: .5; }
+.bot[data-asleep] .preview { display: flex; align-items: center; gap: 4px; }
+.bot[data-new] { animation: arrive 600ms var(--ui-ease) both; }
+@keyframes arrive { from { opacity: 0; transform: translateY(-6px); background: var(--ui-selection); } }
+
+.avatar { position: relative; display: grid; place-items: center; width: var(--s, 34px); height: var(--s, 34px); border-radius: 50%; background: var(--c, #0071e3); color: #fff; font-size: calc(var(--s, 34px) * 0.42); font-weight: 600; flex: none; }
+.avatar[data-ink="dark"] { color: #1d1d1f; }
+.avatar .presence { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ui-sidebar); background: var(--ui-status-working); }
+
+.tag { flex: none; padding: 0 5px; border-radius: 4px; background: var(--ui-fill); color: var(--ui-label-secondary); font-size: 11px; font-weight: 500; line-height: 17px; white-space: nowrap; }
+
+.typing { display: inline-flex; gap: 3px; align-items: center; }
+.typing i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .3; animation: typing 1.2s infinite ease-in-out; }
+.typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes typing { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: .9; transform: translateY(-1.5px); } }
+.preview.working { color: var(--ui-status-working); display: flex; align-items: center; gap: 6px; }
+
+.ask { display: flex; align-items: center; gap: 6px; margin: -2px 0 4px 54px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--ui-label-secondary); }
+.ask:hover { background: var(--ui-row-hover); }
+
+.other { margin-top: 14px; }
+.footer { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 14px; border-top: 0.5px solid var(--ui-separator); font-size: 13px; color: var(--ui-label-secondary); }
+.online { width: 7px; height: 7px; border-radius: 50%; background: var(--ui-status-success); }
+
+/* Conversation */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ui-background); }
+.toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 0.5px solid var(--ui-separator); }
+.toolbar .who { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 15px; font-weight: 600; }
+.sv { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sv-head { height: 44px; flex: none; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; border-bottom: 0.5px solid var(--sv-rule); font-size: 13px; color: var(--ui-label-secondary); }
+.sv-head .left { margin-right: auto; } .sv-head .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.sv-body { flex: 1; overflow: hidden; padding: 12px 0; }
+.sv-col { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+.entry { padding: 12px 14px; margin-bottom: 14px; }
+.entry header { display: flex; gap: 8px; align-items: baseline; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--ui-label-secondary); }
+.entry header time { font: 500 10.5px var(--ui-font-mono); }
+.entry p { margin: 0; font-size: 14px; line-height: 1.6; }
+.entry.user { margin-left: 25%; border: 1px solid var(--sv-user-border); border-radius: 8px; background: var(--sv-user); }
+.entry.assistant { padding-left: 0; }
+.entry.pending { opacity: .62; }
+.delivery { display: flex; align-items: center; gap: 6px; margin: -6px 0 16px 25%; padding-left: 2px; font-size: 12px; color: var(--ui-label-secondary); }
+.delivery .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.delivery button { border: 0; padding: 0; background: none; color: var(--ui-accent-text); cursor: pointer; font-size: 12px; }
+.notice { display: flex; gap: 8px; align-items: center; margin: 0 0 14px; font-size: 12px; color: var(--ui-label-secondary); }
+.reply-presence { display: flex; align-items: center; gap: 8px; height: 28px; margin: -4px 0 12px; color: var(--ui-label-secondary); font-size: 12px; }
+.reply-presence .bubble { display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 14px; background: var(--ui-fill); color: var(--ui-label-secondary); }
+.history-divider { display: flex; align-items: center; gap: 12px; margin: 4px 0 18px; font-size: 11px; color: var(--ui-label-tertiary); }
+.history-divider::before, .history-divider::after { content: ""; flex: 1; height: 0.5px; background: var(--ui-separator); }
+.earlier { opacity: .78; }
+.composer { flex: none; margin: 0 auto 14px; width: min(760px, calc(100% - 48px)); border: 1px solid var(--ui-separator); border-radius: 12px; background: var(--ui-background); padding: 14px 14px 10px; }
+.composer .placeholder { height: 22px; color: var(--ui-label-tertiary); font-size: 14px; }
+.composer .row { display: flex; align-items: center; gap: 18px; margin-top: 10px; font-size: 12.5px; color: var(--ui-label); }
+.composer .send { margin-left: auto; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--ui-fill); color: var(--ui-label-tertiary); }
+
+.card { margin: 0 0 16px; border: 1px solid var(--ui-separator); border-radius: 10px; padding: 12px 14px; background: var(--ui-background); }
+.card h4 { margin: 0 0 6px; font-size: 13px; }
+.card p { margin: 0 0 10px; font-size: 13px; color: var(--ui-label-secondary); }
+.card .actions { display: flex; gap: 8px; }
+.btn { border: 0; border-radius: 7px; padding: 5px 12px; background: var(--ui-fill); font-size: 13px; }
+.btn.primary { background: var(--ui-accent); color: #fff; }
+
+.menu { position: absolute; z-index: 5; left: 0; top: 0; width: 220px; padding: 5px; border-radius: 10px; background: var(--ui-background); box-shadow: var(--ui-shadow-overlay); font-size: 13px; }
+.menu div { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; }
+.menu div:hover, .menu div[data-hot] { background: var(--ui-accent); color: #fff; }
+.menu hr { border: 0; height: 0.5px; margin: 4px 6px; background: var(--ui-separator); }
+.popover { position: absolute; z-index: 5; left: 0; top: 0; width: 250px; padding: 12px 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-overlay); font-size: 12.5px; }
+.popover dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+.popover dt { color: var(--ui-label-secondary); } .popover dd { margin: 0; }
+
+/* Window mode */
+.win-head { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 0.5px solid var(--ui-separator); }
+.win-head h2 { margin: 0; font-size: 15px; } .win-head small { color: var(--ui-label-secondary); font-size: 12px; }
+.canvas { flex: 1; min-height: 0; display: flex; gap: 8px; padding: 8px; background: var(--ui-background-grouped); }
+.pane { display: flex; flex-direction: column; width: 520px; flex: none; border-radius: var(--ui-radius-pane); background: var(--ui-background); box-shadow: var(--ui-shadow-pane); overflow: hidden; }
+.pane .sv-col { padding: 0 16px; }
+.pane-head { height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 0.5px solid var(--sv-rule); font-size: 13px; }
+.pane-head .title { font-weight: 600; } .pane-head .grow { flex: 1; }
+.strip { width: 64px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; border-radius: var(--ui-radius-pane); background: var(--ui-background); box-shadow: var(--ui-shadow-pane); cursor: pointer; transition: transform 150ms var(--ui-ease), opacity 200ms; }
+.strip:hover { transform: translateY(-1px); }
+.strip .vname { writing-mode: vertical-rl; font-size: 13px; font-weight: 500; letter-spacing: .04em; max-height: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip .vtag { writing-mode: vertical-rl; }
+.strip[data-asleep] { opacity: .5; }
+.strip .state { font-size: 11px; font-weight: 600; color: var(--ui-status-attention); writing-mode: vertical-rl; }
+.strip .typing { color: var(--ui-status-working); }
+.wake { animation: wake 500ms var(--ui-ease) both; }
+@keyframes wake { from { opacity: .4; transform: scale(.985); } }
+
+/* Phone */
+.ph-nav { flex: none; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 12px; }
+.ph-title { padding: 2px 18px 8px; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
+.ph-search { margin: 0 16px 6px; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border-radius: 10px; background: var(--ui-fill); color: var(--ui-label-secondary); font-size: 15px; }
+.phone .roster { padding: 0 8px; }
+.phone .bot { min-height: 64px; grid-template-columns: 44px minmax(0, 1fr) auto; }
+.phone .bot .name { font-size: 16px; } .phone .bot .preview { font-size: 14px; }
+.phone .group-head { font-size: 13px; height: 34px; }
+.ph-chat-head { flex: none; display: flex; align-items: center; gap: 6px; height: 50px; padding: 0 10px 0 4px; border-bottom: 0.5px solid var(--ui-separator); }
+.ph-back { display: flex; align-items: center; gap: 0; padding: 6px 4px; color: var(--ui-accent-text); font-size: 17px; }
+.phone .sv-col { padding: 0 14px; }
+.phone .entry.user { margin-left: 12%; }
+.phone .delivery { margin-left: 12%; }
+.phone .composer { width: calc(100% - 20px); margin-bottom: 18px; }
+.home-bar { flex: none; height: 22px; display: grid; place-items: center; } .home-bar::after { content: ""; width: 120px; height: 5px; border-radius: 3px; background: var(--ui-label); opacity: .85; }
+
+
+/* Host overview */
+.hosts-grid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; align-content: start; padding: 16px; background: var(--ui-background-grouped); }
+.host-card { display: grid; gap: 12px; align-content: start; padding: 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
+.host-card header { display: flex; align-items: center; gap: 10px; color: var(--ui-label-tertiary); }
+.host-card header div { flex: 1; min-width: 0; }
+.host-card h3 { margin: 0; font-size: 15px; color: var(--ui-label); }
+.host-card header small { display: block; color: var(--ui-label-secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.host-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ui-label-tertiary); flex: none; }
+.host-dot.on { background: var(--ui-status-success); }
+.host-card.offline { opacity: .6; }
+.host-sessions { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; }
+.host-sessions b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.host-sessions span { font-size: 13px; color: var(--ui-label-secondary); }
+.host-sessions small { flex-basis: 100%; font-size: 12px; color: var(--ui-label-secondary); }
+.host-sessions em { font-style: normal; color: var(--ui-status-attention); font-weight: 600; }
+.metrics { display: grid; gap: 10px; }
+.metrics.compact { grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.meter-line { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ui-label-secondary); }
+.meter-value { color: var(--ui-label); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-value.warn { color: var(--ui-status-attention); font-weight: 600; }
+.bar { height: 4px; margin-top: 5px; border-radius: 2px; background: var(--ui-fill); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 2px; background: var(--ui-accent); }
+.bar i.warn { background: var(--ui-status-attention); }
+.host-note .btn { flex: none; white-space: nowrap; }
+.host-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; font-size: 12px; color: var(--ui-label-secondary); }
+.host-list { flex: 1; overflow: auto; display: grid; gap: 10px; align-content: start; padding: 4px 14px 16px; }
+/* Numbered review markers */
+.frame-wrap { position: relative; }
+.frame-wrap > .kept-note { position: absolute; right: 2px; top: -22px; font-size: 12px; color: var(--ui-label-secondary); }
+.pin { position: absolute; z-index: 6; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--pin); color: #fff; font-size: 12px; font-weight: 700; box-shadow: 0 0 0 3px color-mix(in srgb, var(--pin) 25%, transparent); pointer-events: none; }
+.kept { position: absolute; z-index: 4; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--ui-label) 8%, transparent); color: var(--ui-label-secondary); font-size: 11px; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (max-width: 1000px) { .study { grid-template-columns: 1fr; height: auto; } .notes { border-right: 0; } }
+</style>
+</head>
+<body>
+<div class="study">
+  <aside class="notes">
+    <h1>Bot / Window 工作台</h1>
+    <p class="lead">流程演示稿，供 review。示例数据，不连接后端。Session View 区域按现有产品还原，编号处是提议的变化。</p>
+    <ol class="scenes" id="scenes"></ol>
+    <section class="detail" id="detail" aria-live="polite"></section>
+  </aside>
+  <main class="stage" id="stage"><div class="devices" id="devices"></div></main>
+</div>
+<script>
+const ICONS = {
+  plus: 'M12 5v14M5 12h14', search: 'M11 4.5a6.5 6.5 0 1 1 0 13a6.5 6.5 0 1 1 0-13zM15.8 15.8L20 20',
+  sidebar: 'M4 5.5h16v13H4zM9.5 5.5v13', ellipsis: 'M6 11a1 1 0 1 1 0 2a1 1 0 1 1 0-2zM12 11a1 1 0 1 1 0 2a1 1 0 1 1 0-2zM18 11a1 1 0 1 1 0 2a1 1 0 1 1 0-2z',
+  close: 'M6 6l12 12M18 6L6 18', star: 'M12 3.8l2.5 5.1 5.6.8-4 3.9.9 5.6-5-2.6-5 2.6.9-5.6-4-3.9 5.6-.8z',
+  'chevron-right': 'M9.5 6l6 6-6 6', 'chevron-left': 'M14.5 6l-6 6 6 6', 'chevron-down': 'M6 9.5l6 6 6-6', 'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  question: 'M12 21a9 9 0 1 1 0-18a9 9 0 1 1 0 18zM9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8M12 17h.01',
+  grid: 'M4.5 4.5h6v6h-6zM13.5 4.5h6v6h-6zM4.5 13.5h6v6h-6zM13.5 13.5h6v6h-6z', gear: 'M12 9a3 3 0 1 1 0 6a3 3 0 1 1 0-6zM12 5a7 7 0 1 1 0 14a7 7 0 1 1 0-14zM12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8',
+  team: 'M9 11a3 3 0 1 1 0-6a3 3 0 1 1 0 6zM3.5 19c.7-3 2.9-4.5 5.5-4.5s4.8 1.5 5.5 4.5M16 11a2.5 2.5 0 1 0 0-5M17.5 14.6c1.6.5 2.6 1.9 3 4.4',
+  list: 'M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01', person: 'M12 12a4 4 0 1 1 0-8a4 4 0 1 1 0 8zM4.5 20c.9-3.8 3.9-6 7.5-6s6.6 2.2 7.5 6',
+  moon: 'M19.5 14.6A7.8 7.8 0 0 1 9.4 4.5a7.8 7.8 0 1 0 10.1 10.1z', fold: 'M9 5l-5 7 5 7M15 5l5 7-5 7',
+};
+const icon = (name, size = 18) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const typing = `<span class="typing" aria-label="正在回应"><i></i><i></i><i></i></span>`;
+const avatar = (b, size = 34, presence = false) => `<span class="avatar" style="--c:${b.color};--s:${size}px"${b.ink ? ' data-ink="dark"' : ''}>${esc(b.name[0])}${presence ? '<span class="presence"></span>' : ''}</span>`;
+const tag = role => role ? `<span class="tag">${esc(role)}</span>` : '';
+
+const BOTS = {
+  check: { name: '发布检查', role: '', color: '#636366', preview: '核心流程、安全与回滚都已列入清单，等你确认发布窗口。', time: '23:13' },
+  tpm: { name: '交付协调', role: 'TPM', color: '#0071e3', preview: '验收标准已整理，正在跟进发布检查。', time: '23:20' },
+  lead: { name: '跨平台适配', role: 'Team Leader', color: '#8944ab', preview: '需要你确认：在 Windows 主机上运行安装脚本？', time: '23:18' },
+  member: { name: 'Windows 复现', role: 'Member', color: '#1a7431', preview: '已在 Windows 11 复现，日志已上传。', time: '23:16' },
+  side: { name: '登录模块重构', role: 'Side', color: '#a05a00', preview: '重构完成，单元测试全部通过。', time: '22:51' },
+  support: { name: '独立评审', role: 'Support', color: '#0071a4', preview: '休眠中', time: '21:40' },
+};
+
+function botRow(id, o = {}) {
+  const b = BOTS[id];
+  const state = o.state ?? 'idle';
+  const preview = state === 'working' ? `<span class="preview working">${typing}<span>正在回应</span></span>`
+    : state === 'asleep' ? `<span class="preview">${icon('moon', 13)}<span>${esc(o.preview ?? '休眠中')}</span></span>`
+    : `<span class="preview">${esc(o.preview ?? b.preview)}</span>`;
+  const meta = state === 'needs' ? `<span class="needs">需要你</span>` : o.unread ? `<span class="unread" aria-label="有新消息"></span>` : '';
+  return `<button class="bot" type="button"${o.current ? ' aria-current="true"' : ''}${o.unread ? ' data-unread' : ''}${state === 'asleep' ? ' data-asleep' : ''}${o.fresh ? ' data-new' : ''} data-bot="${id}">
+    ${avatar(b, o.size ?? 34)}
+    <span style="min-width:0;display:grid;gap:2px"><span class="line"><span class="name">${esc(b.name)}</span>${tag(b.role)}</span>${preview}</span>
+    <span class="meta">${o.menu ? `<span class="row-menu">${icon('ellipsis', 16)}</span>` : `<time>${esc(o.time ?? b.time)}</time>`}${meta}</span></button>`;
+}
+const groupHead = (title, o = {}) => `<div class="group-head">${icon(o.open === false ? 'chevron-right' : 'chevron-down', 14)}<span class="title">${esc(title)}</span>${o.quiet ? '<span class="quiet-dot" aria-label="有休眠的 Bot 需要你"></span>' : ''}</div>`;
+const segmented = mode => `<span class="segmented" role="group" aria-label="工作台模式"><span${mode === 'window' ? ' aria-current="true"' : ''}>Window</span><span${mode === 'bot' ? ' aria-current="true"' : ''}>Bot</span></span>`;
+
+function botSidebar(o = {}) {
+  const rows = o.rows ?? ['check', 'tpm', 'lead', 'member', 'side', 'support'];
+  const states = o.states ?? {};
+  const list = rows.map(id => botRow(id, { ...states[id], current: o.current === id })
+    + (id === 'check' ? `<div class="ask">${icon('question', 14)}<span>Ask · 发布时间窗口</span></div>` : '')).join('');
+  return `<aside class="sidebar"><div class="sidebar-head">${segmented('bot')}<span class="spacer"></span><button class="icon-btn" aria-label="搜索">${icon('search')}</button><button class="icon-btn" aria-label="新建">${icon('plus')}</button></div>
+    <div class="roster">
+      <section class="group">${groupHead('Release 2.4')}${list}</section>
+      <section class="group" data-group="homelab">${groupHead('Homelab 运维', { open: false, quiet: o.homelabQuiet })}</section>
+      <section class="group">${groupHead('Agent Remote Control', { open: false })}</section>
+      <section class="group other">${groupHead('其他会话', { open: false })}</section>
+    </div>
+    <div class="footer"><span class="online"></span><span>homelab、Mac mini 在线</span><span class="spacer"></span>${icon('gear', 16)}</div></aside>`;
+}
+
+function sessionView(o = {}) {
+  const b = BOTS[o.bot ?? 'tpm'];
+  const status = o.working ? '工作中' : 'Idle';
+  return `<section class="sv" aria-label="Session View"><div class="sv-head"><span class="left">${icon('search', 16)}</span>${avatar(b, 22)}<b style="color:var(--ui-label)">${esc(b.name)}</b><span>${status}</span><span class="info">Info ▾</span><span class="right">${icon('grid', 16)}<span>Ready</span></span></div>
+    <div class="sv-body"><div class="sv-col">${o.body ?? ''}</div></div>
+    <div class="composer"><div class="placeholder"></div><div class="row"><span>Image</span><span>Resource</span><span>/</span><span>GPT-6-Astra ▾</span><span>⋯</span><span class="send">${icon('arrow-up', 16)}</span></div></div></section>`;
+}
+const userEntry = (text, time) => `<article class="entry user"><header>You <time>${time}</time></header><p>${esc(text)}</p></article>`;
+const assistantEntry = (text, time) => `<article class="entry assistant"><header>Assistant <time>${time}</time></header><p>${text}</p></article>`;
+const replyPresence = `<div class="reply-presence"><span class="bubble">${typing}</span></div>`;
+
+const TPM_BODY = userEntry('帮我跟进 2.4 的发布：先整理验收标准，再督促发布检查完成。', '11/13/26 11:14:02 PM')
+  + assistantEntry('验收标准已整理成三项：核心流程通过回归、Windows 安装可复现修复、回滚步骤已演练。<br>我已请「发布检查」核对清单，并在跨平台修复合并后再确认一次。', '11/13/26 11:15:40 PM');
+
+const pinData = pins => esc(JSON.stringify(pins));
+function desktop(sidebar, main, extra = '', pins = [], kept = '右侧为现有 Session View，保持不变') {
+  return `<div><p class="caption">桌面 · 1180 × 720</p><div class="frame-wrap" data-pins="${pinData(pins)}"><span class="kept-note">${kept}</span><div class="desktop">${sidebar}${main}${extra}</div></div></div>`;
+}
+const botMain = (bot, svOptions, extra = '') => `<section class="main"><div class="toolbar"><button class="icon-btn" aria-label="隐藏侧栏">${icon('sidebar')}</button><span class="who">${avatar(BOTS[bot], 24)}<span>${esc(BOTS[bot].name)}</span>${tag(BOTS[bot].role)}</span></div>${sessionView({ bot, ...svOptions })}${extra}</section>`;
+
+function windowSidebar() {
+  const item = (id, sub) => `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:13px"><span style="flex:1;min-width:0"><span class="line" style="display:flex;gap:6px;align-items:center"><span>${esc(BOTS[id].name)}</span>${tag(BOTS[id].role)}</span><small style="color:var(--ui-label-secondary)">${sub}</small></span></div>`;
+  return `<aside class="sidebar"><div class="sidebar-head">${segmented('window')}<span class="spacer"></span><button class="icon-btn" aria-label="搜索">${icon('search')}</button><button class="icon-btn" aria-label="新建">${icon('plus')}</button></div>
+    <div class="roster"><div class="group-head">Windows</div>
+      <div class="bot" style="min-height:40px;grid-template-columns:1fr;background:var(--ui-selection)"><span><b style="font-weight:600">Release 2.4</b><br><small style="color:var(--ui-label-secondary)">6 个 Bot · 1 个展开</small></span></div>
+      <div class="bot" style="min-height:40px;grid-template-columns:1fr"><span>Homelab 运维<br><small style="color:var(--ui-label-secondary)">3 个 Bot</small></span></div>
+      <div class="group-head" style="margin-top:12px">In this Window</div>
+      ${item('check', '展开')}${item('tpm', '折叠 · 工作中')}${item('lead', '折叠 · 需要你')}${item('member', '折叠')}${item('side', '折叠')}${item('support', '休眠')}
+    </div><div class="footer"><span class="online"></span><span>4 个 Host 在线</span><span class="spacer"></span>${icon('gear', 16)}</div></aside>`;
+}
+function strip(id, o = {}) {
+  const b = BOTS[id];
+  return `<div class="strip"${o.asleep ? ' data-asleep' : ''} role="button" tabindex="0" aria-label="${esc(b.name)}，${o.asleep ? '休眠' : '折叠'}" data-strip="${id}">
+    ${avatar(b, 30)}${o.working ? `<span class="typing" style="color:var(--ui-status-working)"><i></i><i></i><i></i></span>` : o.asleep ? `<span style="color:var(--ui-label-secondary)">${icon('moon', 14)}</span>` : ''}
+    <span class="vname">${esc(b.name)}</span>${b.role ? `<span class="tag vtag">${esc(b.role)}</span>` : ''}${o.needs ? '<span class="state">需要你</span>' : ''}</div>`;
+}
+
+function phoneFrame(content, label, pins = []) {
+  return `<div><p class="caption">${label}</p><div class="frame-wrap" data-pins="${pinData(pins)}"><div class="phone"><div class="screen"><div class="statusbar"><span>23:21</span><span class="battery" aria-hidden="true"></span></div>${content}<div class="home-bar"></div></div></div></div></div>`;
+}
+function phoneRoster() {
+  const rows = ['tpm', 'lead', 'check', 'member', 'side', 'support'];
+  const states = { tpm: { state: 'working' }, lead: { state: 'needs' }, member: { unread: true }, support: { state: 'asleep' } };
+  return phoneFrame(`<div class="ph-nav"><span class="segmented" style="min-width:150px">${'<span>Window</span><span aria-current="true">Bot</span>'}</span><span class="spacer"></span><button class="icon-btn" aria-label="新建">${icon('plus', 20)}</button></div>
+    <div class="ph-title">Bots</div><div class="ph-search">${icon('search', 16)}<span>搜索 Bot、Window、会话和命令</span></div>
+    <div class="roster"><section class="group">${groupHead('Release 2.4')}${rows.map(id => botRow(id, { ...states[id], size: 44 })).join('')}</section>
+    <section class="group">${groupHead('Homelab 运维', { open: false, quiet: true })}</section></div>`, '手机 · Bot 列表', [{ n: 1, sel: '[data-bot="tpm"]', at: 'out' }]);
+}
+function phoneChat() {
+  const b = BOTS.check;
+  const body = userEntry('核对清单时把回滚演练也加进去。', '11/13/26 11:19:10 PM')
+    + assistantEntry('已加入。回滚演练需要在 homelab 上执行，我会在演练后更新清单。', '11/13/26 11:19:52 PM')
+    + `<article class="entry user pending"><header>You <time>11/13/26 11:21:03 PM</time></header><p>演练完成后，把结果发给「交付协调」。</p></article>
+       <p class="delivery"><span class="dot"></span><span>尚未发出 · homelab 离线，上线后发送</span><button type="button">取消</button></p>`;
+  return phoneFrame(`<div class="ph-chat-head"><span class="ph-back">${icon('chevron-left', 22)}<span>Bots</span></span><span class="spacer"></span>${avatar(b, 26)}<b style="font-size:15px">${esc(b.name)}</b><span class="spacer"></span><span style="width:60px"></span></div>
+    ${sessionView({ bot: 'check', body })}`, '手机 · 对话（Host 离线）', [{ n: 2, sel: '.delivery', at: 'out' }, { n: 3, sel: '.ph-chat-head', at: 'out' }]);
+}
+
+const HOSTS = [
+  { id: 'homelab', name: 'homelab', os: 'macOS 15 · arm64', version: 'Controller 0.2.79', online: true, sessions: { working: 2, waiting: 1, idle: 3 },
+    cpu: { cores: 12, usage: 38 }, memory: { used: 14.2, total: 24 }, disks: [{ label: '系统盘', used: 442, total: 460 }, { label: 'Projects', used: 432, total: 1907 }] },
+  { id: 'mini', name: 'Mac mini', os: 'macOS 15 · arm64', version: 'Controller 0.2.79', online: true, sessions: { working: 1, waiting: 0, idle: 2 },
+    cpu: { cores: 10, usage: 12 }, memory: { used: 9.1, total: 16 }, disks: [{ label: '系统盘', used: 211, total: 494 }] },
+  { id: 'win', name: 'Windows 测试机', os: 'Windows 11 · x64', version: 'Controller 0.2.71', online: true, outdated: true, sessions: { working: 0, waiting: 0, idle: 1 } },
+  { id: 'shared', name: 'xia 的 Linux 服务器', os: 'Ubuntu 24.04 · x64', version: '共享给你', online: true, shared: true, sessions: { working: 1, waiting: 0, idle: 0 } },
+  { id: 'ci', name: 'linux-ci', os: 'Ubuntu 22.04 · x64', version: 'Controller 0.2.79', online: false },
+];
+const sizeText = gb => gb >= 1000 ? `${(gb / 1024).toFixed(1)} TB` : `${Math.round(gb * 10) / 10} GB`;
+function meter(label, value, total, text, key = '') {
+  const ratio = Math.min(1, value / total), warn = ratio >= 0.9;
+  return `<div class="meter"${key}><div class="meter-line"><span>${label}</span><span class="meter-value${warn ? ' warn' : ''}">${text}</span></div><div class="bar"><i style="width:${(ratio * 100).toFixed(1)}%"${warn ? ' class="warn"' : ''}></i></div></div>`;
+}
+function hostCard(host, compact = false) {
+  const s = host.sessions, total = s ? s.working + s.waiting + s.idle : 0;
+  const sessions = s ? `<div class="host-sessions"><b>${total}</b><span>个 session</span><small>${[s.working ? `${s.working} 工作中` : '', s.waiting ? `<em>${s.waiting} 需要你</em>` : '', s.idle ? `${s.idle} 空闲` : ''].filter(Boolean).join(' · ')}</small></div>` : '';
+  const metrics = host.cpu ? `<div class="metrics${compact ? ' compact' : ''}">${meter('CPU', host.cpu.usage, 100, `${host.cpu.usage}% · ${host.cpu.cores} 核`)}${meter('内存', host.memory.used, host.memory.total, `${host.memory.used} / ${host.memory.total} GB`)}
+      ${host.disks.map((disk, i) => meter(disk.label, disk.used, disk.total, `${sizeText(disk.used)} / ${sizeText(disk.total)}`, ` data-disk="${i}"`)).join('')}</div>` : '';
+  const note = host.outdated ? `<p class="host-note">更新 Controller 后显示 CPU、内存和磁盘。<button class="btn" type="button">更新</button></p>`
+    : host.shared ? `<p class="host-note">共享的 Host 只显示 session 数。</p>` : !host.online ? `<p class="host-note">离线</p>` : '';
+  return `<article class="host-card${host.online ? '' : ' offline'}" data-host="${host.id}"><header><span class="host-dot${host.online ? ' on' : ''}"></span><div><h3>${esc(host.name)}</h3><small>${esc(host.os)} · ${esc(host.version)}</small></div>${icon('chevron-right', 16)}</header>${sessions}${metrics}${note}</article>`;
+}
+function hostsMain() {
+  return `<section class="main"><div class="toolbar"><button class="icon-btn" aria-label="返回">${icon('chevron-left')}</button><span class="who"><span>Hosts</span></span><span class="spacer"></span><button class="btn" type="button">配对新 Host</button></div>
+    <div class="hosts-grid">${HOSTS.map(host => hostCard(host)).join('')}</div></section>`;
+}
+const OVERLAY_MENU = `<div class="menu" data-anchor='[data-bot="check"] .row-menu' data-place="right"><div>${icon('person', 16)}新建 Side</div><div data-hot>${icon('list', 16)}新建 TPM</div><div>${icon('team', 16)}组建 Team</div><div>${icon('question', 16)}请求支持</div><hr><div>${icon('moon', 16)}休眠</div><div><span style="width:16px;flex:none"></span>在 Window 中隐藏</div><div><span style="width:16px;flex:none"></span>在 Bot 中隐藏</div></div>`;
+const OVERLAY_QUIET = `<div class="popover" data-anchor='[data-group="homelab"]' data-place="below" style="width:236px"><b style="font-size:13px">Homelab 运维</b><p style="margin:6px 0 10px;color:var(--ui-label-secondary)">「备份巡检」在休眠中，需要你确认是否清理旧快照。</p><div style="display:flex;gap:8px"><button class="btn primary">查看</button><button class="btn">稍后</button></div></div>`;
+const OVERLAY_INFO = `<div class="popover" data-anchor=".sv-head .info" data-place="below"><dl><dt>Host</dt><dd>homelab</dd><dt>运行</dt><dd>Codex · GPT-6-Astra</dd><dt>目录</dt><dd>~/projects/agent-remote-control</dd><dt>此前</dt><dd>Claude Code（11月12日）</dd></dl></div>`;
+const CHECK_BODY = userEntry('核对一下 2.4 的发布清单。', '11/13/26 11:12:41 PM') + assistantEntry('发布清单应确认核心功能和关键用户流程通过测试，且无阻断性缺陷。<br>还应检查安全、性能、浏览器兼容性、移动端体验和无障碍支持。<br>最后确认生产配置正确、监控告警可用，并已验证部署和回滚流程。', '11/13/26 11:13:30 PM');
+const BASE_STATES = { tpm: { state: 'working' }, lead: { state: 'needs' }, member: { unread: true }, support: { state: 'asleep' } };
+
+const SCENES = [
+  { title: 'Bot 列表：同事一目了然',
+    render: () => desktop(botSidebar({ current: 'tpm', states: BASE_STATES }), botMain('tpm', { working: true, body: TPM_BODY + replyPresence }), '',
+      [{ n: 1, sel: '.ask', at: 'out' }, { n: 2, sel: '[data-bot="tpm"]', at: 'out' }, { n: 3, sel: '[data-bot="lead"]', at: 'out' }, { n: 4, sel: '[data-bot="member"]', at: 'out' },
+       { n: 5, sel: '[data-bot="support"]', at: 'out' }, { n: 6, sel: '.reply-presence .bubble', at: 'right' }]),
+    detail: `<h2>Bot 列表：同事一目了然</h2><p>Release 2.4 这个 group 里有 6 个 Bot。除了 Ask，都是一级成员。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>Ask 是唯一的二级，挂在所属 Bot 下面。</span></li>
+      <li><span class="n">2</span><span>岗位 tag 放在名字旁边，名字本身不改。正在回应时，三个点代替预览；状态取自共享频道，不需要打开对话。</span></li>
+      <li><span class="n">3</span><span>需要你：唯一的强提示。</span></li>
+      <li><span class="n">4</span><span>新消息只用圆点和加粗名字，不显示数字。</span></li>
+      <li><span class="n">5</span><span>休眠：变暗、安静。</span></li>
+      <li><span class="n">6</span><span>Content only 下的回应提示，与之前评审过的样稿一致。</span></li></ol>
+      <h3>与现在相比</h3><ul><li>去掉每行的原始 Host ID 和 provider。</li><li>预览来自每个 Bot 最新一条消息（方案 C）。</li><li>“其他会话”默认折叠，不再展示一排 Refresh 按钮。</li></ul>
+      <h3>现状，另议</h3><ul><li>对话上方有两行标题：工具栏和 Session View 自带的标题行。是否合并属于 Session View 微调，单独讨论。</li></ul>` },
+  { title: '派活：新建 TPM 自动入组',
+    render: () => desktop(botSidebar({ current: 'check', states: { check: { menu: true }, tpm: { fresh: true, unread: true, preview: '已收到。先确认验收标准，稍后给你计划。', time: '刚刚' }, lead: { state: 'needs' }, support: { state: 'asleep' } } }),
+      botMain('check', { body: CHECK_BODY }), OVERLAY_MENU,
+      [{ n: 1, sel: '.menu', at: 'top' }, { n: 2, sel: '[data-bot="tpm"]', at: 'out' }]),
+    detail: `<h2>派活：新建 TPM 自动入组</h2><p>在「发布检查」这一行的 ⋯ 菜单里选“新建 TPM”。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>Bot 的 ⋯ 菜单集中放新建 Side、TPM、Team、请求支持，以及休眠和单侧隐藏。入口位置需要你 review。</span></li>
+      <li><span class="n">2</span><span>新的 TPM 直接出现在同一个 group，作为一级 Bot，带 TPM tag 和未读圆点。</span></li></ol>
+      <h3>规则</h3><ul><li>一个新会话自己就是一个 group 的第一个成员，group 先用它的标题命名。</li><li>不再需要“Show as section”。</li></ul>` },
+  { title: '休眠的 Bot 需要你：低调提醒',
+    render: () => desktop(botSidebar({ current: 'tpm', homelabQuiet: true, states: { ...BASE_STATES, lead: {} } }), botMain('tpm', { working: true, body: TPM_BODY + replyPresence }), OVERLAY_QUIET,
+      [{ n: 1, sel: '[data-group="homelab"]', at: 'out' }]),
+    detail: `<h2>休眠的 Bot 需要你：低调提醒</h2><p>「备份巡检」在折叠的 Homelab 运维里，正在休眠。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>group 标题上一个安静的圆点；悬停或点开才说明是谁、为什么。不发声音，不弹出打断，不显示数字，也不会自动唤醒它。</span></li></ol>
+      <h3>对比</h3><ul><li>醒着的 Bot 需要你时，行内直接显示“需要你”。</li><li>休眠、折叠状态跨设备一致。</li></ul>` },
+  { title: '切到 Window：一个展开，其余折叠',
+    render: () => desktop(windowSidebar(), `<section class="main"><div class="win-head"><h2>Release 2.4</h2><small>6 个 Bot</small><span class="spacer"></span><button class="icon-btn" aria-label="新建视图">${icon('plus')}</button><button class="icon-btn" aria-label="更多">${icon('ellipsis')}</button></div>
+      <div class="canvas"><div class="pane"><div class="pane-head"><span class="grow"></span><span class="title">发布检查</span><span style="color:var(--ui-label-secondary)">Info ▾</span><span class="grow"></span><button class="icon-btn fold" aria-label="折叠" style="font-size:18px;line-height:1">−</button></div>
+        <div class="pane-head" style="color:var(--ui-label-secondary)"><span style="font-size:11px">VS Code</span>${icon('list', 16)}${icon('search', 16)}<span class="grow"></span><button class="icon-btn" aria-label="关闭">${icon('close', 16)}</button><button class="icon-btn" aria-label="收藏">${icon('star', 16)}</button><button class="icon-btn" aria-label="更多">${icon('ellipsis', 16)}</button></div>
+        ${sessionView({ bot: 'check', body: CHECK_BODY }).replace('<div class="sv-head">', '<div class="sv-head" hidden>')}</div>
+        ${strip('tpm', { working: true })}${strip('lead', { needs: true })}${strip('member')}${strip('side')}${strip('support', { asleep: true })}</div></section>`, '',
+      [{ n: 1, sel: '.fold', at: 'top' }, { n: 2, sel: '[data-strip="tpm"]', at: 'top' }, { n: 3, sel: '[data-strip="support"]', at: 'top' }, { n: 4, sel: '.win-head small', at: 'right' }],
+      '面板内为现有 Session View，保持不变'),
+    detail: `<h2>切到 Window：一个展开，其余折叠</h2><p>同一个 group 在 Window 模式里就是 Release 2.4。展开大 group 时，只有选中的 Bot 实时连接。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>沿用面板右上角现有的“−”作为折叠。去掉 Disconnect；休眠和单侧隐藏放进 ⋯。</span></li>
+      <li><span class="n">2</span><span>折叠成窄条，保留位置：头像、名字、岗位 tag，以及工作中、需要你。状态来自共享频道。</span></li>
+      <li><span class="n">3</span><span>休眠的窄条变暗。点任何窄条就展开并实时连接；休眠的同时被唤醒（可点击试试）。</span></li>
+      <li><span class="n">4</span><span>标题显示 Bot 数量。</span></li></ol>
+      <h3>看不见的部分</h3><ul><li>每台设备只保持有限个实时连接。超出的面板先显示缓存，回到视野时自动接上，不改变折叠或休眠。</li></ul>` },
+  { title: '交接无感：历史接着往上翻',
+    render: () => desktop(botSidebar({ current: 'lead', states: { ...BASE_STATES, lead: {} } }),
+      botMain('lead', { body: `<div class="earlier">${userEntry('先评估一下 Windows 安装脚本的兼容问题。', '11/12/26 09:40:12 PM')}${assistantEntry('问题出在 PowerShell 执行策略和路径中的空格。建议在 Windows 主机上复现后再修。', '11/12/26 09:41:03 PM')}</div>
+        <div class="history-divider">更早的对话 · 11月12日</div>${userEntry('开始修吧，修完让 Windows 复现再验证一次。', '11/13/26 10:02:18 PM')}${assistantEntry('已修复执行策略和路径转义，正在等 Windows 复现的验证结果。', '11/13/26 11:10:44 PM')}` }), OVERLAY_INFO,
+      [{ n: 1, sel: '.history-divider', at: 'left' }, { n: 2, sel: '.toolbar .who', at: 'right' }, { n: 3, sel: '.popover', at: 'top' }]),
+    detail: `<h2>交接无感：历史接着往上翻</h2><p>「跨平台适配」昨天由 Claude Code 运行，今天交接给了 Codex。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>往上翻，直接接着显示上一个会话的内容，只读，中间一条安静的分隔线。</span></li>
+      <li><span class="n">2</span><span>名字、头像、岗位、位置、草稿都不变，Bot 模式不提示交接。</span></li>
+      <li><span class="n">3</span><span>想知道时，在 Info 里能看到现在由谁运行、之前由谁运行。</span></li></ol>
+      <h3>原则</h3><ul><li>对话就是这一串 agent session 的内容，每一段都是真实的会话。</li></ul>` },
+  { title: '手机：列表到对话，离线待发送', render: () => phoneRoster() + phoneChat(),
+    detail: `<h2>手机：列表到对话，离线待发送</h2><p>列表是首页；点开一个 Bot 全屏显示，Back 回到原来的位置。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>同一个 Bot 列表，行更高，方便点按；搜索覆盖 Bot、Window、会话和命令。</span></li>
+      <li><span class="n">2</span><span>Host 离线时也能照常发送：消息显示“尚未发出”，任何设备上都能取消；会话接收后才算对话的一部分。沿用现有的发送中样式。</span></li>
+      <li><span class="n">3</span><span>对话页顶部：返回改为“‹ Bots”，名字居中；Window/Bot 切换只放在列表首页。现在这里是“Back + 标题 + 模式切换”。属于布局变化，需要你 review。</span></li></ol>
+      <h3>保持不变</h3><ul><li>Session View 与桌面一致，只是更窄。</li></ul>` },
+  { title: 'Host 总览：几台机器，一眼看全', render: () => desktop(windowSidebar(), hostsMain(), '',
+      [{ n: 1, sel: '[data-host="homelab"] .host-sessions', at: 'corner' }, { n: 2, sel: '[data-host="homelab"] [data-disk="0"]', at: 'left' }, { n: 3, sel: '[data-host="win"] .host-note', at: 'right' },
+       { n: 4, sel: '[data-host="shared"] .host-note', at: 'corner' }, { n: 5, sel: '.footer', at: 'out' }], '示例数据'),
+    detail: `<h2>Host 总览：几台机器，一眼看全</h2><p>从侧栏底部的“4 个 Host 在线”进入，所有 Host 以卡片并排显示。页面可见时每 5 秒刷新，离开就停。</p><h3>提议的变化</h3><ol>
+      <li><span class="n">1</span><span>Session：Controller 当前连接的会话数，分为工作中、需要你、空闲。</span></li>
+      <li><span class="n">2</span><span>CPU、内存、磁盘都是“已用 / 总量”。磁盘按用户目录和工作目录所在的盘各显示一行，同一块盘只显示一次；用量超过 90% 用警示色。</span></li>
+      <li><span class="n">3</span><span>旧版 Controller 不提供这些数据，卡片上提示更新。</span></li>
+      <li><span class="n">4</span><span>别人共享给你的 Host 只显示 session 数，机器指标只给拥有者看。</span></li>
+      <li><span class="n">5</span><span>入口：侧栏底部的 Host 状态。现在这里打开的是 All sessions。</span></li></ol>
+      <h3>计算口径</h3><ul><li>内存按系统的“已使用”口径计算（macOS 同活动监视器），可回收的缓存不算已用。</li><li>CPU 是两次采样之间的平均使用率。</li><li>点卡片进入该 Host 的详情：providers、Codex daemon、VS Code、更新、配对，内容沿用现有设置页。</li></ul>` },
+  { title: '手机：Host 列表', render: () => phoneFrame(`<div class="ph-nav"><span class="ph-back">${icon('chevron-left', 22)}<span>返回</span></span><span class="spacer"></span><button class="icon-btn" aria-label="配对新 Host">${icon('plus', 20)}</button></div>
+      <div class="ph-title">Hosts</div><div class="host-list">${HOSTS.map(host => hostCard(host, true)).join('')}</div>`, '手机 · Host 列表'),
+    detail: `<h2>手机：Host 列表</h2><p>同样的卡片纵向排列；指标压缩成两列，数字和进度条都保留。</p><h3>保持不变</h3><ul><li>Host 详情、配对、更新沿用现有功能，只是从卡片进入。</li></ul>` },
+];
+
+const scenesEl = document.getElementById('scenes'), detailEl = document.getElementById('detail'), devices = document.getElementById('devices'), stage = document.getElementById('stage');
+let current = 0;
+function within(frame, element) {
+  const a = frame.getBoundingClientRect(), b = element.getBoundingClientRect();
+  return { left: b.left - a.left, top: b.top - a.top, right: b.right - a.left, bottom: b.bottom - a.top, width: b.width, height: b.height };
+}
+function placeOverlays() {
+  devices.querySelectorAll('[data-anchor]').forEach(overlay => {
+    const frame = overlay.closest('.desktop'), target = frame?.querySelector(overlay.dataset.anchor);
+    if (!target) return;
+    const r = within(frame, target);
+    const place = overlay.dataset.place;
+    overlay.style.left = `${place === 'right' ? r.right + 10 : r.left}px`;
+    overlay.style.top = `${place === 'right' ? r.top - 6 : r.bottom + 6}px`;
+  });
+}
+function placePins() {
+  devices.querySelectorAll('.frame-wrap[data-pins]').forEach(wrap => {
+    wrap.querySelectorAll('.pin').forEach(pin => pin.remove());
+    const pins = JSON.parse(wrap.dataset.pins || '[]');
+    const frame = wrap.querySelector('.desktop, .phone');
+    for (const spec of pins) {
+      const target = wrap.querySelector(spec.sel);
+      if (!target) { console.error(`Missing pin target ${spec.sel}`); continue; }
+      const r = within(wrap, target), f = within(wrap, frame);
+      const pin = document.createElement('span');
+      pin.className = 'pin'; pin.textContent = spec.n;
+      const middle = r.top + r.height / 2 - 11;
+      const [x, y] = spec.at === 'out' ? [f.left - 32, middle] : spec.at === 'right' ? [r.right + 8, middle] : spec.at === 'left' ? [r.left - 30, middle] : spec.at === 'corner' ? [r.right - 26, middle] : [r.left + r.width / 2 - 11, r.top - 28];
+      pin.style.left = `${x}px`; pin.style.top = `${y}px`;
+      wrap.append(pin);
+    }
+  });
+}
+function fit() {
+  devices.style.transform = 'none';
+  const scale = Math.min(1, (stage.clientWidth - 96) / devices.scrollWidth, (stage.clientHeight - 56) / devices.scrollHeight);
+  devices.style.transform = `scale(${Math.max(scale, 0.45)})`;
+}
+function show(index) {
+  current = index;
+  scenesEl.querySelectorAll('button').forEach((button, i) => { if (i === index) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current'); });
+  devices.style.transform = 'none';
+  devices.innerHTML = SCENES[index].render();
+  detailEl.innerHTML = SCENES[index].detail;
+  placeOverlays(); placePins();
+  history.replaceState(null, '', `#${index + 1}`);
+  fit();
+}
+scenesEl.innerHTML = SCENES.map((scene, i) => `<li><button type="button"><b>${i + 1}</b><span>${esc(scene.title)}</span></button></li>`).join('');
+scenesEl.querySelectorAll('button').forEach((button, i) => button.addEventListener('click', () => show(i)));
+devices.addEventListener('click', event => {
+  const target = event.target.closest('[data-strip]');
+  if (target) { target.removeAttribute('data-asleep'); target.classList.add('wake'); }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') show(Math.min(SCENES.length - 1, current + 1));
+  if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') show(Math.max(0, current - 1));
+});
+addEventListener('resize', fit);
+show(Math.min(SCENES.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1)));
+</script>
+</body>
+</html>

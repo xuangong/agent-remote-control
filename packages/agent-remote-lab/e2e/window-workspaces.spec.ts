@@ -176,6 +176,8 @@ test('two pages share Window UI edits and external commands across narrow presen
     const nextId = (await current.getAttribute('data-window-id'))!;
     const createsBeforeDelete = creations.length;
     await menu.locator(`[data-window-id="${windowId}"]`).locator('..').getByRole('button', { name: 'Delete Window: Shared browser workspace', exact: true }).click();
+    await expect(menu.locator(`[data-window-id="${windowId}"]`)).toHaveCount(1);
+    await page.getByRole('dialog', { name: 'Delete this Window?', exact: true }).getByRole('button', { name: 'Delete Window', exact: true }).click();
     await expect(menu.locator(`[data-window-id="${windowId}"]`)).toHaveCount(0);
     await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
     expect(new URL(page.url()).searchParams.get('window')).toBe(nextId);
@@ -395,6 +397,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     const requests: Array<{ method: string; path: string }> = [];
     context.on('request', request => { const path = new URL(request.url()).pathname; if (path.includes('/windows') && request.method() !== 'GET') requests.push({ method: request.method(), path }); });
     await panel.getByRole('button', { name: 'Delete Window: Window', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Delete this Window?', exact: true }).getByRole('button', { name: 'Delete Window', exact: true }).click();
     await expect.poll(async () => (await catalog()).map(window => window.id)).toEqual([existingId]);
     await expect(second.getByText(windowDeleted, { exact: true })).toBeVisible();
     const recoveryDeletes = second.locator('.lab-window-recovery button[aria-label^="Delete Window:"]');
@@ -428,6 +431,7 @@ test('active Windows cannot be deleted and deleting another Window never creates
     const permittedDelete = otherPanel.locator(`[data-window-id="${manuallyCreatedId}"]`).locator('..').locator('button[aria-label^="Delete Window:"]');
     await expect(permittedDelete).toBeEnabled();
     await permittedDelete.click();
+    await second.getByRole('dialog', { name: 'Delete this Window?', exact: true }).getByRole('button', { name: 'Delete Window', exact: true }).click();
     await expect.poll(async () => (await catalog()).map(window => window.id)).toEqual([existingId]);
   } finally { await second?.close(); await page.close(); await fixture.close(); }
 });

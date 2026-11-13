@@ -4,6 +4,7 @@
 .lab-window-panel > .lab-directory-heading { flex: none; }
 .lab-window-panel-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .lab-window-workspaces { min-width: 0; color: var(--obs-text); font-size: 13px; }
+.lab-window-workspaces .ui-sheet .lab-sheet-message { overflow-wrap: anywhere; }
 .lab-window-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 6px 0; }
 .lab-window-section-heading > span { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-window-section-heading > button { min-height: 36px; flex: none; padding: 6px 8px; border-color: transparent; color: var(--obs-action); font-size: 12px; }

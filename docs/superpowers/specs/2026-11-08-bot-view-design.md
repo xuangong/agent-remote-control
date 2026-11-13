@@ -1,5 +1,7 @@
 # Bot mode: one session grouping, two ways to manage it
 
+**Superseded in part, 2026-11-13:** [Bot and Window: product model](2026-11-13-bot-window-product-model.md) replaces this document's bot membership (Side, Team, TPM and Support sessions are bots; only Asks are nested), threads, the term *section* (now *group*) and the manual Show as section step (groups appear automatically). Handoff is invisible in Bot mode. The data, Relay and compatibility sections remain the current record.
+
 Status: proposed on 2026-11-08. The direction (one grouping, Window mode and Bot mode over the same groups, switched rather than shown together) was agreed with the owner in conversation; this document turns it into rules, data and milestones for review before implementation.
 
 ## Problem

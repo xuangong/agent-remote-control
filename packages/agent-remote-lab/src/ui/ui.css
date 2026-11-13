@@ -144,6 +144,8 @@ button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, button.ui-list
   box-shadow: var(--ui-shadow-overlay); overflow: clip;
 }
 .ui-sheet[data-detent="large"] { height: calc(100dvh - 44px); }
+.ui-sheet[data-detent="content"] { height: auto; max-height: calc(100dvh - 44px); }
+.ui-sheet[data-detent="content"] > :is(.ui-sheet-grabber, .ui-sheet-header) { flex-shrink: 0; }
 .ui-sheet[open] { display: flex; flex-direction: column; animation: ui-sheet-in var(--ui-duration) var(--ui-ease-spring); }
 .ui-sheet::backdrop { background: var(--ui-backdrop); }
 @keyframes ui-sheet-in { from { transform: translateY(100%); } }

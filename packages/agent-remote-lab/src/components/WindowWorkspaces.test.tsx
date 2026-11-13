@@ -1,13 +1,27 @@
 import { act, useReducer } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowOperation, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
+import { useWindowActions } from '../hooks/useWindowActions.js';
 import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { botGroup, mountBotApp, seedGroup, until } from '../test/bot-mode-fixtures.js';
 
+const dialogMethods = ['showModal', 'close'] as const;
+const originalDialog = Object.fromEntries(dialogMethods.map(name => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)]));
+beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); } });
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterAll(() => {
+  for (const name of dialogMethods) {
+    const original = originalDialog[name];
+    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
+    else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
+  }
+});
 
 it('does not append a selected section-only group to the Window catalog', async () => {
   const group = botGroup('section'); group.presentation = { window: false };
@@ -38,10 +52,15 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
   await app.close(); localStorage.clear(); sessionStorage.clear();
 });
 
-async function fixture({ views = [createWindowView('main', undefined, 'primary')], ...props }: { views?: WindowView[] } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview' | 'placement'> = {}) {
+async function fixture({ views = [createWindowView('main', undefined, 'primary')], sharedActions = false, ...props }: { views?: WindowView[]; sharedActions?: boolean } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview' | 'placement'> = {}) {
   let window: WorkspaceWindow = { schemaVersion: 3, id: 'window', title: 'Project', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
   let other: WorkspaceWindow = { ...window, id: 'other', title: 'Window' };
   const renamed = vi.fn();
+  const removed = new Set<string>();
+  let removeWindow: (id: string) => Promise<void> = async () => {};
+  const remove = vi.fn(async (id: string) => { await removeWindow(id); removed.add(id); update(); });
+  let client: ReturnType<typeof useWindowWorkspace>['client'];
+  let active = true, hasActiveWindow = true, currentWindow = 'window';
   let renameOther: (title: string) => Promise<{ saved: Promise<void> }> = async title => { other = { ...other, title, revision: other.revision + 1 }; return { saved: Promise.resolve() }; };
   let rejectSave!: (error: Error) => void;
   const saved = new Promise<void>((_resolve, reject) => { rejectSave = reject; });
@@ -56,15 +75,16 @@ async function fixture({ views = [createWindowView('main', undefined, 'primary')
   });
   function Harness() {
     [, update] = useReducer(value => value + 1, 0); redraw = update;
-    const workspace = { window, windows: [window, other], hasActiveWindow: true, unavailable: false, saveState,
-      retrySave: retry, discardLocalChanges: discard, open: async () => {}, create: async () => {}, remove: async () => {}, operate,
+    const workspace = { client, window: currentWindow === 'window' ? window : other, windows: [window, other].filter(item => !removed.has(item.id)), hasActiveWindow, unavailable: false, saveState,
+      retrySave: retry, discardLocalChanges: discard, open: async () => {}, create: async () => {}, remove, operate,
       async rename(id: string, title: string) {
         renamed(id, title);
         if (id === window.id) return { saved: operate({ type: 'rename', title }) };
         const result = await renameOther(title); update(); return result;
       },
     } as unknown as ReturnType<typeof useWindowWorkspace>;
-    return <WindowWorkspaces workspace={workspace} {...props} />;
+    const actions = useWindowActions(workspace);
+    return <WindowWorkspaces workspace={workspace} actions={sharedActions ? actions : undefined} active={active} {...props} />;
   }
   const container = await render(<Harness />);
   const button = (title: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === title)!;
@@ -77,7 +97,13 @@ async function fixture({ views = [createWindowView('main', undefined, 'primary')
     });
     await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
   };
-  return { container, button, rename, renamed, operate, read: () => window, readOther: () => other, retry, discard, rejectSave,
+  return { container, button, rename, renamed, operate, remove,
+    setRemove(value: typeof removeWindow) { removeWindow = value; },
+    async changeScope() { await act(async () => { client = new WindowWorkspaceClient('http://localhost/changed-window-scope/'); redraw(); }); },
+    async changeWindow() { await act(async () => { currentWindow = 'other'; redraw(); }); },
+    async setActive(value: boolean) { await act(async () => { active = value; redraw(); }); },
+    async deactivateWindow() { await act(async () => { hasActiveWindow = false; redraw(); }); },
+    read: () => window, readOther: () => other, retry, discard, rejectSave,
     setRenameOther(value: typeof renameOther) { renameOther = value; },
     rejectLocal: () => { rejectLocal = true; },
     async offline() { await act(async () => { saveState = { state: 'offline', pending: 1, error: 'Network unavailable' }; redraw(); }); },
@@ -299,4 +325,101 @@ it('keeps the floating panel text buttons, check marks and delete note by defaul
   expect(root.querySelector('.lab-window-selected[aria-label="Selected view"]')?.textContent).toBe('✓');
   expect(root.textContent).toContain('Switch to another Window before deleting the active one.');
   expect(root.querySelector('.ui-icon-button')).toBeNull();
+});
+
+it.each(['panel', 'sidebar'] as const)('confirms deletion from the %s and cancels without removing a Window', async placement => {
+  const test = await fixture({ placement });
+  const trigger = () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!;
+  await act(async () => trigger().click());
+  expect(test.remove).not.toHaveBeenCalled();
+  let dialog = test.container.querySelector('dialog')!;
+  expect(dialog?.open).toBe(true);
+  expect(dialog?.dataset.detent).toBe('content');
+  expect(dialog?.textContent).toContain('Delete this Window?');
+  expect(dialog?.textContent).toContain('“Window”');
+  expect(dialog?.textContent).toContain('agent sessions keep running');
+  await act(async () => test.button('Cancel').click());
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
+  await act(async () => trigger().click());
+  dialog = test.container.querySelector('dialog')!;
+  await act(async () => dialog.dispatchEvent(new Event('cancel', { cancelable: true })));
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.remove).not.toHaveBeenCalled();
+  expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
+});
+
+it('deletes only the confirmed Window and keeps the open Window', async () => {
+  const test = await fixture();
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  expect(test.remove).not.toHaveBeenCalled();
+  await act(async () => test.button('Delete Window').click());
+  expect(test.remove).toHaveBeenCalledExactlyOnceWith('other');
+  expect(test.container.querySelector('[data-window-id="other"]')).toBeNull();
+  expect(test.container.querySelector('[data-window-id="window"]')?.getAttribute('aria-current')).toBe('true');
+  expect(test.container.querySelector('dialog')).toBeNull();
+});
+
+it('keeps pending deletion open and prevents another submission or dismissal', async () => {
+  const test = await fixture();
+  let finish!: () => void;
+  test.setRemove(() => new Promise<void>(resolve => { finish = resolve; }));
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  const dialog = test.container.querySelector('dialog')!;
+  const confirm = test.button('Delete Window');
+  expect(confirm).toBeDefined();
+  await act(async () => { confirm.click(); confirm.click(); });
+  expect(confirm.disabled).toBe(true);
+  expect(test.button('Cancel').disabled).toBe(true);
+  expect(test.remove).toHaveBeenCalledExactlyOnceWith('other');
+  await act(async () => {
+    dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+    dialog.querySelector<HTMLButtonElement>('[aria-label="Close"]')!.click();
+  });
+  expect(test.container.querySelector('dialog')).toBe(dialog);
+  expect(dialog.open).toBe(true);
+  await act(async () => finish());
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.container.querySelector('[data-window-id="other"]')).toBeNull();
+});
+
+it.each([false, true])('keeps a failed deletion visible and retryable inside its sheet (shared actions: %s)', async sharedActions => {
+  const test = await fixture({ sharedActions });
+  test.setRemove(async () => { throw new Error('This Window could not be deleted. Try again.'); });
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  expect(test.button('Delete Window')).toBeDefined();
+  await act(async () => test.button('Delete Window').click());
+  const dialog = test.container.querySelector('dialog')!;
+  expect(dialog?.open).toBe(true);
+  expect(dialog?.querySelector('[role="alert"]')?.textContent).toBe('This Window could not be deleted. Try again.');
+  expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
+  expect(test.button('Delete Window').disabled).toBe(false);
+  test.setRemove(async () => {});
+  await act(async () => test.button('Delete Window').click());
+  expect(test.remove).toHaveBeenNthCalledWith(2, 'other');
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.container.querySelector('[data-window-id="other"]')).toBeNull();
+});
+
+it.each(['scope', 'window', 'panel'] as const)('closes stale deletion confirmation after a %s change', async change => {
+  const test = await fixture();
+  await act(async () => test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!.click());
+  expect(test.container.querySelector('dialog')?.open).toBe(true);
+  if (change === 'scope') await test.changeScope();
+  else if (change === 'window') await test.changeWindow();
+  else { await test.setActive(false); await test.setActive(true); }
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.remove).not.toHaveBeenCalled();
+  expect(test.container.querySelector('[data-window-id="other"]')).not.toBeNull();
+});
+
+it('keeps Window deletion unavailable until another active Window is open', async () => {
+  const test = await fixture();
+  expect(test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Project"]')!.disabled).toBe(true);
+  await test.deactivateWindow();
+  const trigger = test.container.querySelector<HTMLButtonElement>('[aria-label="Delete Window: Window"]')!;
+  expect(trigger.disabled).toBe(true);
+  await act(async () => trigger.click());
+  expect(test.container.querySelector('dialog')).toBeNull();
+  expect(test.remove).not.toHaveBeenCalled();
 });

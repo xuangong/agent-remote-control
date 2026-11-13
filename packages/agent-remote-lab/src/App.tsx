@@ -142,6 +142,7 @@ import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { arrangeFloatingEntries } from './hooks/useTrackingPosition.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
+import { HostOverview } from './components/HostOverview.js';
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
@@ -384,7 +385,7 @@ function AppContent({
   const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
   const [contextFromSessions, setContextFromSessions] = useState(true);
   const [trackedOnly, setTrackedOnly] = useState(false);
-  const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings'>('list');
+  const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings' | 'hosts'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const [headerViewTarget, setHeaderViewTarget] = useState<HTMLDivElement | null>(null);
   const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
@@ -394,6 +395,8 @@ function AppContent({
   const [mobileViewTarget, setMobileViewTarget] = useState<HTMLDivElement | null>(null);
   const [traceViewTarget, setTraceViewTarget] = useState<HTMLDivElement | null>(null);
   const [pageViewTarget, setPageViewTarget] = useState<HTMLDivElement | null>(null);
+  /** The desktop page toolbar's trailing slot, where a page such as Hosts places its actions. */
+  const [pageActionsTarget, setPageActionsTarget] = useState<HTMLDivElement | null>(null);
   const connectionSummaryRef = useRef<HTMLDetailsElement>(null);
   const workbenchPanelRef = useRef<HTMLElement>(null);
   const compactLayoutRef = useRef(isCompactLayout());
@@ -1256,7 +1259,7 @@ function AppContent({
     setSessionPanel(panel); setActiveView('workbench'); setSessionsPage(true);
     if (panel === 'favorites') void favorites.refresh();
   }
-  const sessionsPageTitle = sessionPanel === 'list' ? 'All sessions' : sessionPanel === 'favorites' ? 'Favorites' : sessionPanel === 'new' ? 'New session' : 'Settings';
+  const sessionsPageTitle = sessionPanel === 'list' ? 'All sessions' : sessionPanel === 'favorites' ? 'Favorites' : sessionPanel === 'new' ? 'New session' : sessionPanel === 'hosts' ? 'Hosts' : 'Settings';
   /** Shows a sidebar panel: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
   function showPanel(panel: typeof sessionPanel) {
     if (!compactLayout) { openPage(panel); return; }
@@ -2796,7 +2799,10 @@ function AppContent({
         <LayoutDiagnosticsSettings />
       </section> : null}
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
-      {directory && sessionPanel !== 'favorites' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {directory && userScoped && sessionPanel === 'hosts' ? <HostOverview hosts={remoteHosts} service={hostClient} visible={windowMode && (compactLayout ? contextOpen : pageOpen)}
+        compact={compactLayout} actionsTarget={compactLayout ? undefined : pageActionsTarget}
+        onOpenHost={id => { const host = remoteHosts.find(item => item.id === id); if (host) selectHost(host); if (compactLayout) setSessionPanel('settings'); else openPage('settings'); }} /> : null}
+      {directory && sessionPanel !== 'favorites' && sessionPanel !== 'hosts' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel key={selectedRemoteHost?.id} />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={windowMode && (compactLayout ? contextOpen : pageOpen)}>
           <HostVscodeTunnel key={selectedRemoteHost?.id} />
@@ -2982,6 +2988,7 @@ function AppContent({
       {compactLayout ? <nav className="lab-session-panel-actions" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
+        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'hosts'} onClick={() => setSessionPanel('hosts')}>Hosts</button> : null}
         <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>Settings</button>
       </nav> : null}
       {compactLayout ? sessionPanelContent : <>
@@ -2998,7 +3005,7 @@ function AppContent({
             <div ref={askSidebarSlot} className="lab-movable-slot" />
           </nav>
         </div>
-        <SidebarFooter hosts={selectableHosts} loaded={hostsLoaded} onHosts={() => openPage('list')} onSettings={() => openPage('settings')} settingsCurrent={pageOpen && sessionPanel === 'settings'} />
+        <SidebarFooter hosts={selectableHosts} loaded={hostsLoaded} onHosts={() => openPage(userScoped ? 'hosts' : 'list')} hostsCurrent={pageOpen && sessionPanel === 'hosts'} onSettings={() => openPage('settings')} settingsCurrent={pageOpen && sessionPanel === 'settings'} />
       </>}
       {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button></footer> : null}
     </SupportingRail>
@@ -3016,8 +3023,9 @@ function AppContent({
         }}>
         {/* On the Favorites page the toolbar heading is the Favorites heading, with its loading mark; the panel shows none. */}
         <Toolbar className="lab-sessions-page-toolbar" title={userScoped && sessionPanel === 'favorites' ? <FavoritesHeading loading={favorites.loading} /> : sessionsPageTitle} titleRef={sessionsPageTitleRef} titleFocusable
-          leading={<><div ref={setPageViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /><IconButton icon="chevron-left" label="Back to Window" onClick={closePage} /></>} />
-        {sessionPanel !== 'settings' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? (sidebarWindow ? 'Empty session view' : 'Main session'))}</strong></div> : null}
+          leading={<><div ref={setPageViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /><IconButton icon="chevron-left" label="Back to Window" onClick={closePage} /></>}
+          trailing={<div ref={setPageActionsTarget} className="lab-page-actions" />} />
+        {sessionPanel !== 'settings' && sessionPanel !== 'hosts' ? <div className="lab-session-open-target" role="status">Open in: <strong>{directoryView?.binding?.title ?? (directoryView ? 'Empty session view' : sidebarWindow?.target?.title ?? (sidebarWindow ? 'Empty session view' : 'Main session'))}</strong></div> : null}
         <div className="lab-sessions-page-body">{sessionPanelContent}</div>
       </section> : null}
       <section

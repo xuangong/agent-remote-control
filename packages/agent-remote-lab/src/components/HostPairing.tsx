@@ -11,6 +11,8 @@ export interface RemoteHost {
   controller?: ControllerIdentity;
   providerManagement?: true;
   teamManagement?: true;
+  /** The Controller answers Host status reads: open sessions, CPU, memory and disks. */
+  hostStatus?: true;
   credentialRotation?: boolean; environment?: HostEnvironment;
   access?: 'owner' | 'shared'; sessionQuota?: { limit: number; used: number };
 }

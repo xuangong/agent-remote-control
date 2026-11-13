@@ -1,0 +1,37 @@
+.lab-host-overview { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.lab-host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; align-content: start; }
+.lab-host-card { display: grid; gap: 12px; align-content: start; min-width: 0; padding: 14px; border-radius: 12px;
+  background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
+.lab-host-card:not([data-online]) { opacity: 0.6; }
+.lab-host-open.lab-host-open { display: flex; align-items: center; gap: 10px; min-width: 0; margin: -6px; padding: 6px; border: 0; border-radius: 8px;
+  background: none; color: var(--ui-label-tertiary); font: inherit; text-align: left; cursor: pointer; }
+.lab-host-open.lab-host-open:hover { background: var(--ui-row-hover); }
+.lab-host-open.lab-host-open:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: 1px; }
+.lab-host-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ui-label-tertiary); }
+.lab-host-card[data-online] .lab-host-dot { background: var(--ui-status-success); }
+.lab-host-name { flex: 1; min-width: 0; display: grid; }
+.lab-host-name strong { overflow: hidden; color: var(--ui-label); font-size: var(--ui-size-headline); text-overflow: ellipsis; white-space: nowrap; }
+.lab-host-name small { overflow: hidden; color: var(--ui-label-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.lab-host-sessions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.lab-host-sessions strong { color: var(--ui-label); font-size: 22px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.lab-host-sessions span { color: var(--ui-label-secondary); font-size: 13px; }
+.lab-host-sessions small { flex-basis: 100%; color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-sessions em { color: var(--ui-status-attention); font-style: normal; font-weight: 600; }
+.lab-host-meters { display: grid; gap: 10px; }
+.lab-host-grid[data-compact] { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.lab-host-grid[data-compact] .lab-host-meters { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.lab-host-meter-line { display: flex; justify-content: space-between; gap: 8px; color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-meter-line > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-host-meter-value { flex: none; color: var(--ui-label); font-variant-numeric: tabular-nums; }
+.lab-host-meter[data-warning] .lab-host-meter-value { color: var(--ui-status-attention); font-weight: 600; }
+.lab-host-bar { height: 4px; margin-top: 5px; overflow: hidden; border-radius: 2px; background: var(--ui-fill); }
+.lab-host-bar i { display: block; height: 100%; border-radius: 2px; background: var(--ui-accent); }
+.lab-host-meter[data-warning] .lab-host-bar i { background: var(--ui-status-attention); }
+.lab-host-note { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--ui-label-secondary); font-size: 12px; }
+.lab-host-update.lab-host-update { flex: none; white-space: nowrap; }
+.lab-host-empty { margin: 0; color: var(--ui-label-secondary); }
+.lab-host-pairing-panel { max-width: 720px; min-width: 0; padding: 14px; border-radius: 12px; background: var(--ui-background); box-shadow: var(--ui-shadow-pane); }
+@media (pointer: coarse) { .lab-host-update.lab-host-update, .lab-host-pair.lab-host-pair { min-height: 44px; } }
+/* The desktop Hosts page lays its cards across the whole page on the grouped background, instead of the narrow column of list pages. */
+.lab-sessions-page-body:has(> .lab-sidebar-content > .lab-host-overview) { background: var(--ui-background-grouped); }
+.lab-sessions-page-body > .lab-sidebar-content:has(> .lab-host-overview) { max-width: none; padding: 16px; }

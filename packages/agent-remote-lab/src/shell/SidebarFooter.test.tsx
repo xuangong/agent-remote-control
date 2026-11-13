@@ -19,7 +19,7 @@ it('opens the Hosts and Settings pages', async () => {
   const footer = container.querySelector('footer.lab-sidebar-footer')!;
   expect(footer.querySelector('[data-host-state]')?.getAttribute('data-host-state')).toBe('offline');
   const hosts = footer.querySelector<HTMLButtonElement>('.lab-sidebar-hosts')!;
-  expect([hosts.title, hosts.getAttribute('aria-description')]).toEqual(['Open All sessions to choose a Host', 'Open All sessions to choose a Host']);
+  expect([hosts.title, hosts.getAttribute('aria-description')]).toEqual(['Open Hosts', 'Open Hosts']);
   expect(footer.querySelector('button[aria-label="Sidebar settings"]')?.hasAttribute('aria-current')).toBe(false);
   expect(footer.querySelector('button[aria-label="Sidebar settings"]')?.hasAttribute('aria-pressed')).toBe(false);
   await act(async () => (footer.querySelector('.lab-sidebar-hosts') as HTMLButtonElement).click());

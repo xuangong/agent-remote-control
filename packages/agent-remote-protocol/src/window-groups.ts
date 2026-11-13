@@ -68,20 +68,28 @@ export class WindowGroupError extends WindowLayoutError {
   constructor(code: string, message: string) { super(code, message); this.name = 'WindowGroupError'; }
 }
 
-/** A bot is an ordinary view showing a current session: not attached, not history, not a subagent's, not an Ask, Team or TPM view. */
+/**
+ * A bot is a view showing a current session: ordinary sessions, Sides (attached views) and the managed sessions of Teams,
+ * TPM works and Support rosters. Asks, history views, subagents' views and empty views are not bots; an Ask nests under its bot.
+ */
 export function isBotView(view: WindowView): view is WindowView & { binding: WindowSessionBinding } {
-  return view.placement !== 'attached' && view.binding !== undefined && view.binding.sessionIntent === undefined
-    && view.binding.parentNativeSessionId === undefined && view.feature === undefined && view.bindingPolicy !== 'managed';
+  return view.binding !== undefined && view.binding.sessionIntent === undefined
+    && view.binding.parentNativeSessionId === undefined && view.feature?.kind !== 'ask';
 }
 export const windowSessionIdentity = (binding: Pick<WindowSessionBinding, 'hostId' | 'providerId' | 'nativeSessionId'>) =>
   JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]);
-/** The views Bot mode shows as bots: none for a group that is not a section. */
+/** Every view of the group that is a bot, whether or not the group carries bot details or appears in Bot mode. */
+export function botViews(group: WindowGroup): Array<WindowView & { binding: WindowSessionBinding }> {
+  return group.window.views.filter(isBotView);
+}
+/** The bots the one-bot-per-session rule counts: those of a group with bot details that appears in Bot mode. */
 export function groupBotViews(group: WindowGroup): Array<WindowView & { binding: WindowSessionBinding }> {
-  return group.bots ? group.window.views.filter(isBotView) : [];
+  return group.bots && hasBotAppearance(group) ? botViews(group) : [];
 }
 export const isWindowBots = (value: unknown): value is WindowBots => Value.Check(WindowBots, value);
 export const isWindowPresentation = (value: unknown): value is WindowPresentation => Value.Check(WindowPresentation, value);
 export const hasWindowAppearance = (group: WindowGroup): boolean => group.presentation?.window !== false;
+export const hasBotAppearance = (group: WindowGroup): boolean => (group.presentation as { bots?: false } | undefined)?.bots !== false;
 /** The group a Window, a group or a Relay snapshot describes: every Window is a group with only the Window appearance. */
 export function toWindowGroup(value: WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation; manager?: unknown }): WindowGroup {
   if (!('window' in value)) return { window: value };
@@ -99,7 +107,7 @@ export function decodeWindowGroup(value: unknown): WindowGroup | undefined {
 export function isWindowGroup(value: unknown): value is WindowGroup {
   if (!Value.Check(WindowGroup, value) || !isWorkspaceWindow(value.window)) return false;
   if (!hasWindowAppearance(value) && !value.bots) return false;
-  const bots = new Set(groupBotViews(value).map(view => view.id));
+  const bots = new Set(botViews(value).map(view => view.id));
   return Object.keys(value.bots?.members ?? {}).every(viewId => bots.has(viewId));
 }
 export const isWindowGroupOperation = (value: unknown): value is WindowGroupOperation => Value.Check(WindowGroupOperation, value);
@@ -116,7 +124,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 /** Drops the details of views that are no longer bots, such as a closed view or one now showing history. */
 export function pruneBotDetails(group: WindowGroup): WindowGroup {
   if (!group.bots) return group;
-  const bots = new Set(groupBotViews(group).map(view => view.id));
+  const bots = new Set(botViews(group).map(view => view.id));
   return { ...group, bots: { ...group.bots, members: Object.fromEntries(Object.entries(group.bots.members).filter(([viewId]) => bots.has(viewId))) } };
 }
 
@@ -151,7 +159,8 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
     default: {
       if (item.type === 'view.bind' && group.bots) {
         const view = group.window.views.find(candidate => candidate.id === item.viewId);
-        // Rule 1: a bot keeps its conversation; the title and role details of that session may change.
+        // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot (a Team member,
+        // a TPM or Support session) never takes view.bind: its feature rebinds it through the layout, like succession.
         if (view && isBotView(view) && (!isBotView({ ...view, binding: item.binding })
           || windowSessionIdentity(view.binding) !== windowSessionIdentity(item.binding))) {
           fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');

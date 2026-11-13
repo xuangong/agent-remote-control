@@ -18,15 +18,26 @@ function refusal(run: () => unknown): string {
   return 'none';
 }
 
-it('counts only ordinary views with a current session as bots', () => {
+it('counts every view with a current session as a bot except Asks, history, subagents and empty views', () => {
   expect(isBotView(createWindowView('main', session('a'), 'primary'))).toBe(true);
   expect(isBotView(createWindowView('dock', session('b')))).toBe(true);
+  expect(isBotView({ ...createWindowView('side', session('d'), 'attached'), attachedTo: 'main' })).toBe(true);
+  expect(isBotView({ ...createWindowView('team', session('f')), feature: { kind: 'team', id: 'release', metadata: { role: 'member' } }, bindingPolicy: 'managed' })).toBe(true);
+  expect(isBotView({ ...createWindowView('tpm', session('t')), feature: { kind: 'tpm', id: 'work', metadata: { hostId: 'mac' } }, bindingPolicy: 'managed' })).toBe(true);
+  expect(isBotView({ ...createWindowView('ask', session('e'), 'float'), feature: { kind: 'ask', id: 'ask-1' }, bindingPolicy: 'managed' })).toBe(false);
   expect(isBotView(createWindowView('empty'))).toBe(false);
   expect(isBotView(createWindowView('past', { ...session('c'), sessionIntent: 'history' }))).toBe(false);
-  expect(isBotView({ ...createWindowView('side', session('d'), 'attached'), attachedTo: 'main' })).toBe(false);
-  expect(isBotView({ ...createWindowView('ask', session('e'), 'float'), bindingPolicy: 'managed' })).toBe(false);
-  expect(isBotView({ ...createWindowView('team', session('f')), feature: { kind: 'team', id: 'release' } })).toBe(false);
   expect(isBotView(createWindowView('child', { ...session('g'), parentNativeSessionId: 'a' }))).toBe(false);
+});
+
+it('lets a feature rebind its managed bot through the layout but keeps an ordinary bot on its conversation', () => {
+  const managed = { ...createWindowView('member', session('m1')), feature: { kind: 'team', id: 'release', metadata: { role: 'member' } }, bindingPolicy: 'managed' as const };
+  const group = section(windowOf('w', createWindowView('main', session('a'), 'primary'), managed));
+  const { schemaVersion: _version, id: _id, revision: _revision, ...layout } = group.window;
+  const rebound = applyGroupOperation(group, { type: 'layout.apply', layout: { ...layout, views: layout.views.map(view => view.id === 'member' ? { ...view, binding: session('m2') } : view) } });
+  expect(rebound.window.views[1]?.binding?.nativeSessionId).toBe('m2');
+  expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'member', binding: session('m2') }))).toBe('bot_view');
+  expect(refusal(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: session('b') }))).toBe('bot_view');
 });
 
 it('requires a Window or a section, and bot details only for bots', () => {
@@ -178,7 +189,9 @@ it('moves a bot with its attached views to another section', () => {
   expect(moved.target.window.views.map(view => view.id)).toEqual(['lead', 'dock', 'side']);
   expect(moved.target.bots?.members).toEqual({ dock: { label: 'Reviewer' } });
   expect(refusal(() => transferBot(source, { window: target.window }, 'dock'))).toBe('section_missing');
-  expect(refusal(() => transferBot(source, target, 'side'))).toBe('bot_not_found');
+  // A Side is a bot, but it cannot leave without the view it is attached to.
+  expect(refusal(() => transferBot(source, target, 'side'))).toBe('bot_attached_elsewhere');
+  expect(refusal(() => transferBot(source, target, 'missing'))).toBe('bot_not_found');
   expect(refusal(() => transferBot(source, source, 'dock'))).toBe('same_group');
   expect(moved.source.window.revision).toBe(source.window.revision + 1);
   expect(moved.target.window.revision).toBe(1);

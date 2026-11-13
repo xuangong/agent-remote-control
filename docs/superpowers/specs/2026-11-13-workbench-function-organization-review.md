@@ -10,6 +10,25 @@ Preserve the existing Session View, including messages, tools, reasoning, approv
 
 The earlier [roster proposal](2026-11-13-bot-roster-layout-review.md) is a partial exploration. Its Pinned/Hidden groups and menus are still unapproved. Resolve the whole-workbench questions here before turning that exploration into an implementation plan.
 
+## User-confirmed Bot hierarchy
+
+The user's clarification takes precedence over the earlier feature-oriented framing: in Bot mode, only Ask is a secondary session under its owning session. Other sessions are first-level peers within the same Bot group, including related Side sessions and sessions serving Team, support or TPM roles. Their role, source, membership and coordination relationships do not create extra roster levels or separate role-based destinations.
+
+```text
+Bot group
+  Implementation session
+    Ask
+  Related working session (Side)
+  Team Leader session
+  Team member session
+  Support session
+  TPM session
+```
+
+This example expresses hierarchy, not required membership or ordering for every group. Preserve native ownership, permissions and lifecycle independently of the flat presentation. An Ask's actual owner can be any eligible session; it is not limited to the first row in this example. The exact disclosure affordance still requires layout review and must not redesign Session View.
+
+Design around finding and switching among the group's sessions. Roles can provide concise context; management operations stay associated with their actual objects. Attention indicators should lead back to the corresponding session and group. The responsibility categories below describe user intents, not separate navigation areas for each role.
+
 ## Current product evidence
 
 These observations come from the current worktree's implementation and product documentation, not usage analytics or an authenticated competitor evaluation:
@@ -19,6 +38,7 @@ These observations come from the current worktree's implementation and product d
 - `App.tsx` builds the common command palette from actions, Windows, Bots and known sessions. Results have different destinations: a Bot opens Bot mode, whereas a session result opens through Window mode. Some settings/actions also enter Window mode.
 - `SessionTrackingMenu.tsx` summarizes tracked background sessions. It is not evidence that every Bot, Team, TPM or native session is continuously observed. Counts and activity depend on the underlying observation scope.
 - The README distinguishes ordinary sessions, saved Window layouts, contextual Ask/Side conversations, Team collaboration, support calls and TPM delivery. Team and TPM lists are grouped by their source session. TPM coordinates delivery with a main session; it does not have the Team Leader's implementation role.
+- Implementation gap to assess before planning: `window-groups.ts:isBotView` currently excludes attached, managed, feature and native-child views, and `BotRoster.tsx` renders the resulting section rows without an Ask child projection. Therefore the confirmed hierarchy above must not be reported as already fully implemented. Verify how each role's actual session is represented before changing filters or contracts; do not simply remove ownership guards.
 
 ## Responsibility model
 
@@ -35,7 +55,7 @@ Object meaning should remain explicit:
 
 - A native session is a conversation/runtime identity. A view displays it.
 - A Window holds a saved arrangement. Closing a view or deleting a Window does not stop that native session.
-- A Bot entry is a curated way to return to a bound conversation. Pinning, hiding and section membership should not be mistaken for native lifecycle operations.
+- A Bot group presents first-level session peers, with only Ask nested beneath its owner. A Bot entry is a curated way to return to a bound conversation. Pinning, hiding and section membership should not be mistaken for native lifecycle operations.
 - Team, support calls and TPM represent different coordination contracts. They should not become interchangeable merely to simplify a menu.
 - Host and Provider identify execution context. Shared names or matching directory paths on different Hosts do not establish shared project identity.
 
@@ -45,7 +65,7 @@ Object meaning should remain explicit:
 | --- | --- | --- |
 | Continue yesterday's work | Choose a known Bot or saved Window; use common search if it is not visible. | Restore the intended place, draft and selection. Avoid requiring infrastructure browsing on every visit. |
 | Respond to a blocked agent | Follow a truthful attention indicator to the responsible existing conversation or approval surface. | Return to the source list/Window without losing its position; distinguish pending input from unread results and failure. |
-| Get help on the current work | Use the existing contextual coordination entry; choose a mechanism based on the goal: contextual discussion, related work, review/support, Team coordination or TPM delivery. | Preserve source identity and show the relationship so the user can return. Creation and background authority remain explicit. |
+| Get help on the current work | Use the existing contextual coordination entry; preserve each mechanism's purpose. In Bot mode, present resulting non-Ask sessions as peers in the same group; keep Ask secondary to its owner. | Preserve source identity as relationship context without turning it into extra navigation depth. Creation and background authority remain explicit. |
 | Find or start something else | Common search identifies result type and destination. Creation names its object and execution context. | Make opening/replacing a selected view versus adding a new view understandable; do not silently change the current contract. |
 | Recover after disconnection or an uncertain operation | Show the affected Host/work, last known state and a supported recovery action. | Keep unknown outcomes unknown until reconciled. A saved transcript or loaded roster is not proof of a running connection or successful handoff. |
 
@@ -53,13 +73,13 @@ Object meaning should remain explicit:
 
 1. **The preview changes search semantics.** Its Search button currently filters sample Bot rows, while the actual shared header opens the cross-object command palette. This is a prototype limitation, not a proposal to narrow product search. Preserve common search in the eventual design. If a separate list filter is useful, label its scope and review its placement separately.
 2. **The same plus has different creation scopes.** The Bot header creates a section; the Window header offers sessions and Windows; the Window toolbar creates a view or opens a session. Context-sensitive actions can be useful, but their outcome must be clear before selection. Review explicit labels or a small contextual creation menu before changing any entry.
-3. **Related work is split across feature lists.** Team and TPM already know their source. A candidate improvement is clearer source context and consistent return behavior in their existing management surfaces. A unified attention surface is a separate proposal requiring identity, observation coverage, deduplication and unread semantics to be settled first. Do not invent a universal count from partial observations.
+3. **Feature management must not dictate Bot hierarchy.** Team and TPM have management lists and source relationships, but their sessions belong alongside other first-level sessions in a Bot group. The earlier implication that users should navigate separate role-based areas is withdrawn. Improve relationship context and return behavior around the group. A unified attention surface remains a separate proposal requiring identity, observation coverage, deduplication and unread semantics; do not invent a universal count from partial observations.
 4. **Infrastructure detail competes with the roster.** Bot directory controls expose raw Host IDs and per-source refresh inline. Propose concise known Host/provider labels for ordinary browsing, with full identity and source controls still reachable. Preserve disambiguation for identically titled sessions across machines.
 5. **Mode transitions are real product behavior.** Search and management actions can move to Window mode. Before offering a unified shell, specify when an action changes mode, what remains mounted and how Back restores the caller's context. Visual consistency alone does not solve this.
 
 ## Recommended direction and alternatives
 
-Prefer an incremental common navigation model around the existing Bot and Window modes. Preserve their current places and strengths: a concise roster for continuing a conversation, and saved arrangements for parallel work. Make search, creation scope, attention semantics and return behavior consistent around them. Review each actual entry relocation separately.
+Prefer an incremental common navigation model around the existing Bot and Window modes. In Bot mode, the primary organization is group → first-level sessions, with Ask as the only secondary session kind. Window mode retains saved arrangements for parallel work. Make search, creation scope, attention semantics and return behavior consistent around them. Review each actual entry relocation separately.
 
 Continuing isolated roster polish has low implementation cost but leaves cross-feature journeys unresolved. Replacing the product with a new project/task hierarchy would be a larger conceptual and data-model change; current Window labels and cross-Host folders are not sufficient evidence for that hierarchy. Neither alternative should be adopted implicitly.
 
@@ -78,7 +98,7 @@ For desktop, persistent surrounding context may help compare and coordinate seve
 - Which journey should lead: parallel supervision, familiar Bots, or delegated delivery? No user priority has been inferred from a missing answer.
 - Should attention become easier to reach across both modes, and what exact set of work can it truthfully cover?
 - Which creation outcomes should each existing plus expose, with what wording?
-- How should source-related Team/TPM/support work be discoverable without changing Session View?
+- How should peer-session roles and relationships be legible within a group, and how should Ask disclosure work without changing Session View?
 - Which controls actually need relocation after these journeys have been demonstrated?
 
 Next deliverable after agreeing on the direction: desktop and phone walkthroughs of the same realistic work, showing entry, action, state change and return. Review those flows before an implementation plan, rather than approving a static sidebar alone.

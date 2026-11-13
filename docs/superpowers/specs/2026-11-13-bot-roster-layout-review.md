@@ -4,6 +4,8 @@ Status: proposed, awaiting user review. No functional-layout changes have been i
 
 **Whole-product review, 2026-11-13:** This roster is a partial exploration. Review [workbench function organization](2026-11-13-workbench-function-organization-review.md) before approving its groupings and entry placement. In particular, the prototype's local Bot filter does not represent the production header's global search contract.
 
+**User-confirmed hierarchy:** Bot groups contain first-level peer sessions regardless of Side/Team/support/TPM role. Only Ask remains a secondary session under its owner. Do not split the roster into role-specific destinations or nest other sessions by their source relationship. The cross-group Pinned proposal below is also on hold while its effect on group continuity is reviewed. The current prototype does not yet demonstrate this complete hierarchy and must not be treated as its acceptance.
+
 This review narrows the next step of the approved modernization design. The user requested advance review before changes to functional layout, including desktop and phone. Reference research: [agent workbench design references](../../investigations/2026-11-13-agent-workbench-design-references.md).
 
 ## Protected Session View boundary

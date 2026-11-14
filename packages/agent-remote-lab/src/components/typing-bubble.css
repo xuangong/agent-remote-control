@@ -1,0 +1,15 @@
+/* Presence, as in a chat app: an incoming bubble with three dots rising in turn while a bot works. */
+.lab-typing { display: inline-flex; align-items: center; gap: 4px; margin: 4px 0 12px; padding: 10px 12px; border-radius: 16px 16px 16px 6px;
+  background: var(--ui-fill); animation: lab-typing-in var(--ui-duration-short, 160ms) var(--ui-ease, ease-out); }
+.lab-typing > span, .lab-bot-typing > span { width: 6px; height: 6px; border-radius: 50%; background: var(--ui-label-secondary);
+  animation: lab-typing-dot 1.2s ease-in-out infinite; }
+.lab-typing > span:nth-child(2), .lab-bot-typing > span:nth-child(2) { animation-delay: .15s; }
+.lab-typing > span:nth-child(3), .lab-bot-typing > span:nth-child(3) { animation-delay: .3s; }
+.lab-bot-typing { display: inline-flex; flex: none; align-items: center; gap: 3px; height: 12px; }
+.lab-bot-typing > span { width: 4px; height: 4px; }
+@keyframes lab-typing-dot { 0%, 60%, 100% { opacity: .35; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
+@keyframes lab-typing-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lab-typing, .lab-typing > span, .lab-bot-typing > span { animation: none; }
+  .lab-typing > span, .lab-bot-typing > span { opacity: .6; }
+}

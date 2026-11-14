@@ -51,6 +51,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   let replays: SessionSuccessionReplay[] = [];
   const acknowledgements: Array<() => void> = [];
   const activityListeners = new Map<string, RemoteTransportListener>();
+  /** Each conversation's stream, by agent, as the Host would push to it. */
+  const conversationListeners = new Map<string, Set<RemoteTransportListener>>();
   const titleListeners = new Set<(session: SessionTitleUpdate) => void>();
   // Shared session states and read positions, as the Relay pushes them on the states channel.
   const sharedStates = new SessionStateStore(), sharedReads = new SessionReadStore();
@@ -77,6 +79,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
         if (message.type === 'negotiate') {
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
           if (message.observation === 'activity') { activityListeners.set(agentId, listener); listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: { agentId, status: 'idle' } }); return; }
+          conversationListeners.set(agentId, (conversationListeners.get(agentId) ?? new Set()).add(listener));
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
           listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot(agentId) });
         } else if (message.type === 'timeline_subscription') listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: [agentId] } });
@@ -110,6 +113,12 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   const container = await render(createElement(Access));
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     activityListeners, releaseInspect: () => releaseInspect(),
+    /** A conversation's agent status, as its Host pushes it. */
+    emitStatus(agentId: string, status: 'running' | 'idle' | 'waiting') {
+      const current = snapshot(agentId);
+      for (const listener of conversationListeners.get(agentId) ?? []) listener.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_update',
+        payload: { ...current, status, runtimeInfo: { ...current.runtimeInfo, status } } });
+    },
     /** Session states (with reply facts) as the Relay shares them. */
     emitStates(frame: Omit<SessionStatesFrame, 'protocolVersion' | 'type'>) { sharedStates.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_states', ...frame }); },
     /** The account's read positions as the Relay shares them. */

@@ -16,8 +16,10 @@ it('follows bots through the shared channel without a stream each and reminds of
   const notices: Array<{ title: string; options: NotificationOptions }> = [];
   vi.stubGlobal('Notification', class { static permission = 'granted'; close() {} constructor(readonly title: string, readonly options: NotificationOptions) { notices.push(this); } });
   const app = await mountBotApp(scope, { hosted: true });
-  const status = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
-    .find(row => row.querySelector('.lab-bot-name')?.textContent === name)?.querySelector('.lab-bot-status')?.textContent ?? '';
+  // A working bot shows typing dots in place of the word; screen readers still hear it.
+  const status = (name: string) => { const row = [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
+    .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
+    return row?.querySelector('.lab-bot-typing') ? 'Working' : row?.querySelector('.lab-bot-status')?.textContent ?? ''; };
   try {
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot');
@@ -69,5 +71,34 @@ it("shows each bot's latest reply and time, a dot while it is unread, and marks 
     await until(() => expect(row('A2')!.dataset.unread).toBe('true'));
     await act(async () => app.emitReads({ reads: [{ hostId: 'local', providerId: 'recorded', nativeSessionId: 'A2', readAt: today.getTime() + 1_000 }] }));
     await until(() => expect(row('A2')!.dataset.unread).toBeUndefined());
+  } finally { await app.close(); }
+});
+
+it('shows a typing indicator while a bot works, in its conversation and in its row', async () => {
+  const scope = 'http://localhost/u/bot-typing/';
+  seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true });
+  const typing = () => app.container.querySelector('.lab-bot-conversation .lab-typing[role="status"]');
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')].find(item => item.querySelector('.lab-bot-name')?.textContent === name);
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await app.switchMode('bot');
+    await act(async () => app.button('A1').click());
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    expect(typing()).toBeNull();
+    await act(async () => app.emitStatus('agent-A1', 'running'));
+    await until(() => expect(typing()?.getAttribute('aria-label')).toBe('A1 is working'));
+    // Waiting for the owner, or finishing, ends it.
+    await act(async () => app.emitStatus('agent-A1', 'waiting'));
+    await until(() => expect(typing()).toBeNull());
+    await act(async () => app.emitStatus('agent-A1', 'running'));
+    await until(() => expect(typing()).not.toBeNull());
+    await act(async () => app.emitStatus('agent-A1', 'idle'));
+    await until(() => expect(typing()).toBeNull());
+    // A working bot's row shows the dots in place of the word.
+    await act(async () => app.emitStates({ snapshot: true, hosts: [host], states: [state('A2', 'running', { replyAt: 1, preview: 'Looking.' })] }));
+    await until(() => expect(row('A2')?.querySelector('.lab-bot-typing')).not.toBeNull());
+    expect(row('A2')!.querySelector('.lab-bot-status')).toBeNull();
+    expect(row('A2')!.getAttribute('aria-description')).toContain('Working');
   } finally { await app.close(); }
 });

@@ -169,6 +169,7 @@ import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceF
 import { CollapsedConversations } from './components/CollapsedConversations.js';
 import { MinimizeMainSession, SessionDockProvider, SessionDockRail, type FoldedBot } from './components/SessionDock.js';
 import { RemoveBotSheet } from './components/RemoveBotSheet.js';
+import { TypingBubble } from './components/TypingBubble.js';
 import { foldOperation } from './window-fold.js';
 import { ConversationPane, ConversationSplit } from './components/ConversationSplit.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
@@ -2890,6 +2891,8 @@ function AppContent({
           onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; setQuoteNotice(undefined); void open().catch(() => {}); } : undefined} /> : null}</>,
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
       timelineStart: botPresentation ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
+      // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
+      timelineEnd: botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : undefined,
       headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
@@ -2921,6 +2924,12 @@ function AppContent({
       conversationPath: botPresentation ? <span className="lab-bot-session-heading">{options.bot ? <BotPicture picture={botGroup?.bots?.members[options.bot.viewId]?.picture} name={view?.binding ? botDisplayName(view.binding) : source.title} /> : null}<span><strong>{source.title}</strong>{options.bot && botGroup?.bots?.members[options.bot.viewId]?.label ? <small>{botGroup.bots.members[options.bot.viewId]!.label}</small> : null}<small>{context.offline ? 'Host offline' : context.state?.agent?.status === 'waiting' || context.state?.agent?.status === 'starting' ? 'Needs you' : context.state?.agent?.status === 'running' ? 'Working' : context.state?.agent?.status === 'failed' ? 'Failed' : context.status === 'ready' ? 'Idle' : 'Status unavailable'}</small></span></span> : <SessionTitle className={isPrimary ? 'lab-primary-title' : undefined} title={source.title} status={context.state?.agent?.status}
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
     };
+  }
+  /** A bot at work: running a turn, not waiting for the owner, and connected to its agent. */
+  function botWorking(state: AgentReplicaState | undefined): boolean {
+    const agent = state?.agent;
+    return !!agent && (agent.status === 'running' || agent.status === 'starting') && !state!.pendingInteractions.length
+      && agent.runtimeInfo.connection?.state !== 'unavailable';
   }
   /** Whether the shown Window's view is a bot put to sleep (stored with its group). */
   function asleepBot(view: { id: string }) {

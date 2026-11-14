@@ -73,6 +73,8 @@ export interface AgentTimelineProps {
    * after a handoff. While older pages of its own remain, History controls come first.
    */
   readonly timelineStart?: ReactNode;
+  /** Presence below the latest entry, such as a bot's typing indicator; it is not an entry and moves nothing. */
+  readonly timelineEnd?: ReactNode;
 }
 
 export function AgentTimeline({
@@ -105,6 +107,7 @@ export function AgentTimeline({
   inspectedRequestId,
   entrySelection,
   timelineStart,
+  timelineEnd,
 }: AgentTimelineProps) {
   const inheritedPreviewController = usePreviewController();
   const previews = previewController ?? inheritedPreviewController;
@@ -213,6 +216,7 @@ export function AgentTimeline({
             entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}
             renderEntry={renderEntry} />)}
       {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
+      {timelineEnd ?? null}
     </div>
 
     <AgentChildSessionList childrenFor={childrenFor} key={identity} children={children} label="Session subagents" collapsible onOpenChildSession={onOpenChildSession} />

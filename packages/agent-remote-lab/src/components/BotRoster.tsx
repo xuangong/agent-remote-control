@@ -7,6 +7,7 @@ import { Avatar } from '../ui/Avatar.js';
 import { Icon } from '../ui/Icon.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
+import { TypingDots } from './TypingBubble.js';
 
 /** The name a bot is known by; its avatar letter comes from here. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
@@ -38,7 +39,8 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
         {/* Like a chat list: the status that asks for something, then the latest reply; an unread one is a dot, never a number. */}
         {status || row.reply ? <span className="lab-bot-summary">
-          {status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
+          {status === 'Working' ? <TypingDots />
+            : status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
           {row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
           {row.unread ? <span className="lab-bot-unread" aria-hidden="true" /> : null}
         </span> : null}

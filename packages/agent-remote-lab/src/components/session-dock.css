@@ -128,3 +128,7 @@
 .lab-ask-window[data-folded] > :not(.lab-folded-bot, .lab-folded-remove) { display: none !important; }
 .lab-ask-viewport[data-presentation="floating"] > .lab-ask-window[data-folded] { width: 44px; height: min(var(--ask-height, 560px), 360px); }
 .lab-folded-remove { flex: none; width: 100%; min-height: 36px; padding: 4px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text-secondary); }
+/* A folded bot at work: its status dot breathes, as its row's typing dots do. */
+.lab-folded-bot-status:not([data-attention], [data-failed]) { animation: lab-folded-working 1.6s ease-in-out infinite; }
+@keyframes lab-folded-working { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .lab-folded-bot-status { animation: none; } }

@@ -195,6 +195,19 @@ describe('content-only timeline', () => {
     expect(container.querySelector('.agent-timeline-empty')).toBeNull();
   });
 
+  it('shows presence below the latest entry, without changing the entries or replacing the empty text', async () => {
+    const typing = <div data-testid="typing" role="status">Working</div>;
+    const loaded = state();
+    let container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={loaded} timelineEnd={typing} /></TimelineDisplay.Provider>);
+    const slot = container.querySelector('[data-testid="typing"]')!;
+    const entries = [...container.querySelectorAll('[data-entry-key]')];
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.at(-1)!.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.closest('.agent-timeline-entries')).not.toBeNull();
+    container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([])} timelineEnd={typing} /></TimelineDisplay.Provider>);
+    expect(container.querySelector('[data-testid="typing"]')).not.toBeNull();
+  });
+
   it('shows an empty message view when a loaded page contains only execution events and keeps older history reachable', async () => {
     const current = state(items.filter(item => ['tool_call', 'reasoning', 'compaction'].includes(item.type)));
     const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline

@@ -159,7 +159,7 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
         } } },
       directory: { providerId, supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
         list: () => [...records.values()].filter(item => item.providerId === providerId).map(item => ({ nativeSessionId: item.id, providerId,
-          title: item.title, createdAt: '2026-11-15T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z' })),
+          title: item.title, createdAt: '2026-11-15T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z', state: 'idle' as const })),
         workspaces: () => [], create: async () => { throw new Error('Sessions here are opened, not created.'); },
         // Each opening is a new native agent over the same conversation, as a Controller resumes a released session.
         open: async id => {

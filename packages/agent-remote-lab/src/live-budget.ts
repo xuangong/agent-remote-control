@@ -1,4 +1,9 @@
-/** Provisional until stage 6 measures them: conversations kept live beyond those on screen, and how long one stays live after leaving it. */
+/**
+ * Conversations kept live beyond those on screen, and how long one stays live after leaving it. Stage 6 kept both: a
+ * device mounts the conversations of its current Window (in Bot mode also the selected bot), so these bound the streams
+ * of panes that are hidden or out of view; a bot left in Bot mode closes its stream at once and shows its cached history
+ * when opened again.
+ */
 export const LIVE_RECENT = 4;
 export const LIVE_GRACE_MS = 20_000;
 

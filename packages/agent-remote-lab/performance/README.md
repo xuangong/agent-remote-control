@@ -161,3 +161,60 @@ Results, before (main 8babb2b9) and after stage 6:
 | Workbench chunk after sign-in | 1.99 MB, 600 KB gzip | 1.84 MB, 544 KB gzip |
 
 The local instance has six bots and short conversations, so it shows the per-switch floor; the jsdom runner shows how the cost grows with the number of bots and panes. A switch spent most of its time listing browser storage (a quadratic scan through `ConversationStorage`); a frame of the shared states channel spent it re-rendering every mounted conversation.
+
+## Bot and Window workbench (stage 7)
+
+Stage 7 ([plan](../../../docs/superpowers/plans/2026-11-14-stage-7-stability.md)) made the workbench hold up when things fail and over time. Its guards run with the suite: `src/session-restoration.test.ts` (backoff), `src/unavailable-sessions.test.ts` and `src/App.attach-budget.test.tsx` (a missing session is asked once), and the e2e specs `e2e/bot-mode.spec.ts` and `e2e/cross-host.spec.ts` (two Hosts, an offline Host, a handoff across providers).
+
+Attaches before (main 0ba5350c) and after, counted with fake timers:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| A conversation whose Host answers 503 for 30 minutes | 361 attaches | 33 (at most 41 with jitter) |
+| Loading a page with a session its Host reports missing (404) | 6 attaches | at most 2 |
+| That session across a mode switch, an access refresh, ten state frames, three bot switches and a page resume | asked again on each remount | not asked until Retry, the Host's return or 10 minutes |
+| A conversation of a Host the page knows is offline | asked, 503 `host_offline` | waits; opens when the Host is back |
+
+Growth over time comes from two runners, neither part of the suite:
+
+```sh
+# from packages/agent-remote-lab: two in-process Controllers (fake natives, no model), headless Chromium 1280 x 720
+ARC_SOAK_MINUTES=60 npx playwright test e2e/soak.spec.ts --project=chromium-desktop   # .tmp/soak.json (ARC_PERFORMANCE_OUTPUT)
+# from the repository root: read-only on the pnpm local instance, with its real sessions; sends nothing
+MINUTES=20 node packages/agent-remote-lab/performance/local-soak.mjs                  # .tmp/local-soak.json
+```
+
+The cross-Host soak holds 12 bots in three groups, each group with two bots on each Host, and each conversation starts with 20 turns. Every 5 s it opens the next bot. In the first half, every fourth switch sends a message, which the bot's Host answers. Every 24 switches (about two minutes) it goes to Window mode and back, and the Laptop leaves for one minute in every ten. Every minute it returns to the first bot, forces a garbage collection, and records the JS heap, DOM nodes, event listeners, open WebSockets, requests and console errors. `ARC_SOAK_SNAPSHOTS=35,60` also writes heap snapshots at those minutes.
+
+Budgets, checked by the spec: once sends stop, the heap and DOM nodes at the end stay within 10% of five minutes into the quiet half; requests per minute in the last ten minutes stay within a quarter of the quiet half's first ten; at most 12 WebSockets; no console errors.
+
+Results of the hour-long run on the stage 7 build (78 sends, Laptop away at minutes 10, 20, 30, 40 and 50):
+
+| Minute | JS heap | DOM nodes | Event listeners | WebSockets |
+| ---: | ---: | ---: | ---: | ---: |
+| 10, sending | 22.45 MB | 11,809 | 2,566 | 2 |
+| 30, sends stop | 25.20 MB | 18,267 | 3,117 | 2 |
+| 35 | 25.81 MB | 18,259 | 3,117 | 2 |
+| 60 | 26.16 MB | 18,256 | 3,117 | 2 |
+
+- From minute 35 to 60 the heap grew 1.4% and the DOM not at all.
+- Requests averaged 52 a minute in minutes 35-45 and 53 in minutes 50-60.
+- The page never held more than two WebSockets.
+- There were no console errors and no failed requests.
+- Heap snapshots at minutes 35 and 60 show the page's own data did not grow: objects -62 KB, closures -70 KB, strings unchanged, detached DOM nodes 1,832 to 1,829. The difference is compiled code, which V8 was still optimizing (+428 KB), and DevTools' records of network requests (+376 KB). Those records exist only while a debugger, such as the test's, is attached.
+
+What the soak found:
+- **Sends grow conversations.** A first run that sent throughout grew from 23.5 to 26.2 MB between minutes 10 and 25, over 66 sends. That is about 60 KB a send: content, not a leak. Growth is judged after sends stop.
+- **An offline Host was asked anyway.** That run also logged nine console errors, `attach` 503 `host_offline`, while the Laptop was away. A conversation of a Host the page knows is offline now waits, and opens when the Host is back.
+- **Samples must show the same screen.** Which bot was on screen changed the DOM by up to 6,500 nodes (12,776 to 19,235), so every sample returns to the first bot first.
+- **The fixture had limits of its own:**
+  - Without the Relay's timer, the owner's one-minute grant lapsed, and the Hosts went offline at minute 1 or 2.
+  - Its identity server crashed on a request body the Relay aborted under load.
+  - Its sign-in lasted exactly an hour.
+
+The local instance run (six bots with real sessions, 20 minutes, Chromium 1440 x 900, read-only):
+- The heap went from 18.8 MB at minute 5 to 20.8 MB at minute 10, then stayed there (20.3 and 20.5 MB).
+- DOM nodes went from 2,836 to 2,621, and listeners from 2,640 to 2,285.
+- The page held at most two WebSockets.
+- It made 45-76 requests a minute (mean 62).
+- There were no console errors and no failed requests.

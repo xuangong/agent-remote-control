@@ -68,4 +68,4 @@ Bot mode is a list, then a chat. **‹ Bots** returns to the list where you left
 - **Previews.** A bot that has not been opened since its Controller started keeping replies (0.2.81) shows no preview until it replies or is opened.
 - **Rolling back the Worker.** Once the Relay stores sleep, read positions, drafts or outbox messages, Worker versions from before those stages cannot read it. Fix forward.
 
-The budgets that keep the workbench quick as it grows, and how they are measured, are in [the Lab performance notes](../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-6).
+The Lab performance notes describe the budgets that keep the workbench quick as it grows ([stage 6](../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-6)) and the hour-long soak that checks it stays so ([stage 7](../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-7)).

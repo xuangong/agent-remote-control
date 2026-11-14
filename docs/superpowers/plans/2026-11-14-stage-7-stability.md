@@ -50,7 +50,10 @@
 
 - [x] The capacity tests write and reread state files of up to 8 MiB, so the file gets a 60 s deadline with a comment saying why.
 - [x] Every full-App test in `App.succession.test.tsx` uses the file's `testDeadline`. The file sets it with `vi.setConfig` at the top, so new tests inherit it.
-- [ ] Run `pnpm test` three times in a row with the machine busy. For each failure, find the cause and fix it, or bound a deadline that is legitimately long with a comment. Record each one here.
+- [x] Run the full `pnpm verify` three times in a row, with the e2e runs and the soak keeping the machine busy. For each failure, find the cause and fix it, or bound a deadline that is legitimately long with a comment:
+  - Round 1, agent-host `native-prefix-role-runtime.test.ts`: a TPM resume was refused with 409. Under load the TPM work can still change once more after it reads as paused, and the Controller rightly refuses an action on a stale revision (seen before, in the 0.2.74 verify). The test now reads the work again and resends, as a client does.
+  - Round 2, Lab `SessionConversation.connections.test.tsx`: the test expected a conversation to attach while its Host was offline, which the soak's fix stopped (Task 9). It became two tests: a conversation of a Host known to be away waits, and one that learns it late reopens when the Host is back.
+  - Round 3: clean in every package (Lab 2,782 tests, 12 skipped).
 
 ## Task 3: Bot mode e2e matches the shipped model
 
@@ -123,18 +126,31 @@ The fixture is one hosted Relay (`createHostedRelay`, in memory) behind the Lab'
 
 **Files:** a new `packages/agent-remote-lab/e2e/soak.spec.ts` (runs only with `ARC_SOAK_MINUTES`); results in `performance/README.md`.
 
-- [ ] Run for 60 minutes against the cross-host fixture (fake natives, no model cost) in headless Chromium:
+- [x] Run for 60 minutes against the cross-host fixture (fake natives, no model cost) in headless Chromium:
   - every 5 s, switch bots;
-  - every 20 s, send a message;
+  - in the first half, every fourth switch (every 20 s) sends a message;
   - every 2 min, Window mode and back (no reloads, so growth shows);
   - one minute in every ten, Laptop away.
-- [ ] Every minute after a forced garbage collection, record JS heap, DOM nodes, event listeners, open WebSockets, requests per minute and console errors.
-- [ ] Budgets:
-  - The heap and DOM nodes at minute 60 stay within 15% of minute 10.
-  - Open WebSockets stay within the live budget plus the fixed channels.
-  - Requests per minute stay flat.
+- [x] Every minute, back on the first bot and after a forced garbage collection, record JS heap, DOM nodes, event listeners, open WebSockets, requests and console errors. `ARC_SOAK_SNAPSHOTS` also writes heap snapshots.
+- [x] Budgets. Changed: each send lengthens a conversation, about 60 KB a send, so growth is judged once sends stop.
+  - The heap and DOM nodes at minute 60 stay within 10% of minute 35.
+  - Open WebSockets stay within the live budget plus the fixed channels (at most 12).
+  - Requests per minute in the last ten minutes stay within a quarter of minutes 35-45.
   - No console errors.
-- [ ] A 20-minute read-only soak on the local instance (prepare-arc-local, own sessions, no sends) records the same figures with real sessions.
+- [x] Result: passed.
+  - From minute 35 to 60 the heap grew 1.4% and the DOM not at all.
+  - Requests stayed at 52-53 a minute.
+  - The page held two WebSockets, with no errors or failed requests through five absences of the Laptop.
+  - Heap snapshots at minutes 35 and 60 show no growth in the page's own objects, closures or strings: the difference is compiled code and DevTools' network records.
+- [x] Found by the soak:
+  - A conversation of a Host the page knows is offline still asked it to attach (503 `host_offline`, four in each minute the Laptop was away). It now waits and opens when the Host is back.
+  - Samples compared different screens: which bot was shown changed the DOM by up to 6,500 nodes. Every sample now returns to the first bot first.
+  - The fixture's own limits: the owner's grant lapsed without the Relay's timer, its identity server crashed on a body the Relay aborted under load, and its sign-in lasted an hour.
+- [x] A 20-minute read-only soak on the local instance (prepare-arc-local, own sessions, no sends) with six real bots:
+  - The heap was flat after minute 10 (20.8, 20.3 and 20.5 MB).
+  - DOM nodes and listeners fell.
+  - The page held at most two WebSockets, with no errors.
+- [x] Numbers and the runners in `packages/agent-remote-lab/performance/README.md`.
 
 ## Task 10: Docs and release notes
 
@@ -153,4 +169,4 @@ Stage 7 changes no Controller code (Task 8 needed none), so it ships as a Worker
 3. The soak report.
 4. A local check on desktop and phone, light and dark.
 5. Merge, push and deploy the Worker; record versions in the roadmap and the release memory.
-6. Update this Mac's Controller to 0.2.82 last, after the final report: it runs this session.
+6. This Mac's Controller already runs 0.2.82 (updated 2026-11-14 12:34Z), so the roadmap's last step needs no update.

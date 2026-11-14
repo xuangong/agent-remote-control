@@ -2282,8 +2282,30 @@ function AppContent({
     return (source as OpenedSession & { viewId?: string }).viewId ?? sessionKey(source);
   }
   function selectSide(source: OpenedSession, session: OpenedSession): void {
+    const sourceSlot = viewKey(viewSession(source));
+    // In Bot mode a bot may belong to a group other than the Window shown in Window mode: its Side joins that group,
+    // attached beside it, and so becomes a bot of the group (with the Side role).
+    const placed = !windowMode && !(sharedWindow && sharedViewForSlot(sourceSlot)) ? succession.document.windowBindings?.find(entry => entry.slotId === sourceSlot) : undefined;
+    const group = placed ? windowWorkspace.readGroup(placed.windowId) : undefined;
+    if (placed && group) {
+      const origin = group.window.views.find(view => view.id === placed.viewId);
+      if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error('The source view changed. Open the Side session again.');
+      const binding = windowSessionBinding(session);
+      const { operation, viewId } = sideWindowOperation(group.window, { windowId: group.window.id, viewId: origin.id, binding: origin.binding }, binding, crypto.randomUUID());
+      const targetSlot = succession.document.slots.find(slot => slot.id === viewSession(session).viewId)!;
+      const slot = operation.type !== 'view.select' && !succession.document.windowBindings?.some(entry => entry.slotId === targetSlot.id)
+        ? succession.bindWindowView(group.window.id, viewId, binding, targetSlot.id)
+        : succession.ensureWindowView(group.window.id, viewId, binding);
+      const opened = { ...session, viewId: slot.id };
+      succession.rememberSide(opened);
+      setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
+      nextSideRequest(source);
+      void windowWorkspace.operateGroup(group.window.id, operation).then(() => navigation.select({ kind: 'bot', groupId: group.window.id, viewId }))
+        .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+      return;
+    }
     if (sharedWindow) {
-      const origin = sharedViewForSlot(viewKey(viewSession(source)));
+      const origin = sharedViewForSlot(sourceSlot);
       if (!origin?.binding || sessionKey(origin.binding) !== sessionKey(source)) throw new Error('The source view changed. Open the Side session again.');
       const binding = windowSessionBinding(session);
       const { operation, viewId } = sideWindowOperation(windowWorkspace.readWindow(), { windowId: sharedWindow.id, viewId: origin.id, binding: origin.binding }, binding, crypto.randomUUID());
@@ -2926,7 +2948,8 @@ function AppContent({
         : pageNotes ? referencedActions(quoteView ? quotedActions(commands, quoteView) : commands, source, context.state) : quoteView ? quotedActions(commands, quoteView) : commands,
       ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
       ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
-      consoleCommands: [...(!botPresentation && available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
+      // In Bot mode a Side joins the bot's group beside it (a Side is a bot); a fork or an Ask would open elsewhere.
+      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? botPresentation ? forkCommands.filter(command => command.id === 'console:side') : forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
         ...(!botPresentation && referencing && available ? [refCommand] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
         if (id === refCommand.id) {
@@ -2942,7 +2965,7 @@ function AppContent({
           setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
           return {};
         }
-        if (botPresentation) throw new Error('This command is unavailable in Bot mode.');
+        if (botPresentation && id !== 'console:side') throw new Error('This command is unavailable in Bot mode.');
         if (!context.state || !available) throw new Error('Wait for this session to finish synchronizing.');
         return createFork(context.state, source, id, args);
       },

@@ -93,6 +93,23 @@ it('opens and hides a bot Handoff\'s details in Window mode while the bot\'s con
   await app.close();
 });
 
+it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", async () => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-S', nativeSessionId: 'S' });
+  const app = await setup('bot-side');
+  const other = structuredClone(app.hostedGroups.get('A'));
+  expect(leaves.get('B1')!.consoleCommands?.map(command => command.id)).toContain('console:side');
+  await act(async () => { await leaves.get('B1')!.onExecuteConsoleCommand!('console:side', ''); });
+  // The Side is a view of B attached to B1, so it is a bot of B with the Side role, and Bot mode shows it.
+  await until(() => expect(app.hostedGroups.get('B')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'B1' }));
+  expect(app.hostedGroups.get('A')).toEqual(other);
+  // Bot mode opens it: the Side is the current bot, listed in B's section.
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe('Fork of B1'));
+  const section = app.container.querySelector('#bot-section-B')!.closest('section')!;
+  expect(section.contains(app.container.querySelector('.lab-bot-row[aria-current="true"]'))).toBe(true);
+  expect(app.sendMessages).toHaveLength(0);
+  await app.close();
+});
+
 it('blocks Handoff on the exact pending Bot slot even on a section-only page', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'describeSuccession').mockResolvedValue(description);
   const prepared: string[] = [];

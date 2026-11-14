@@ -1,6 +1,6 @@
 # Stage 5: IM layer, part 2 — implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A bot's unsent message follows the owner across devices, and a message to a bot whose Host is offline waits in an outbox that every device can see and cancel, delivered by the Host's Controller when it returns, without any page open ([IM gateway](../specs/2026-11-13-im-gateway-product-form.md): "Draft: one draft per bot, shared across devices", decision 2 "Outbox").
 
@@ -20,37 +20,37 @@
 
 **Files:** `packages/agent-remote-protocol/src/session-drafts.ts` (new, + test), `session-channel.ts` (`session_drafts` frame), `index.ts`.
 
-- [ ] Tests: `SessionDraft` is `{ hostId, providerId, nativeSessionId, text, revision }` with `text` at most `SESSION_DRAFT_BYTES` (8192) UTF-8 bytes (an empty text is a cleared draft) and `revision` a positive safe integer; `isSessionDraftRequest` accepts `{ hostId, providerId, nativeSessionId, text }` and rejects a text over 8192 bytes even when it has fewer characters (CJK), extra fields and empty identities; the channel accepts `{ type: 'session_drafts', snapshot?: true, drafts }` with at most `SESSION_DRAFT_LIMIT` (64) drafts.
-- [ ] Commit `feat(protocol): describe drafts shared across devices`.
+- [x] Tests: `SessionDraft` is `{ hostId, providerId, nativeSessionId, text, revision }` with `text` at most `SESSION_DRAFT_BYTES` (8192) UTF-8 bytes (an empty text is a cleared draft) and `revision` a positive safe integer; `isSessionDraftRequest` accepts `{ hostId, providerId, nativeSessionId, text }` and rejects a text over 8192 bytes even when it has fewer characters (CJK), extra fields and empty identities; the channel accepts `{ type: 'session_drafts', snapshot?: true, drafts }` with at most `SESSION_DRAFT_LIMIT` (64) drafts.
+- [x] Commit `feat(protocol): describe drafts shared across devices`.
 
 ### Task 2: The Relay keeps drafts
 
-**Files:** `packages/agent-remote-hosted/src/session-drafts.ts` (new service, + test), `state.ts` (`sessionDrafts`, validation, `MAX_SESSION_DRAFTS = 1024`), `record-codec.ts` (kind `sessionDraft`, key `[subject, hostId, providerId, nativeSessionId]`), `gateway.ts` (`GET`/`PUT /v1/session-drafts`, channel flag `drafts=1`, publishing).
+**Files:** `packages/agent-remote-hosted/src/session-drafts.ts` (new service, + test), `state.ts` (`sessionDrafts`, validation, `MAX_SESSION_DRAFTS = 1024`), `record-codec.ts` (kind `sessionDraft`, key `[subject, hostId, providerId, nativeSessionId]`), `gateway.ts` (`GET`/`POST /v1/session-drafts`, channel flag `drafts=1`, publishing).
 
-- [ ] Tests: `PUT` stores the text with a revision greater than the draft's previous one (the Relay's clock, or previous + 1), returns the draft, and does not commit when the text is unchanged; an empty text stays as a cleared draft; an account keeps at most 64 (cleared drafts are dropped first, then the oldest revision); beyond 1024 drafts in all, a new draft is refused with 409 `drafts_limit`; another account never sees them; they survive a restart through the record codec; a channel opened with `drafts=1` receives a `session_drafts` snapshot when accepted and then only the drafts whose revision changed; texts are never logged.
-- [ ] Commit `feat(relay): keep each account's drafts and share them on its channel`.
+- [x] Tests: `POST` stores the text with a revision greater than the draft's previous one (the Relay's clock, or previous + 1), returns the draft, and does not commit when the text is unchanged; an empty text stays as a cleared draft; an account keeps at most 64 (cleared drafts are dropped first, then the oldest revision); beyond 1024 drafts in all, a new draft is refused with 409 `drafts_limit`; another account never sees them; they survive a restart through the record codec; a channel opened with `drafts=1` receives a `session_drafts` snapshot when accepted and then only the drafts whose revision changed; texts are never logged.
+- [x] Commit `feat(relay): keep each account's drafts and share them on its channel`.
 
 ### Task 3: The web client follows drafts
 
 **Files:** `packages/agent-remote-web/src/client/session-drafts.ts` (new `SessionDraftStore`, + test), `http-websocket-transport.ts`, `session-channel-transport.ts`, `transport.ts`, `headless.ts`.
 
-- [ ] Tests: the store replaces its drafts on a snapshot and updates them on later frames, ignoring a revision older than the one it has; `view.draft(session)` returns `{ text, revision }`; the transport opens its channel with `drafts=1`, `watchSessionDrafts` delivers the view and `saveSessionDraft(session, text)` sends `PUT /v1/session-drafts` and applies the returned draft to the store at once.
-- [ ] Commit `feat(web): follow and save drafts shared across devices`.
+- [x] Tests: the store replaces its drafts on a snapshot and updates them on later frames, ignoring a revision older than the one it has; `view.draft(session)` returns `{ text, revision }`; the transport opens its channel with `drafts=1`, `watchSessionDrafts` delivers the view and `saveSessionDraft(session, text)` sends `POST /v1/session-drafts` and applies the returned draft to the store at once.
+- [x] Commit `feat(web): follow and save drafts shared across devices`.
 
 ### Task 4: Composers share their drafts
 
 **Files:** `packages/agent-remote-lab/src/shared-draft-sync.ts` (new, + test), `src/hooks/useSharedDraft.ts` (new), `src/draft-store.ts` (public `scope`), `src/components/SessionConversation.tsx` (mount the hook for the composer's session), `src/App.tsx` (provide the transport through a `SharedDraftsContext`).
 
-- [ ] Tests (`createSharedDraftSync`, fake timers): a page with an empty composer takes the remote draft; a local edit is published 800 ms after the last keystroke and becomes the agreed text; a newer remote draft replaces the composer text only while the text equals the agreed one (no unpublished edits), so typing is never overwritten and the next publish wins; a cleared remote draft clears an unchanged composer; a send (the composer becoming empty) publishes the clear; a reloaded tab whose text still hashes to the remembered agreement follows a newer remote draft, and one whose text changed keeps it and publishes it; a text over 8192 bytes is not published and keeps its local copy.
-- [ ] Tests (Lab): typing in a bot's conversation saves the draft; a draft arriving from another device appears in an idle composer and not in one being edited; sending clears it everywhere.
-- [ ] Commit `feat(lab): share each conversation's draft across devices`.
+- [x] Tests (`createSharedDraftSync`, fake timers): a page with an empty composer takes the remote draft; a local edit is published 800 ms after the last keystroke and becomes the agreed text; a newer remote draft replaces the composer text only while the text equals the agreed one (no unpublished edits), so typing is never overwritten and the next publish wins; a cleared remote draft clears an unchanged composer; a send (the composer becoming empty) publishes the clear; a reloaded tab whose text still hashes to the remembered agreement follows a newer remote draft, and one whose text changed keeps it and publishes it; a text over 8192 bytes is not published and keeps its local copy.
+- [x] Tests (Lab): typing in a bot's conversation saves the draft; a draft arriving from another device appears in an idle composer and not in one being edited; sending clears it everywhere.
+- [x] Commit `feat(lab): share each conversation's draft across devices`.
 
 ### Task 5: Drafts in bot rows
 
 **Files:** `src/bot-roster.ts` (`BotRow.draft`), `src/components/BotRoster.tsx` (+ css).
 
-- [ ] Tests: a bot that is not on screen and has a non-empty draft shows "Draft" (accent label color) and the draft's first line where the preview would be; a status that asks for something still comes first; screen readers hear "Draft: …"; the bot on screen shows its preview instead.
-- [ ] Commit `feat(lab): show a bot's unsent draft in its row`.
+- [x] Tests: a bot that is not on screen and has a non-empty draft shows "Draft" (accent label color) and the draft's first line where the preview would be; a status that asks for something still comes first; screen readers hear "Draft: …"; the bot on screen shows its preview instead.
+- [x] Commit `feat(lab): show a bot's unsent draft in its row`.
 
 ### Ship 5a
 

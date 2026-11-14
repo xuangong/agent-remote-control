@@ -10,10 +10,8 @@ import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
 import { botActivityLabel, botRole, projectBotRoster, type BotSessionRef } from './bot-roster.js';
 import { sharedReminders } from './bot-attention.js';
-import { useSessionReads } from './hooks/useSessionReads.js';
-import { SharedDraftsContext, useSessionDrafts } from './hooks/useSharedDraft.js';
-import { useSessionOutbox } from './hooks/useSessionOutbox.js';
-import { OutboxMessages } from './components/OutboxMessages.js';
+import { SharedDraftsContext, useSharedDrafts } from './hooks/useSharedDraft.js';
+import { SessionOutboxMessages } from './components/OutboxMessages.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -34,7 +32,7 @@ import { Button } from './ui/Button.js';
 import { WindowMenu } from './components/WindowMenu.js';
 import { WindowOverview } from './components/WindowOverview.js';
 import { byRecentUse, touchWindow } from './window-recency.js';
-import { useSessionStates } from './hooks/useSessionStates.js';
+import { SharedFeedsContext, useSharedFeedOf, useSharedFeedsSource, type SharedFeedsSnapshot } from './shared-feeds.js';
 import { sessionActivity } from './session-activity-status.js';
 import { useWindowVisibility } from './hooks/useWindowVisibility.js';
 import { teamViewTarget } from './team-view-binding.js';
@@ -1504,13 +1502,11 @@ function AppContent({
   // Windows and their floating entry show the states of their sessions whenever there is a Window to show.
   const sharedStatesWanted = !windowMode && activated && accessReady || windowOverviewAvailable && windowOverviewOpen
     || windowMode && windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
-  const sessionStates = useSessionStates(transport, sharedStatesWanted);
-  // Read positions travel with the states: rows show what is unread, and a conversation on screen is read.
-  const sessionReads = useSessionReads(transport, sharedStatesWanted);
-  // Drafts follow the owner to every device while the workbench is open.
-  const sharedDrafts = useSessionDrafts(transport, activated && accessReady);
-  // Messages waiting for offline Hosts, shown in their conversations and rows on every device.
-  const sessionOutbox = useSessionOutbox(transport, activated && accessReady);
+  // The account's shared IM state: session states with read positions (rows show what is unread, and a conversation on
+  // screen is read), drafts that follow the owner to every device, and messages waiting for offline Hosts. Kept outside
+  // App's state: its frames render the roster, folded cards and outbox bubbles that show them, not App (stage 6).
+  const sharedFeeds = useSharedFeedsSource(transport, { states: sharedStatesWanted, drafts: activated && accessReady, outbox: activated && accessReady });
+  const sharedDrafts = useSharedDrafts(sharedFeeds, transport);
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -1911,18 +1907,28 @@ function AppContent({
     attention.notifier.setEligible(eligible);
     attention.notifier.setDisplayed(displayed);
   }, [attention.notifier, eligibleKeys, displayedKeys, attention.enabled, navigation.mode]);
-  const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sessionStates), [tracking.liveObservations, sessionStates]);
+  // Reads the latest shared states; components that show statuses render again when they change (useSharedStates).
+  const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sharedFeeds.get().states), [tracking.liveObservations, sharedFeeds]);
   // Bot mode's reminders: a bot that starts waiting or finishes, unless its conversation is on screen.
   const sharedAttention = useRef(new Map<string, 'running' | 'waiting' | 'idle' | 'failed'>());
   const botTargetKeys = JSON.stringify(botTargets.map(sessionKey).sort());
   const onScreenBots = visibleBots.map(sessionKey).join('\n');
   useEffect(() => {
     if (windowMode || !attention.enabled) { sharedAttention.current = new Map(); return; }
-    const { next, reminders } = sharedReminders(sharedAttention.current, botTargets, sessionStates);
-    sharedAttention.current = next;
-    const onScreen = new Set(document.visibilityState === 'hidden' ? [] : onScreenBots.split('\n'));
-    for (const { session, reminder, identity } of reminders) if (!onScreen.has(sessionKey(session))) void attention.notifier.remind(session, reminder, identity);
-  }, [sessionStates, windowMode, attention.enabled, attention.notifier, botTargetKeys, onScreenBots]);
+    // Follows the shared states as they arrive, without rendering App for them.
+    let seen: SharedFeedsSnapshot['states'] | null = null;
+    const remind = () => {
+      const states = sharedFeeds.get().states;
+      if (states === seen) return;
+      seen = states;
+      const { next, reminders } = sharedReminders(sharedAttention.current, botTargets, states);
+      sharedAttention.current = next;
+      const onScreen = new Set(document.visibilityState === 'hidden' ? [] : onScreenBots.split('\n'));
+      for (const { session, reminder, identity } of reminders) if (!onScreen.has(sessionKey(session))) void attention.notifier.remind(session, reminder, identity);
+    };
+    remind();
+    return sharedFeeds.subscribe(remind);
+  }, [sharedFeeds, windowMode, attention.enabled, attention.notifier, botTargetKeys, onScreenBots]);
   const botDirectorySources = useMemo<OtherSessionSource[]>(() => {
     const sources: OtherSessionSource[] = [];
     if (providers.length && directory && selectedHost.id === 'local') for (const provider of providers) sources.push({ id: `local/${provider.providerId}`, hostId: 'local', providerId: provider.providerId, directory, online: true });
@@ -1934,9 +1940,13 @@ function AppContent({
   }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
-  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId),
-    current: currentBotSession, earlier: earlierBotSessions, reply: session => sessionStates?.reply(session), unread: (session, replyAt) => !!sessionReads?.unread(session, replyAt),
-    draft: session => sharedDrafts?.view.draft(session)?.text, waiting: session => (sessionOutbox?.entries(session).length ?? 0) > 0 });
+  // Who the bots are, for App's own use (search, the selected bot); the roster on screen adds the shared IM state itself.
+  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: () => 'unknown', supportTeam: teamId => supportTeams.has(teamId),
+    current: currentBotSession, earlier: earlierBotSessions });
+  const projectSharedRoster = (shared: SharedFeedsSnapshot) => projectBotRoster(windowWorkspace.groups, otherSessions.sessions, {
+    status: session => sessionActivity(session, tracking.liveObservations, shared.states), supportTeam: teamId => supportTeams.has(teamId),
+    current: currentBotSession, earlier: earlierBotSessions, reply: session => shared.states?.reply(session), unread: (session, replyAt) => !!shared.reads?.unread(session, replyAt),
+    draft: session => shared.drafts?.draft(session)?.text, waiting: session => (shared.outbox?.entries(session).length ?? 0) > 0 });
   // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
   // continues into the session before a handoff, whose last reply may still be the latest.
   const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = windowMode ? visibleWindows
@@ -1944,16 +1954,24 @@ function AppContent({
       ? [...visibleBots, botBinding, ...earlierBotSessions(selectedBot.group.window.id, selectedBot.view.id, botBinding)] : [];
   const readableKeys = readableSessions.map(sessionKey).join('\n');
   useEffect(() => {
-    if (!pageVisible || !sessionReads || !transport.markSessionRead) return;
-    for (const session of readableSessions) {
-      const ref = { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId };
-      const reply = sessionStates?.reply(ref);
-      if (reply && sessionReads.unread(ref, reply.replyAt)) transport.markSessionRead(ref, reply.replyAt);
-    }
-  }, [pageVisible, readableKeys, sessionStates, sessionReads, transport]);
+    if (!pageVisible || !transport.markSessionRead) return;
+    // Marks as the shared states and read positions arrive, without rendering App for them.
+    const mark = () => {
+      const { states, reads } = sharedFeeds.get();
+      if (!reads) return;
+      for (const session of readableSessions) {
+        const ref = { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId };
+        const reply = states?.reply(ref);
+        if (reply && reads.unread(ref, reply.replyAt)) transport.markSessionRead!(ref, reply.replyAt);
+      }
+    };
+    mark();
+    return sharedFeeds.subscribe(mark);
+  }, [pageVisible, readableKeys, sharedFeeds, transport]);
   const botPlace = navigation.place?.kind === 'bot' ? navigation.place : undefined;
   /** The selected bot's activity: a finished turn may have named its session. */
-  const selectedBotStatus = botPlace ? botRoster.sections.find(section => section.groupId === botPlace.groupId)?.rows.find(row => row.viewId === botPlace.viewId)?.status : undefined;
+  const selectedBotSessionRef = botPlace ? botRoster.sections.find(section => section.groupId === botPlace.groupId)?.rows.find(row => row.viewId === botPlace.viewId)?.session : undefined;
+  const selectedBotStatus = useSharedFeedOf(sharedFeeds, shared => selectedBotSessionRef ? botActivityLabel(sessionActivity(selectedBotSessionRef, tracking.liveObservations, shared.states)) : undefined);
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
     showDockOf(view);
@@ -2848,7 +2866,6 @@ function AppContent({
     const pageNotes = referencing && !host?.providers?.some(provider => provider.providerId === source.providerId && provider.referenceNotes);
     // A conversation whose Host is offline can still be written to: the message waits for the Host when its Controller delivers from the outbox.
     const outboxTarget = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
-    const waiting = sessionOutbox?.entries(outboxTarget) ?? [];
     const writable = !!context.offline && !!host && host.access !== 'shared' && !source.parentNativeSessionId && !context.operationBinding.historical;
     const laterHost = writable && host!.outbox === 1 && transport.queueMessage ? host : undefined;
     const outdatedOffline = writable && host!.outbox !== 1 && !!transport.queueMessage;
@@ -2909,7 +2926,7 @@ function AppContent({
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
       timelineStart: botPresentation ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
       // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
-      timelineEnd: <>{waiting.length ? <OutboxMessages entries={waiting} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
+      timelineEnd: <>{transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
         {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
       ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
@@ -2991,7 +3008,8 @@ function AppContent({
   /** What a folded bot's slim card shows: who it is and how it is doing, from the shared channel, while its conversation is released. */
   function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {
     return { name: botDisplayName(view.binding), picture: sharedWindow ? windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture : undefined,
-      role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding)), asleep: asleepBot(view) };
+      role: botRole(view, teamId => supportTeams.has(teamId)), asleep: asleepBot(view),
+      statusOf: states => botActivityLabel(sessionActivity(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding, tracking.liveObservations, states)) };
   }
   function providerDisplayName(hostId: string, id: string): string {
     return remoteHosts.find(host => host.id === hostId)?.providers?.find(provider => provider.providerId === id)?.displayName
@@ -3142,7 +3160,7 @@ function AppContent({
     successionContextFor: (...args) => latestContexts.current.operations.successionContextFor?.(...args),
     synchronize: () => latestContexts.current.operations.synchronize?.(),
   }), [baseUrl, transport, operationsEnabled]);
-  return <SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
+  return <SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
     docksHidden={!!sharedWindow && !compactLayout && docksHidden}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}
     {activated ? tracking.observers : null}
@@ -3522,7 +3540,7 @@ function AppContent({
         <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
       </div>
     </Sheet> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
+  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
       hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot}
       onNewBot={directory ? openNewBot : undefined} />
     {removingBot && windowMode && sharedWindow?.id === removingBot.windowId && sharedWindow.views.some(view => view.id === removingBot.viewId) ? (() => {
@@ -3539,7 +3557,7 @@ function AppContent({
       unavailableReason={windowWorkspace.sectionCreationState.state === 'unknown' ? 'A new group is not confirmed yet. Retry it in the roster first.' : creationUnavailableReason}
       starting={transitioning} failure={newBot.failure} onStart={() => void createAgent(true)} /> : null}
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
-    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></LiveConnectionsContext.Provider></SharedDraftsContext.Provider>;
+    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></LiveConnectionsContext.Provider></SharedDraftsContext.Provider></SharedFeedsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

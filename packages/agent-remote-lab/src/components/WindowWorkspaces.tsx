@@ -10,6 +10,7 @@ import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
 import { Sheet } from '../ui/Sheet.js';
 import { revealView, viewSelection } from '../window-view-selection.js';
+import { useSharedStates } from '../shared-feeds.js';
 
 export function viewTitle(view: WindowView): string {
   return view.binding?.title || (view.feature ? `${view.feature.kind.toUpperCase()} view` : 'Empty view');
@@ -45,6 +46,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   /** Where the list sits: the floating Windows panel, or the desktop sidebar, where headings and rows follow its flat rows and icon actions. */
   placement?: 'panel' | 'sidebar';
 }) {
+  // Statuses come from sessionStatus, which reads the shared states: render again when they change.
+  useSharedStates();
   const sidebar = placement === 'sidebar';
   const ownActions = useWindowActions(workspace);
   const { notice, noticeTone, setNotice, busy, run, background, edit, copyLink, setBotAppearance, saveRename: save, deleteWindow } = sharedActions ?? ownActions;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
 import type { useBotWorkspace } from '../hooks/useBotWorkspace.js';
@@ -7,6 +7,7 @@ import { useVisualViewport } from '../hooks/useVisualViewport.js';
 import type { BotRosterModel } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { BotRoster, botDisplayName, botPlaceKey } from './BotRoster.js';
+import { useSharedFeed, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
 import { Menu } from '../ui/Menu.js';
 import { WorkbenchModeSwitch } from './WorkbenchModeSwitch.js';
@@ -26,7 +27,14 @@ export interface BotWorkspaceProps {
   workspace: ReturnType<typeof useWindowWorkspace>;
   navigation: ReturnType<typeof useWorkbenchMode>;
   selected: ReturnType<typeof useBotWorkspace>;
-  roster: BotRosterModel; directory: ReturnType<typeof useOtherSessions>;
+  /** Who the bots are, for the selected bot's menu. */
+  roster: BotRosterModel;
+  /**
+   * The roster with the account's shared IM state (statuses, replies, unread, drafts, waiting messages). The roster
+   * projects it itself, so a frame of the shared feeds renders the roster and nothing else. Defaults to `roster`.
+   */
+  projectRoster?(shared: SharedFeedsSnapshot): BotRosterModel;
+  directory: ReturnType<typeof useOtherSessions>;
   describeConversation(place: BotPlace): SessionSurfaceDescriptor | undefined;
   /** Whether the desktop roster is hidden; the state lives in App so the shell shortcut can toggle it. Compact layouts ignore it. */
   rosterCollapsed: boolean; onToggleRoster(): void;
@@ -39,7 +47,7 @@ export interface BotWorkspaceProps {
   /** Where a bot runs, for its Info sheet. */
   botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
 }
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, projectRoster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot }: BotWorkspaceProps) {
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
   const [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -149,7 +157,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
-      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={compact}
+      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><SharedBotRoster model={roster} project={projectRoster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={compact}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
@@ -173,4 +181,11 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     </section>
     {actions.sheets}
   </main>;
+}
+
+/** The roster on screen: it follows the shared feeds itself, so their frames render it and not the workspace around it. */
+function SharedBotRoster({ model, project, ...props }: ComponentProps<typeof BotRoster> & { project?(shared: SharedFeedsSnapshot): BotRosterModel }) {
+  const shared = useSharedFeed(snapshot => project ? snapshot : undefined);
+  const projected = useMemo(() => project && shared ? project(shared) : model, [project, shared, model]);
+  return <BotRoster model={projected} {...props} />;
 }

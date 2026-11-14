@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ComponentProps } from 'react';
 import type { OutboxEntry } from '@orchardworks/agent-remote-protocol';
+import type { SessionStateRef } from '@orchardworks/agent-remote-web';
+import { useSharedFeed } from '../shared-feeds.js';
 import { UserMessageItem } from '@orchardworks/agent-remote-web/react';
 import './outbox-messages.css';
 
@@ -39,6 +41,16 @@ export function OutboxMessages({ entries, hostName, hostOnline, now: fixedNow, o
   const now = useNow(entries.length > 0, fixedNow);
   if (!entries.length) return null;
   return <>{entries.map(entry => <OutboxMessage key={entry.id} entry={entry} hostName={hostName} hostOnline={hostOnline} now={now} onCancel={onCancel} onRetry={onRetry} />)}</>;
+}
+
+/**
+ * A conversation's messages in the account's outbox, read from the page's shared feeds: an outbox frame renders these
+ * bubbles, not the conversation around them.
+ */
+export function SessionOutboxMessages({ session, ...props }: Omit<ComponentProps<typeof OutboxMessages>, 'entries'> & { session: SessionStateRef }) {
+  const outbox = useSharedFeed(snapshot => snapshot.outbox);
+  const entries = outbox?.entries(session) ?? [];
+  return entries.length ? <OutboxMessages entries={entries} {...props} /> : null;
 }
 
 function OutboxMessage({ entry, hostName, hostOnline, now, onCancel, onRetry }: { entry: OutboxEntry; hostName: string; hostOnline: boolean; now: number;

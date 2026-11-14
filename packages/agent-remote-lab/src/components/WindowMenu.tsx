@@ -4,6 +4,7 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
+import { useSharedStates } from '../shared-feeds.js';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
 export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, onRemoveView }: {
@@ -14,6 +15,8 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
   onRemoveView?: ComponentProps<typeof WindowWorkspaces>['onRemoveView'];
 }) {
+  // Statuses come from sessionStatus, which reads the shared states: render again when they change.
+  useSharedStates();
   const [open, setOpen] = useState(false);
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
   const trigger = useRef<HTMLButtonElement>(null);

@@ -7,7 +7,9 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
+import type { SessionStatesView } from '@orchardworks/agent-remote-web';
 import { Avatar } from '../ui/Avatar.js';
+import { useSharedFeed } from '../shared-feeds.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number; folded?: boolean }
@@ -178,14 +180,20 @@ export function MinimizeMainSession() {
 }
 
 /** The bot a folded pane shows: its picture, name, role tag and status from the shared channel. */
-export interface FoldedBot { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean }
+export interface FoldedBot {
+  name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean;
+  /** Its status from the shared session states, read by the card itself so a states frame renders only the card. */
+  statusOf?(states: SessionStatesView | undefined): FoldedBot['status'];
+}
 export interface PrimarySessionGroupPane {
   id: string; title: string; width: number; additionalWidth?: number;
   collapsed: boolean; selected: boolean; content: ReactNode;
   fold?: FoldedBot;
 }
 /** A folded bot: a slim card standing where its pane was; pressing it restores the pane. */
-export function FoldedBotCard({ label, fold, controls, onRestore }: { label: string; fold: FoldedBot; controls?: string; onRestore(): void }) {
+export function FoldedBotCard({ label, fold: given, controls, onRestore }: { label: string; fold: FoldedBot; controls?: string; onRestore(): void }) {
+  const status = useSharedFeed(snapshot => given.statusOf ? given.statusOf(snapshot.states) : given.status);
+  const fold = { ...given, status };
   return <button type="button" className="lab-folded-bot" aria-label={label} aria-controls={controls} aria-expanded={controls ? false : undefined}
     data-asleep={fold.asleep || undefined}
     aria-description={[fold.role, fold.asleep && fold.status !== 'Needs you' ? 'Asleep' : fold.status].filter(Boolean).join(' · ') || undefined} title={fold.name}

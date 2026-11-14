@@ -1,27 +1,31 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { RemoteAgentTransport, SessionDraftsView, SessionStateRef } from '@orchardworks/agent-remote-web';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import type { DraftBinding } from '../draft-store.js';
 import { createSharedDraftSync, type SharedDraftAgreement, type SharedDraftSync } from '../shared-draft-sync.js';
+import type { SharedFeeds } from '../shared-feeds.js';
 
-/** The account's drafts shared across devices, and how to save one; absent where the transport has none. */
+/**
+ * The account's drafts shared across devices, and how to save one; absent where the transport has none. Its identity
+ * lasts as long as the page's feeds and transport: drafts reach composers through `subscribe`, without rendering them.
+ */
 export interface SharedDrafts {
-  view: SessionDraftsView;
+  /** The drafts as last shared, once they arrived. */
+  current(): SessionDraftsView | undefined;
+  /** Calls back when the drafts may have changed. */
+  subscribe(listener: () => void): () => void;
   /** Saves a session's draft for every device and resolves with the revision it got. */
   save(session: SessionStateRef, text: string): Promise<number>;
 }
 export const SharedDraftsContext = createContext<SharedDrafts | undefined>(undefined);
+const ignoreChanges = () => () => {};
 
-/** The account's shared drafts while enabled, with how to save one; undefined where the transport has none. */
-export function useSessionDrafts(transport: Pick<RemoteAgentTransport, 'watchSessionDrafts' | 'saveSessionDraft'> | undefined, enabled: boolean): SharedDrafts | undefined {
-  const [view, setView] = useState<SessionDraftsView>();
-  useEffect(() => {
-    if (!enabled || !transport?.watchSessionDrafts || !transport.saveSessionDraft) { setView(undefined); return; }
-    return transport.watchSessionDrafts(setView);
-  }, [transport, enabled]);
-  // One save per transport, so composers keep their pending edits while drafts arrive.
-  const save = useMemo(() => transport?.saveSessionDraft ? (session: SessionStateRef, text: string) => transport.saveSessionDraft!(session, text).then(draft => draft.revision) : undefined, [transport]);
-  return useMemo(() => view && save ? { view, save } : undefined, [view, save]);
+/** Shared drafts read from the page's feeds and saved through the transport; undefined where the transport cannot save them. */
+export function useSharedDrafts(feeds: SharedFeeds, transport: Pick<RemoteAgentTransport, 'saveSessionDraft'> | undefined): SharedDrafts | undefined {
+  return useMemo(() => transport?.saveSessionDraft ? {
+    current: () => feeds.get().drafts, subscribe: feeds.subscribe,
+    save: (session: SessionStateRef, text: string) => transport.saveSessionDraft!(session, text).then(draft => draft.revision),
+  } : undefined, [feeds, transport]);
 }
 
 /** Agreements kept per tab, next to its drafts, so a reload tells text it agreed on from text edited since. */
@@ -49,31 +53,35 @@ function remember(scope: string, id: string, value: SharedDraftAgreement) {
 /**
  * Keeps a composer's draft in step with the session's draft on every device. It follows another device's newer draft
  * only while nothing typed here is unpublished, and publishes what is typed here shortly after the last keystroke.
+ * It starts once the account's drafts have arrived, so it never publishes over a draft it has not seen.
  */
 export function useSharedDraft(binding: DraftBinding | undefined, session: SessionStateRef | undefined, enabled = true): void {
   const shared = useContext(SharedDraftsContext);
+  const loaded = useSyncExternalStore(shared?.subscribe ?? ignoreChanges, () => !!shared?.current()?.loaded);
   const sync = useRef<SharedDraftSync>();
-  const save = shared?.save, store = binding?.store, key = binding?.key;
+  const store = binding?.store, key = binding?.key;
   const hostId = session?.hostId, providerId = session?.providerId, nativeSessionId = session?.nativeSessionId;
-  const latest = useRef(shared?.view); latest.current = shared?.view;
   useEffect(() => {
-    if (!enabled || !save || !store || key === undefined || !hostId || !providerId || !nativeSessionId) return;
+    if (!enabled || !loaded || !shared || !store || key === undefined || !hostId || !providerId || !nativeSessionId) return;
     const ref = { hostId, providerId, nativeSessionId }, id = JSON.stringify([key, hostId, providerId, nativeSessionId]);
     const current = createSharedDraftSync({
       read: () => store.get(key),
       apply: text => { store.set(key, text); },
-      publish: text => save(ref, text),
+      publish: text => shared.save(ref, text),
       agreement: agreement(store.scope, id),
       remember: value => remember(store.scope, id, value),
     });
     sync.current = current;
     const stop = store.subscribe(key, () => current.local(store.get(key)));
-    if (latest.current?.loaded) current.remote(latest.current.draft(ref));
-    return () => { stop(); current.dispose(); if (sync.current === current) sync.current = undefined; };
-  }, [enabled, save, store, key, hostId, providerId, nativeSessionId]);
-  const view = shared?.view;
-  useEffect(() => {
-    if (!view?.loaded || !hostId || !providerId || !nativeSessionId) return;
-    sync.current?.remote(view.draft({ hostId, providerId, nativeSessionId }));
-  }, [view, hostId, providerId, nativeSessionId]);
+    let seen = shared.current();
+    if (seen?.loaded) current.remote(seen.draft(ref));
+    // Drafts from other devices reach the sync directly; the conversation does not render for them.
+    const unfollow = shared.subscribe(() => {
+      const view = shared.current();
+      if (!view?.loaded || view === seen) return;
+      seen = view;
+      current.remote(view.draft(ref));
+    });
+    return () => { stop(); unfollow(); current.dispose(); if (sync.current === current) sync.current = undefined; };
+  }, [enabled, loaded, shared, store, key, hostId, providerId, nativeSessionId]);
 }

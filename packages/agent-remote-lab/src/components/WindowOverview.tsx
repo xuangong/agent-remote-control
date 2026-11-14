@@ -7,6 +7,7 @@ import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';
 import { activityLabel, type SessionActivityStatus } from '../session-activity-status.js';
 import { viewTitle } from './WindowWorkspaces.js';
+import { useSharedStates } from '../shared-feeds.js';
 
 /** Width a collapsed view keeps in the rail. */
 const COLLAPSED_WIDTH = 44;
@@ -82,6 +83,8 @@ export function WindowOverview({ workspace, scope, enabled, open, sessionStatus,
   sessionStatus?(session: SessionStateRef): SessionActivityStatus;
   onOpenChange(open: boolean): void;
 }) {
+  // Statuses come from sessionStatus, which reads the shared states: render again when they change.
+  useSharedStates();
   const dialog = useRef<HTMLDialogElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const [openingId, setOpeningId] = useState<string>();

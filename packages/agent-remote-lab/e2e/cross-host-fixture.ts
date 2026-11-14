@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import type { BrowserContext } from '@playwright/test';
 import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentCapabilities, type AgentInputAcceptance, type AgentSession, type AgentSessionNativeEvidence,
   type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { createHostedRelay, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, createTimerRelayScheduler, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
 import { createRemoteHostUplinkClient, type RemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
 import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { createAgentHostRuntime, type AgentHostProviderRegistration } from '../../agent-host/src/host.js';
@@ -21,24 +21,24 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
  * A native session that answers every message with "<Host>/<provider>: <message>", as an agent would reply, and that
  * takes part in a Handoff (its native evidence prepares and dispatches input). Nothing runs a model.
  */
+/** A native session's conversation, which outlives each opening of it as a native agent's files do. */
+export interface EchoRecord { readonly received: string[]; readonly history: Array<{ role: 'user' | 'assistant'; text: string }> }
 export class EchoNative implements AgentSession {
   capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
     interactions: { question: false, toolApproval: false, planApproval: false } };
-  /** The messages this session received, in order. */
-  readonly received: string[] = [];
   private queue: ProviderStreamItem[] = [];
   private wake?: () => void;
   private closed = false;
   private sequence = 0;
   private epoch = 0;
   private preparations = 0;
-  constructor(readonly host: string, readonly providerId: string, readonly id: string, readonly cwd: string, private readonly history: readonly string[] = []) {}
+  constructor(readonly host: string, readonly providerId: string, readonly id: string, readonly cwd: string, readonly record: EchoRecord) {}
   async runtimeInfo() {
     return { providerId: this.providerId, sessionId: this.id, status: 'idle' as const, cwd: this.cwd, persistence: { providerId: this.providerId, sessionId: this.id, opaque: `cross-host-${this.id}` } };
   }
   async *observe(): AsyncIterable<ProviderStreamItem> {
-    for (const [index, text] of this.history.entries()) yield { type: 'observation', sourceKey: `history-${this.id}-${index}`, occurredAt: 1_000 + index, delivery: 'history',
-      event: { type: 'timeline', provider: this.providerId, item: index % 2 ? { type: 'assistant_message', text, messageId: `history-${this.id}-${index}` } : { type: 'user_message', text } } };
+    for (const [index, { role, text }] of [...this.record.history].entries()) yield { type: 'observation', sourceKey: `history-${this.id}-${index}`, occurredAt: 1_000 + index, delivery: 'history',
+      event: { type: 'timeline', provider: this.providerId, item: role === 'assistant' ? { type: 'assistant_message', text, messageId: `history-${this.id}-${index}` } : { type: 'user_message', text } } };
     yield { type: 'history_boundary' };
     while (!this.closed) {
       const item = this.queue.shift();
@@ -48,7 +48,7 @@ export class EchoNative implements AgentSession {
   }
   private push(item: ProviderStreamItem) { this.queue.push(item); this.wake?.(); }
   private receive(text: string) {
-    this.received.push(text);
+    this.record.received.push(text); this.record.history.push({ role: 'user', text });
     const turnId = `turn-${this.id}-${++this.sequence}`;
     const live = (event: Extract<ProviderStreamItem, { type: 'observation' }>['event']) =>
       this.push({ type: 'observation', sourceKey: `live-${this.id}-${++this.sequence}`, occurredAt: Date.now(), delivery: 'live', event });
@@ -57,7 +57,9 @@ export class EchoNative implements AgentSession {
     // A Handoff's first message carries the earlier conversation before it; the reply names the message itself.
     const message = text.split('\n').filter(Boolean).at(-1) ?? text;
     setTimeout(() => {
-      live({ type: 'timeline', provider: this.providerId, item: { type: 'assistant_message', text: `${this.host}/${this.providerId}: ${message}`, messageId: `reply-${turnId}` } });
+      const reply = `${this.host}/${this.providerId}: ${message}`;
+      this.record.history.push({ role: 'assistant', text: reply });
+      live({ type: 'timeline', provider: this.providerId, item: { type: 'assistant_message', text: reply, messageId: `reply-${turnId}` } });
       live({ type: 'turn_completed', provider: this.providerId, turnId });
     }, 100);
   }
@@ -114,7 +116,9 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
   const gateway = createHostedRelay({ ...auth, successionEnrollment: true,
     successionEncodingCosts: { measureSnapshot(state) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES,
       costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord },
-    storage: { initial: saved, async commit(value) { saved = structuredClone(value); } }, scheduler: { schedule() {}, cancel() {} } });
+    // A real timer, as production's alarm: the owner's access is renewed before its one-minute grant runs out, so the
+    // fixture keeps its Hosts past a minute.
+    storage: { initial: saved, async commit(value) { saved = structuredClone(value); } }, scheduler: createTimerRelayScheduler() });
   const serve = await createGatewayStaticPages(resolve('dist'), { origin });
   server.on('request', (incoming, outgoing) => { void (async () => {
     const result = await gateway.fetch(webRequest(incoming, new URL(incoming.url!, origin)));
@@ -131,12 +135,13 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
 
   const hosts = await Promise.all(hostSpecs.map(async (spec, index) => {
     const directory = join(root, spec.name); await mkdir(directory, { recursive: true });
-    const natives = new Map<string, EchoNative>(), key = (providerId: string, id: string) => `${providerId}:${id}`;
-    const titles = new Map<string, string>();
-    for (const session of spec.sessions) {
-      natives.set(key(session.providerId, session.nativeSessionId), new EchoNative(spec.name, session.providerId, session.nativeSessionId, directory, session.history));
-      titles.set(key(session.providerId, session.nativeSessionId), session.title);
-    }
+    const records = new Map<string, EchoRecord & { providerId: string; id: string; title: string }>(), key = (providerId: string, id: string) => `${providerId}:${id}`;
+    const natives = new Set<EchoNative>();
+    const record = (providerId: string, id: string, title = 'New session', history: readonly string[] = []) => {
+      const value = { providerId, id, title, received: [], history: history.map((text, index) => ({ role: index % 2 ? 'assistant' as const : 'user' as const, text })) };
+      records.set(key(providerId, id), value); return value;
+    };
+    for (const session of spec.sessions) record(session.providerId, session.nativeSessionId, session.title, session.history);
     let created = 0;
     const registrations: AgentHostProviderRegistration[] = spec.providers.map(({ providerId, displayName }) => ({
       adapter: { descriptor: { providerId, displayName, sessionExtensions: { instructions: true, tools: true } },
@@ -145,35 +150,43 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
         readSessionHistory: async () => ({ entries: [] }),
         nativeEvidence: { availability: () => ({ status: 'configured', version: 2 }), createEmpty: async config => {
           const id = config.sessionId ?? `${spec.name.toLowerCase()}-${providerId}-${++created}`;
-          const native = new EchoNative(spec.name, providerId, id, directory); natives.set(key(providerId, id), native);
+          const native = new EchoNative(spec.name, providerId, id, directory, record(providerId, id));
           return { status: 'created' as const, handle: (await native.runtimeInfo()).persistence };
         } } },
       directory: { providerId, supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
-        list: () => [...natives.values()].filter(native => native.providerId === providerId).map(native => ({ nativeSessionId: native.id, providerId,
-          title: titles.get(key(providerId, native.id)) ?? 'New session', createdAt: '2026-11-15T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z' })),
+        list: () => [...records.values()].filter(item => item.providerId === providerId).map(item => ({ nativeSessionId: item.id, providerId,
+          title: item.title, createdAt: '2026-11-15T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z' })),
         workspaces: () => [], create: async () => { throw new Error('Sessions here are opened, not created.'); },
-        open: async id => { const native = natives.get(key(providerId, id)); if (!native) throw new Error('The native session is unavailable.'); return native; },
+        // Each opening is a new native agent over the same conversation, as a Controller resumes a released session.
+        open: async id => {
+          const saved = records.get(key(providerId, id));
+          if (!saved) throw new Error('The native session is unavailable.');
+          const native = new EchoNative(spec.name, providerId, id, directory, saved); natives.add(native); return native;
+        },
         sessionWorkspace: async () => directory, sourceReferences: async () => [], setSourceBindingReader: () => {},
-        close: async () => { for (const native of natives.values()) if (native.providerId === providerId) await native.dispose(); } },
+        close: async () => { for (const native of natives) if (native.providerId === providerId) await native.dispose(); } },
     }));
     let uplink: RemoteHostUplinkClient | undefined;
-    const runtime = createAgentHostRuntime({ idleGraceMs: 20, registrations, controllerId: installations[index]!,
+    const runtime = createAgentHostRuntime({ idleGraceMs: 2_000, registrations, controllerId: installations[index]!,
       executionPolicy: { defaultWorkspace: directory, allowedWorkspaceRoots: [directory], lockPermissions: false },
       succession: { controllerId: installations[index]!, enrollment: true, stateDirectory: directory },
       sessionRepliesFile: join(directory, 'session-replies.json'),
       outbox: { file: join(directory, 'outbox-receipts.json'), request: call => uplink ? uplink.outboxRequest(call) : Promise.reject(new Error('Offline.')) } });
     const connect = () => createRemoteHostUplinkClient({ relay: runtime.relay, url: origin.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: credentials[index]!,
       installationId: installations[index]!, name: spec.name, providers: spec.providers.map(provider => ({ ...provider, sessionCommands: true as const })),
-      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: request => runtime.control(request),
+      resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession,
+      // A Controller without a VS Code tunnel says so, as the real one does.
+      control: request => request.method === 'GET' && request.path === '/remote/vscode-tunnel'
+        ? Promise.resolve({ status: 200, body: JSON.stringify({ status: 'unavailable', processAlive: false, revision: 0 }) }) : runtime.control(request),
       sessionStates: runtime.sessionStates,
       outbox: { onAvailable: available => runtime.outbox?.setAvailable(available), onReady: () => runtime.outbox?.wake() },
       successionEnrollment: { control: runtime.enrollFromRelay } });
     uplink = connect();
     const { hostId } = await uplink.ready;
     runtime.setRelayConnected(true);
-    return { name: spec.name, hostId, natives, runtime,
-      /** The native session the Host holds, by provider and id. */
-      native: (providerId: string, id: string) => natives.get(key(providerId, id)),
+    return { name: spec.name, hostId, runtime,
+      /** A native session's conversation on this Host, by provider and id. */
+      native: (providerId: string, id: string) => records.get(key(providerId, id)),
       /** Takes the Host offline, as when its computer sleeps or loses its network. */
       async disconnect() { runtime.setRelayConnected(false); const closing = uplink; uplink = undefined; await closing?.close(); },
       /** Brings the Host back with the same installation. */

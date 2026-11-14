@@ -90,8 +90,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const tenants = new Map<string, Tenant>();
   const diagnostics = createDiagnosticJournal({storage:options.diagnosticStorage,context:options.diagnosticContext});
   const hostKeyOperations = new Map<string, Promise<unknown>>();
-  /** What a channel was last sent of each Host and session state; a fresh feed starts with a snapshot. */
-  type StateFeed = { snapshot: boolean; hosts: Map<string, string>; entries: Map<string, string> };
+  /** What a channel was last sent of each Host and session state; a fresh feed starts with a snapshot. facts: it asked for reply facts. */
+  type StateFeed = { snapshot: boolean; facts: boolean; hosts: Map<string, string>; entries: Map<string, string> };
   const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed }>();
   const userStreamCount = (subject: string) => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0);
   const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
@@ -203,8 +203,11 @@ export function createHostedRelay(options: HostedRelayOptions) {
         hosts.push({ hostId: host.hostId, online: host.online, ...(host.confirmedAt === undefined ? {} : { confirmedAgeMs: Math.max(0, at - host.confirmedAt) }) });
         feed.hosts.set(host.hostId, hostValue);
       }
-      for (const { changedAt, ...state } of host.states) {
-        const id = JSON.stringify([host.hostId, state.providerId, state.nativeSessionId]), value = JSON.stringify([state.state, state.updatedAt, changedAt]);
+      for (const { changedAt, ...reported } of host.states) {
+        // Reply facts reach only the channels that asked for them, and only their changes are news to those channels.
+        const { replyAt, preview, ...plain } = reported, state = feed.facts ? reported : plain;
+        const id = JSON.stringify([host.hostId, state.providerId, state.nativeSessionId]);
+        const value = JSON.stringify([state.state, state.updatedAt, changedAt, ...feed.facts ? [replyAt, preview] : []]);
         seenStates.add(id);
         if (!feed.snapshot && feed.entries.get(id) === value) continue;
         states.push({ hostId: host.hostId, ...state, ageMs: Math.max(0, at - changedAt) });
@@ -911,7 +914,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
         browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}),
-          ...(route.searchParams.get('states') === '1' ? { states: { snapshot: true, hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}) });
+          ...(['1', '2'].includes(route.searchParams.get('states') ?? '') ? { states: { snapshot: true, facts: route.searchParams.get('states') === '2', hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         // Clients that report which subscriptions are in use let the account's least recently used streams go first.

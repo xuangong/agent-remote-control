@@ -27,12 +27,14 @@ function transportPair() {
   return { server, native };
 }
 
-async function connectedHost(statesRequested: boolean, options: { ownerSubject?: string } = {}) {
+async function connectedHost(statesRequested: boolean, options: { ownerSubject?: string; replyFacts?: boolean } = {}) {
   let clock = 1_000, notifications = 0;
-  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, now: () => clock, onSessionStates: () => { notifications++; }, ...options });
+  const { replyFacts: _replyFacts, ...brokerOptions } = options;
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, now: () => clock, onSessionStates: () => { notifications++; }, ...brokerOptions });
   close.push(() => broker.close());
   const pairing = await (await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), options.ownerSubject ? { principalSubject: () => options.ownerSubject } : {}))!.json();
-  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${statesRequested ? '?sessionStates=1' : ''}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
+  const query = statesRequested ? `?sessionStates=1${options.replyFacts ? '&sessionReplyFacts=1' : ''}` : '';
+  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
   if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
   const pair = transportPair();
   const registered = new Promise<{ hostId: string; sessionStates?: number }>(resolve => pair.native.onMessage(data => { const message = JSON.parse(data); if (message.type === 'registered') resolve(message); }));
@@ -76,4 +78,19 @@ it('closes a Host that reports states the Relay did not acknowledge, and shows n
   expect(owned.broker.sessionStates('owner')[0]!.states).toHaveLength(1);
   expect(owned.broker.sessionStates('stranger')).toEqual([]);
   expect(broker.sessionStates('anyone')[0]!.states).toEqual([]);
+});
+
+it('acknowledges reply facts to a Host that asks for them and keeps them with its states', async () => {
+  const older = await connectedHost(true);
+  expect(older.host.sessionStates).toBe(1);
+  const { broker, host, report } = await connectedHost(true, { replyFacts: true });
+  expect(host.sessionStates).toBe(2);
+  const facts = { replyAt: 7, preview: 'Release notes are ready.' };
+  await report({ full: true, states: [{ ...thread('idle'), ...facts }] });
+  expect(broker.sessionStates('anyone')[0]!.states).toEqual([{ ...thread('idle'), ...facts, changedAt: 1_000 }]);
+  // New facts replace the old ones; a state without facts drops them.
+  await report({ states: [{ ...thread('idle'), replyAt: 9, preview: 'Shipped.' }] });
+  expect(broker.sessionStates('anyone')[0]!.states[0]).toMatchObject({ replyAt: 9, preview: 'Shipped.', changedAt: 1_000 });
+  await report({ states: [thread('running')] });
+  expect(broker.sessionStates('anyone')[0]!.states[0]).not.toHaveProperty('preview');
 });

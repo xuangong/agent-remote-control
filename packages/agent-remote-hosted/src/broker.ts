@@ -792,7 +792,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -830,7 +830,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: 1 } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.hostStatus = statusRequested ? true : undefined;
@@ -2015,7 +2015,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') === '1', url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

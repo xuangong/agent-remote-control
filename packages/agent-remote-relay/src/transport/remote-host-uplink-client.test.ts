@@ -284,6 +284,35 @@ it.each([true, false])('reports session states only to a Relay that acknowledged
   expect(listeners.size).toBe(0);
 });
 
+it.each([2, 1] as const)('sends reply facts only to a Relay that acknowledged them (sessionStates=%s)', async acknowledged => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
+  const reports: Array<{ states: unknown[] }> = []; let asked: string | null = null;
+  server.on('connection', (socket, request) => {
+    asked = new URL(request.url!, 'http://relay').searchParams.get('sessionReplyFacts');
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, sessionStates: acknowledged }));
+      if (message.type === 'session_states') reports.push(message);
+    });
+  });
+  const listeners = new Set<(report: { full: boolean; states: never[] }) => void>();
+  const relay = createAgentRemoteRelay({ providers: [] }); closeables.push(() => relay.close());
+  const idle = { providerId: 'codex', nativeSessionId: 'thread', state: 'idle' as const, updatedAt: 5 };
+  const facts = { replyAt: 7, preview: 'Release notes are ready.' };
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [],
+    url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
+    sessionStates: { snapshot: () => [{ ...idle, ...facts }] as never[], subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); } } });
+  closeables.push(() => client.close()); await client.ready;
+  expect(asked).toBe('1');
+  await until(() => reports.length === 1);
+  expect(reports[0]!.states).toEqual([acknowledged === 2 ? { ...idle, ...facts } : idle]);
+  for (const listener of listeners) listener({ full: false, states: [{ ...idle, replyAt: 9, preview: 'Shipped.' }] } as never);
+  await until(() => reports.length === 2);
+  expect(reports[1]!.states).toEqual([acknowledged === 2 ? { ...idle, replyAt: 9, preview: 'Shipped.' } : idle]);
+});
+
 it.each([[true, true], [true, false], [false, true]])('requests Call For Support only when asked and tracks the acknowledgement (requested=%s, acknowledged=%s)', async (requested, acknowledged) => {
   const server = new WebSocketServer({host:'127.0.0.1',port:0}); await new Promise<void>(resolve=>server.once('listening',resolve));
   closeables.push(()=>new Promise<void>(resolve=>{for(const socket of server.clients)socket.terminate();server.close(()=>resolve());}));

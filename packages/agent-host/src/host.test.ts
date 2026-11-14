@@ -102,6 +102,26 @@ describe('Agent Host runtime', () => {
     } finally { await host.close(); }
   });
 
+  it("shares each session's latest reply with its state and keeps it across restarts", async () => {
+    const root = await mkdtemp(join(tmpdir(), 'host-replies-'));
+    const registration = fixture('codex');
+    const native = new Session('codex', 'native', [{ type: 'history_boundary' }]);
+    registration.sessions.set('native', native);
+    const file = join(root, 'session-replies.json');
+    const host = createAgentHostRuntime({ registrations: [registration], sessionRepliesFile: file });
+    try {
+      expect((await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'reply-agent', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) })).status).toBe(200);
+      native.emit({ type: 'observation', sourceKey: 'reply', occurredAt: 1, delivery: 'live', event: {
+        type: 'timeline', provider: 'codex', item: { type: 'assistant_message', messageId: 'reply', text: '**Shipped** to production.' } } });
+      await expect.poll(() => host.sessionStates.snapshot().find(state => state.nativeSessionId === 'native')).toMatchObject({ preview: 'Shipped to production.', replyAt: expect.any(Number) });
+    } finally { await host.close(); }
+    const restarted = createAgentHostRuntime({ registrations: [fixture('codex')], sessionRepliesFile: file });
+    try {
+      const replies = JSON.parse(await readFile(file, 'utf8'));
+      expect(replies.replies).toEqual([['codex', 'native', expect.any(Number), 'Shipped to production.']]);
+    } finally { await restarted.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it('wires a durable resource store into an attached native session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'host-resource-'));
     const received: import('@orchardworks/agent-provider-sdk').AgentInputPart[][] = [];

@@ -56,3 +56,19 @@ it('drops catalog states it could not read again in time and rarely rereads cata
   await vi.advanceTimersByTimeAsync(10 * 60_000);
   expect(quietReads).toBe(2);
 });
+
+it("adds each session's latest reply to its state and sends a new reply as a change", async () => {
+  const replies = new Map<string, { replyAt: number; preview: string }>([['thread', { replyAt: 3, preview: 'Shipped.' }]]);
+  const publisher = createSessionStatePublisher({ live: () => [state('open', 'running', 'claude')],
+    catalogs: () => [{ providerId: 'codex', read: async () => [state('thread', 'idle', 'codex', 5)] }],
+    replies: session => replies.get(session.nativeSessionId) });
+  const reports: HostSessionStates[] = [];
+  publisher.subscribe(report => reports.push(report));
+  await vi.advanceTimersByTimeAsync(0);
+  // A released session keeps its reply; one without a reply has none.
+  expect(reports[0]).toEqual({ full: true, states: [{ ...state('thread', 'idle', 'codex', 5), replyAt: 3, preview: 'Shipped.' }, state('open', 'running', 'claude')] });
+  replies.set('open', { replyAt: 4, preview: 'Working on it.' });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(reports[1]).toEqual({ full: false, states: [{ ...state('open', 'running', 'claude'), replyAt: 4, preview: 'Working on it.' }] });
+  expect(publisher.snapshot()).toContainEqual({ ...state('open', 'running', 'claude'), replyAt: 4, preview: 'Working on it.' });
+});

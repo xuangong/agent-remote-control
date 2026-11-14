@@ -40,6 +40,7 @@ import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessi
 import { AgentOperationRejectedError, bindAgentSessionTools, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
+import { createSessionReplies } from './session-replies.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
 import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
 import { withReferenceNotes } from './session-reference-notes.js';
@@ -142,6 +143,8 @@ export interface AgentHostRuntimeOptions {
   });
   inputImages?: InputImageStoreOptions;
   inputResources?: InputResourceStoreOptions;
+  /** Where each session's latest reply is kept across restarts; without it, replies are known only while this process runs. */
+  sessionRepliesFile?: string;
   /** Credentials through which sessions' shell commands reach this Controller as themselves. */
   sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string; sessionBin?: string };
   /** The sessions each session refers to; without it, sessions have only their source. */
@@ -237,7 +240,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const runtime = createAgentHostRuntime({ ...options, hostId: registeredHostId, siteOrigin, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
     genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
-    ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}) });
+    ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}),
+    ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
@@ -538,8 +542,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
     return state ? [{ providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, state }] : [];
   });
+  // Each open session's latest reply is read when its timeline moves, and remembered after it is released.
+  const sessionReplies = createSessionReplies(options.sessionRepliesFile ? { file: options.sessionRepliesFile } : {});
   const sessionStates = createSessionStatePublisher({
-    live: liveSessionStates,
+    live: () => {
+      for (const binding of bindings.values()) { const live = liveAgent(binding.agentId); if (live) sessionReplies.observe(binding, binding.agentId, live); }
+      return liveSessionStates();
+    },
+    replies: session => sessionReplies.facts(session),
     catalogs: () => [...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
   });
@@ -1588,6 +1598,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         await bounded(successionBoundary?.close() ?? Promise.resolve(), shutdownTimeoutMs);
       } finally {
         successionBoundary?.retireCoverageEvidence();
+        sessionReplies.close();
         bindings.close();
         const releasing = idle.close();
         for (const catalog of catalogs.values()) catalog.dispose();

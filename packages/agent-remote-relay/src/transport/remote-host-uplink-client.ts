@@ -149,7 +149,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     options.onStateChange?.('connecting');
     const endpoint = new URL(options.url);
     if (options.successionEnrollment) endpoint.searchParams.set('successionEnrollment', '3');
-    if (options.sessionStates) endpoint.searchParams.set('sessionStates', '1');
+    // A Relay that understands reply facts acknowledges sessionStates: 2; older ones keep acknowledging 1.
+    if (options.sessionStates) { endpoint.searchParams.set('sessionStates', '1'); endpoint.searchParams.set('sessionReplyFacts', '1'); }
     if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
@@ -313,8 +314,14 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           unsubscribeProviders = options.providerChanges.subscribe(publish);
           publish();
         }
-        if (options.sessionStates && decoded.value.sessionStates === 1) {
-          const publish = (report: HostSessionStates) => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'session_states', ...report })); };
+        if (options.sessionStates && decoded.value.sessionStates) {
+          // A Relay that did not acknowledge reply facts validates states without them.
+          const facts = decoded.value.sessionStates === 2;
+          const publish = (report: HostSessionStates) => {
+            if (retired) return;
+            const states = facts ? report.states : report.states.map(({ replyAt: _replyAt, preview: _preview, ...state }) => state);
+            writer.send(JSON.stringify({ uplinkVersion: 2, type: 'session_states', ...report, states }));
+          };
           unsubscribeStates = options.sessionStates.subscribe(publish);
           publish({ full: true, states: options.sessionStates.snapshot() });
         }

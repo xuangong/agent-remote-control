@@ -10,6 +10,8 @@ export interface SessionStateSources {
   live(): HostSessionState[];
   /** The enabled providers' catalogs, read from the native agents. */
   catalogs(): readonly SessionStateCatalog[];
+  /** A session's latest reply, when known; it travels with the session's state. */
+  replies?(session: Pick<HostSessionState, 'providerId' | 'nativeSessionId'>): { replyAt: number; preview: string } | undefined;
 }
 export interface SessionStatePublisherOptions {
   liveIntervalMs?: number;
@@ -35,7 +37,8 @@ export function liveSessionState(facts: LiveSessionFacts): SessionActivityState 
 }
 
 const key = (state: Pick<HostSessionState, 'providerId' | 'nativeSessionId'>) => JSON.stringify([state.providerId, state.nativeSessionId]);
-const same = (left: HostSessionState, right: HostSessionState) => left.state === right.state && left.updatedAt === right.updatedAt;
+const same = (left: HostSessionState, right: HostSessionState) => left.state === right.state && left.updatedAt === right.updatedAt
+  && left.replyAt === right.replyAt && left.preview === right.preview;
 
 /**
  * Reports session states for the Relay to share: open sessions are checked every couple of seconds and their changes
@@ -64,9 +67,14 @@ export function createSessionStatePublisher(sources: SessionStateSources, option
       const updatedAt = state.updatedAt ?? merged.get(key(state))?.updatedAt;
       merged.set(key(state), { ...state, ...(updatedAt === undefined ? {} : { updatedAt }) });
     }
-    if (merged.size <= SESSION_STATE_LIMIT) return merged;
-    const ordered = [...merged].sort(([, a], [, b]) => (b.updatedAt ?? Infinity) - (a.updatedAt ?? Infinity));
-    return new Map(ordered.slice(0, SESSION_STATE_LIMIT));
+    const kept = merged.size <= SESSION_STATE_LIMIT ? merged
+      : new Map([...merged].sort(([, a], [, b]) => (b.updatedAt ?? Infinity) - (a.updatedAt ?? Infinity)).slice(0, SESSION_STATE_LIMIT));
+    if (sources.replies) for (const [id, state] of kept) {
+      let reply: ReturnType<NonNullable<SessionStateSources['replies']>>;
+      try { reply = sources.replies(state); } catch { reply = undefined; }
+      if (reply) kept.set(id, { ...state, replyAt: reply.replyAt, preview: reply.preview });
+    }
+    return kept;
   }
   function emit(report: HostSessionStates) {
     for (const listener of [...listeners]) { try { listener(report); } catch { /* A failed delivery only affects its listener. */ } }

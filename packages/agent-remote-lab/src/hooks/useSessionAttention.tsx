@@ -78,13 +78,15 @@ export function useSessionAttention(scope: string, active: boolean, onOpen: (ses
   }, [active, mobile, notificationChoice, notificationPermission, requestPermission]);
   const trackVisible = trackChoice ?? mobile;
   function setTrackVisible(value: boolean) { save(trackKey, value); setTrackChoice(value); }
-  async function executeTrack(args: string): Promise<AgentCommandResult> {
+  // Every conversation reads the command through context: it keeps its identity and acts on the latest choice.
+  const latestTrack = useRef({ trackVisible, setTrackVisible }); latestTrack.current = { trackVisible, setTrackVisible };
+  const executeTrack = useCallback(async (args: string): Promise<AgentCommandResult> => {
     const arg = args.trim().toLowerCase();
     if (!['', 'on', 'off', 'enable', 'disable'].includes(arg)) throw new Error('Use /track, /track on, or /track off.');
-    const next = arg ? arg === 'on' || arg === 'enable' : !trackVisible;
-    setTrackVisible(next);
+    const next = arg ? arg === 'on' || arg === 'enable' : !latestTrack.current.trackVisible;
+    latestTrack.current.setTrackVisible(next);
     return { text: `Track view ${next ? 'shown' : 'hidden'}.` };
-  }
+  }, []);
   const observe = useCallback((session: SessionEntry, value: SessionObservation) => { void notifier.observe(session, value); }, [notifier]);
   const controls = <>
     <label><span>Track view</span><input type="checkbox" checked={trackVisible} onChange={event => setTrackVisible(event.target.checked)} /></label>

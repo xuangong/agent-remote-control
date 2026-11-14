@@ -120,6 +120,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ContextType,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
   type ReactNode,
@@ -1294,6 +1295,8 @@ function AppContent({
     }
     return [...entries.values()];
   }, [observedSessionEntries, sideSessions, sideActivity, state?.agent?.id]);
+  // What the titles below read: a render that rebuilds the same entries neither updates titles nor renders App again (stage 6).
+  const sessionTitlesKey = JSON.stringify(sessionEntries.map(item => [sessionKey(item), item.title, item.parentNativeSessionId ?? null]));
   useEffect(() => {
     succession.observeHistoryTitles(sessionEntries);
     succession.updateTitles(sessionEntries.filter(item => !!item.parentNativeSessionId));
@@ -1305,7 +1308,7 @@ function AppContent({
       });
       return next.some((item, index) => item !== current[index]) ? next : current;
     });
-  }, [sessionEntries]);
+  }, [sessionTitlesKey]);
   const currentSession = windowSession.empty ? undefined : sessionEntries.find((item) => item.agentId === activeAgentId) ?? succession.selected;
   const askView = useAskVisibility();
   const askSurfaceVisible = windowMode && askView.visible && activeView === 'workbench' && !supportingRailOpen;
@@ -3106,11 +3109,13 @@ function AppContent({
       {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       </div>;
-  return <SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections}><SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
+  // Conversations read these during render; their values keep their identity so a render of App does not reach every
+  // mounted conversation through context (stage 6). Shown conversations render with App and read the latest state.
+  const contextValues: { descriptions: NonNullable<ContextType<typeof SessionDescriptionsContext>>; operations: NonNullable<ContextType<typeof SessionViewOperationsContext>> } = { descriptions: { describe: session => describeSession({ session,
     sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
     tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
     hostNames: new Map([['local', 'Lab server'], ...remoteHosts.map(host => [host.id, host.name] as const)]),
-  }), hostName: id => remoteHosts.find(host => host.id === id)?.name, navigate: navigateAttribution }}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={{ storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
+  }), hostName: id => remoteHosts.find(host => host.id === id)?.name, navigate: navigateAttribution }, operations: { storageScope: baseUrl, transport, enabled: accessReady && activated, resolveTarget: (source, requested) => {
     const mapped = currentGroupBinding(requested?.viewId);
     if (mapped && sessionKey(mapped.binding) !== sessionKey(source)) throw new Error('The session view binding changed. Reopen its current conversation.');
     const roster = teamRosterRef.current;
@@ -3121,7 +3126,23 @@ function AppContent({
     if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
-    successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() }}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
+    successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() } };
+  const latestContexts = useRef(contextValues); latestContexts.current = contextValues;
+  const sessionDescriptions = useMemo<ContextType<typeof SessionDescriptionsContext>>(() => ({
+    describe: session => latestContexts.current.descriptions.describe(session),
+    hostName: id => latestContexts.current.descriptions.hostName?.(id),
+    navigate: (...args) => latestContexts.current.descriptions.navigate!(...args),
+  }), []);
+  const operationsEnabled = accessReady && activated;
+  const sessionViewOperations = useMemo<ContextType<typeof SessionViewOperationsContext>>(() => ({
+    storageScope: baseUrl, transport, enabled: operationsEnabled,
+    resolveTarget: (source, requested) => latestContexts.current.operations.resolveTarget(source, requested),
+    directory: source => latestContexts.current.operations.directory(source),
+    refreshSettled: (...args) => latestContexts.current.operations.refreshSettled(...args),
+    successionContextFor: (...args) => latestContexts.current.operations.successionContextFor?.(...args),
+    synchronize: () => latestContexts.current.operations.synchronize?.(),
+  }), [baseUrl, transport, operationsEnabled]);
+  return <SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
     docksHidden={!!sharedWindow && !compactLayout && docksHidden}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}
     {activated ? tracking.observers : null}

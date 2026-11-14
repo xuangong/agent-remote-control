@@ -1,6 +1,6 @@
 import { LiveConnectionsContext } from '../hooks/useLiveBudget.js';
 import type { LiveRegistration } from '../live-budget.js';
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type ComponentProps } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type AgentChildSessionView, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
@@ -54,6 +54,7 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   familyRoot: boolean; entries: SessionWindowTarget[];
   onNavigate(destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession): Promise<void>;
 }
+const ignoreChanges = () => () => {};
 /** How long a view waits for its locator before it reports the wait with a Retry. */
 export const locatorSynchronizingNoticeMs = 30_000;
 export function SessionConversation(props: SessionConversationProps) {
@@ -110,7 +111,9 @@ export function SessionConversation(props: SessionConversationProps) {
     return () => { current.release(); if (registration.current === current) registration.current = undefined; };
   }, [liveConnections?.register, props.viewId]);
   useEffect(() => { registration.current?.update({ visible: onScreen, pinned, folded }); }, [onScreen, pinned, folded]);
-  const disconnected = !!props.viewId && liveConnections?.live(props.viewId) === false;
+  // Read through a subscription: a change of another conversation's liveness does not render this one.
+  const viewId = props.viewId;
+  const disconnected = useSyncExternalStore(liveConnections?.subscribe ?? ignoreChanges, () => !!viewId && liveConnections?.live(viewId) === false);
   const discardedAttachment = useRef(false);
   if (disconnected) discardedAttachment.current = true;
   const canAttach = attachmentEnabled && !disconnected && !retainingInput;

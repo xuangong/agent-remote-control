@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
+import { createContext, memo, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
@@ -14,6 +14,7 @@ import { sessionKey } from '../session-tree.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { moveSessionHost } from './SessionDock.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
+import { hiddenConversationUnchanged } from './conversation-props.js';
 import { ToastActivity } from './Toast.js';
 
 interface ConversationPresentation {
@@ -43,6 +44,8 @@ interface Registration { mode: WorkbenchMode; active: boolean; destination: HTML
 interface SurfaceEntry {
   slotId: string; host: HTMLDivElement; registrations: Map<symbol, Registration>;
   last: Registration; pending: number;
+  /** Changes with the entry's registrations, so its surface renders again only when they changed. */
+  revision: number;
 }
 /** Transient destinations only. Group membership and live locators remain application-owned. */
 class ConversationSurfaces {
@@ -77,15 +80,15 @@ class ConversationSurfaces {
       const host = document.createElement('div'); host.className = 'lab-session-conversation-host';
       // Both the destination and host fill the existing flex pane without changing its layout authority.
       Object.assign(host.style, { display: 'flex', flex: '1', flexDirection: 'column', minHeight: '0', minWidth: '0', height: '100%' });
-      entry = { slotId, host, registrations: new Map(), last: registration, pending: 0 };
+      entry = { slotId, host, registrations: new Map(), last: registration, pending: 0, revision: 0 };
       this.entries.set(slotId, entry);
     }
-    entry.registrations.set(token, registration); this.publish();
+    entry.registrations.set(token, registration); entry.revision++; this.publish();
   }
   unregister(slotId: string, token: symbol) {
     const entry = this.entries.get(slotId);
     if (!entry?.registrations.delete(token)) return;
-    this.publish(); this.collect(entry);
+    entry.revision++; this.publish(); this.collect(entry);
   }
   reportPending(entry: SurfaceEntry, count: number) {
     if (!this.live || this.entries.get(entry.slotId) !== entry) return false;
@@ -117,11 +120,20 @@ export function SessionConversationSurfaces({ scope, transport, mode, children }
   }, [registry]);
   return <SurfaceScope.Provider value={context}>{children}
     <div hidden aria-hidden="true" ref={parkingRef} />
-    {[...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} mode={registry.mode} enabled={enabled} />)}
+    {[...registry.entries.values()].map(entry => <ConversationSurface key={entry.slotId} registry={registry} entry={entry} revision={entry.revision} mode={registry.mode} enabled={enabled} />)}
   </SurfaceScope.Provider>;
 }
 
-function ConversationSurface({ registry, entry, mode, enabled }: { registry: ConversationSurfaces; entry: SurfaceEntry; mode: WorkbenchMode; enabled: boolean }) {
+/**
+ * A conversation that is not shown keeps its last render while its lifecycle is unchanged (see hiddenConversationUnchanged);
+ * it still renders for its own session's events and its contexts.
+ */
+const ConversationGate = memo(function ConversationGate(props: SessionConversationProps) {
+  return <SessionConversation {...props} />;
+}, hiddenConversationUnchanged);
+
+/** Renders again when its entry's registrations, the mode or access changed, not with every render of the surfaces. */
+const ConversationSurface = memo(function ConversationSurface({ registry, entry, mode, enabled }: { registry: ConversationSurfaces; entry: SurfaceEntry; revision: number; mode: WorkbenchMode; enabled: boolean }) {
   const registrations = [...entry.registrations.values()];
   const selected = registrations.find(item => item.mode === mode && item.active);
   const chosen = selected ?? registrations.find(item => item.mode === mode) ?? registrations[0] ?? entry.last;
@@ -169,13 +181,13 @@ function ConversationSurface({ registry, entry, mode, enabled }: { registry: Con
       <SessionTitleInteractionContext.Provider value={descriptor.titleInteraction}>
         <TrackViewScope.Provider value={descriptor.track}><AskViewScope.Provider value={descriptor.ask}>
           <TpmViewScope.Provider value={descriptor.tpm}><TeamViewScope.Provider value={descriptor.team}>
-            <SessionConversation {...props} />
+            <ConversationGate {...props} />
           </TeamViewScope.Provider></TpmViewScope.Provider>
         </AskViewScope.Provider></TrackViewScope.Provider>
       </SessionTitleInteractionContext.Provider>
     </WindowPresentationContext.Provider></WindowSessionBridgeContext.Provider>
   </WindowLayoutContext.Provider></ToastActivity.Provider>, entry.host, entry.slotId);
-}
+});
 
 export function SessionConversationMount({ mode, descriptor, active }: { mode: WorkbenchMode; descriptor: SessionSurfaceDescriptor; active: boolean }) {
   const scope = useContext(SurfaceScope);

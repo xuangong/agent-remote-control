@@ -134,7 +134,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     return { agentId: `agent-${nativeSessionId}`, nativeSessionId };
   });
   let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
-  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: options.host?.online ?? true, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
+  let hostOnline = options.host?.online ?? true;
+  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: hostOnline, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
     providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
   function Access() {
     const inheritedReady = useContext(WorkspaceReady);
@@ -144,6 +145,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   const container = await render(createElement(Access));
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     activityListeners, releaseInspect: () => releaseInspect(),
+    /** Whether the Host list reports the Host online from now on. */
+    setHostOnline(online: boolean) { hostOnline = online; },
     /** A conversation's agent status, as its Host pushes it. */
     emitStatus(agentId: string, status: 'running' | 'idle' | 'waiting') {
       const current = snapshot(agentId);

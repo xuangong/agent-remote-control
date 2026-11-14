@@ -56,3 +56,13 @@ it("keeps each session's latest reply, also after its state goes away or its Hos
   store.apply(frame({ snapshot: true }));
   expect(store.view().reply(thread)?.replyAt).toBe(9);
 });
+
+it('tells whether each Host is online as soon as a frame says so', () => {
+  const store = new SessionStateStore();
+  expect(store.view().host('host')).toBeUndefined();
+  store.apply(frame({ snapshot: true, hosts: [{ hostId: 'host', online: true }] }));
+  expect(store.view().host('host')).toEqual({ online: true });
+  store.apply(frame({ hosts: [{ hostId: 'host', online: false }] }));
+  expect(store.view().host('host')).toEqual({ online: false });
+  expect(store.view().host('other')).toBeUndefined();
+});

@@ -55,3 +55,21 @@ it('says to update the Controller of an offline Host that cannot keep messages',
     expect(app.container.querySelector('.lab-bot-conversation [data-testid="prompt-submit"]')!.getAttribute('aria-label')).toBe('Send message');
   } finally { await app.close(); }
 });
+
+it("notices at once that a bot's Host left, from the shared states channel, without waiting for the Host list", async () => {
+  const scope = 'http://localhost/u/bot-host-left/';
+  seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true, host: { outbox: 1 } });
+  const input = () => app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
+  const submit = () => app.container.querySelector<HTMLButtonElement>('.lab-bot-conversation [data-testid="prompt-submit"]')!;
+  try {
+    await openBot(app);
+    await act(async () => app.emitStates({ snapshot: true, hosts: [{ hostId: 'local', online: true }], states: [] }));
+    await act(async () => { setPromptText(input(), 'Run it later.'); input().dispatchEvent(new Event('input', { bubbles: true })); });
+    await until(() => expect(submit().getAttribute('aria-label')).not.toBe('Send when Test Host is back'));
+    // The Host's computer sleeps: the Relay says so on the states channel at once; the Host list agrees when asked.
+    app.setHostOnline(false);
+    await act(async () => app.emitStates({ hosts: [{ hostId: 'local', online: false }] }));
+    await until(() => expect(submit().getAttribute('aria-label')).toBe('Send when Test Host is back'));
+  } finally { await app.close(); }
+});

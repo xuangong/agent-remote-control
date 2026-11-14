@@ -1519,6 +1519,18 @@ function AppContent({
   // screen is read), drafts that follow the owner to every device, and messages waiting for offline Hosts. Kept outside
   // App's state: its frames render the roster, folded cards and outbox bubbles that show them, not App (stage 6).
   const sharedFeeds = useSharedFeedsSource(transport, { states: sharedStatesWanted, drafts: activated && accessReady, outbox: activated && accessReady });
+  // The shared states channel says at once when a Host connects or leaves. The Host list follows it then instead of at
+  // its next refresh (up to 30 s on a phone with the sidebar closed), so composers and offline notices change with it.
+  const listedHosts = useRef(remoteHosts); listedHosts.current = remoteHosts;
+  const sharedHostFlags = useRef('');
+  useEffect(() => sharedFeeds.subscribe(() => {
+    const states = sharedFeeds.get().states;
+    if (!states) return;
+    const flags = JSON.stringify(listedHosts.current.map(host => [host.id, states.host(host.id)?.online]));
+    if (flags === sharedHostFlags.current) return;
+    sharedHostFlags.current = flags;
+    if (listedHosts.current.some(host => { const shared = states.host(host.id); return !!shared && shared.online !== (host.online === true); })) retryHosts();
+  }), [sharedFeeds, retryHosts]);
   const sharedDrafts = useSharedDrafts(sharedFeeds, transport);
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);

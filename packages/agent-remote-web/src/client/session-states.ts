@@ -9,6 +9,8 @@ export interface SessionStatesView {
   state(session: SessionStateRef): { state: SharedSessionState; updatedAt?: number };
   /** The session's latest reply, when its Host reported it; kept after the state goes away, since it describes the past. */
   reply(session: SessionStateRef): SessionReply | undefined;
+  /** Whether a Host is connected, as the Relay last said; undefined before it said anything about that Host. */
+  host(hostId: string): { online: boolean } | undefined;
 }
 
 const key = (session: SessionStateRef) => JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
@@ -46,7 +48,8 @@ export class SessionStateStore {
   }
 
   view(): SessionStatesView {
-    return { state: session => this.state(session), reply: session => { const reply = this.replies.get(key(session)); return reply && { ...reply }; } };
+    return { state: session => this.state(session), reply: session => { const reply = this.replies.get(key(session)); return reply && { ...reply }; },
+      host: hostId => { const host = this.hosts.get(hostId); return host && { online: host.online }; } };
   }
 
   subscribe(listener: (view: SessionStatesView) => void): () => void {

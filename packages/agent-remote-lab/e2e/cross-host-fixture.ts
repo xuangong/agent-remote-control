@@ -94,6 +94,8 @@ interface HostSpec { name: string; providers: ReadonlyArray<{ providerId: string
  */
 export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-cross-host-')));
+  // The owner's sign-in and the Hosts' keys outlast the hour-long soak (soak.spec.ts) and its setup: they last a day.
+  const day = 86_400_000;
   // The owner's identity authority. The Relay gives up on a request after 5 s and aborts it, which leaves a truncated
   // body here when the machine is busy: answer that with an error rather than throwing out of the server.
   const authority = createServer(async (request, response) => {
@@ -101,7 +103,7 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
       let text = ''; for await (const chunk of request) text += String(chunk);
       const input = JSON.parse(text), subject = input.subject ?? input.continuation;
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ active: true, subject, authenticatedAt: Date.now(), validUntil: Date.now() + 60000, expiresAt: Date.now() + 3_600_000 }));
+      response.end(JSON.stringify({ active: true, subject, authenticatedAt: Date.now(), validUntil: Date.now() + 60000, expiresAt: Date.now() + day }));
     } catch { if (!response.headersSent) response.writeHead(400); response.end(); }
   });
   await new Promise<void>(done => authority.listen(0, '127.0.0.1', done));
@@ -112,9 +114,9 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
   const credentials = hostSpecs.map((_spec, index) => 'arc_' + String.fromCharCode(107 + index).repeat(43));
   const installations = hostSpecs.map(spec => `${spec.name.toLowerCase()}-controller`);
   const initial = emptyRelayState(auth);
-  initial.sessions.push({ hash: hash('owner'), sessionExpiresAt: Date.now() + 3_600_000,
-    grant: { authenticatedAt: Date.now(), subject: 'owner', namespace, expiresAt: Date.now() + 60000, ticket: '', nonce: 'nonce', continuation: 'owner', sessionExpiresAt: Date.now() + 3_600_000 } });
-  initial.tenants.push({ subject: 'owner', namespace, broker: { keys: credentials.map((credential, index) => [hash(credential), { expires: Date.now() + 3_600_000, installationId: installations[index]!, kind: 'device' }] as [string, { expires: number; installationId: string; kind: 'device' }]),
+  initial.sessions.push({ hash: hash('owner'), sessionExpiresAt: Date.now() + day,
+    grant: { authenticatedAt: Date.now(), subject: 'owner', namespace, expiresAt: Date.now() + 60000, ticket: '', nonce: 'nonce', continuation: 'owner', sessionExpiresAt: Date.now() + day } });
+  initial.tenants.push({ subject: 'owner', namespace, broker: { keys: credentials.map((credential, index) => [hash(credential), { expires: Date.now() + day, installationId: installations[index]!, kind: 'device' }] as [string, { expires: number; installationId: string; kind: 'device' }]),
     hosts: [], bindings: [], creations: [] } });
   let saved: HostedRelayState = initial;
   const gateway = createHostedRelay({ ...auth, successionEnrollment: true,

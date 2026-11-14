@@ -11,6 +11,11 @@ const minutes = Number(process.env.ARC_SOAK_MINUTES ?? 0);
 // Sends stop halfway: conversations grow with each message, so only the quiet half can show a leak.
 const sendMinutes = Number(process.env.ARC_SOAK_SEND_MINUTES ?? minutes / 2);
 const output = resolve(process.env.ARC_PERFORMANCE_OUTPUT ?? '.tmp/soak.json');
+// Diagnostics, off by default: heap snapshots at the given minutes, written beside the output (ARC_SOAK_SNAPSHOTS=12,32),
+// and runs without the Laptop's absences or without the mode switches (ARC_SOAK_HOST_AWAY=0, ARC_SOAK_MODE_SWITCHES=0),
+// to tell what a growth comes from.
+const snapshotMinutes = (process.env.ARC_SOAK_SNAPSHOTS ?? '').split(',').filter(Boolean).map(Number);
+const hostAway = process.env.ARC_SOAK_HOST_AWAY !== '0', modeSwitches = process.env.ARC_SOAK_MODE_SWITCHES !== '0';
 const sessions = (host: string, providerId: string) => Array.from({ length: 6 }, (_, index) => ({ providerId, nativeSessionId: `${host.toLowerCase()}-${index}`,
   title: `${host} ${index}`, history: Array.from({ length: 20 }, (_, turn) => turn % 2 ? `${host} answer ${turn} `.repeat(20) : `Question ${turn}`) }));
 
@@ -56,13 +61,28 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
     const samples: Sample[] = [];
+    const conversation = bot.getByRole('region', { name: 'Bot conversation', exact: true });
     const sample = async (minute: number) => {
+      // Every sample is taken on the same screen, the first bot with its history shown, so samples compare like with
+      // like: which bot is on screen changes the DOM by thousands of nodes, as the bots that received messages are longer.
+      await row(names[0]!).click();
+      await expect(conversation.getByRole('heading', { name: names[0]!, exact: true })).toBeVisible();
+      await expect(conversation.locator('.agent-message-assistant').filter({ hasText: 'Studio answer 19' })).toHaveCount(1, { timeout: 30_000 });
+      await page.waitForTimeout(1_000);
       await cdp.send('HeapProfiler.collectGarbage');
       const { metrics } = await cdp.send('Performance.getMetrics');
       const metric = (name: string) => metrics.find(item => item.name === name)?.value ?? 0;
       samples.push({ minute, heapMB: Math.round(metric('JSHeapUsedSize') / 1e4) / 100, nodes: metric('Nodes'), listeners: metric('JSEventListeners'), sockets, requests, errors: errors.length, sends });
       await mkdir(dirname(output), { recursive: true });
       await writeFile(output, JSON.stringify({ minutes, samples, errors: errors.slice(0, 50), failures: failures.slice(0, 100) }, null, 2));
+      if (snapshotMinutes.includes(minute)) {
+        const chunks: string[] = [], collect = ({ chunk }: { chunk: string }) => { chunks.push(chunk); };
+        await cdp.send('HeapProfiler.enable');
+        cdp.on('HeapProfiler.addHeapSnapshotChunk', collect);
+        await cdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+        cdp.off('HeapProfiler.addHeapSnapshotChunk', collect);
+        await writeFile(output.replace(/\.json$/, '') + `-${minute}.heapsnapshot`, chunks.join(''));
+      }
     };
     const mode = async (value: 'window' | 'bot') => {
       const region = page.locator(`[data-workbench-mode="${value === 'bot' ? 'window' : 'bot'}"]`);
@@ -91,20 +111,23 @@ test('soak: bot switches, sends, mode switches and a Host leaving and coming bac
       // Every fourth switch sends a message, which its Host answers (unless that Host is away).
       if (minute < sendMinutes && step % 4 === 3 && !(laptopAway && name.startsWith('Laptop'))) { await send(page, `Soak message ${step}`); sends++; }
       // Every 24 switches (about two minutes) the page goes to Window mode and back.
-      if (step % 24 === 23) { await mode('window'); await page.waitForTimeout(2_000); await mode('bot'); }
+      if (modeSwitches && step % 24 === 23) { await mode('window'); await page.waitForTimeout(2_000); await mode('bot'); }
       // The Laptop leaves for a minute every ten.
       const decade = Math.floor(minute / 10), inDecade = minute - decade * 10;
-      if (!laptopAway && decade > 0 && inDecade < 1) { await fixture.host('Laptop').disconnect(); laptopAway = true; }
+      if (hostAway && !laptopAway && decade > 0 && inDecade < 1) { await fixture.host('Laptop').disconnect(); laptopAway = true; }
       else if (laptopAway && inDecade >= 1) { await fixture.host('Laptop').reconnect(); laptopAway = false; }
       step++;
       await page.waitForTimeout(5_000);
     }
     await sample(minutes);
     // Budgets: once sends stop and the conversations stop growing, a few minutes in, the heap and the DOM stay flat while
-    // switching, mode changes and the Host's absences go on; sockets stay bounded; no errors.
+    // switching, mode changes and the Host's absences go on; requests per minute stay flat; sockets stay bounded; no errors.
     const quiet = samples.find(item => item.minute >= sendMinutes + 5) ?? samples[0]!, last = samples.at(-1)!;
     expect(last.heapMB, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.heapMB * 1.1);
     expect(last.nodes, JSON.stringify(samples)).toBeLessThanOrEqual(quiet.nodes * 1.1);
+    const perMinute = (from: Sample, to: Sample) => (to.requests - from.requests) / Math.max(1, to.minute - from.minute);
+    const early = samples.find(item => item.minute >= quiet.minute + 10) ?? last, late = samples.find(item => item.minute >= last.minute - 10) ?? quiet;
+    expect(perMinute(late, last), JSON.stringify(samples)).toBeLessThanOrEqual(perMinute(quiet, early) * 1.25);
     expect(Math.max(...samples.map(item => item.sockets))).toBeLessThanOrEqual(12);
     expect(errors).toEqual([]);
   } finally { await fixture.close(); }

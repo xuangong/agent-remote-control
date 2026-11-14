@@ -8,8 +8,9 @@ import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
-import { botActivityLabel, botRole, projectBotRoster } from './bot-roster.js';
+import { botActivityLabel, botRole, projectBotRoster, type BotSessionRef } from './bot-roster.js';
 import { sharedReminders } from './bot-attention.js';
+import { useSessionReads } from './hooks/useSessionReads.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -273,6 +274,12 @@ function AppContent({
   const navigation = useWorkbenchMode(baseUrl);
   const windowMode = navigation.mode === 'window';
   const windowModeRef = useRef(windowMode); windowModeRef.current = windowMode;
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
   const accessReady = useContext(WorkspaceReady);
   const [activated, setActivated] = useState(accessReady);
   useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
@@ -1488,8 +1495,11 @@ function AppContent({
   const [teamReveal, setTeamReveal] = useState<{ baseUrl: string; teamId: string; requestId: string }>();
   const windowView = useWindowVisibility();
   // Windows and their floating entry show the states of their sessions whenever there is a Window to show.
-  const sessionStates = useSessionStates(transport, !windowMode && activated && accessReady || windowOverviewAvailable && windowOverviewOpen
-    || windowMode && windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window));
+  const sharedStatesWanted = !windowMode && activated && accessReady || windowOverviewAvailable && windowOverviewOpen
+    || windowMode && windowView.visible && !initialState && !windowWorkspace.unavailable && (windowWorkspace.windows.length > 0 || !!windowWorkspace.window);
+  const sessionStates = useSessionStates(transport, sharedStatesWanted);
+  // Read positions travel with the states: rows show what is unread, and a conversation on screen is read.
+  const sessionReads = useSessionReads(transport, sharedStatesWanted);
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -1823,22 +1833,43 @@ function AppContent({
   });
   // A session under the desktop sessions page is not seen, so it is not acknowledged as read.
   const visibleWindows = openWindows.filter(session => windowStageVisible && isViewVisible(viewKey(session)));
+  /**
+   * The session that drives a bot now: after a handoff, the successor its view's slot follows (the view keeps naming the
+   * session it was opened with); otherwise the view's own session. Status, replies and reminders follow this one.
+   */
+  function currentBotSession(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef {
+    const slotId = succession.document.windowBindings?.find(entry => entry.windowId === groupId && entry.viewId === viewId && entry.bindingKey === windowBindingKey(binding))?.slotId;
+    const slot = slotId ? succession.document.slots.find(item => item.id === slotId) : undefined;
+    const selected = slot ? compositionSelection(slot) : undefined;
+    return selected ? { hostId: selected.hostId ?? binding.hostId, providerId: selected.providerId, nativeSessionId: selected.nativeSessionId }
+      : { hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId };
+  }
+  /** A bot's sessions before its handoffs, most recent first, where this page knows its chain. */
+  function earlierBotSessions(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef[] {
+    const hostId = binding.hostId ?? 'local';
+    const slotId = succession.document.windowBindings?.find(entry => entry.windowId === groupId && entry.viewId === viewId && entry.bindingKey === windowBindingKey(binding))?.slotId;
+    const current = currentBotSession(groupId, viewId, binding);
+    const chain = slotId ? succession.historyNavigationFor({ ...current, title: binding.title, viewId: slotId }) : undefined;
+    const earlier = chain?.predecessor && !chain.history ? [chain.predecessor, ...chain.ancestors] : [];
+    return earlier.map(session => ({ hostId: session.hostId ?? hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId }));
+  }
   const botTargets = !windowMode && activated && accessReady
-    ? projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown' }).sections.flatMap(section => section.rows.map(({ binding }) => {
-      const { role: _role, ...session } = binding;
-      return session;
+    ? projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown', current: currentBotSession }).sections.flatMap(section => section.rows.map(({ binding, session }) => {
+      const { role: _role, ...entry } = binding;
+      return { ...entry, ...session };
     })) : [];
   const botBinding = selectedBot.view?.binding;
   const botConnection = botBinding && connections.find(botBinding);
-  const displayedBot = botBinding && botTargets.find(session => sessionKey(session) === sessionKey(botBinding));
+  const selectedBotSession = botBinding && selectedBot.group && selectedBot.view ? currentBotSession(selectedBot.group.window.id, selectedBot.view.id, botBinding) : undefined;
+  const displayedBot = selectedBotSession && botTargets.find(session => sessionKey(session) === sessionKey(selectedBotSession));
   const visibleBots = !windowMode && accessReady && selectedBot.slot && botBinding && displayedBot && botConnection
     && (!compactLayout || !navigation.rosterVisible) && connections.shown(botBinding, botConnection.agentId) ? [displayedBot] : [];
   const latestEligible = useRef(new Set<string>());
   const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
     if (!windowMode) {
       if (!latestEligible.current.has(sessionKey(item))) return;
-      const row = projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown' }).sections
-        .flatMap(section => section.rows).find(row => sessionKey(row.binding) === sessionKey(item));
+      const row = projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown', current: currentBotSession }).sections
+        .flatMap(section => section.rows).find(row => sessionKey(row.session) === sessionKey(item));
       if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
       return;
     }
@@ -1892,7 +1923,22 @@ function AppContent({
   }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
-  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId) });
+  const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId),
+    current: currentBotSession, earlier: earlierBotSessions, reply: session => sessionStates?.reply(session), unread: (session, replyAt) => !!sessionReads?.unread(session, replyAt) });
+  // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
+  // continues into the session before a handoff, whose last reply may still be the latest.
+  const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = windowMode ? visibleWindows
+    : visibleBots.length && botBinding && selectedBot.group && selectedBot.view
+      ? [...visibleBots, botBinding, ...earlierBotSessions(selectedBot.group.window.id, selectedBot.view.id, botBinding)] : [];
+  const readableKeys = readableSessions.map(sessionKey).join('\n');
+  useEffect(() => {
+    if (!pageVisible || !sessionReads || !transport.markSessionRead) return;
+    for (const session of readableSessions) {
+      const ref = { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId };
+      const reply = sessionStates?.reply(ref);
+      if (reply && sessionReads.unread(ref, reply.replyAt)) transport.markSessionRead(ref, reply.replyAt);
+    }
+  }, [pageVisible, readableKeys, sessionStates, sessionReads, transport]);
   const botPlace = navigation.place?.kind === 'bot' ? navigation.place : undefined;
   /** The selected bot's activity: a finished turn may have named its session. */
   const selectedBotStatus = botPlace ? botRoster.sections.find(section => section.groupId === botPlace.groupId)?.rows.find(row => row.viewId === botPlace.viewId)?.status : undefined;
@@ -2913,7 +2959,7 @@ function AppContent({
   /** What a folded bot's slim card shows: who it is and how it is doing, from the shared channel, while its conversation is released. */
   function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {
     return { name: botDisplayName(view.binding), picture: sharedWindow ? windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture : undefined,
-      role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)), asleep: asleepBot(view) };
+      role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(sharedWindow ? currentBotSession(sharedWindow.id, view.id, view.binding) : view.binding)), asleep: asleepBot(view) };
   }
   function providerDisplayName(hostId: string, id: string): string {
     return remoteHosts.find(host => host.id === hostId)?.providers?.find(provider => provider.providerId === id)?.displayName

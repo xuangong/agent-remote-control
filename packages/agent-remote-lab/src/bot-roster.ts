@@ -6,17 +6,31 @@ import { sessionKey, type SessionEntry } from './session-tree.js';
 export type BotRole = 'Side' | 'Team Leader' | 'Team member' | 'Support' | 'TPM';
 /** An Ask: the only secondary level, listed under the bot it belongs to. */
 export interface BotAsk { viewId: string; title: string }
+/** A native session, wherever it runs. */
+export interface BotSessionRef { hostId: string; providerId: string; nativeSessionId: string }
 export interface BotRow {
   groupId: string; viewId: string; binding: WindowSessionBinding;
+  /** The session that drives the bot now: after a handoff, its successor; otherwise the view's own session. */
+  session: BotSessionRef;
   details: WindowBotDetails; role?: BotRole; asks: BotAsk[]; status?: 'Needs you' | 'Working' | 'Failed';
+  /** The bot's latest reply, as its Host reported it, and whether the owner has not seen it yet. */
+  reply?: { replyAt: number; preview: string }; unread?: true;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
-export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; status?: BotRow['status'] }
+export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; status?: BotRow['status']; unread?: true }
 export interface BotRosterModel { sections: BotSection[]; other: SessionEntry[] }
 export interface BotRosterOptions {
-  status(binding: WindowSessionBinding): SessionActivityStatus;
+  status(session: BotSessionRef): SessionActivityStatus;
+  /** The session that drives a bot now; by default the view's own binding. */
+  current?(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef;
+  /** The bot's sessions before its handoffs, when known, most recent first: its conversation continues into them. */
+  earlier?(groupId: string, viewId: string, binding: WindowSessionBinding): BotSessionRef[];
   /** Whether a Team is a Support roster (it has a call-for-support configuration); its leader then shows the Support role. */
   supportTeam?(teamId: string): boolean;
+  /** A session's latest reply, when known. */
+  reply?(session: BotSessionRef): { replyAt: number; preview: string } | undefined;
+  /** Whether a reply a session produced at replyAt is one the owner has not seen. */
+  unread?(session: BotSessionRef, replyAt: number): boolean;
 }
 /** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
@@ -79,14 +93,25 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
     // A group formed from sessions appears once it has a bot; a group made in Bot mode (it carries details) appears while still empty.
     if (!visible.length && !group.bots) return [];
     const asks = group.window.views.filter(view => view.feature?.kind === 'ask' && view.closeWith);
-    const activities = visible.map(({ view }) => options.status(view.binding));
-    const rows = visible.map(({ view, details }, index): BotRow => ({
-      groupId: group.window.id, viewId: view.id, binding: view.binding, details, status: botActivityLabel(activities[index]),
-      ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
-      asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
-    }));
+    const sessions = visible.map(({ view }) => options.current?.(group.window.id, view.id, view.binding)
+      ?? { hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId });
+    const activities = sessions.map(session => options.status(session));
+    const rows = visible.map(({ view, details }, index): BotRow => {
+      // The conversation is the chain of the bot's sessions: its latest reply may still be in the session before a handoff.
+      const session = sessions[index]!, own = { hostId: view.binding.hostId, providerId: view.binding.providerId, nativeSessionId: view.binding.nativeSessionId };
+      const chain = [...new Map([session, own, ...options.earlier?.(group.window.id, view.id, view.binding) ?? []].map(item => [sessionKey(item), item])).values()];
+      const candidates = chain.flatMap(owner => {
+        const reply = options.reply?.(owner); return reply ? [{ owner, reply }] : [];
+      }).sort((a, b) => b.reply.replyAt - a.reply.replyAt);
+      const latest = candidates[0], reply = latest?.reply;
+      return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, status: botActivityLabel(activities[index]),
+        ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
+        asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
+        ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}) };
+    });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
-    return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)) }];
+    return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)),
+      ...(rows.some(row => row.unread) ? { unread: true as const } : {}) }];
   });
   const grouped = new Set(groups.flatMap(group => group.window.views.flatMap(view => view.binding ? [sessionKey(view.binding)] : [])));
   return { sections, other: sortDirectorySessions(directory.filter(entry => !grouped.has(sessionKey(entry)))) };

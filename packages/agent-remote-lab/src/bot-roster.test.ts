@@ -72,3 +72,33 @@ it('deduplicates fallback by full identity and sorts timestamps with missing one
   const result = projectBotRoster([], entries, { status: () => 'idle' });
   expect(result.other.map(s => [s.hostId, s.nativeSessionId])).toEqual([['other', 'loose'], ['host', 'loose'], ['host', 'created'], ['host', 'missing']]);
 });
+
+it("carries each bot's latest reply and whether it is unread, and marks a group with an unread bot", () => {
+  const groups = [group('A', [createWindowView('a1', binding('a1'), 'primary'), createWindowView('a2', binding('a2'), 'primary')]), group('B', [createWindowView('b1', binding('b1'), 'primary')])];
+  const replies: Record<string, { replyAt: number; preview: string }> = { a1: { replyAt: 5, preview: 'Done.' }, b1: { replyAt: 3, preview: 'Old.' } };
+  const model = projectBotRoster(groups, [], { status: () => 'idle', reply: value => replies[value.nativeSessionId], unread: (_value, replyAt) => replyAt > 4 });
+  const [a, b] = model.sections;
+  expect(a!.rows.map(row => [row.viewId, row.reply?.preview, row.unread])).toEqual([['a1', 'Done.', true], ['a2', undefined, undefined]]);
+  expect(a!.unread).toBe(true);
+  expect(b!.rows[0]).toMatchObject({ reply: { replyAt: 3, preview: 'Old.' } });
+  expect(b!.rows[0]!.unread).toBeUndefined();
+  expect(b!.unread).toBeUndefined();
+});
+
+it("follows a bot's current session after a handoff and keeps the latest reply of its chain", () => {
+  const groups = [group('A', [createWindowView('a1', binding('before'), 'primary')])];
+  const replies: Record<string, { replyAt: number; preview: string }> = { before: { replyAt: 7, preview: 'Handing off.' } };
+  const statuses: Record<string, SessionActivityStatus> = { before: 'idle', after: 'running' };
+  const model = projectBotRoster(groups, [], { status: session => statuses[session.nativeSessionId] ?? 'unknown',
+    current: () => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'after' }),
+    reply: session => replies[session.nativeSessionId], unread: (session, replyAt) => session.nativeSessionId === 'before' && replyAt > 5 });
+  const row = model.sections[0]!.rows[0]!;
+  expect(row.session.nativeSessionId).toBe('after');
+  expect(row.status).toBe('Working');
+  // The successor has not replied yet: the latest reply is still the one before the handoff.
+  expect(row.reply).toEqual({ replyAt: 7, preview: 'Handing off.' });
+  expect(row.unread).toBe(true);
+  replies.after = { replyAt: 9, preview: 'Picked it up.' };
+  expect(projectBotRoster(groups, [], { status: () => 'idle', current: () => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'after' }), reply: session => replies[session.nativeSessionId] })
+    .sections[0]!.rows[0]!.reply).toEqual({ replyAt: 9, preview: 'Picked it up.' });
+});

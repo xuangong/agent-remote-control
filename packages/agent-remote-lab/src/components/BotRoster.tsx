@@ -6,6 +6,7 @@ import { sessionKey } from '../session-tree.js';
 import { Avatar } from '../ui/Avatar.js';
 import { Icon } from '../ui/Icon.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
+import { replyTime } from '../reply-time.js';
 
 /** The name a bot is known by; its avatar letter comes from here. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
@@ -23,17 +24,24 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
   const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status;
-  const description = [row.role, row.details.label, status].filter(Boolean).join(' · ');
+  const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
+  const description = [row.role, row.details.label, status, row.unread ? 'Unread' : undefined, row.reply?.preview, time].filter(Boolean).join(' · ');
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`}
-      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
+      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
       <BotPicture picture={row.details.picture} name={name} size={compact ? 36 : 26} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
-          {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}</span>
-        {status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
+          {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
+          {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
+        {/* Like a chat list: the status that asks for something, then the latest reply; an unread one is a dot, never a number. */}
+        {status || row.reply ? <span className="lab-bot-summary">
+          {status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
+          {row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
+          {row.unread ? <span className="lab-bot-unread" aria-hidden="true" /> : null}
+        </span> : null}
       </span>
       {row.details.pinned ? <span className="lab-bot-pinned" aria-label="Pinned">⌖</span> : null}
     </button>
@@ -58,6 +66,7 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
     {model.sections.map(section => <section key={section.groupId} className="lab-bot-section" aria-labelledby={`bot-section-${section.groupId}`}>
       <div className="lab-bot-section-head">
         <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
+          {section.unread ? <span className="lab-bot-section-unread" role="img" aria-label="Unread" /> : null}
           {section.status ? <small>{section.status}</small> : null}</h2>
         {groupActions ? <Menu label={`Group actions: ${section.title}`} items={groupActions(section)} /> : null}
       </div>

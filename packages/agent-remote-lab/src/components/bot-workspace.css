@@ -37,10 +37,24 @@
   text-overflow: ellipsis; white-space: nowrap; }
 .lab-bot-role { background: var(--ui-fill); color: var(--ui-label-secondary); font-weight: 500; }
 .lab-bot-label { border: 1px solid var(--ui-separator); color: var(--ui-label-secondary); }
-.lab-bot-row-text > .lab-bot-status { color: var(--ui-label-secondary); font-size: 12px; }
+/* A chat list row: the latest reply's time ends the name line; the status that asks for something, then the latest reply,
+   make the second line; an unread reply is a dot and a stronger name, never a number. */
+.lab-bot-time { flex: none; margin-inline-start: auto; padding-inline-start: 6px; color: var(--ui-label-secondary); font-size: 12px; font-weight: 400;
+  font-variant-numeric: tabular-nums; }
+.lab-bot-summary { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ui-label-secondary); font-size: 12px; }
+.lab-bot-summary > .lab-bot-status { flex: none; color: var(--ui-label-secondary); }
 /* Needs you is the one signal that asks for action. */
-.lab-bot-row-text > .lab-bot-status[data-attention] { color: var(--ui-status-attention); font-weight: 600; }
-.lab-bot-row-text > .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
+.lab-bot-summary > .lab-bot-status[data-attention] { color: var(--ui-status-attention); font-weight: 600; }
+.lab-bot-summary > .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
+.lab-bot-summary > .lab-bot-status + .lab-bot-preview::before { content: '·'; margin-inline-end: 6px; }
+.lab-bot-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-unread { flex: none; width: 8px; height: 8px; margin-inline-start: auto; border-radius: 50%; background: var(--ui-accent); }
+.lab-bot-row[data-unread] .lab-bot-name { font-weight: 650; }
+.lab-bot-row[data-unread] .lab-bot-preview { color: var(--ui-label); }
+.lab-bot-row[data-asleep] .lab-bot-unread { opacity: .5; }
+/* A group with an unread reply: a quiet dot beside its name. */
+.lab-bot-section-unread { flex: none; align-self: center; width: 7px; height: 7px; margin-inline-end: auto; border-radius: 50%; background: var(--ui-accent); }
+.lab-bot-workspace[data-compact] .lab-bot-summary, .lab-bot-workspace[data-compact] .lab-bot-time { font-size: 14px; }
 /* Asks are the only second level: listed under their bot, indented past its picture. */
 /* The Ask's icon lines up with its bot's name. */
 .lab-bot-asks { margin: 0 0 2px; padding: 0 0 0 36px; list-style: none; }

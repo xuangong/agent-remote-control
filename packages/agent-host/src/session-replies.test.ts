@@ -20,15 +20,15 @@ function entry(item: ProjectedTimelineEntry['item'], timestamp: string): Project
 }
 const reply = (text: string, timestamp: string) => entry({ type: 'assistant_message', text } as ProjectedTimelineEntry['item'], timestamp);
 const request = (text: string, timestamp: string) => entry({ type: 'user_message', text } as ProjectedTimelineEntry['item'], timestamp);
-function source(entries: ProjectedTimelineEntry[], cursor: TimelineCursor = { epoch: 'e', seq: 1 }) {
-  const state = { entries, cursor, reads: 0 };
+function source(entries: ProjectedTimelineEntry[], cursor: TimelineCursor = { epoch: 'e', seq: 1 }, hasOlder = false) {
+  const state = { entries, cursor, reads: 0, hasOlder };
   const value: ReplySource & { state: typeof state } = {
     state,
     timelineCursor: () => state.cursor,
     fetchTimeline: request => {
       state.reads++;
-      expect(request).toMatchObject({ direction: 'tail', limit: 12 });
-      return { payload: { entries: state.entries } };
+      expect(request).toMatchObject({ direction: 'tail' });
+      return { payload: { entries: state.entries.slice(-request.limit), hasOlder: state.hasOlder || state.entries.length > request.limit } };
     },
   };
   return value;
@@ -86,4 +86,30 @@ it('keeps replies on disk across restarts and ignores a damaged file', async () 
   const third = createSessionReplies({ file: path });
   expect(third.facts(ref)).toBeUndefined();
   third.close();
+});
+
+it('reads a session again once older history arrives, which leaves its timeline position where it was', () => {
+  const replies = createSessionReplies();
+  // Just attached: the Host has not loaded the session's history yet.
+  const agent = source([], { epoch: 'e', seq: 0 }, true);
+  replies.observe(ref, 'agent', agent);
+  expect(replies.facts(ref)).toBeUndefined();
+  // A page loads earlier history: it is prepended, so the position does not move.
+  agent.state.entries = [request('Ship it?', '2026-11-14T10:00:00.000Z'), reply('Shipped.', '2026-11-14T10:01:00.000Z')];
+  agent.state.hasOlder = false;
+  replies.observe(ref, 'agent', agent);
+  expect(replies.facts(ref)?.preview).toBe('Shipped.');
+  // With everything read and nothing new, the tail is not read again.
+  const reads = agent.state.reads;
+  replies.observe(ref, 'agent', agent);
+  expect(agent.state.reads).toBe(reads);
+  replies.close();
+});
+
+it('looks further back when the latest entries are all work, not replies', () => {
+  const replies = createSessionReplies();
+  const work = Array.from({ length: 20 }, (_, index) => request(`Step ${index}`, '2026-11-14T10:02:00.000Z'));
+  replies.observe(ref, 'agent', source([reply('Plan ready.', '2026-11-14T10:01:00.000Z'), ...work]));
+  expect(replies.facts(ref)?.preview).toBe('Plan ready.');
+  replies.close();
 });

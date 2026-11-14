@@ -6,7 +6,7 @@ import { SESSION_PREVIEW_LENGTH, SESSION_PREVIEW_MAX_LENGTH, SESSION_STATE_LIMIT
 /** What an open session offers for reading its latest reply: where its timeline is, and the timeline's tail. */
 export interface ReplySource {
   timelineCursor(): TimelineCursor;
-  fetchTimeline(request: { requestId: string; agentId: string; direction: 'tail'; limit: number }): { payload: { entries: readonly ProjectedTimelineEntry[] } };
+  fetchTimeline(request: { requestId: string; agentId: string; direction: 'tail'; limit: number }): { payload: { entries: readonly ProjectedTimelineEntry[]; hasOlder?: boolean } };
 }
 export interface ReplySession { providerId: string; nativeSessionId: string }
 /** When a session's latest reply was produced, and a short plain-text excerpt of it. */
@@ -27,8 +27,8 @@ export interface SessionRepliesOptions {
   saveDelayMs?: number;
 }
 
-/** Entries read from a timeline's end to find its latest reply. */
-const TAIL = 12;
+/** Entries read from a timeline's end to find its latest reply, and how far back to look when those are all work. */
+const TAIL = 12, LONG_TAIL = 64;
 const key = (session: ReplySession) => JSON.stringify([session.providerId, session.nativeSessionId]);
 
 /** A reply as one line of plain text: Markdown marks, code blocks and link targets removed, cut to the preview length. */
@@ -46,6 +46,16 @@ export function replyPreview(text: string): string | undefined {
   if (plain.length <= SESSION_PREVIEW_LENGTH) return plain;
   const cut = plain.slice(0, SESSION_PREVIEW_LENGTH - 1), space = cut.lastIndexOf(' ');
   return `${(space > SESSION_PREVIEW_LENGTH * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
+}
+
+function latestReply(entries: readonly ProjectedTimelineEntry[]): ReplyFacts | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const item = entries[index]!.item;
+    if (item.type !== 'assistant_message') continue;
+    const preview = replyPreview(item.text), replyAt = Math.floor(Date.parse(entries[index]!.timestamp));
+    if (preview && Number.isSafeInteger(replyAt) && replyAt >= 0) return { replyAt, preview };
+  }
+  return undefined;
 }
 
 /**
@@ -113,23 +123,24 @@ export function createSessionReplies(options: SessionRepliesOptions = {}): Sessi
     observe(session, agentId, source) {
       if (closed) return;
       const id = key(session);
-      let position: string, entries: readonly ProjectedTimelineEntry[];
+      let position: string, found: ReplyFacts | undefined, more = false;
       try {
         const cursor = source.timelineCursor();
         position = `${cursor.epoch}:${cursor.seq}`;
         if (read.get(id) === position) return;
-        entries = source.fetchTimeline({ requestId: 'session-replies', agentId, direction: 'tail', limit: TAIL }).payload.entries;
+        for (const size of [TAIL, LONG_TAIL]) {
+          const page = source.fetchTimeline({ requestId: 'session-replies', agentId, direction: 'tail', limit: size }).payload;
+          found = latestReply(page.entries);
+          more = !!page.hasOlder || page.entries.length >= size;
+          if (found || !more) break;
+        }
       } catch { return; }
+      // Older history arrives before the tail without moving the position, so a session read without finding a reply is
+      // read again until its history is in or a reply comes.
+      if (!found && more) return;
       if (read.size >= 2 * limit) read.clear();
       read.set(id, position);
-      for (let index = entries.length - 1; index >= 0; index--) {
-        const item = entries[index]!.item;
-        if (item.type !== 'assistant_message') continue;
-        const preview = replyPreview(item.text), replyAt = Math.floor(Date.parse(entries[index]!.timestamp));
-        if (!preview || !Number.isSafeInteger(replyAt) || replyAt < 0) continue;
-        remember(id, { replyAt, preview });
-        return;
-      }
+      if (found) remember(id, found);
     },
     facts(session) {
       const facts = replies.get(key(session));

@@ -60,6 +60,26 @@ Entries: Info (Host name, provider, model when known, previous providers from th
 - [x] A Window named after its one primary session follows that session's native title (`windowTitleEdits`), and Bot mode projects titles into the selected bot's group, so a new bot and its group take the session's name after its first turn (verified on the local instance).
 - [x] Commit `feat(lab): start a group from a new session in Bot mode`.
 
-## 2b — rule 6 in Window panes, creation joins the bot's group
+## 2b — rule 6 in Window panes (after stage 3, roadmap decision 10)
 
-Written after 2a ships: open beside in every pane, closing a bot's pane folds it, Remove from group is explicit, navigation within a bot's chain stays in place; Side, TPM, Team and Support created from a bot join its group.
+A pane of a group shown in Bot mode is a bot, so it keeps its conversation everywhere.
+
+### Task 6: Open beside in every bot pane
+
+**Files:** `packages/agent-remote-lab/src/App.tsx` (`bindDirectorySession`), the Window tests that describe in-place opens (`App.window*.test.tsx`, `App.test.tsx`, `App.succession.test.tsx`).
+
+- [ ] Opening another session (directory, Favorites, search, Track, a new session) on a bot's pane opens it beside: a new view in the target's place (a primary group beside a primary, a dock after a dock, a float for a float, a primary group for a Side), then the ordinary binding into that empty view, so Track restore, drafts and succession work unchanged. A session that is already a bot of the group is selected instead.
+- [ ] In place: a pane of a group hidden in Bot mode, an empty view, a history view, and navigation within the bot's own chain (opening its handoff history; returning to current from history).
+- [ ] Rewrite the in-place expectations of the 19 Window tests to the beside behavior; keep the chain ones in place.
+- [ ] Commit `feat(lab): open another session beside a bot's pane`.
+
+### Task 7: Closing a bot's pane folds it; removing is explicit
+
+**Files:** `App.tsx` (primary header ×, dock and float ×, the folded primary card's ×), `SessionFamily.tsx` (a Side's ×), `SessionWindow.tsx` and `SessionDock.tsx` (a folded dock or float as a slim card), a confirmation sheet, tests.
+
+- [ ] × on a bot's pane folds it (`view.collapse`); Asks, empty and history views close as before.
+- [ ] A folded dock or float is the same slim card as a folded primary group (DockPane 44 px wide, no resize); a folded Side is hidden and listed in the sidebar and Bot mode.
+- [ ] × on a folded card asks "Remove “name” from this group?" (sheet, naming what closes with it) and closes the view on Remove.
+- [ ] Commit `feat(lab): fold a bot's pane on close and remove it only on request`.
+
+Later (not in 2b): Side, TPM, Team and Support created from a bot in Bot mode join its group (needs those creation commands in Bot mode).

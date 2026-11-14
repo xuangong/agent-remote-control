@@ -33,3 +33,11 @@ it('keeps drafts per account and shares them with every page that asks for them'
   const after = await listen(again);
   await expect.poll(() => after.drafts()[0]?.drafts).toEqual([{ ...ref, text: 'After the restart', revision: expect.any(Number) }]);
 }, 20000);
+
+it('saves drafts on a budget of their own, leaving control requests theirs', async () => {
+  const f = await fixture(); const alice = await f.login('alice');
+  const ref = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
+  for (let index = 0; index < 70; index++) expect((await f.json(alice.basePath + 'v1/session-drafts', alice.cookie, { ...ref, text: `Draft ${index}` })).status).toBe(200);
+  // Control requests still pass the limiter (this one is refused for its input, not its rate).
+  expect((await f.json(alice.basePath + 'v1/session-relations/reset', alice.cookie, {})).status).not.toBe(429);
+}, 30000);

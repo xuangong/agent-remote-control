@@ -706,7 +706,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
     const relative = relativeRequest(request, prefix); const path = new URL(relative.url).pathname;
     if (path === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: [...tenants.values()].flatMap(value => value.broker.visibleHosts(grant.subject)) });
     if (request.method !== 'GET') {
-      if (!security.allow('mutation:' + grant.subject, 60, 60_000)) return json(429, {error:'Too many control requests.'});
+      // Drafts and read positions follow typing and reading: they have a budget of their own and never use up the one for control requests.
+      const ambient = request.method === 'POST' && (path === '/v1/session-drafts' || path === '/v1/session-reads');
+      if (!security.allow((ambient ? 'ambient:' : 'mutation:') + grant.subject, ambient ? 240 : 60, 60_000)) return json(429, {error:'Too many control requests.'});
       const sensitive = path.startsWith('/v1/remote/pairings') || /\/rotate$/.test(path);
       if (sensitive && accountBacked && !recentAuthentication(grant)) {
         await security.record(grant.subject, 'recent_authentication_required', 'denied');

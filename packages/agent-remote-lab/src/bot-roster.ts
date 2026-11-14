@@ -15,6 +15,8 @@ export interface BotRow {
   details: WindowBotDetails; role?: BotRole; asks: BotAsk[]; status?: 'Needs you' | 'Working' | 'Failed';
   /** The bot's latest reply, as its Host reported it, and whether the owner has not seen it yet. */
   reply?: { replyAt: number; preview: string }; unread?: true;
+  /** What the owner typed for the bot and has not sent, on any device. */
+  draft?: string;
 }
 /** `hidden` lists the views of this group's bots hidden in Bot mode, which the group can show again. */
 export interface BotSection { groupId: string; title: string; rows: BotRow[]; hidden: string[]; status?: BotRow['status']; unread?: true }
@@ -31,6 +33,8 @@ export interface BotRosterOptions {
   reply?(session: BotSessionRef): { replyAt: number; preview: string } | undefined;
   /** Whether a reply a session produced at replyAt is one the owner has not seen. */
   unread?(session: BotSessionRef, replyAt: number): boolean;
+  /** A session's unsent draft, shared across devices. */
+  draft?(session: BotSessionRef): string | undefined;
 }
 /** A rank after every group's: groups keep catalog order in Bot mode, but bot details still carry one. */
 export function appendedRank(groups: readonly WindowGroup[]): string {
@@ -103,11 +107,12 @@ export function projectBotRoster(groups: readonly WindowGroup[], directory: read
       const candidates = chain.flatMap(owner => {
         const reply = options.reply?.(owner); return reply ? [{ owner, reply }] : [];
       }).sort((a, b) => b.reply.replyAt - a.reply.replyAt);
-      const latest = candidates[0], reply = latest?.reply;
+      const latest = candidates[0], reply = latest?.reply, draft = options.draft?.(session);
       return { groupId: group.window.id, viewId: view.id, binding: view.binding, session, details, status: botActivityLabel(activities[index]),
         ...(botRole(view, options.supportTeam) ? { role: botRole(view, options.supportTeam)! } : {}),
         asks: asks.filter(ask => ask.closeWith === view.id).map(ask => ({ viewId: ask.id, title: ask.binding?.title ?? 'Ask' })),
-        ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}) };
+        ...(reply ? { reply } : {}), ...(latest && options.unread?.(latest.owner, latest.reply.replyAt) ? { unread: true as const } : {}),
+        ...(draft?.trim() ? { draft } : {}) };
     });
     const hidden = botViews(group).filter(view => members[view.id]?.hidden).map(view => view.id);
     return [{ groupId: group.window.id, title: group.window.title, rows, hidden, status: botActivityLabel(windowActivity(activities)),

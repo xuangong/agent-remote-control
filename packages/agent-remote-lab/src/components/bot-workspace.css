@@ -48,6 +48,8 @@
 .lab-bot-summary > .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
 .lab-bot-summary > .lab-bot-status + .lab-bot-preview::before { content: '·'; margin-inline-end: 6px; }
 .lab-bot-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* An unsent draft reads like a chat list's: the word Draft in the accent color, then its first words. */
+.lab-bot-draft-label { margin-inline-end: 4px; color: var(--ui-accent); font-weight: 600; }
 .lab-bot-unread { flex: none; width: 8px; height: 8px; margin-inline-start: auto; border-radius: 50%; background: var(--ui-accent); }
 .lab-bot-row[data-unread] .lab-bot-name { font-weight: 650; }
 .lab-bot-row[data-unread] .lab-bot-preview { color: var(--ui-label); }

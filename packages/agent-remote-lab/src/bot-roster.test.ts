@@ -85,6 +85,17 @@ it("carries each bot's latest reply and whether it is unread, and marks a group 
   expect(b!.unread).toBeUndefined();
 });
 
+it("carries the unsent draft of a bot's current session", () => {
+  const groups = [group('A', [createWindowView('a1', binding('a1'), 'primary'), createWindowView('a2', binding('a2'), 'primary')])];
+  const drafts: Record<string, string> = { a1: 'Ship the notes', after: 'Continue from here' };
+  const model = projectBotRoster(groups, [], { status: () => 'idle', draft: value => drafts[value.nativeSessionId] });
+  expect(model.sections[0]!.rows.map(row => row.draft)).toEqual(['Ship the notes', undefined]);
+  // After a handoff the draft belongs to the session that drives the bot now.
+  const followed = projectBotRoster(groups, [], { status: () => 'idle', current: (_group, viewId) => ({ hostId: 'host', providerId: 'recorded', nativeSessionId: viewId === 'a2' ? 'after' : 'a1' }),
+    draft: value => drafts[value.nativeSessionId] });
+  expect(followed.sections[0]!.rows.map(row => row.draft)).toEqual(['Ship the notes', 'Continue from here']);
+});
+
 it("follows a bot's current session after a handoff and keeps the latest reply of its chain", () => {
   const groups = [group('A', [createWindowView('a1', binding('before'), 'primary')])];
   const replies: Record<string, { replyAt: number; preview: string }> = { before: { replyAt: 7, preview: 'Handing off.' } };

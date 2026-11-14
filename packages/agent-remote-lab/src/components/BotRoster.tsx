@@ -26,7 +26,9 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
   // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
   const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status;
   const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
-  const description = [row.role, row.details.label, status, row.unread ? 'Unread' : undefined, row.reply?.preview, time].filter(Boolean).join(' · ');
+  // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
+  const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
+  const description = [row.role, row.details.label, status, row.unread ? 'Unread' : undefined, draft ? `Draft: ${draft}` : row.reply?.preview, time].filter(Boolean).join(' · ');
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`}
@@ -38,10 +40,11 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}
           {time ? <span className="lab-bot-time" aria-hidden="true">{time}</span> : null}</span>
         {/* Like a chat list: the status that asks for something, then the latest reply; an unread one is a dot, never a number. */}
-        {status || row.reply ? <span className="lab-bot-summary">
+        {status || row.reply || draft ? <span className="lab-bot-summary">
           {status === 'Working' ? <TypingDots />
             : status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
-          {row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
+          {draft ? <span className="lab-bot-preview lab-bot-draft" aria-hidden="true"><span className="lab-bot-draft-label">Draft</span>{draft}</span>
+            : row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
           {row.unread ? <span className="lab-bot-unread" aria-hidden="true" /> : null}
         </span> : null}
       </span>

@@ -1928,7 +1928,8 @@ function AppContent({
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId),
-    current: currentBotSession, earlier: earlierBotSessions, reply: session => sessionStates?.reply(session), unread: (session, replyAt) => !!sessionReads?.unread(session, replyAt) });
+    current: currentBotSession, earlier: earlierBotSessions, reply: session => sessionStates?.reply(session), unread: (session, replyAt) => !!sessionReads?.unread(session, replyAt),
+    draft: session => sharedDrafts?.view.draft(session)?.text });
   // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
   // continues into the session before a handoff, whose last reply may still be the latest.
   const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = windowMode ? visibleWindows

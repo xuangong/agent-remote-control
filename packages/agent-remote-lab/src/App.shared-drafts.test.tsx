@@ -37,3 +37,22 @@ it("shares a bot's draft across devices: saved while typing, taken when idle, cl
     await until(() => expect(input().textContent).toBe('Next idea from the phone'));
   } finally { await app.close(); }
 });
+
+it('shows the draft of a bot that is not on screen in its row', async () => {
+  const scope = 'http://localhost/u/bot-draft-rows/';
+  seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true });
+  const row = (name: string) => [...app.container.querySelectorAll<HTMLElement>('[aria-label="Bots"] .lab-bot-row')]
+    .find(item => item.querySelector('.lab-bot-name')?.textContent === name);
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await app.switchMode('bot');
+    await act(async () => app.button('A1').click());
+    await act(async () => app.emitDrafts({ snapshot: true, drafts: [{ ...ref('A1'), text: 'On screen', revision: 5 }, { ...ref('A2'), text: 'Ask about the release', revision: 6 }] }));
+    await until(() => expect(row('A2')?.querySelector('.lab-bot-draft')?.textContent).toBe('DraftAsk about the release'));
+    expect(row('A1')?.querySelector('.lab-bot-draft')).toBeNull();
+    // Cleared elsewhere, the row goes back to its reply.
+    await act(async () => app.emitDrafts({ drafts: [{ ...ref('A2'), text: '', revision: 7 }] }));
+    await until(() => expect(row('A2')?.querySelector('.lab-bot-draft')).toBeNull());
+  } finally { await app.close(); }
+});

@@ -56,3 +56,21 @@ it('keeps Other sessions folded with their Refresh controls inside, and names an
   expect(other.querySelector('summary')?.textContent).toBe('Other sessions');
   expect(other.textContent).toContain('Refresh');
 });
+
+it("shows a bot's unsent draft where its latest reply would be, except for the bot on screen", async () => {
+  const group = botGroup('A');
+  const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A2' ? 'waiting' : 'idle',
+    reply: () => ({ replyAt: Date.now(), preview: 'Release notes are ready.' }), draft: binding => `Draft of ${binding.nativeSessionId}\nsecond line` });
+  const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A1' }} onSelect={() => {}} directoryControls={null} />);
+  // The bot on screen shows its reply: its draft is right below, in its composer.
+  const current = visibleButton(container, 'A1');
+  expect(current.querySelector('.lab-bot-draft')).toBeNull();
+  expect(current.querySelector('.lab-bot-preview')?.textContent).toBe('Release notes are ready.');
+  // Another bot shows its draft in place of the reply, after a status that asks for something.
+  const other = visibleButton(container, 'A2');
+  expect(other.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
+  expect(other.querySelector('.lab-bot-draft-label')?.textContent).toBe('Draft');
+  expect(other.querySelector('.lab-bot-draft')?.textContent).toBe('DraftDraft of A2 second line');
+  expect(other.querySelector('.lab-bot-preview:not(.lab-bot-draft)')).toBeNull();
+  expect(other.getAttribute('aria-description')).toContain('Draft: Draft of A2 second line');
+});

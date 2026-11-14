@@ -1,4 +1,4 @@
-import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage, storageKeys } from './conversation-storage.js';
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
@@ -60,7 +60,7 @@ export function clearConversationRecovery(scope?: string): void {
   if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {
     for (const storage of [conversationSessionStorage, conversationLocalStorage]) {
-      for (const key of Array.from({ length: storage.length }, (_, index) => storage.key(index)!)) if (key.startsWith(scope ? `${prefix}${scope}:` : prefix)) storage.removeItem(key);
+      for (const key of storageKeys(storage)) if (key.startsWith(scope ? `${prefix}${scope}:` : prefix)) storage.removeItem(key);
     }
   } catch { /* Signing out must also work when storage is disabled. */ }
 }

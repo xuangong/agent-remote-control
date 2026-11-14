@@ -1,5 +1,5 @@
 import { isNativeSessionRef, isSessionSuccessionReplay, type NativeSessionRef, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage, storageKeys } from './conversation-storage.js';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import type { OpenedSession } from './directory-client.js';
@@ -297,9 +297,8 @@ function readAskEnabled(scope: string, id: string): boolean | undefined {
 export function retainCompositionOwners(document: CompositionDocument, isCurrent: () => boolean): void {
   const prefix = ownerPrefix(document.scope);
   let count = 0, bytes = 0;
-  for (let index = 0; index < conversationLocalStorage.length; index++) {
-    const key = conversationLocalStorage.key(index);
-    if (!key?.startsWith(prefix)) continue;
+  for (const key of storageKeys(conversationLocalStorage)) {
+    if (!key.startsWith(prefix)) continue;
     const raw = conversationLocalStorage.getItem(key); requireValue(raw !== null);
     count++; bytes += new TextEncoder().encode(raw!).byteLength;
   }
@@ -331,9 +330,8 @@ export function retainCompositionOwners(document: CompositionDocument, isCurrent
 export function restoreCompositionOwners(scope: string): CompositionDocument {
   const prefix = ownerPrefix(scope), records: CompositionOwnerRecord[] = [];
   let bytes = 0;
-  for (let index = 0; index < conversationLocalStorage.length; index++) {
-    const key = conversationLocalStorage.key(index);
-    if (!key?.startsWith(prefix)) continue;
+  for (const key of storageKeys(conversationLocalStorage)) {
+    if (!key.startsWith(prefix)) continue;
     const raw = conversationLocalStorage.getItem(key); requireValue(raw !== null);
     bytes += new TextEncoder().encode(raw!).byteLength;
     requireValue(bytes <= COMPOSITION_CAPACITY.bytes && records.length < COMPOSITION_CAPACITY.slots);

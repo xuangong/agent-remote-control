@@ -1,6 +1,6 @@
 import { nativeSessionRefKey, serializeNormalizedHistory, quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
-import { conversationLocalStorage } from './conversation-storage.js';
+import { conversationLocalStorage, storageKeys } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
@@ -115,9 +115,8 @@ export class ForkStore {
   allLocal(): readonly SessionFork[] {
     const records: SessionFork[] = [];
     try {
-      for (let index = 0; index < (this.storage?.length ?? 0); index += 1) {
-        const key = this.storage!.key(index);
-        if (!key?.startsWith(this.key)) continue;
+      for (const key of this.storage ? storageKeys(this.storage) : []) {
+        if (!key.startsWith(this.key)) continue;
         const value: unknown = JSON.parse(this.storage!.getItem(key) ?? 'null');
         if (validRecord(value) && !value.remote) records.push(value);
       }

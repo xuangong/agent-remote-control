@@ -2,7 +2,7 @@ import { windowAskSourceAnchor, windowAskSourceMatches } from '../window-composi
 import { parseWindowFeature } from '../window-feature-views.js';
 import type { WindowLayoutAuthority } from '../window-workspace-context.js';
 import { askFeatureView, openFeatureView, projectFeatureBinding } from '../window-feature-views.js';
-import { clearCacheOnClose, conversationSessionStorage } from '../conversation-storage.js';
+import { clearCacheOnClose, conversationSessionStorage, storageKeys } from '../conversation-storage.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
@@ -564,7 +564,7 @@ export function useAskConversations(document: CompositionDocument, transport: Re
       if (!storage) throw new Error('Storage unavailable.');
       // A checked enumeration proves no-record owners, without the forgiving ledger view.
       const prefix = `agent-remote-forks:ask:${baseUrl}:record:`;
-      for (let index = 0; index < storage.length; index++) { const key = storage.key(index); if (key?.startsWith(prefix)) store.getLocalForEffect(key.slice(prefix.length)); }
+      for (const key of storageKeys(storage)) if (key.startsWith(prefix)) store.getLocalForEffect(key.slice(prefix.length));
       for (const key of keys) {
         const owner = associationOwner(key); if (!owner) throw new Error('Ask owner unavailable.');
         const unread = inputFailures.has(key);

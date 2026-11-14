@@ -219,14 +219,16 @@ function resolveSlotWindowViewId(document: CompositionDocument, window: Workspac
   const mapped = document.windowBindings?.find(entry => entry.windowId === window.id && entry.slotId === slot.id);
   const stable = window.views.find(view => view.id === mapped?.viewId);
   if (stable) return stable.id;
-  try {
+  // Called for every pane and Ask on every render: parse only what can be a JSON slot ID, and key the slot's session once.
+  if (slot.id.startsWith('[')) try {
     const parts: unknown = JSON.parse(slot.id);
     if (Array.isArray(parts) && parts.includes(window.id)) {
       const view = window.views.find(view => parts.includes(view.id));
       if (view) return view.id;
     }
   } catch { /* Legacy slots fall back to their native reference. */ }
-  return window.views.find(view => view.binding && sessionKey(view.binding) === sessionKey(compositionSelection(slot)))?.id;
+  const selected = sessionKey(compositionSelection(slot));
+  return window.views.find(view => view.binding && sessionKey(view.binding) === selected)?.id;
 }
 
 export function createWindowSessionBridge(document: CompositionDocument, window: WorkspaceWindow): WindowSessionBridge {

@@ -1,4 +1,4 @@
-import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
+import { conversationLocalStorage, conversationSessionStorage, storageKeys } from './conversation-storage.js';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
@@ -43,9 +43,8 @@ function importComposition(scope: string): CompositionDocument {
   if (catalog !== undefined) { requireValue(Array.isArray(catalog)); known.push(...(catalog as unknown[]).map(opened)); }
   const askStore = new ForkStore(`ask:${scope}`, conversationSessionStorage);
   const recordPrefix = `agent-remote-forks:ask:${scope}:record:`;
-  for (let index = 0; index < conversationSessionStorage.length; index++) {
-    const key = conversationSessionStorage.key(index);
-    if (key?.startsWith(recordPrefix)) askStore.getLocalForEffect(key.slice(recordPrefix.length));
+  for (const key of storageKeys(conversationSessionStorage)) {
+    if (key.startsWith(recordPrefix)) askStore.getLocalForEffect(key.slice(recordPrefix.length));
   }
   const records = askStore.all();
   for (const record of records) known.push(record.source, ...(record.target ? [record.target] : []));

@@ -14,11 +14,14 @@ export function subscribeCacheProtection(listener: () => void): () => void { lis
 export function cacheProtectionState(): CacheProtection { return state; }
 
 /** Existing readers and delayed writers share the same page-local store in private mode. */
-class ConversationStorage implements Storage {
+export class ConversationStorage implements Storage {
   private readonly memory = new Map<string, string>();
   private readonly privateKeys = new Set<string>();
   constructor(private readonly disk: () => Storage) {}
-  /** Capture one key inventory for bulk operations instead of rebuilding it for each key(index). */
+  /**
+   * Capture one key inventory for bulk operations instead of rebuilding it for each key(index): `length` and `key(index)`
+   * list the browser storage on every call, so iterate `storageKeys(storage)`.
+   */
   keys(): string[] {
     if (clearCacheOnClose()) return [...this.memory.keys()];
     return [...new Set([...Object.keys(this.disk()).filter(isContentKey), ...this.privateKeys])];
@@ -49,6 +52,16 @@ class ConversationStorage implements Storage {
       storage.removeItem(key);
     }
   }
+}
+/**
+ * Every key of a storage. A ConversationStorage lists its browser storage on every `length` and `key(index)`, which made
+ * a `for (index < length) key(index)` scan quadratic in the number of keys (stage 6); this lists it once.
+ */
+export function storageKeys(storage: Storage): string[] {
+  if (storage instanceof ConversationStorage) return storage.keys();
+  const keys: string[] = [];
+  for (let index = 0; index < storage.length; index++) { const key = storage.key(index); if (key !== null) keys.push(key); }
+  return keys;
 }
 export const conversationLocalStorage = new ConversationStorage(() => localStorage);
 export const conversationSessionStorage = new ConversationStorage(() => sessionStorage);

@@ -126,7 +126,7 @@ test('keeps a message for an offline Host on every device, cancels it everywhere
   } finally { await desk.close(); }
 });
 
-test('hands a bot off to another provider on its Host and keeps its place, conversation and earlier provider', async ({ page, context }) => {
+test('hands a bot off to another provider on its Host and keeps its place, conversation and earlier provider', async ({ browser, page, context }) => {
   const groupId = await releaseGroup(fixture, context);
   await openBots(page, fixture);
   await open(page, 'Studio task');
@@ -147,6 +147,15 @@ test('hands a bot off to another provider on its Host and keeps its place, conve
   await open(page, 'Studio task');
   // Its earlier conversation stays readable above the new one.
   await expect(conversation(page).getByText('Studio/codex: First on Codex')).toBeVisible();
+  // Another device, which did not compose this group, still sees the bot's row go on with its latest reply: it learns
+  // the bot's chain from the Relay's succession records.
+  const elsewhere = await browser.newContext();
+  try {
+    await fixture.seed(elsewhere);
+    const other = await elsewhere.newPage();
+    await openBots(other, fixture);
+    await expect(preview(other, 'Studio task')).toContainText('Studio/codex: First on Codex', { timeout: 20_000 });
+  } finally { await elsewhere.close(); }
   await send(page, 'Continue on Claude');
   await expectReply(page, 'Studio/claude: Continue on Claude');
   const successor = (await windows.inspect(groupId)).window.views.find(view => view.id === 'S1')!.binding!;

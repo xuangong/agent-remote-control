@@ -11,6 +11,7 @@ import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessi
 import { botActivityLabel, botRole, projectBotRoster, type BotSessionRef } from './bot-roster.js';
 import { sharedReminders } from './bot-attention.js';
 import { useSessionReads } from './hooks/useSessionReads.js';
+import { SharedDraftsContext, useSessionDrafts } from './hooks/useSharedDraft.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -1501,6 +1502,8 @@ function AppContent({
   const sessionStates = useSessionStates(transport, sharedStatesWanted);
   // Read positions travel with the states: rows show what is unread, and a conversation on screen is read.
   const sessionReads = useSessionReads(transport, sharedStatesWanted);
+  // Drafts follow the owner to every device while the workbench is open.
+  const sharedDrafts = useSessionDrafts(transport, activated && accessReady);
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -3086,7 +3089,7 @@ function AppContent({
       {sessionNotice && !nativeTakeover && compactLayout && contextOpen ? <SessionConnectionNotice notice={sessionNotice} action={successionNotice ? successionRetry : undefined} /> : null}
       {failure ? <p className="lab-control-note" role="alert">{failure}</p> : null}
       </div>;
-  return <LiveConnectionsContext.Provider value={liveConnections}><SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
+  return <SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections}><SessionDescriptionsContext.Provider value={{ describe: session => describeSession({ session,
     sessions: [...favorites.stars, ...sessionEntries, ...tpmMainSessions.values()], forks: forkStore.all(), asks: ask.store.all(),
     tpmWorks: tpm.works, teams: teamRoster?.baseUrl === baseUrl ? teamRoster.teams : [],
     hostNames: new Map([['local', 'Lab server'], ...remoteHosts.map(host => [host.id, host.name] as const)]),
@@ -3498,7 +3501,7 @@ function AppContent({
       unavailableReason={windowWorkspace.sectionCreationState.state === 'unknown' ? 'A new group is not confirmed yet. Retry it in the roster first.' : creationUnavailableReason}
       starting={transitioning} failure={newBot.failure} onStart={() => void createAgent(true)} /> : null}
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
-    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></LiveConnectionsContext.Provider>;
+    {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></LiveConnectionsContext.Provider></SharedDraftsContext.Provider>;
 }
 
 function PreviewScope({ client, host, polling, children }: { readonly client: HttpPreviewClient; readonly host?: RemoteHost; readonly polling: boolean; readonly children: ReactNode }) {

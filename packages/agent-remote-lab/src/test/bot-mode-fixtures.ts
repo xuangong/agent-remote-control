@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
-import { SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
+import { SessionDraftStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
@@ -57,6 +57,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   // Shared session states and read positions, as the Relay pushes them on the states channel.
   const sharedStates = new SessionStateStore(), sharedReads = new SessionReadStore();
   const markedReads: Array<{ nativeSessionId: string; readAt: number }> = [];
+  // Drafts shared across devices, as the Relay keeps them, and the ones this page saved.
+  const sharedDrafts = new SessionDraftStore(), savedDrafts: Array<{ nativeSessionId: string; text: string }> = [];
+  let draftRevision = 1000;
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
@@ -68,6 +71,13 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     watchSessionStates: listener => sharedStates.subscribe(listener),
     watchSessionReads: listener => sharedReads.subscribe(listener),
     markSessionRead: (session, readAt) => { if (sharedReads.advance(session, readAt)) markedReads.push({ nativeSessionId: session.nativeSessionId, readAt }); },
+    watchSessionDrafts: listener => sharedDrafts.subscribe(listener),
+    saveSessionDraft: async (session, text) => {
+      savedDrafts.push({ nativeSessionId: session.nativeSessionId, text });
+      const draft = { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, text, revision: ++draftRevision };
+      sharedDrafts.accept(draft);
+      return draft;
+    },
     listProviders: async () => options.hosted && !options.serverProviders ? [] : [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
     createAgent: async () => { throw new Error('No session creation in this fixture.'); },
     resumeAgent: async () => { throw new Error('Use directory attachment.'); },
@@ -124,6 +134,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     /** The account's read positions as the Relay shares them. */
     emitReads(frame: Omit<SessionReadsFrame, 'protocolVersion' | 'type'>) { sharedReads.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_reads', ...frame }); },
     markedReads,
+    /** The account's drafts as the Relay shares them; revisions above 1000 are this page's saves. */
+    emitDrafts(frame: Omit<SessionDraftsFrame, 'protocolVersion' | 'type'>) { sharedDrafts.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_drafts', ...frame }); },
+    savedDrafts,
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     /** A native title the Host reports for a session, as the Relay pushes it. */
     emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },

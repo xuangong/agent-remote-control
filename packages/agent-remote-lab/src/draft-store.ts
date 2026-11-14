@@ -19,7 +19,7 @@ export class DraftStore {
   private result?: RecoveryWriteResult;
   private failed = false;
   private initialization: CheckedDraftRead;
-  constructor(private readonly scope: string) {
+  constructor(readonly scope: string) {
     this.initialization = readDraftsChecked(scope);
     this.drafts = this.initialization.status === 'ready' ? this.initialization.drafts : {};
     this.generation = recoveryGeneration(scope);

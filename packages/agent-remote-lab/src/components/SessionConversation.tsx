@@ -14,6 +14,7 @@ import type { NativeSessionOwner, NativeSessionRef } from '@orchardworks/agent-r
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
+import { useSharedDraft } from '../hooks/useSharedDraft.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { DraftBinding } from '../draft-store.js';
 import { sessionViewNavigation, type SessionViewNavigationActions, type SessionViewNavigationFactory } from '../session-view-navigation.js';
@@ -230,6 +231,9 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     return [...children.values()];
   };
   const key = JSON.stringify([target.hostId, target.providerId, target.nativeSessionId]);
+  const composerDraft = draftBinding ?? { store: draftStore, key: `session:${key}` };
+  // The draft follows the owner to every device, for the session this composer writes to: not history, not a subagent.
+  useSharedDraft(composerDraft, target, !operationBinding.historical && !target.parentNativeSessionId);
   const presentationContext: FamilySessionPresentationContext = {
     ...conversation, session: presentedSession, viewId, windowViewId, conversation, pending, offline, controls, menuActions, isRoot: familyRoot,
     actions: safeActions,
@@ -270,7 +274,7 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} operationBinding={operationBinding}
-    draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
+    draftSessionKey={key} draftBinding={composerDraft} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
     visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={disconnected || mutationBlocked || presentation?.mutationBlocked}

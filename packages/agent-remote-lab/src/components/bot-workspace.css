@@ -120,3 +120,11 @@
 @media (pointer: coarse) { .lab-new-bot-field > select, .lab-new-bot-workspace .lab-workspace-field :is(select, button) { min-height: 44px; } }
 .lab-new-bot-field > span:first-child { flex: none; color: var(--ui-label); font: var(--ui-size-body)/1.35 var(--ui-font); }
 .lab-new-bot-value { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-label-secondary); font: var(--ui-size-body)/1.35 var(--ui-font); text-align: end; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+
+/* Asleep: quiet and dimmed, like a sleeping tab; it still says when it needs the owner. */
+.lab-bot-row[data-asleep] .ui-avatar, .lab-bot-row[data-asleep] .lab-bot-name { opacity: .5; }
+.lab-bot-row[data-asleep] .lab-bot-status:not([data-attention]) { color: var(--ui-label-tertiary); }
+.lab-bot-asleep { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; padding: 8px 12px; border-bottom: 0.5px solid var(--ui-separator);
+  background: var(--ui-fill); color: var(--ui-label-secondary); font-size: 12px; }
+.lab-bot-asleep > button { padding: 2px 6px; border: 0; background: none; color: var(--ui-accent-text); font: inherit; font-weight: 600; cursor: pointer; }
+.lab-bot-asleep > button:hover { text-decoration: underline; }

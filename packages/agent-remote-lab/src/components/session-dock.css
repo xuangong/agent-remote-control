@@ -121,3 +121,4 @@
 .lab-folded-bot-role { writing-mode: vertical-rl; padding: 6px 1px; border-radius: 4px; background: var(--ui-fill); color: var(--ui-label-secondary);
   font: 500 10px/1.2 var(--ui-font); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lab-folded-bot { transition: none; } }
+.lab-folded-bot[data-asleep] .ui-avatar, .lab-folded-bot[data-asleep] .lab-folded-bot-name { opacity: .5; }

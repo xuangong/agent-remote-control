@@ -34,10 +34,10 @@
 
 **Files:** `packages/agent-remote-protocol/src/window-groups.ts` (`WindowBotDetails.asleep`), hosted validation tests, `src/components/BotActions.tsx` (Sleep), `src/bot-roster.ts` / `BotRoster.tsx` (dimmed row, quiet status), `src/components/BotWorkspace.tsx` (opening wakes), Window panes of sleeping bots (folded card, dimmed).
 
-- [ ] Protocol and Relay accept `asleep: true` in bot details; tests.
-- [ ] The bot menu offers Sleep; a sleeping bot's row is dimmed with a quiet "Asleep" (or a quiet "Needs you" when it waits for the owner, which also shows in its group header — the low-key reminder, no sound or pop-up); opening it wakes it for every device (`bot.update` without `asleep`) and shows the cached history at once.
-- [ ] A sleeping bot is never live (budget) and its Window pane shows the dimmed folded card.
-- [ ] Commit `feat: put a bot to sleep from its menu`.
+- [x] Protocol and Relay accept `asleep: true` in bot details; tests.
+- [x] The bot menu offers Sleep; a sleeping bot's row is dimmed with a quiet "Asleep" (or a quiet "Needs you" when it waits for the owner, which also shows in its group header — the low-key reminder, no sound or pop-up); opening it wakes it for every device (`bot.update` without `asleep`) and shows the cached history at once.
+- [x] A sleeping bot is never live (budget) and its Window primary group shows the dimmed folded card; restoring it wakes it. A bot that fell asleep while open in Bot mode shows a quiet Asleep bar with Wake. Compact Window layouts do not fold, so a sleeping bot presented there stays live (known gap, stage 7).
+- [x] Commit `feat: put a bot to sleep from its menu`.
 - Deferred: automatic sleep of idle bots needs a shared "last opened" time (with stage 4's Relay-side read positions).
 
 ## Ship

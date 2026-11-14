@@ -21,17 +21,19 @@ export function botPlaceKey(place: BotPlace): string {
 function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void }) {
   const name = botDisplayName(row.binding), destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
-  const description = [row.role, row.details.label, row.status].filter(Boolean).join(' · ');
+  // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
+  const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status;
+  const description = [row.role, row.details.label, status].filter(Boolean).join(' · ');
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`}
-      data-bot-place={botPlaceKey(destination)} aria-current={current || undefined} onClick={() => onSelect(destination)}>
+      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
       <BotPicture picture={row.details.picture} name={name} size={compact ? 36 : 26} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}</span>
-        {row.status ? <span className="lab-bot-status" data-attention={row.status === 'Needs you' || undefined} data-failed={row.status === 'Failed' || undefined}>{row.status}</span> : null}
+        {status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
       </span>
       {row.details.pinned ? <span className="lab-bot-pinned" aria-label="Pinned">⌖</span> : null}
     </button>

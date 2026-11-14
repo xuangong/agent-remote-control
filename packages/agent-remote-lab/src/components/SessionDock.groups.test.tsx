@@ -104,3 +104,12 @@ it('folds a primary group into a slim card naming its bot, with picture, role ta
   await act(async () => card.click());
   expect(collapsed).toHaveBeenCalledWith('a', false);
 });
+
+it('dims the folded card of a sleeping bot and says Asleep unless it needs the owner', async () => {
+  const pane = (status?: 'Needs you') => <SessionDockProvider enabled><SessionDockRail onCollapsePrimaryGroup={vi.fn()} primaryGroups={[{ id: 'a', title: 'Night shift', width: 400, collapsed: true, selected: false,
+    fold: { name: 'Night shift', asleep: true, ...(status ? { status } : {}) }, content: null }]} /></SessionDockProvider>;
+  const view = await render(pane());
+  const card = () => view.querySelector<HTMLButtonElement>('button.lab-folded-bot')!;
+  expect(card().getAttribute('data-asleep')).toBe('true');
+  expect(card().getAttribute('aria-description')).toBe('Asleep');
+});

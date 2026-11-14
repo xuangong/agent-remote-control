@@ -119,6 +119,15 @@ it('adds and removes appearances, always keeping one', () => {
     .toBe('other:The Window revision limit has been reached.');
 });
 
+it('puts a bot to sleep and wakes it as a detail of the group, shared by every device', () => {
+  const window = windowOf('w', createWindowView('main', session('a'), 'primary'));
+  const asleep = applyGroupOperation(section(window), { type: 'bot.update', viewId: 'main', details: { label: 'Night shift', asleep: true } });
+  expect(asleep.bots?.members.main).toEqual({ label: 'Night shift', asleep: true });
+  expect(isWindowGroup(asleep)).toBe(true);
+  expect(applyGroupOperation(asleep, { type: 'bot.update', viewId: 'main', details: { label: 'Night shift' } }).bots?.members.main).toEqual({ label: 'Night shift' });
+  expect(isWindowGroup({ ...asleep, bots: { ...asleep.bots!, members: { main: { asleep: false } } } })).toBe(false);
+});
+
 it('keeps details only for views that are still bots', () => {
   const window = windowOf('w', createWindowView('main', session('a'), 'primary'), createWindowView('dock', session('b')));
   let group = applyGroupOperation(section(window), { type: 'batch', operations: [

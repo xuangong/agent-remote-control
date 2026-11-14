@@ -2828,6 +2828,15 @@ function AppContent({
         onRename={mayRename ? () => setRenamingSession({ scope: baseUrl, session: { ...source, hostId: source.hostId ?? 'local' } }) : undefined} />,
     };
   }
+  /** Whether the shown Window's view is a bot put to sleep (stored with its group). */
+  function asleepBot(view: { id: string }) {
+    return !!sharedWindow && !!windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.asleep;
+  }
+  /** Wakes a sleeping bot for every device, keeping its other details. */
+  function wakeBot(groupId: string, viewId: string) {
+    const { asleep: _asleep, ...details } = windowWorkspace.readGroup(groupId)?.bots?.members[viewId] ?? {};
+    void windowWorkspace.operateGroup(groupId, { type: 'bot.update', viewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+  }
   function providerDisplayName(hostId: string, id: string): string {
     return remoteHosts.find(host => host.id === hostId)?.providers?.find(provider => provider.providerId === id)?.displayName
       ?? (hostId === 'local' ? providers.find(provider => provider.providerId === id)?.displayName : undefined) ?? id;
@@ -3172,7 +3181,11 @@ function AppContent({
         {sharedWindow ? <SessionDockRail compact={compactLayout} onCreateView={createSessionView}
           onSelectPrimaryGroup={selectPrimaryGroup}
           onResizePrimaryGroup={(viewId, width) => windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width })}
-          onCollapsePrimaryGroup={(viewId, collapsed) => windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed })}
+          onCollapsePrimaryGroup={(viewId, collapsed) => {
+            const view = sharedWindow.views.find(item => item.id === viewId);
+            if (!collapsed && view && asleepBot(view)) wakeBot(sharedWindow.id, viewId);
+            if (collapsed || view?.collapsed) windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed });
+          }}
           onClosePrimaryGroup={viewId => windowWorkspace.authority?.operate({ type: 'view.close', viewId })}
           primaryGroups={primaryGroups.map(view => {
             const pendingSlot = view.id === sharedWindow.selectedPrimaryViewId ? succession.displaySlot : undefined;
@@ -3182,12 +3195,13 @@ function AppContent({
             const additionalWidth = sharedWindow.views.filter(child => child.id !== view.id && windowPrimaryViewId(sharedWindow, child.id) === view.id && !child.collapsed).reduce((total, child) => total + child.width, 0);
             const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
             return { id: view.id, title: view.binding && !missing ? view.binding.title : 'Select session', width: view.width, additionalWidth,
-              selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed,
+              // A sleeping bot stands folded and dimmed; restoring it wakes it for every device.
+              selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed || asleepBot(view),
               // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
-              ...(view.collapsed && view.binding && !missing && isBotView(view) ? { fold: {
+              ...((view.collapsed || asleepBot(view)) && view.binding && !missing && isBotView(view) ? { fold: {
                 name: botDisplayName(view.binding), picture: windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture,
-                role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)) } } : {}),
-              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
+                role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)), asleep: asleepBot(view) } } : {}),
+              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}
                 directoryFor={hostId => hostId === selectedHost.id ? directory : undefined}

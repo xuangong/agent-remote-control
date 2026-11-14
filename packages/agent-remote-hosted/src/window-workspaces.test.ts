@@ -358,6 +358,17 @@ it('hides a group in Bot mode and shows it again, through storage restart, never
   expect(restarted.saved().workspaceWindows![0]).not.toHaveProperty('presentation');
 });
 
+it('keeps a sleeping bot asleep through storage restart until it is woken', async () => {
+  const f = await fixture(); await f.create();
+  const viewId = (await f.call('/window')).body.window.views[0].id;
+  const asleep = await f.call('/window/operations', 'POST', f.mutation('sleep', 0, { type: 'batch', operations: [{ type: 'bots.add', rank: 'm' }, { type: 'bot.update', viewId, details: { asleep: true } }] }));
+  expect(asleep.body).toMatchObject({ result: { status: 'committed', revision: 1 }, bots: { members: { [viewId]: { asleep: true } } } });
+  const restarted = await fixture(f.saved());
+  expect((await restarted.call('/window')).body.bots.members[viewId]).toEqual({ asleep: true });
+  const woken = await restarted.call('/window/operations', 'POST', restarted.mutation('wake', 1, { type: 'bot.update', viewId, details: {} }));
+  expect(woken.body.bots.members[viewId]).toEqual({});
+});
+
 it('counts a Side as a bot, so its session cannot be a bot in another section', async () => {
   const f = await fixture(); await f.create();
   expect((await f.call('/window/operations', 'POST', f.mutation('as-section', 0, { type: 'bots.add', rank: 'm' }))).body.result.status).toBe('committed');

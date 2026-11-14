@@ -77,6 +77,20 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
       if (await update(row, without(current, 'hidden'))) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
     } });
   }
+  /** Sleep is quiet on every device: the bot's conversation is released until someone opens it, which wakes it. */
+  async function sleep(row: BotRow) {
+    setNotice(undefined);
+    if (!await update(row, { ...row.details, asleep: true })) return;
+    onSelect({ kind: 'section', groupId: row.groupId });
+    setNotice({ text: `“${botDisplayName(row.binding)}” is asleep. Opening it wakes it.`, undo: async () => {
+      setNotice(undefined);
+      if (await wake(row)) onSelect({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
+    } });
+  }
+  function wake(row: Pick<BotRow, 'groupId' | 'viewId'>) {
+    const current = workspace.readGroup(row.groupId)?.bots?.members[row.viewId] ?? {};
+    return current.asleep ? update(row, without(current, 'asleep')) : Promise.resolve(true);
+  }
   async function saveLabel(event: Pick<FormEvent, 'preventDefault'>, label: string | undefined) {
     event.preventDefault();
     if (!open) return;
@@ -94,6 +108,7 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
       { label: 'Info', icon: 'person', onSelect: () => setOpen({ kind: 'info', row, groupTitle }) },
       { label: 'Label…', icon: 'pencil', onSelect: () => { setDraft(row.details.label ?? ''); setOpen({ kind: 'label', row, groupTitle }); } },
       { kind: 'separator' },
+      { label: 'Sleep', icon: 'moon', onSelect: () => void sleep(row) },
       { label: 'Hide in Bot mode', icon: 'eye-off', onSelect: () => void hide(row) },
       { label: 'Remove from group…', icon: 'trash', destructive: true, onSelect: () => setOpen({ kind: 'remove', row, groupTitle }) },
     ];
@@ -146,5 +161,5 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
     </Sheet>;
   const noticeLine: ReactNode = notice ? <p className="lab-bot-notice" role="status">{notice.text}
     {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>Undo</button> : null}</p> : null;
-  return { botMenu, groupMenu, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
+  return { botMenu, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };
 }

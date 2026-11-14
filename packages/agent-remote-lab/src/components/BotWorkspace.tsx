@@ -61,6 +61,8 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const actions = useBotActions({ scope, workspace, onSelect: navigation.select, onError: setError, botInfo });
   const botSection = place?.kind === 'bot' ? roster.sections.find(section => section.groupId === place.groupId) : undefined;
   const botRow = place?.kind === 'bot' ? botSection?.rows.find(row => row.viewId === place.viewId) : undefined;
+  // A bot put to sleep elsewhere while open here: its conversation is released until it is woken.
+  const asleep = place?.kind === 'bot' && !!workspace.readGroup(place.groupId)?.bots?.members[place.viewId]?.asleep;
   const botMenu = botRow && botSection && descriptor ? <Menu label={`Bot actions: ${botDisplayName(botRow.binding)}`} items={actions.botMenu(botRow, botSection.title)} /> : null;
   // Choosing another bot dismisses a notice about the last one.
   useEffect(() => { if (place?.kind === 'bot') actions.clearNotice(); }, [key]);
@@ -100,6 +102,11 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     ];
   }
   function back() { returning.current = true; navigation.back(); }
+  /** Opening a sleeping bot wakes it for every device. */
+  function open(next: BotPlace) {
+    if (next.kind === 'bot' && workspace.readGroup(next.groupId)?.bots?.members[next.viewId]?.asleep) void actions.wake(next);
+    navigation.select(next);
+  }
   /** Retries an unconfirmed new group, then opens its bot. */
   async function retryGroup() {
     const requestScope = scope; setError(undefined);
@@ -124,7 +131,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
       {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
-      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions} compact={compact}
+      <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={open} hostName={hostName} groupActions={groupActions} compact={compact}
         directoryControls={<div className="lab-bot-directory-controls">
           {directory.sources.map(source => <div key={source.id}><small>{hostName(source.hostId)} · {source.providerId}</small>
             {!source.online ? <p>Host offline</p> : null}{source.loading ? <p role="status">Loading sessions…</p> : null}
@@ -141,7 +148,9 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         title={place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}
         trailing={compact ? <><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />{botMenu}</> : botMenu ?? undefined} />
       {!unavailable ? availabilityNotice : null}
-      {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content' } }} />
+      {asleep && descriptor ? <p className="lab-bot-asleep" role="status">Asleep. Its conversation catches up when it wakes.{' '}
+        <button type="button" onClick={() => place?.kind === 'bot' && void actions.wake(place)}>Wake</button></p> : null}
+      {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content', folded: asleep } }} />
         : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this group.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>
     {actions.sheets}

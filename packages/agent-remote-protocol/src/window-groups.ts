@@ -18,6 +18,8 @@ export const WindowBotDetails = Type.Object({
   }, strict)),
   pinned: Type.Optional(Type.Literal(true)),
   hidden: Type.Optional(Type.Literal(true)),
+  /** Asleep: quiet on every device, its conversation released until someone opens it, which wakes it. */
+  asleep: Type.Optional(Type.Literal(true)),
   rank: Type.Optional(rank),
 }, strict);
 export type WindowBotDetails = Static<typeof WindowBotDetails>;

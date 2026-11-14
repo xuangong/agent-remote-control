@@ -181,7 +181,7 @@ export interface PrimarySessionGroupPane {
   id: string; title: string; width: number; additionalWidth?: number;
   collapsed: boolean; selected: boolean; content: ReactNode;
   /** The bot a folded group shows: its picture, name, role tag and status from the shared channel. */
-  fold?: { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed' };
+  fold?: { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean };
 }
 interface SessionDockRailProps {
   children?: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void;
@@ -263,7 +263,8 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     {minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
       title="Close this session view. Agent sessions keep running." onClick={() => onClose(group.id)}>×</button> : null}
     {minimized && group.fold ? <button type="button" className="lab-folded-bot" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
-      aria-description={[group.fold.role, group.fold.status].filter(Boolean).join(' · ') || undefined} title={group.fold.name}
+      data-asleep={group.fold.asleep || undefined}
+      aria-description={[group.fold.role, group.fold.asleep && group.fold.status !== 'Needs you' ? 'Asleep' : group.fold.status].filter(Boolean).join(' · ') || undefined} title={group.fold.name}
       onClick={() => onCollapse?.(group.id, false)}>
       {/* A folded bot: its picture with the status beside it, then its name and role running down the slim card. */}
       <span className="lab-folded-bot-picture"><Avatar name={group.fold.name} picture={group.fold.picture} size={28} />

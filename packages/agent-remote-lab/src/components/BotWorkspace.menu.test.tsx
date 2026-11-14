@@ -37,7 +37,7 @@ async function open(name: string, groups: Parameters<typeof seedGroup>[1][], pla
   return app;
 }
 const row = (app: Awaited<ReturnType<typeof open>>, group: string, view: string) =>
-  app.container.querySelector(`nav[aria-label="Bots"] [data-bot-place='${JSON.stringify([group, view])}']`);
+  app.container.querySelector<HTMLButtonElement>(`nav[aria-label="Bots"] [data-bot-place='${JSON.stringify([group, view])}']`);
 
 it('labels a bot from its menu, shows the label beside its name, and clears it', async () => {
   const app = await open('bot-menu-label', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
@@ -125,5 +125,40 @@ it('shows where a bot runs in Info', async () => {
     expect(rows).not.toHaveProperty('Earlier');
     await act(async () => visibleButton(sheet()!, 'Close').click());
     expect(sheet()).toBeNull();
+  } finally { await app.close(); }
+});
+
+it('puts a bot to sleep: quiet and dimmed in the roster, with Undo, and opening it wakes it everywhere', async () => {
+  const app = await open('bot-menu-sleep', [botGroup('A')], '/?mode=bot&section=A&bot=A1');
+  try {
+    await choose('Bot actions: A1', 'Sleep');
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ asleep: true }));
+    const asleep = () => row(app, 'A', 'A1')!;
+    expect(asleep().getAttribute('data-asleep')).toBe('true');
+    expect(asleep().querySelector('.lab-bot-status')?.textContent).toBe('Asleep');
+    expect(new URL(location.href).searchParams.get('bot')).toBeNull();
+    expect(app.container.querySelector('.lab-bot-notice')?.textContent).toContain('asleep');
+    await act(async () => visibleButton(app.container, 'Undo').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await choose('Bot actions: A1', 'Sleep');
+    await until(() => expect(asleep().getAttribute('data-asleep')).toBe('true'));
+    // Opening a sleeping bot wakes it.
+    await act(async () => asleep().click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+  } finally { await app.close(); }
+});
+
+it('shows a bot that fell asleep while open as asleep, with Wake, and releases its conversation', async () => {
+  const group = botGroup('A'); group.bots!.members.A1 = { asleep: true };
+  const scope = 'http://localhost/bot-asleep-open/'; seedGroup(scope, group);
+  history.replaceState(null, '', '/?mode=bot&section=A&bot=A1');
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-asleep')).not.toBeNull());
+    expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({ asleep: true });
+    await act(async () => visibleButton(app.container.querySelector('.lab-bot-asleep')!, 'Wake').click());
+    await until(() => expect(app.workspace().readGroup('A')?.bots?.members.A1).toEqual({}));
+    await until(() => expect(app.container.querySelector('.lab-bot-asleep')).toBeNull());
   } finally { await app.close(); }
 });

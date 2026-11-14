@@ -1,4 +1,4 @@
-import { isSessionDraft, SESSION_READ_BATCH, type SessionDraft, type SessionRead as SessionReadPosition, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { isOutboxEntry, isSessionDraft, SESSION_READ_BATCH, type OutboxEntry, type SessionDraft, type SessionRead as SessionReadPosition, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   isSessionSuccessionReplay, isSessionSuccessionReplayPage, isSessionSuccessionCurrent,
@@ -26,6 +26,7 @@ import { SessionChannelPool } from './session-channel-transport.js';
 import { SessionStateStore, type SessionStateRef, type SessionStatesView } from './session-states.js';
 import { SessionReadStore, type SessionReadsView } from './session-reads.js';
 import { SessionDraftStore, type SessionDraftsView } from './session-drafts.js';
+import { SessionOutboxStore, type SessionOutboxView } from './session-outbox.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -165,6 +166,32 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.sessionDrafts.accept(draft);
     return draft;
   }
+  private readonly sessionOutbox = new SessionOutboxStore();
+  /** The account's outbox; the listener receives the current view at once and on each change. Keeps the activity channel open while watched. */
+  watchSessionOutbox(listener: (outbox: SessionOutboxView) => void): () => void {
+    if (!this.sessionChannels) { listener(this.sessionOutbox.view()); return () => {}; }
+    const unsubscribe = this.sessionOutbox.subscribe(listener), stopWatching = this.sessionChannels.watchStates();
+    return () => { unsubscribe(); stopWatching(); };
+  }
+  /** Leaves a message for a session whose Host is offline; it shows here at once, and on every page once the Relay has it. */
+  async queueMessage(session: SessionStateRef, text: string): Promise<OutboxEntry> {
+    const body = await this.fetchBody('v1/outbox', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: crypto.randomUUID(), hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, text }) });
+    return this.acceptOutboxEntry(body);
+  }
+  async cancelQueuedMessage(id: string): Promise<void> {
+    await this.fetchBody(`v1/outbox/${encodeURIComponent(id)}/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    this.sessionOutbox.remove(id);
+  }
+  async retryQueuedMessage(id: string): Promise<OutboxEntry> {
+    return this.acceptOutboxEntry(await this.fetchBody(`v1/outbox/${encodeURIComponent(id)}/retry`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
+  }
+  private acceptOutboxEntry(body: string): OutboxEntry {
+    const entry: unknown = JSON.parse(body);
+    if (!isOutboxEntry(entry)) throw new Error('The Relay returned an invalid outbox message.');
+    this.sessionOutbox.accept(entry);
+    return entry;
+  }
   private readonly migrations = new Map<string, SessionMigration>();
   onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
     this.migrationListeners.add(listener);
@@ -217,8 +244,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           if (frame.snapshot && frame.since === undefined && !this.readsStarted) { this.readsStarted = true; void this.postReads([]).catch(() => { this.readsStarted = false; }); }
         },
         onSessionDrafts: frame => this.sessionDrafts.apply(frame),
+        onSessionOutbox: frame => this.sessionOutbox.apply(frame),
         // Only the activity channel carries shared session states, so a page receives them once.
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=2&reads=1&drafts=1' : ''}`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=2&reads=1&drafts=1&outbox=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -343,6 +371,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     clearTimeout(this.pendingReadTimer); this.pendingReadTimer = undefined; this.pendingReads.clear();
     this.sessionReads.dispose();
     this.sessionDrafts.dispose();
+    this.sessionOutbox.dispose();
   }
 
   private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {

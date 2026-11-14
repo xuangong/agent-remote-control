@@ -93,6 +93,14 @@ export interface RemoteAgentTransport {
   watchSessionDrafts?(listener: (drafts: import('./session-drafts.js').SessionDraftsView) => void): () => void;
   /** Saves a session's draft for every device (an empty text clears it) and resolves with the revision it got. */
   saveSessionDraft?(session: import('./session-states.js').SessionStateRef, text: string): Promise<import('@orchardworks/agent-remote-protocol').SessionDraft>;
+  /** The account's outbox: messages waiting for offline Hosts. The listener receives the current view at once and on each change. */
+  watchSessionOutbox?(listener: (outbox: import('./session-outbox.js').SessionOutboxView) => void): () => void;
+  /** Leaves a message for a session whose Host is offline; its Controller delivers it when it returns. */
+  queueMessage?(session: import('./session-states.js').SessionStateRef, text: string): Promise<import('@orchardworks/agent-remote-protocol').OutboxEntry>;
+  /** Takes a waiting message back before its Host's Controller claims it. */
+  cancelQueuedMessage?(id: string): Promise<void>;
+  /** Lets a message that was not delivered wait again. */
+  retryQueuedMessage?(id: string): Promise<import('@orchardworks/agent-remote-protocol').OutboxEntry>;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;
   fetchTimeline(
     agentId: string,

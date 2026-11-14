@@ -123,6 +123,38 @@ describe('shared drafts', () => {
   });
 });
 
+describe('the outbox', () => {
+  it("follows the account's outbox and queues, retries and cancels messages", async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
+    const fetchImplementation = (async (url: string, init?: RequestInit) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      requests.push({ url: String(url), body });
+      if (String(url).endsWith('/cancel')) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      if (String(url).endsWith('/retry')) return new Response(JSON.stringify({ id: String(url).split('/').at(-2), ...thread, text: 'Run the suite', createdAt: 5, status: 'waiting' }), { status: 200 });
+      return new Response(JSON.stringify({ ...body, createdAt: 5, status: 'waiting' }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const harness = await server(true, fetchImplementation);
+    const waiting: number[] = [];
+    const stop = harness.transport.watchSessionOutbox(view => waiting.push(view.entries(thread).length));
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    expect(harness.urls[0]).toContain('outbox=1');
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_outbox', snapshot: true, entries: [] }));
+    await vi.waitFor(() => expect(waiting.at(-1)).toBe(0));
+    const queued = await harness.transport.queueMessage(thread, 'Run the suite');
+    expect(queued).toMatchObject({ ...thread, text: 'Run the suite', status: 'waiting' });
+    expect(requests[0]).toEqual({ url: expect.stringContaining('/base/v1/outbox'), body: { id: queued.id, ...thread, text: 'Run the suite' } });
+    expect(queued.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(waiting.at(-1)).toBe(1);
+    await harness.transport.retryQueuedMessage(queued.id);
+    expect(requests[1]!.url).toContain(`/base/v1/outbox/${queued.id}/retry`);
+    await harness.transport.cancelQueuedMessage(queued.id);
+    expect(requests[2]!.url).toContain(`/base/v1/outbox/${queued.id}/cancel`);
+    expect(waiting.at(-1)).toBe(0);
+    stop();
+  });
+});
+
 describe('session channel transport', () => {
   it('delivers ordered title updates once across channels and replays the latest name', async () => {
     const harness = await server(); connect(harness.transport, 'session'); connect(harness.transport, 'session', true);
@@ -164,7 +196,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1&drafts=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1&drafts=1&outbox=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;

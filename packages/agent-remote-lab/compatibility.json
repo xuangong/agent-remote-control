@@ -102,7 +102,6 @@
         "packages/agent-remote-lab/vite.config.ts",
         "packages/agent-remote-lab/vitest.config.ts",
         "packages/agent-remote-lab/vitest.preview.config.ts",
-        "packages/agent-remote-lab/vitest.profile.config.ts",
         "packages/agent-remote-protocol/.gitignore",
         "packages/agent-remote-protocol/README.md",
         "packages/agent-remote-protocol/package.json",
@@ -130,7 +129,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:55996c0513b063a962215f0f543228075fc96dfd3f58accbb8ad01d95f060654"
+      "digest": "sha256:8bde144edab5395e5d92f394df9aeb3cfcce54c3733459bb9dfaad01d0b729fc"
     }
   },
   "providers": [

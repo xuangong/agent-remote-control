@@ -133,3 +133,31 @@ The initial Chromium probe showed 0px drift without containment and -1px with it
 - Markdown reading: 8 passed, 1 platform-specific skip. The delayed-image fixture first approaches the image to start its request, then reads below it before metadata arrives, matching lazy request behavior.
 - Mobile viewport: 24 passed across Chromium/WebKit, covering keyboard recovery and orientation changes.
 - Relay build, Web/Lab typechecks, compatibility metadata update/check, and whitespace checks passed. No production service, Controller, or daemon was changed.
+
+## Bot and Window workbench (stage 6)
+
+Stage 6 ([plan](../../../docs/superpowers/plans/2026-11-14-stage-6-performance.md)) measured the workbench as it grows and removed the waste it found. Budgets that guard it run with the suite: `src/App.render-budget.test.tsx` (render counts with 12 groups of 10 bots), `src/storage-keys.test.ts` (one storage inventory per scan), `src/components/TeamMenu.test.tsx` and `src/hooks/useTpmWork.test.tsx` (requests per minute), `src/bundle-budget.test.ts` with the build's gzip budget, and the Relay's `record-cache.test.ts` (records encoded per commit).
+
+Timings come from two runners, neither part of the suite:
+
+```sh
+# jsdom, from packages/agent-remote-lab: shared states frames and bot switches with 120 bots
+pnpm exec vitest run src/workbench-cost.local.test.tsx   # appends to .tmp/workbench-cost.log (ARC_PERFORMANCE_OUTPUT)
+# the pnpm local instance, from the repository root, Chromium 1440 x 900
+node packages/agent-remote-lab/performance/local-switch.mjs after
+THROTTLE=4 node packages/agent-remote-lab/performance/local-switch.mjs after-4x
+```
+
+Results, before (main 8babb2b9) and after stage 6:
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| jsdom, a state frame of a bot not on screen | ~850 ms, 20 conversation renders | 6-30 ms, none |
+| jsdom, switching bots | 3.3-4.0 s, 76-90 conversation renders | 100-125 ms, 5-6 |
+| jsdom, Window mode, a change in one of 10 panes | 40 conversation renders | each visible pane once |
+| Local instance, switch until shown (cold / warm) | 101 / 79 ms | 71 / 77 ms |
+| Local instance with 4x CPU slowdown | 116 / 125 ms, task 143 / 137 ms | 98 / 109 ms, task 119 / 106 ms |
+| Local instance, idle main-thread task per 10 s | 35 ms (4x: 39 ms) | 5 ms (4x: 5 ms) |
+| Workbench chunk after sign-in | 1.99 MB, 600 KB gzip | 1.84 MB, 544 KB gzip |
+
+The local instance has six bots and short conversations, so it shows the per-switch floor; the jsdom runner shows how the cost grows with the number of bots and panes. A switch spent most of its time listing browser storage (a quadratic scan through `ConversationStorage`); a frame of the shared states channel spent it re-rendering every mounted conversation.

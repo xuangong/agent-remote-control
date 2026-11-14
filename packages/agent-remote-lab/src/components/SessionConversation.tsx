@@ -288,7 +288,8 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     draftOnly={pending || !nativeIdentityMatches || !!presentation?.draftOnly}
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
-    composerNotice={<>{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
+    composerNotice={<>{/* While the Host is away the conversation opens again by itself once it is back; nothing to retry. */}
+      {availabilityError && !offline ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 
 function familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId }: Pick<SessionConversationProps, 'displayBinding' | 'target' | 'entries' | 'viewId' | 'windowViewId'>) {

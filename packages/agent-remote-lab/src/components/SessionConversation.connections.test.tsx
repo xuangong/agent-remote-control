@@ -135,8 +135,11 @@ it('opens a conversation again by itself when its Host comes back after an attem
   }
   const container = await render(<Harness />);
   try {
-    await vi.waitFor(() => expect(container.textContent).toContain('The Host disconnected while opening the session.'));
-    expect(attach).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+    // While the Host is away the failure needs no Retry: the conversation opens again by itself.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(container.textContent).not.toContain('The Host disconnected while opening the session.');
+    expect(container.querySelector('[role="alert"] button')).toBeNull();
     await act(async () => setOffline(false));
     await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
     await vi.waitFor(() => expect(container.textContent).toContain('Recorded history 1'));

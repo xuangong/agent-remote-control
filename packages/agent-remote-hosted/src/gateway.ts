@@ -10,6 +10,7 @@ import { createFavorites } from './favorites.js';
 import { createSessionTitles, pruneSessionTitles } from './session-titles.js';
 import { createSessionMigrations } from './session-migrations.js';
 import { createSessionReads, SessionReadsError } from './session-reads.js';
+import { createSessionDrafts, SessionDraftsError } from './session-drafts.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
@@ -95,7 +96,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
   type StateFeed = { snapshot: boolean; facts: boolean; hosts: Map<string, string>; entries: Map<string, string> };
   /** What a channel was last sent of its account's read positions; a fresh feed starts with a snapshot. */
   type ReadFeed = { snapshot: boolean; since?: number; positions: Map<string, number> };
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed; reads?: ReadFeed }>();
+  /** What a channel was last sent of each draft: its revision. */
+  type DraftFeed = { snapshot: boolean; revisions: Map<string, number> };
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed; reads?: ReadFeed; drafts?: DraftFeed }>();
   const userStreamCount = (subject: string) => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0);
   const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
@@ -156,6 +159,21 @@ export function createHostedRelay(options: HostedRelayOptions) {
     feed.snapshot = false; feed.since = current.since;
     for (const read of advanced) feed.positions.set(key(read), read.readAt);
     try { socket.send(encoded.json); } catch { socket.close(1011, 'Read position delivery failed'); }
+  }
+  const sessionDrafts = createSessionDrafts(state);
+  /** Shares the account's drafts: everything in a snapshot, then the drafts whose revision changed. */
+  function publishDrafts(socket: RelaySocket, channel: { subject: string; drafts?: DraftFeed }) {
+    const feed = channel.drafts;
+    if (!feed || socket.readyState !== 1) return;
+    const current = sessionDrafts.read(channel.subject).drafts;
+    const key = (draft: { hostId: string; providerId: string; nativeSessionId: string }) => JSON.stringify([draft.hostId, draft.providerId, draft.nativeSessionId]);
+    const changed = feed.snapshot ? current : current.filter(draft => feed.revisions.get(key(draft)) !== draft.revision);
+    if (!feed.snapshot && !changed.length) return;
+    const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_drafts', ...(feed.snapshot ? { snapshot: true as const } : {}), drafts: changed });
+    if (encoded.status !== 'ok') return;
+    feed.snapshot = false;
+    for (const draft of changed) feed.revisions.set(key(draft), draft.revision);
+    try { socket.send(encoded.json); } catch { socket.close(1011, 'Draft delivery failed'); }
   }
   let successionPublishing: Promise<void> = Promise.resolve();
   function publishSuccessions(socket: RelaySocket, channel: { subject: string; expiresAt(): number; successions?: Set<string> }) {
@@ -301,7 +319,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
-    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); publishStates(socket, channel); publishReads(socket, channel); }
+    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); publishStates(socket, channel); publishReads(socket, channel); publishDrafts(socket, channel); }
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -764,6 +782,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
         throw error;
       }
     }
+    if (path === '/v1/session-drafts') {
+      try {
+        if (request.method === 'GET') return json(200, sessionDrafts.read(grant.subject));
+        if (request.method === 'POST') return json(200, await sessionDrafts.save(grant.subject, await readJson(request)));
+        return json(405, { error: 'Method is not allowed.' });
+      } catch (error) {
+        if (error instanceof SessionDraftsError) return json(error.status, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     if (path === '/v1/favorites' || path === '/v1/stars') {
       const saved = state.read().tenants.find(tenant => tenant.subject === grant.subject);
       const pending = saved?.broker.associations?.freezes.some(row => row.projection
@@ -944,7 +972,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
         browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}),
           ...(['1', '2'].includes(route.searchParams.get('states') ?? '') ? { states: { snapshot: true, facts: route.searchParams.get('states') === '2', hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}),
-          ...(route.searchParams.get('reads') === '1' ? { reads: { snapshot: true, positions: new Map<string, number>() } } : {}) });
+          ...(route.searchParams.get('reads') === '1' ? { reads: { snapshot: true, positions: new Map<string, number>() } } : {}),
+          ...(route.searchParams.get('drafts') === '1' ? { drafts: { snapshot: true, revisions: new Map<string, number>() } } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         // Clients that report which subscriptions are in use let the account's least recently used streams go first.
@@ -971,6 +1000,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         publishSuccessions(socket, browserChannels.get(socket)!);
         publishStates(socket, browserChannels.get(socket)!);
         publishReads(socket, browserChannels.get(socket)!);
+        publishDrafts(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

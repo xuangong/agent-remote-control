@@ -171,6 +171,8 @@ export function SessionConversation(props: SessionConversationProps) {
     if (session && sessionKey(session) === targetKey && !historyRoleId) return;
     const cached = connections?.find(currentTarget);
     if (cached && !historyRoleId) { setSession({ ...currentTarget, agentId: cached.agentId }); return () => { stopped = true; abort.abort(); }; }
+    // A Host known to be offline is not asked: the conversation says so and opens by itself when the Host is back (below).
+    if (props.offline) return;
     const client = directory;
     // A session its Host already reported missing is not asked for again by another mount of this view (see unavailableSessions).
     const known = historyRoleId ? undefined : unavailable.get(currentTarget);

@@ -73,3 +73,25 @@ it("notices at once that a bot's Host left, from the shared states channel, with
     await until(() => expect(submit().getAttribute('aria-label')).toBe('Send when Test Host is back'));
   } finally { await app.close(); }
 });
+
+it('does not ask an offline Host for a bot it holds, and opens the conversation once the Host is back', async () => {
+  const scope = 'http://localhost/u/bot-host-away/';
+  // B is not the Window shown in Window mode, so nothing opens its bots before the test does.
+  seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true, host: { outbox: 1 } });
+  const submit = () => app.container.querySelector<HTMLButtonElement>('.lab-bot-conversation [data-testid="prompt-submit"]')!;
+  try {
+    await openBot(app);
+    await act(async () => app.emitStates({ snapshot: true, hosts: [{ hostId: 'local', online: true }], states: [] }));
+    // The Host leaves while the page runs: the page learns it, then a bot not opened yet is opened.
+    app.setHostOnline(false);
+    await act(async () => app.emitStates({ hosts: [{ hostId: 'local', online: false }] }));
+    await until(() => expect(submit().getAttribute('aria-label')).toBe('Send when Test Host is back'));
+    await act(async () => app.button('B1').click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
+    expect(app.attachments).not.toContain('B1');
+    app.setHostOnline(true);
+    await act(async () => app.emitStates({ hosts: [{ hostId: 'local', online: true }] }));
+    await until(() => expect(app.attachments).toContain('B1'));
+  } finally { await app.close(); }
+});

@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom';
 import { NativeSessionCommand, nativeOpenCommand } from './NativeSessionCommands.js';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import QRCode from 'qrcode';
 import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
 import type { OpenedSession } from '../directory-client.js';
 import { readSessionCode, type ScannedSession } from '../session-transfer.js';
@@ -54,7 +53,8 @@ export function SessionTransferDialog({ session, sessionIntent, keepOriginal, on
     if (!url) return;
     let retired = false;
     setQr(undefined); setQrFailure(undefined); setFailure(undefined); setCopied(false);
-    void Promise.resolve().then(() => QRCode.toDataURL(url, { width: 320, margin: 4, errorCorrectionLevel: 'M' }))
+    // The encoder loads with the first QR code drawn, not with the workbench (stage 6).
+    void import('qrcode').then(({ default: QRCode }) => QRCode.toDataURL(url, { width: 320, margin: 4, errorCorrectionLevel: 'M' }))
       .then(value => { if (!retired) setQr(value); })
       .catch(() => { if (!retired) setQrFailure('The QR code could not be generated. Copy the session link instead.'); });
     return () => { retired = true; };

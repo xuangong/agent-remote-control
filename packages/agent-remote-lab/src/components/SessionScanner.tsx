@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import decodeQr from 'jsqr';
 
 function cameraFailure(error: unknown): string {
   const name = error instanceof Error ? error.name : '';
@@ -29,6 +28,11 @@ export function SessionScanner({ onRead }: { onRead(text: string): void }) {
     setFailure(undefined); setPaused(false); setStatus('Starting camera…');
     document.addEventListener('visibilitychange', hide);
     async function start() {
+      // The decoder loads with the first scan, not with the workbench (stage 6).
+      let decodeQr: typeof import('jsqr').default;
+      try { decodeQr = (await import('jsqr')).default; }
+      catch { if (!retired) setFailure('The QR decoder could not be loaded. Retry or paste a session link.'); return; }
+      if (retired) return;
       try {
         if (!navigator.mediaDevices?.getUserMedia) {
           setFailure('Camera scanning is unavailable in this browser. Use HTTPS or paste a session link.'); return;

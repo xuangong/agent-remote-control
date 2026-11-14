@@ -1,8 +1,7 @@
-import { useWindowConnections } from './useWindowConnections.js';
 import 'fake-indexeddb/auto';
 import { createServer } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
-import { act, useState, useSyncExternalStore } from 'react';
+import { act, useCallback, useState, useSyncExternalStore } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, HttpWebSocketTransport, WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
@@ -107,13 +106,16 @@ async function fixture(shared = false) {
   let succession!: ReturnType<typeof useSessionSuccession>;
   let bridge!: ReturnType<typeof useWindowSessionBridge>;
   let setEnabled!: (enabled: boolean) => void;
-  let connectionPreferences!: ReturnType<typeof useWindowConnections>;
+  // The live budget's answer for each slot, as App passes it: a released slot may not attach.
+  let release!: (slotId: string, released: boolean) => void;
   configureImageDraftPersistence(() => false);
   function Harness() {
     const [enabled, updateEnabled] = useState(true); setEnabled = updateEnabled;
+    const [released, setReleased] = useState<ReadonlySet<string>>(new Set());
+    release = (slotId, value) => setReleased(current => { const next = new Set(current); if (value) next.add(slotId); else next.delete(slotId); return next; });
+    const attachmentAllowed = useCallback((slotId: string) => !released.has(slotId), [released]);
     const workspace = useSyncExternalStore(windowStore.subscribe, windowStore.getSnapshot);
-    connectionPreferences = useWindowConnections(scope);
-    succession = useSessionSuccession({ attachmentAllowed: connectionPreferences.enabledSlot, scope, transport, connections, enabled,
+    succession = useSessionSuccession({ attachmentAllowed, scope, transport, connections, enabled,
       replicaFor(id) { let replica = replicas.get(id); if (!replica) replicas.set(id, replica = new AgentReplica()); return replica; },
       directory: hostId => new SessionDirectoryClient(scope, undefined, hostId),
       textStore(key) { let store = stores.get(key); if (!store) stores.set(key, store = new DraftStore(key)); return store; },
@@ -141,7 +143,10 @@ async function fixture(shared = false) {
   if (shared) await vi.waitFor(async () => { await act(async () => {}); expect(succession.binding?.session.nativeSessionId).toBe('A'); });
   return { read: () => succession, window, a, b, aSlot, bSlot, connections, attachments, directory: new SessionDirectoryClient(scope, undefined, 'host'),
     setEnabled: (enabled: boolean) => setEnabled(enabled),
-    connectView: (viewId: string, enabled: boolean) => connectionPreferences.setEnabled(window.id, viewId, enabled),
+    connectView: (viewId: string, enabled: boolean) => {
+      const slotId = succession.document.windowBindings?.find(entry => entry.windowId === window.id && entry.viewId === viewId)?.slotId;
+      if (slotId) release(slotId, !enabled);
+    },
     failAttachment(nativeSessionId: string, failed = true) { if (failed) failedAttachments.add(nativeSessionId); else failedAttachments.delete(nativeSessionId); },
     bridge: () => bridge, store: () => windowStore,
     async remount() {
@@ -357,18 +362,13 @@ it.each(['selected', 'unselected'])('accepts a %s group independently connected 
 }, 10000);
 
 
-it('disconnects the selected primary, preserves its saved choice on reload and reconnects only on activation', async () => {
+it('releases the selected primary while the live budget releases it and attaches again once it is live', async () => {
   const test = await fixture(true);
   expect(test.connections.find(test.a)).toBeDefined();
   await act(async () => test.connectView('a', false));
   await vi.waitFor(() => expect(test.connections.find(test.a)).toBeUndefined());
   expect(test.read().binding).toBeUndefined();
   expect(test.read().selected?.nativeSessionId).toBe('A');
-  const count = test.attachments.length;
-  await test.remount();
-  await vi.waitFor(() => expect(test.read().discovering).toBe(false));
-  expect(test.attachments).toHaveLength(count);
-  expect(test.connections.find(test.a)).toBeUndefined();
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'b' }); });
   await vi.waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('B'));
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'a' }); });

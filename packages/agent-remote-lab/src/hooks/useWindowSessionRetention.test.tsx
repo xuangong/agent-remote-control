@@ -1,5 +1,4 @@
-import { useWindowConnections } from './useWindowConnections.js';
-import { act, useState } from 'react';
+import { act, useCallback, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { createWindowView, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
@@ -8,6 +7,7 @@ import { ConversationConnections } from '../conversation-connections.js';
 import { createRecordedValidationServer } from '../server/recorded.js';
 import { render, unmount } from '../test/setup.js';
 import { useWindowSessionRetention } from './useWindowSessionRetention.js';
+import { LIVE_RECENT } from '../live-budget.js';
 
 const windowWith = (id: string, targets: WindowSessionBinding[]): WorkspaceWindow => ({ schemaVersion: 3, id, title: id,
   revision: 0, selectedPrimaryViewId: 'primary', selectedViewId: 'primary', views: targets.length
@@ -110,21 +110,21 @@ it('forgets only the deleted Window ownership and cannot revive it from a stale 
   } finally { await view.close(); await f.close(); }
 }, 10000);
 
-it('keeps only the 24 most recently used Session identities across many Windows', async () => {
+it('keeps only the most recently used Session identities across many Windows, as many as the live budget', async () => {
   const f = await fixture(), targets: WindowSessionBinding[] = [];
   const view = await harness(f.connections);
   try {
-    for (let index = 0; index < 24; index++) {
+    for (let index = 0; index < LIVE_RECENT; index++) {
       const target = await f.session(String(index)); targets.push(target);
       await view.update(windowWith(`window-${index}`, [target]));
       const opened = f.acquire(target); opened.release(); await Promise.resolve();
     }
-    expect(f.connections.agentIds).toHaveLength(24);
+    expect(f.connections.agentIds).toHaveLength(LIVE_RECENT);
     await view.update(windowWith('window-0', [targets[0]!]));
     const newest = await f.session('newest');
     await view.update(windowWith('window-newest', [newest]));
     const opened = f.acquire(newest); opened.release(); await Promise.resolve();
-    expect(f.connections.agentIds).toHaveLength(24);
+    expect(f.connections.agentIds).toHaveLength(LIVE_RECENT);
     expect(f.connections.find(targets[0]!)).toBeDefined();
     expect(f.connections.find(targets[1]!)).toBeUndefined();
     expect(f.connections.find(newest)).toBeDefined();
@@ -197,11 +197,16 @@ it('retains conversations shown without a Window workspace by when they were las
 it('drops disabled Window retention without closing another enabled view of the same session', async () => {
   const f = await fixture(), target = await f.session('shared-disconnect');
   const first = windowWith('first', [target]), second = windowWith('second', [target]);
-  let choose!: (value: WorkspaceWindow) => void, preferences!: ReturnType<typeof useWindowConnections>;
+  // A view the live budget released (formerly a disconnected view) is not retained.
+  let choose!: (value: WorkspaceWindow) => void, preferences!: { enabled(windowId: string, viewId: string): boolean; setEnabled(windowId: string, viewId: string, enabled: boolean): void };
   function Harness() {
     const [window, setWindow] = useState(first); choose = setWindow;
-    preferences = useWindowConnections('retention-disconnect');
-    useWindowSessionRetention(f.connections, window, undefined, preferences.enabled);
+    const [released, setReleased] = useState<ReadonlySet<string>>(new Set());
+    const enabled = useCallback((windowId: string, viewId: string) => !released.has(JSON.stringify([windowId, viewId])), [released]);
+    preferences = { enabled, setEnabled: (windowId, viewId, value) => setReleased(current => {
+      const next = new Set(current), key = JSON.stringify([windowId, viewId]); if (value) next.delete(key); else next.add(key); return next;
+    }) };
+    useWindowSessionRetention(f.connections, window, undefined, enabled);
     return null;
   }
   const view = await render(<Harness />);

@@ -1,4 +1,5 @@
-import { WindowConnectionsContext } from '../hooks/useWindowConnections.js';
+import { LiveConnectionsContext } from '../hooks/useLiveBudget.js';
+import type { LiveRegistration } from '../live-budget.js';
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
 import { CommunicationNavigationContext, type AgentChildSessionView, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
@@ -92,8 +93,20 @@ export function SessionConversation(props: SessionConversationProps) {
   const resolutionNotice = synchronizing && !retainingInput && !synchronizingOverdue ? undefined : resolutionError;
   const retrySynchronizing = synchronizing && synchronizingOverdue && operations?.synchronize
     ? () => { setSynchronizingOverdue(false); operations.synchronize!(); } : undefined;
-  const connectionPreferences = useContext(WindowConnectionsContext);
-  const disconnected = !!props.viewId && connectionPreferences?.enabled(props.viewId) === false;
+  // This device keeps a bounded set of conversations live (see LiveBudget): one on screen or with pending input is live;
+  // a released one shows its cached history, keeps its draft and attaches again by itself once it is live.
+  const liveConnections = useContext(LiveConnectionsContext);
+  const onScreen = (props.visible ?? true) && props.active, pinned = !!inputOwner?.count;
+  const registration = useRef<LiveRegistration>();
+  const liveRegistration = useRef({ onScreen, pinned }); liveRegistration.current = { onScreen, pinned };
+  useEffect(() => {
+    if (!liveConnections || !props.viewId) return;
+    const current = liveConnections.register(props.viewId, { visible: liveRegistration.current.onScreen, pinned: liveRegistration.current.pinned });
+    registration.current = current;
+    return () => { current.release(); if (registration.current === current) registration.current = undefined; };
+  }, [liveConnections?.register, props.viewId]);
+  useEffect(() => { registration.current?.update({ visible: onScreen, pinned }); }, [onScreen, pinned]);
+  const disconnected = !!props.viewId && liveConnections?.live(props.viewId) === false;
   const discardedAttachment = useRef(false);
   if (disconnected) discardedAttachment.current = true;
   const canAttach = attachmentEnabled && !disconnected && !retainingInput;
@@ -237,17 +250,8 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     if (contextKey && observed.current.contextKey === contextKey && observed.current.evidence !== evidence) setRefreshKey(value => value + 1);
     observed.current = { contextKey, evidence };
   }, [contextKey, evidence]);
-  const preferences = useContext(WindowConnectionsContext);
-  const [pendingCount, setPendingCount] = useState(0);
-  const connectionControl = preferences && viewId && windowViewId ? <button type="button" data-pane-selection-ignore
-    className="lab-session-connection-toggle" aria-label={disconnected ? 'Connect session' : 'Disconnect session'}
-    title={pendingCount ? 'Wait for pending input to finish before disconnecting.' : disconnected ? 'Connect this view and resume live updates.' : 'Disconnect this view and keep its saved history. Agent work continues.'}
-    disabled={!disconnected && pendingCount > 0} onClick={() => preferences.setEnabled(viewId, disconnected)}>
-    {disconnected ? 'Connect' : 'Disconnect'}
-  </button> : null;
   const pendingInput = useRef<{ key: string; count: number }>();
   const reportPendingInput = (count: number) => {
-    setPendingCount(count);
     onPendingInputChange?.(count);
     presentation?.onPendingInputChange?.(count);
     if (!contextKey) return;
@@ -262,15 +266,15 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     sessionIdentity={presentedSession} hostLabel={hostLabel} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
-    state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={disconnected ? 'idle' : pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} operationBinding={operationBinding}
+    state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} operationBinding={operationBinding}
     draftSessionKey={key} draftBinding={draftBinding ?? { store: draftStore, key: `session:${key}` }} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
     visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={disconnected || mutationBlocked || presentation?.mutationBlocked}
     draftOnly={pending || !nativeIdentityMatches || !!presentation?.draftOnly}
-    sessionManager={<>{connectionControl}{presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}</>}
+    sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
-    composerNotice={<>{disconnected ? <p className="lab-session-disconnected" role="status">Disconnected · {displayedState ? 'Showing saved history.' : 'No saved history on this browser.'} Connect to resume live updates.</p> : null}{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
+    composerNotice={<>{availabilityError ? <p role="alert">{availabilityError} <button type="button" onClick={onRetryAttachment} disabled={!onRetryAttachment}>Retry</button></p> : null}{presentation?.composerNotice}</>} />{renderSessionFooter?.(presentationContext)}</CommunicationNavigationContext.Provider>;
 }
 
 function familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId }: Pick<SessionConversationProps, 'displayBinding' | 'target' | 'entries' | 'viewId' | 'windowViewId'>) {

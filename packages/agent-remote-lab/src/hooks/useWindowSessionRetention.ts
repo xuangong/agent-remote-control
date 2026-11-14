@@ -1,10 +1,12 @@
+import { LIVE_RECENT } from '../live-budget.js';
 import { useEffect, useMemo } from 'react';
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { ConversationConnections } from '../conversation-connections.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 
 type Identity = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>;
-const RECENT_SESSION_LIMIT = 24;
+/** Sessions kept connected after their view closes, for quick reopening; bounded with the live budget. */
+const RECENT_SESSION_LIMIT = LIVE_RECENT;
 const allConnected = () => true;
 
 /**

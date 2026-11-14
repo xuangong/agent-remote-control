@@ -14,13 +14,13 @@
 
 **Files:** create `packages/agent-remote-lab/src/live-budget.ts` (+ test); replace `src/hooks/useWindowConnections.ts` with `src/hooks/useLiveBudget.ts` (+ test); `src/components/SessionConversation.tsx`; `src/App.tsx` (succession `attachmentAllowed`, retention, Track's `sessionEnabled`, the context provider); `src/hooks/useWindowSessionRetention.ts`.
 
-- [ ] `LiveBudget` model tests: a registered slot is live while visible or pinned; when it leaves the screen it stays live for the grace period, then only while it is among the 4 most recently seen; an unregistered slot is live; a slot registered twice (Bot and Window surfaces of one target) is visible if either is; listeners hear each change, including the grace timer's.
-- [ ] Implement `LiveBudget` with an injected clock and timer.
-- [ ] `useLiveBudget(scope)` provides `LiveConnectionsContext { live(slotId), register(slotId, { visible, pinned }) }`; it removes the old `agent-remote:window-connections:<scope>` key once.
-- [ ] `SessionConversation`: registers with `visible = visible && active` and `pinned = pending input`; a released conversation behaves as a disconnected one did (session cleared, cached display shown, input kept) but without the Connect/Disconnect button or its notice; it reattaches by itself when live again.
-- [ ] App: succession `attachmentAllowed`, `useWindowSessionRetention` and Track's `sessionEnabled` read the budget; retention's loose limit becomes 4.
-- [ ] Tests: no Disconnect control remains; a Window pane hidden by Bot mode is released after the grace period and shows its cached history; it reattaches when Window mode returns; a pane with pending input is never released.
-- [ ] Commit `feat(lab): keep a bounded set of conversations live on each device`.
+- [x] `LiveBudget` model tests: a registered slot is live while visible or pinned; when it leaves the screen it stays live for the grace period, then only while it is among the 4 most recently seen; an unregistered slot is live; a slot registered twice (Bot and Window surfaces of one target) is visible if either is; listeners hear each change, including the grace timer's.
+- [x] Implement `LiveBudget` with an injected clock and timer.
+- [x] `useLiveBudget(scope)` provides `LiveConnectionsContext { live(slotId), register(slotId, { visible, pinned }) }`; it removes the old `agent-remote:window-connections:<scope>` key once.
+- [x] `SessionConversation`: registers with `visible = visible && active` and `pinned = pending input`; a released conversation behaves as a disconnected one did (session cleared, cached display shown, input kept) but without the Connect/Disconnect button or its notice; it reattaches by itself when live again.
+- [x] App: succession `attachmentAllowed`, `useWindowSessionRetention` and Track's `sessionEnabled` read the budget; retention's loose limit becomes 4.
+- [x] Tests: no Disconnect control remains; a Window pane hidden by Bot mode is released after the grace period and shows its cached history; it reattaches when Window mode returns; a pane with pending input is never released.
+- [x] Commit `feat(lab): keep a bounded set of conversations live on each device`.
 
 ## Task 2: Folded panes are slim cards
 

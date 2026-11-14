@@ -8,7 +8,7 @@ import { validSourceRelation } from './session-relations.js';
 import { MAX_SESSION_TITLES } from './session-titles.js';
 import { validBrowserId } from './browser-devices.js';
 import { validFavoritesState, type SavedFavoritesTree } from './favorites.js';
-import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, isSessionDraft, isSessionRead, PROTOCOL_VERSION, SESSION_DRAFT_LIMIT, SESSION_READ_LIMIT, type SessionDraft, type SessionRead, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, isOutboxEntry, isSessionDraft, isSessionRead, OUTBOX_LIMIT, PROTOCOL_VERSION, SESSION_DRAFT_LIMIT, SESSION_READ_LIMIT, type OutboxEntry, type SessionDraft, type SessionRead, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import type { SavedSessionMigration } from './session-migrations.js';
 import { validPairingHistory } from './pairing-keys.js';
 import { hasHostRecoveryMetadata, retainedHostIdentities, validHostRecovery, validRevokedHosts } from './host-recovery.js';
@@ -44,6 +44,8 @@ export interface HostedRelayState {
   sessionReadAccounts?: SavedSessionReadAccount[];
   /** Each account's unsent drafts, one record per session; an empty text is a draft that was cleared. */
   sessionDrafts?: SavedSessionDraft[];
+  /** Messages waiting for offline Hosts, one record per message. */
+  outbox?: SavedOutboxEntry[];
   config: { origin: string; issuer: string; provider?: 'google'; clientId?: string };
   googleIdentities?: Array<{ subject: string; email: string }>;
   sessions: SavedHostedSession[];
@@ -58,6 +60,10 @@ export const MAX_SESSION_READS = 16384;
 export type SavedSessionDraft = SessionDraft & { subject: string };
 /** Drafts kept across every account: at most 8 MB of text. */
 export const MAX_SESSION_DRAFTS = 1024;
+/** claimedAt: when the Host's Controller claimed the message for delivery. */
+export type SavedOutboxEntry = OutboxEntry & { subject: string; claimedAt?: number };
+/** Messages kept across every account: at most 8 MB of text. */
+export const MAX_OUTBOX = 512;
 export interface LoginChallenge { expiresAt: number; hostId?: string; returnPath?: string; google?: { nonce: string; verifier: string; browserHash: string; browserId?: string } }
 /** What a store's commit wrote, for diagnostics. */
 export interface RelayStateCommitStats {
@@ -105,7 +111,7 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
     && unique(entry.pendingRemovals, (id: string) => id) && validPreviewNames(entry) && decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot: entry.snapshot })).status === 'ok')
     || (Array.isArray(value.previews) && !unique(value.previews, (entry: HostPreviewState) => entry.hostId)))) return false;
   if (!value.keys.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[a-f0-9]{64}$/.test(item[0]) && record(item[1]) && time(item[1].expires) && (item[1].purpose === undefined || isPairingPurpose(item[1].purpose)) && (item[1].pairingId === undefined || string(item[1].pairingId, 128)) && (item[1].claimedAt === undefined || time(item[1].claimedAt)) && (item[1].installationId === undefined || string(item[1].installationId)) && (item[1].kind === undefined || item[1].kind === 'device') && (item[1].requiresRotation === undefined || typeof item[1].requiresRotation === 'boolean')) ||
-    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.pairingPurpose === undefined || isPairingPurpose(host.pairingPurpose)) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.controller === undefined || isControllerIdentity(host.controller)) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
+    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.pairingPurpose === undefined || isPairingPurpose(host.pairingPurpose)) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.controller === undefined || isControllerIdentity(host.controller)) && (host.outbox === undefined || host.outbox === 1) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
     !value.bindings.every((binding: unknown) => record(binding) && ['hostId', 'providerId', 'nativeSessionId', 'agentId'].every(key => string(binding[key], 4096)) && value.hosts.some((host: any) => host.id === binding.hostId) && (binding.sourceRelation === undefined || validSourceRelation(binding.sourceRelation) && binding.sourceRelation.sourceNativeSessionId !== binding.nativeSessionId) && (binding.creatorSubject === undefined || string(binding.creatorSubject)) && (binding.parentNativeSessionId === undefined || string(binding.parentNativeSessionId, 4096))) ||
     !value.creations.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 16384) && record(item[1]) && string(item[1].fingerprint, 65536) && value.bindings.some((binding: any) => binding.agentId === item[1].agentId))) return false;
   if (!unique(value.keys, item => item[0]) || !unique(value.hosts, item => item.id) || !unique(value.hosts, item => item.installationId) || !unique(value.bindings, item => item.agentId) || !unique(value.bindings, item => JSON.stringify([item.hostId, item.providerId, item.nativeSessionId])) || !unique(value.creations, item => item[0])) return false;
@@ -121,18 +127,18 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 /** Frozen parts of committed state that passed validation; equal identity is equal content because nobody can change them. */
 interface ValidationMemo {
   tenants: WeakSet<object>; sessions: WeakSet<object>; challenges: WeakSet<object>; proofs: WeakSet<object>; events: WeakSet<object>;
-  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; authorities: WeakSet<object>;
+  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; drafts: WeakSet<object>; outbox: WeakSet<object>; authorities: WeakSet<object>;
   progress: WeakSet<object>; favorites: WeakMap<object, WeakSet<object>>; normalized: WeakMap<object, boolean>;
   /** Whole collections that passed, with their uniqueness and per-account counts. */
-  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads' | 'drafts', WeakSet<object>>;
+  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads' | 'drafts' | 'outbox', WeakSet<object>>;
 }
 const memos = new WeakMap<HostedAuthOptions, ValidationMemo>();
 function memoFor(auth: HostedAuthOptions): ValidationMemo {
   let memo = memos.get(auth);
   if (!memo) memos.set(auth, memo = { tenants: new WeakSet(), sessions: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(),
-    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
+    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
     favorites: new WeakMap(), normalized: new WeakMap(),
-    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet() } });
+    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet(), drafts: new WeakSet(), outbox: new WeakSet() } });
   return memo;
 }
 /** check(item), skipped for a frozen item that passed it before. */
@@ -201,6 +207,16 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
     })) || !unique(drafts, (item: SavedSessionDraft) => JSON.stringify([item.subject, item.hostId, item.providerId, item.nativeSessionId]))) return false;
     const counts = new Map<string, number>();
     for (const item of drafts) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > SESSION_DRAFT_LIMIT) return false; counts.set(item.subject, count); }
+    return true;
+  }))) return invalid();
+  if (value.outbox !== undefined && (!Array.isArray(value.outbox) || value.outbox.length > MAX_OUTBOX || !once(memo?.lists.outbox, value.outbox, (entries: any[]) => {
+    if (!entries.every((item: unknown) => once(memo?.outbox, item, (item: unknown) => {
+      if (!record(item) || !string(item.subject) || item.claimedAt !== undefined && !time(item.claimedAt)) return false;
+      const { subject: _, claimedAt: __, ...entry } = item;
+      return isOutboxEntry(entry);
+    })) || !unique(entries, (item: SavedOutboxEntry) => item.id)) return false;
+    const counts = new Map<string, number>();
+    for (const item of entries) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > OUTBOX_LIMIT) return false; counts.set(item.subject, count); }
     return true;
   }))) return invalid();
   if (value.sessionReadAccounts !== undefined && (!Array.isArray(value.sessionReadAccounts) || value.sessionReadAccounts.length > 4096

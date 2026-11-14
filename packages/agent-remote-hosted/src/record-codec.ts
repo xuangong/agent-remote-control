@@ -13,7 +13,7 @@ export const HOSTED_CHUNK_BYTES = 262144;
 export const HOSTED_RECORD_KINDS = ['relayHeader', 'tenant', 'brokerHeader', 'associationHeader', 'favoritesHeader',
   'session', 'loginChallenge', 'consumedProof', 'securityEvent', 'sessionStar', 'favoritesTree', 'sessionMigration',
   'sessionTitle', 'deviceKey', 'host', 'binding', 'creation', 'preview', 'pairing', 'share', 'reservation',
-  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt', 'team', 'sessionRead', 'sessionReadAccount', 'sessionDraft'] as const;
+  'workspaceWindow', 'revokedHost', 'admission', 'freeze', 'relationChange', 'relationReset', 'favoritesReceipt', 'team', 'sessionRead', 'sessionReadAccount', 'sessionDraft', 'outboxEntry'] as const;
 export type HostedRecordKind = typeof HOSTED_RECORD_KINDS[number];
 type Identity<K extends HostedRecordKind = HostedRecordKind> = [K, string, string];
 type JsonObject = Record<string, unknown>;
@@ -39,12 +39,12 @@ type HostedBrokerHeader = Omit<Broker, 'keys' | 'hosts' | 'bindings' | 'creation
 type HostedTenantHeader = Omit<Tenant, 'broker' | 'favoritesSuccession'> & {
   broker: Identity<'brokerHeader'>; favoritesSuccession?: Identity<'favoritesHeader'>;
 };
-type HostedRelayHeader = Omit<HostedRelayState, 'workspaceWindows' | 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles' | 'sessionReads' | 'sessionReadAccounts' | 'sessionDrafts'> & {
+type HostedRelayHeader = Omit<HostedRelayState, 'workspaceWindows' | 'tenants' | 'sessions' | 'loginChallenges' | 'consumedProofs' | 'securityEvents' | 'sessionStars' | 'favoritesTrees' | 'sessionMigrations' | 'sessionTitles' | 'sessionReads' | 'sessionReadAccounts' | 'sessionDrafts' | 'outbox'> & {
   workspaceWindows?: Identity<'workspaceWindow'>[];
   tenants: Identity<'tenant'>[]; sessions: Identity<'session'>[]; loginChallenges: Identity<'loginChallenge'>[];
   consumedProofs: Identity<'consumedProof'>[]; securityEvents?: Identity<'securityEvent'>[]; sessionStars?: Identity<'sessionStar'>[];
   favoritesTrees?: Identity<'favoritesTree'>[]; sessionMigrations?: Identity<'sessionMigration'>[]; sessionTitles?: Identity<'sessionTitle'>[];
-  sessionReads?: Identity<'sessionRead'>[]; sessionReadAccounts?: Identity<'sessionReadAccount'>[]; sessionDrafts?: Identity<'sessionDraft'>[];
+  sessionReads?: Identity<'sessionRead'>[]; sessionReadAccounts?: Identity<'sessionReadAccount'>[]; sessionDrafts?: Identity<'sessionDraft'>[]; outbox?: Identity<'outboxEntry'>[];
 };
 export type HostedManifest = {
   format: number; kind: HostedRecordKind; identity: string; byte_length: number; chunk_count: number; digest: string;
@@ -232,6 +232,7 @@ function encodeValidatedHostedSnapshot(state: HostedRelayState, format: HostedSn
     sessionReads: references(state.sessionReads, 'sessionRead', '', value => JSON.stringify([value.subject, value.hostId, value.providerId, value.nativeSessionId])),
     sessionReadAccounts: references(state.sessionReadAccounts, 'sessionReadAccount', '', value => value.subject),
     sessionDrafts: references(state.sessionDrafts, 'sessionDraft', '', value => JSON.stringify([value.subject, value.hostId, value.providerId, value.nativeSessionId])),
+    outbox: references(state.outbox, 'outboxEntry', '', value => JSON.stringify([value.subject, value.id])),
     tenants: stable(['references', 'tenant', ''], state.tenants.map(tenant => {
       const owner = tenant.namespace; const source = tenant.broker;
       const broker: HostedBrokerHeader = { ...source,
@@ -367,6 +368,7 @@ export function decodeHostedSnapshot(manifests: HostedManifest[], chunks: Hosted
   collection(relay, 'sessionReads', 'sessionRead', '');
   collection(relay, 'sessionReadAccounts', 'sessionReadAccount', '');
   collection(relay, 'sessionDrafts', 'sessionDraft', '');
+  collection(relay, 'outbox', 'outboxEntry', '');
   if (!Array.isArray(relay.tenants)) invalid('tenant order');
   relay.tenants = relay.tenants.map((ref: unknown) => {
     if (!Array.isArray(ref) || typeof ref[2] !== 'string') invalid('tenant reference');

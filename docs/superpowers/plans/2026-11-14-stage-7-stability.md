@@ -35,11 +35,12 @@
 
 **Files:** `packages/agent-remote-lab/src/session-restoration.ts` (+ test), `src/hooks/useSessionTracking.tsx`, `src/components/SessionConversation.tsx`, a new `src/unavailable-sessions.ts` (+ test).
 
-- [x] `restoreSession` retries with exponential backoff: 5 s, 10 s, 20 s and so on, doubling up to 5 min. Jitter only shortens a wait, by up to a fifth. Page resume and coming back online retry at once and reset the delay; so do the Host returning and an explicit Retry, since both start a new restoration.
+- [x] `restoreSession` retries with exponential backoff: 5 s, 10 s, 20 s and so on, doubling up to a minute. Jitter only shortens a wait, by up to a fifth. Page resume and coming back online retry at once and reset the delay, and so does the session's Host coming back: App announces it (`announceHostReturned`) when the Host list shows it online again. An explicit Retry starts a new restoration.
+- [x] An independent review found that with a 5-minute cap, and nothing announcing a returning Host, the selected primary and Track could wait 5 minutes to reconnect: hence the minute and the announcement. It also found that a replayed report renewed the memory's ten minutes (they now count from the Host's report), and two `/side` issues (Task 5).
 - [x] A session the Host reported unavailable (404 `native_session_unavailable`) is remembered per page (`src/unavailable-sessions.ts`). Conversation and Track attaches skip it, and so does the selected primary's binding through App. The memory is cleared by an explicit Retry, the Host coming back or 10 minutes passing.
 - [x] Found while testing: the 404 bursts came from remounts. On load, a missing session's conversation mounted four times, as a view moving between Bot and Window mode mounts anew, and each mount asked again: six asks before, at most two now (the binding and its conversation ask together).
 - [x] Tests (fake timers):
-  - A session answering 503 for 30 min is attached 11 times without jitter, and at most 13 with the shortest waits (361 before).
+  - A session answering 503 for 30 min is attached 33 times without jitter, and at most 41 with the shortest waits (361 before); its Host returning retries at once.
   - One answering 404 is attached once across a mode switch, an access refresh, ten state frames, three bot switches and a page resume, and again after Retry.
   - A Host coming back attaches each waiting conversation once.
 
@@ -93,7 +94,7 @@ The fixture is one hosted Relay (`createHostedRelay`, in memory) behind the Lab'
 **Files:** `src/components/BotActions.tsx`, `src/components/BotWorkspace.tsx`, `src/App.tsx` (the existing Side, TPM, Team and Call for support creation flows), tests.
 
 - [x] Changed scope: Bot mode now offers **/side** (and /btw). Since Bot mode was a content-only view, Sides there had nowhere to go; now a Side joins the bot's group beside it, even when that group is not the Window shown in Window mode, and Bot mode opens it. Team, TPM and Call for support are created from their Window-mode panels, which have no Bot mode counterpart; they stay one switch away, from the bot's group in Window mode.
-- [x] Test: /side from a bot of group B, while Window A is shown, attaches the Side to the bot's view in B, leaves A unchanged and selects the Side in B's section.
+- [x] Test: /side from a bot of group B, while Window A is shown, attaches the Side to the bot's view in B, leaves A unchanged and selects the Side in B's section. From a bot of A itself it opens the Side too (found by the review), and a session under Other sessions is offered no /side (it has no group to join; before, it failed and left a stray session).
 
 ## Task 6: Sleeping bots in compact Window layouts
 

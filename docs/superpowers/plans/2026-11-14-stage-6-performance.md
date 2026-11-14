@@ -93,3 +93,6 @@ Conversations rendered again by parents and contexts are about 87% of the work o
 ## Ship
 
 Full `pnpm verify`; the switch timing script on the local instance (with and without 4× CPU slowdown) and the jsdom harness, recorded here as after numbers; local check on desktop and phone, light and dark (Bot and Window modes, switching, typing, drafts across two pages, offline send); merge, push, Worker deploy (the website ships with the Worker). No Controller change is planned; if one becomes necessary, release it as in stage 5.
+
+- [x] Full `pnpm verify` passed (Lab 2,762 tests). The after numbers are in [the performance README](../../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-6). The local check covered drafts across a desktop and a phone page, an offline send (the instance Controller paused with SIGSTOP and resumed) and folded cards in light and dark.
+- [x] Shipped 2026-11-14 as main 28001475 and Worker 2765de5d (previous 5374bba6), website only. The Relay started on the new version about 4 minutes after the deploy. Relay records did not change, so rolling back to 5374bba6 is safe. The e2e `bot-mode.spec.ts` still uses a "Show as section" helper written before this stage; stage 7 fixes it.

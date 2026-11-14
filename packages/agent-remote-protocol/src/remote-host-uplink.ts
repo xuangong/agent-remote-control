@@ -1,4 +1,5 @@
 import { TeamHostCall } from './team.js';
+import { OutboxHostCall } from './session-outbox.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
@@ -47,6 +48,10 @@ const requestPath = Type.String({
 export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ ...rpc, type: Type.Literal('team_request'), call: TeamHostCall }, object),
   Type.Object({ ...rpc, type: Type.Literal('team_response'), status: Type.Integer({minimum:200, maximum:599}), body: Type.String() }, object),
+  // The outbox: a Controller that asked for it polls, claims and settles the messages waiting for its Host; the Relay says when one arrives.
+  Type.Object({ ...rpc, type: Type.Literal('outbox_request'), call: OutboxHostCall }, object),
+  Type.Object({ ...rpc, type: Type.Literal('outbox_response'), status: Type.Integer({ minimum: 200, maximum: 599 }), body: Type.String() }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('outbox_ready') }, object),
   Type.Union([
     Type.Object({ uplinkVersion: version, type: Type.Literal('register'), installationId: identity, name: identity, environment: Type.Optional(HostEnvironment), controller: Type.Optional(ControllerIdentity), providerManagement: Type.Optional(Type.Literal(true)), tpmManagement: Type.Optional(Type.Literal(true)), credentialRotation: Type.Optional(Type.Literal(true)),
       providerId: Type.Literal('dsh') }, object),
@@ -58,7 +63,7 @@ export const RemoteHostUplinkMessage = Type.Union([
   // teamSuccession: Team recipients follow a generic succession of their session, including one to another provider.
   // callForSupport: the Host runs Call For Support groups: requester seats, coordinators and supporters.
   // It requested them with callForSupport=1 and named its read-only providers with readOnlyProvider=<id> query parameters.
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), outbox: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   // Only after the Relay acknowledged sessionStates in registered; reply facts only after it acknowledged sessionStates: 2.
@@ -78,7 +83,7 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'team_response' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'team_response' | 'outbox_response' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

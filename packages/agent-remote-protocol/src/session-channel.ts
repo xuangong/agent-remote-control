@@ -3,6 +3,7 @@ import { SessionMigration } from './session-migration.js';
 import { SessionStateHost, SessionStateRef, SessionStateUpdate, SESSION_STATE_LIMIT } from './session-states.js';
 import { SessionRead, SessionReadsSince, SESSION_READ_LIMIT } from './session-reads.js';
 import { SessionDraft, SESSION_DRAFT_LIMIT } from './session-drafts.js';
+import { OutboxEntry, OUTBOX_HOST_LIMIT, OUTBOX_LIMIT } from './session-outbox.js';
 import { type Static, Type } from '@sinclair/typebox';
 import { ClientMessage, IncompatibleProtocolVersionErrorMessage, NegotiateRequest, ServerMessage } from './messages.js';
 import { ProtocolVersionSchema } from './version.js';
@@ -41,6 +42,10 @@ export const SessionChannelServerMessage = Type.Union([
   // Only on channels that requested drafts. A snapshot carries every draft of the account; other frames the ones that changed.
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_drafts'), snapshot: Type.Optional(Type.Literal(true)),
     drafts: Type.Array(SessionDraft, { maxItems: SESSION_DRAFT_LIMIT }) }),
+  // Only on channels that requested the outbox. A snapshot carries every entry of the account; other frames the ones that
+  // changed and the IDs of the ones that left it (delivered or cancelled).
+  Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('session_outbox'), snapshot: Type.Optional(Type.Literal(true)),
+    entries: Type.Array(OutboxEntry, { maxItems: OUTBOX_LIMIT }), removed: Type.Optional(Type.Array(OutboxEntry.properties.id, { maxItems: OUTBOX_HOST_LIMIT })) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('ready'), successions: Type.Optional(Type.Literal(1)), preemption: Type.Optional(Type.Literal(1)) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('message'), subscriptionId: SubscriptionId, message: Type.Union([ServerMessage, IncompatibleProtocolVersionErrorMessage]) }),
   Strict({ protocolVersion: ProtocolVersionSchema, type: Type.Literal('closed'), subscriptionId: SubscriptionId, code: Type.Integer(), reason: Type.String() }),

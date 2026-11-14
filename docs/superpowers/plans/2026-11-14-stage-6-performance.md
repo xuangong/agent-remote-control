@@ -60,6 +60,7 @@ Conversations rendered again by parents and contexts are about 87% of the work o
 - [x] A shown conversation renders with its parent, as before: its presentation reads App state when it renders, so it is never stale.
 - [x] Surfaces render a portal again only when its registrations changed (a revision per entry), once per App render instead of twice.
 - [x] Tests: `conversation-props.test.ts`; the render budgets hold; the full Lab suite passes.
+- [x] Found by the full verify: a conversation its parent does not render again (one a dock keeps, a hidden pane) resolved its target only when the operations context changed, so with a stable context a managed Team window stayed on the member's predecessor. The context now takes a new value when succession publishes or a Team's revision changes (`resolutionRevision`), and every conversation resolves its target again then; App's other renders leave it alone.
 
 ## Task 4: One roster projection per render
 
@@ -71,7 +72,7 @@ Conversations rendered again by parents and contexts are about 87% of the work o
 
 **Files:** `src/components/TeamMenu.tsx`, `src/hooks/useTpmWork.ts`, App wiring (+ tests).
 
-- [x] The Team roster polls every 4 s while the Team menu is open or a Team is forming (a member is still reserved); every 30 s otherwise; never while the page is hidden; at once when the menu opens or the page becomes visible.
+- [x] The Team roster polls every 4 s while the Team menu is open, a Team is forming (a member is still reserved) or a Team member's conversation is open (its seat follows the member's successor through the roster); every 30 s otherwise; never while the page is hidden; at once when any of these begins or the page becomes visible.
 - [x] TPM catalogs poll every 10 s while TPM is in view (its list or a TPM workspace); every 60 s otherwise; never while hidden; at once on focus.
 - [x] Tests (fake timers): requests per minute in each case. Session relations already skip hidden pages and refresh on local changes; they keep their 10 s.
 

@@ -113,7 +113,9 @@ it('releases a folded pane at once, without waiting for the grace period, and ke
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 15000);
 
-it('opens a conversation again by itself when its Host comes back after an attempt failed while it was away', async () => {
+for (const known of [true, false]) it(known
+  ? 'does not ask a Host the page knows is away, and opens the conversation by itself when it comes back'
+  : 'opens a conversation again by itself when its Host comes back after an attempt failed while it was away', async () => {
   const server = createRecordedValidationServer();
   const { url } = await server.http.listen();
   const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address =>
@@ -122,12 +124,14 @@ it('opens a conversation again by itself when its Host comes back after an attem
   const target = { hostId: 'local', providerId: 'recorded', nativeSessionId: created.payload.sessionId, title: 'Returning conversation' };
   const connections = new ConversationConnections(transport, url), drafts = new DraftStore(url);
   const directory = new SessionDirectoryClient(url);
-  const attach = vi.spyOn(directory, 'attach')
-    .mockRejectedValueOnce(new Error('The Host disconnected while opening the session. Wait for it to reconnect, then reopen the same session.'))
-    .mockResolvedValue({ agentId: 'agent-returning', nativeSessionId: target.nativeSessionId });
+  const attach = known ? vi.spyOn(directory, 'attach').mockResolvedValue({ agentId: 'agent-returning', nativeSessionId: target.nativeSessionId })
+    : vi.spyOn(directory, 'attach')
+      .mockRejectedValueOnce(new Error('The Host disconnected while opening the session. Wait for it to reconnect, then reopen the same session.'))
+      .mockResolvedValue({ agentId: 'agent-returning', nativeSessionId: target.nativeSessionId });
   let setOffline!: (value: boolean) => void;
   function Harness() {
-    const [offline, change] = useState(true); setOffline = change;
+    // Known: the page learned the Host left before the conversation opened. Otherwise the attempt finds out first.
+    const [offline, change] = useState(known); setOffline = change;
     return <WorkspaceReady.Provider value={true}><ConversationConnectionScope.Provider value={connections}>
       <SessionConversation storageScope={url} baseUrl={url} target={target} hostLabel="Test Host" directoryFor={() => directory}
         compact={false} active offline={offline} transport={transport} draftStore={drafts} familyRoot entries={[target]} onNavigate={async () => {}} />
@@ -135,13 +139,18 @@ it('opens a conversation again by itself when its Host comes back after an attem
   }
   const container = await render(<Harness />);
   try {
-    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
-    // While the Host is away the failure needs no Retry: the conversation opens again by itself.
+    if (known) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(attach).not.toHaveBeenCalled();
+    } else {
+      await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+      await act(async () => setOffline(true));
+    }
+    // While the Host is away the conversation needs no Retry: it opens by itself.
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(container.textContent).not.toContain('The Host disconnected while opening the session.');
     expect(container.querySelector('[role="alert"] button')).toBeNull();
     await act(async () => setOffline(false));
-    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(known ? 1 : 2));
     await vi.waitFor(() => expect(container.textContent).toContain('Recorded history 1'));
     expect(container.textContent).not.toContain('The Host disconnected while opening the session.');
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }

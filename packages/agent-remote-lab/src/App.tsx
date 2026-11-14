@@ -2910,6 +2910,8 @@ function AppContent({
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
         {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
       ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
+      ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
+        detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
       headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })

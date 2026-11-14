@@ -32,7 +32,9 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice }: { entrySelection?: TimelineEntrySelection;
+  /** Said in place of Opening session while the conversation cannot load yet, for example because its Host is offline. */
+  loadingNotice?: { title: string; detail: string };
   /** Sends from a draft-only composer whose Host is offline: the message waits for the Host. */
   sendLater?: ComponentProps<typeof DraftComposer>['sendLater'];
   /** Content above this conversation's own entries once its oldest page is loaded: a bot's earlier sessions after a handoff. */
@@ -163,7 +165,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
       agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
-      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} />
+      questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} />
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{workspaceLink}{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <div className="lab-composer-region">
     {composerStatus}
@@ -271,7 +273,7 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
   agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
-  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection'> & {
+  questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice'> & {
     readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string; agentFailure?: string;
     /** A visible heading hosts the search trigger so it never covers Timeline content; null until it mounts. */
     searchTriggerTarget?: HTMLElement | null;
@@ -394,8 +396,8 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
           </> : nativeTakeover ? null : isAttaching ? <>
             <div className="lab-empty-state">
               <span className="lab-empty-icon" aria-hidden="true">↗</span>
-              <h3>{sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} {attachingAgentId}</h3>
-              <p>The conversation appears here once the Host has loaded it.</p>
+              <h3>{loadingNotice ? loadingNotice.title : `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId ?? ''}`.trim()}</h3>
+              <p>{loadingNotice ? loadingNotice.detail : 'The conversation appears here once the Host has loaded it.'}</p>
             </div>
             {/* What follows the conversation (messages waiting for an offline Host) shows before it loads too. */}
             {timelineEnd ? <div className="agent-timeline-entries lab-timeline-end">{timelineEnd}</div> : null}

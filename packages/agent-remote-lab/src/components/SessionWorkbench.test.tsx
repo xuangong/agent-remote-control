@@ -267,3 +267,11 @@ it('shows what follows the conversation even before it has loaded, so messages w
   expect(container.querySelector('.lab-empty-state')).not.toBeNull();
   expect(container.querySelector('.waiting-message')?.textContent).toBe('Waiting for Mac mini');
 });
+
+it('says why a conversation cannot open yet when its Host is offline', async () => {
+  const container = await render(<SessionWorkbench state={undefined} sessionStatus="connecting" attachingAgentId="" actions={{}}
+    loadingNotice={{ title: 'Mac mini is offline', detail: 'The conversation appears here when it is back. Messages you send now wait for it.' }} />);
+  const empty = container.querySelector('.lab-empty-state')!;
+  expect(empty.querySelector('h3')?.textContent).toBe('Mac mini is offline');
+  expect(empty.querySelector('p')?.textContent).toBe('The conversation appears here when it is back. Messages you send now wait for it.');
+});

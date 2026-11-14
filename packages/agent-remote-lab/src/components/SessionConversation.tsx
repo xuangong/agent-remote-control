@@ -184,6 +184,13 @@ export function SessionConversation(props: SessionConversationProps) {
     });
     return () => { stopped = true; abort.abort(); };
   }, [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId, currentTarget.parentNativeSessionId, historyRoleId, attachmentError, attempt, connections, enabled, canAttach, directory, props.attachedSession?.agentId, props.attachmentManaged, disconnected]);
+  // A Host that comes back opens the conversation again when an attempt failed, or none was made, while it was away.
+  const wasOffline = useRef(props.offline);
+  useEffect(() => {
+    const returned = wasOffline.current && !props.offline;
+    wasOffline.current = props.offline;
+    if (returned && (error || !session)) setAttempt(value => value + 1);
+  }, [props.offline]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
   // A view whose locator was restored while the Relay is unreachable keeps showing its last resolved target, attached;
   // only its input waits (it queues) until a discovery confirms the locator again.

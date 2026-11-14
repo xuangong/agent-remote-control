@@ -112,3 +112,34 @@ it('releases a folded pane at once, without waiting for the grace period, and ke
     await vi.waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 15000);
+
+it('opens a conversation again by itself when its Host comes back after an attempt failed while it was away', async () => {
+  const server = createRecordedValidationServer();
+  const { url } = await server.http.listen();
+  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address =>
+    new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
+  const created = await transport.createAgent('agent-returning', 'recorded', { sessionId: 'native-returning' });
+  const target = { hostId: 'local', providerId: 'recorded', nativeSessionId: created.payload.sessionId, title: 'Returning conversation' };
+  const connections = new ConversationConnections(transport, url), drafts = new DraftStore(url);
+  const directory = new SessionDirectoryClient(url);
+  const attach = vi.spyOn(directory, 'attach')
+    .mockRejectedValueOnce(new Error('The Host disconnected while opening the session. Wait for it to reconnect, then reopen the same session.'))
+    .mockResolvedValue({ agentId: 'agent-returning', nativeSessionId: target.nativeSessionId });
+  let setOffline!: (value: boolean) => void;
+  function Harness() {
+    const [offline, change] = useState(true); setOffline = change;
+    return <WorkspaceReady.Provider value={true}><ConversationConnectionScope.Provider value={connections}>
+      <SessionConversation storageScope={url} baseUrl={url} target={target} hostLabel="Test Host" directoryFor={() => directory}
+        compact={false} active offline={offline} transport={transport} draftStore={drafts} familyRoot entries={[target]} onNavigate={async () => {}} />
+    </ConversationConnectionScope.Provider></WorkspaceReady.Provider>;
+  }
+  const container = await render(<Harness />);
+  try {
+    await vi.waitFor(() => expect(container.textContent).toContain('The Host disconnected while opening the session.'));
+    expect(attach).toHaveBeenCalledTimes(1);
+    await act(async () => setOffline(false));
+    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(container.textContent).toContain('Recorded history 1'));
+    expect(container.textContent).not.toContain('The Host disconnected while opening the session.');
+  } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
+}, 20000);

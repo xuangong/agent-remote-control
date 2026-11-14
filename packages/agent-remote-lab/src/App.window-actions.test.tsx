@@ -308,19 +308,22 @@ async function trackedPrimaryFixture(staleAgent = false, focus: 'primary' | 'sid
     timelineRequested: () => timelineRequested, releaseTimeline, open: () => menu.onOpen(target) };
 }
 
-it.each(['primary', 'side'] as const)('restores a saved Track with %s focus after native confirmation finishes later than the Window binding', async focus => {
+it.each(['primary', 'side'] as const)('restores a saved Track with %s focus beside the bot it was opened on, after native confirmation finishes later than the Window binding', async focus => {
   const test = await trackedPrimaryFixture(false, focus);
+  // Rule 6: `main` is a bot showing A, so the tracked D opens beside it as a new primary group, with its Side.
+  const opened = () => test.workspace().window?.views.find(view => view.placement === 'primary' && view.binding?.nativeSessionId === 'D');
   try {
     await act(async () => test.open());
-    await settleTrackedPrimary(() => { expect(test.timelineRequested()).toBe(true); expect(test.workspace().window?.views[0]?.binding?.nativeSessionId).toBe('D'); });
+    await settleTrackedPrimary(() => { expect(test.timelineRequested()).toBe(true); expect(opened()).toBeDefined(); });
+    expect(test.workspace().window?.views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('A');
     expect(test.confirmed).not.toContain('D');
-    expect(test.workspace().window?.views).toHaveLength(1);
+    expect(test.workspace().window?.views).toHaveLength(2);
     await act(async () => test.releaseTimeline());
     await settleTrackedPrimary(() => expect(test.confirmed).toContain('D'));
-    await settleTrackedPrimary(() => expect(test.workspace().window?.views.find(view => view.attachedTo === 'main')?.binding?.nativeSessionId).toBe('S'));
-    const side = test.workspace().window!.views.find(view => view.attachedTo === 'main')!;
-    expect(test.workspace().window?.selectedViewId).toBe(focus === 'primary' ? 'main' : side.id);
-    expect(test.succession().document.windowBindings?.find(binding => binding.viewId === 'main' && binding.slotId === 'tracked-slot')).toBeDefined();
+    await settleTrackedPrimary(() => expect(test.workspace().window?.views.find(view => view.attachedTo === opened()!.id)?.binding?.nativeSessionId).toBe('S'));
+    const side = test.workspace().window!.views.find(view => view.attachedTo === opened()!.id)!;
+    expect(test.workspace().window?.selectedViewId).toBe(focus === 'primary' ? opened()!.id : side.id);
+    expect(test.succession().document.windowBindings?.find(binding => binding.viewId === opened()!.id && binding.slotId === 'tracked-slot')).toBeDefined();
   } finally { test.releaseTimeline(); }
 }, 10000);
 
@@ -331,5 +334,6 @@ it('resolves a shared primary Track from its live identity instead of a saved ru
   await settleTrackedPrimary(() => expect(test.confirmed).toContain('D'));
   expect(test.contentConnections).not.toContain('stale-D');
   expect(test.succession().binding?.session.agentId).toBe('agent-D');
-  expect(test.workspace().window?.views[0]?.binding?.nativeSessionId).toBe('D');
+  expect(test.workspace().window?.views.find(view => view.placement === 'primary' && view.binding?.nativeSessionId === 'D')).toBeDefined();
+  expect(test.workspace().window?.views.find(view => view.id === 'main')?.binding?.nativeSessionId).toBe('A');
 }, 10000);

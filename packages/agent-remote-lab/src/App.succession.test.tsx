@@ -541,24 +541,26 @@ it('retains the selected session draft while cached navigation waits for checks 
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('C');
   try {
     await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', agentId: 'agent-C', title: 'C' }); });
-    expect(visibleText(f.view)).toContain('Cached C content');
+    // C opens beside A (rule 6) as the selected primary group, showing its cached content at once.
+    const groupC = () => f.view.querySelector<HTMLElement>('[data-primary-group-id][data-selected="true"]')!;
+    await settleApp(() => expect(visibleText(groupC())).toContain('Cached C content'));
     const owner = primary.draftBinding;
     expect(owner).toBeDefined();
-    await editVisiblePrompt(f.view, 'C edit before connection');
+    await editVisiblePrompt(groupC(), 'C edit before connection');
     expect(owner!.store.get(owner!.key)).toBe('C edit before connection');
-    expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    expect(visibleQuery(groupC(), '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
     await act(async () => releaseReplay());
     await settleApp(() => expect(succession.desired?.target.native.nativeSessionId).toBe('C'));
     expect(primary.draftBinding).toEqual(owner);
     await act(async () => releaseAttach());
     await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('C'));
     expect(primary.draftBinding).toEqual(owner);
-    expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
+    expect(visibleQuery(groupC(), '[data-testid="prompt-input"]')?.textContent).toBe('C edit before connection');
     expect(f.frames.filter(frame => frame.message?.type === 'send_message')).toEqual([]);
   } finally { releaseReplay(); releaseAttach(); }
 });
 
-it('changes cached content immediately on session selection and clears it for uncached targets', async () => {
+it('opens a selected session beside with its cached content at once, and an uncached one without content', async () => {
   const real = successionHooks.useSessionSuccession;
   const realDirectory = directoryComponents.SessionDirectory;
   let directory!: ComponentProps<typeof realDirectory>;
@@ -571,14 +573,17 @@ it('changes cached content immediately on session selection and clears it for un
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const release = f.pauseReplay();
   try {
+    const selectedGroup = () => f.view.querySelector<HTMLElement>('[data-primary-group-id][data-selected="true"]')!;
     await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'C', agentId: 'agent-C', title: 'C' }); });
-    expect(visibleText(f.view)).toContain('Cached C content');
-    expect(visibleText(f.view)).not.toContain('Cached A content');
+    // C opens beside A with its cached content; A keeps its own conversation (rule 6).
+    await settleApp(() => expect(visibleText(selectedGroup())).toContain('Cached C content'));
+    expect(visibleText(selectedGroup())).not.toContain('Cached A content');
+    expect(visibleText(f.view)).toContain('Cached A content');
     expect(succession.binding).toBeUndefined();
     await act(async () => { directory.onSelect({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'D', agentId: 'agent-D', title: 'D' }); });
-    expect(succession.selected?.nativeSessionId).toBe('D');
+    await settleApp(() => expect(succession.selected?.nativeSessionId).toBe('D'));
     expect(succession.state).toBeUndefined();
-    expect(visibleText(f.view)).not.toContain('Cached C content');
+    expect(visibleText(selectedGroup())).not.toContain('Cached C content');
     await act(async () => { release(); });
     await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('D'));
   } finally { release(); }
@@ -2152,10 +2157,23 @@ it.each(['ordinary', 'Track'] as const)('leaves a focused unlinked Side through 
     const dock = workspace.window!.views.find(view => view.placement === 'dock' && view.binding?.nativeSessionId === 'S')!;
     await act(async () => { await workspace.operate({ type: 'view.collapse', viewId: dock.id, collapsed: true }); await workspace.operate({ type: 'view.select', viewId: workspace.window!.selectedPrimaryViewId! }); });
   }
-  await open(side);
+  if (sharedWindow && navigation === 'Track') {
+    // S is already a bot of this group, its own folded dock: Track selects and unfolds it instead of opening it again (rule 6).
+    await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
+    const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes(side.title));
+    await settleApp(() => expect(row()).toBeDefined());
+    await act(async () => row()!.click());
+    await settleApp(() => {
+      const dock = workspace.window!.views.find(view => view.placement === 'dock' && view.binding?.nativeSessionId === 'S')!;
+      expect(dock.collapsed).toBe(false);
+      expect(workspace.window!.selectedViewId).toBe(dock.id);
+    });
+  } else await open(side);
   if (sharedWindow) {
-    expect(succession.binding?.session.viewId).not.toBe(slot.id);
-    expect(succession.desired?.slot.owners).not.toEqual(owners);
+    if (navigation !== 'Track') {
+      expect(succession.binding?.session.viewId).not.toBe(slot.id);
+      expect(succession.desired?.slot.owners).not.toEqual(owners);
+    }
     expect(independent()?.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('Independent S draft');
     expect(succession.document.slots.find(value => value.id === slot.id)?.owners).toEqual(owners);
   } else {
@@ -2811,7 +2829,7 @@ it('keeps both primary conversations mounted with separate drafts and creates an
 
 });
 
-it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a %s session into the selected primary group and preserves the other group', async navigation => {
+it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a %s session beside the selected bot as a new primary group and keeps every other group', async navigation => {
   if (navigation === 'Favorites') vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realDirectory = directoryComponents.SessionDirectory, realAttention = attentionHooks.useSessionAttention;
@@ -2855,15 +2873,21 @@ it.each(['directory', 'directory-open', 'Favorites', 'Track'] as const)('opens a
     await act(async () => f.view.querySelector<HTMLButtonElement>('[aria-label="Tracked sessions"]')!.click());
     await act(async () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(row => row.textContent?.includes(target.title))!.click());
   }
+  // Rule 6: X is a bot and keeps its conversation; D opens beside it as a new primary group, selected.
+  const selectedGroup = () => f.view.querySelector<HTMLElement>('[data-primary-group-id][data-selected="true"]');
   await settleApp(() => {
-    expect(x()?.getAttribute('data-selected')).toBe('true');
-    expect(f.view.querySelector('[data-primary-group-id="primary-X"]')?.textContent).toContain('Destination D');
+    expect(selectedGroup()?.getAttribute('data-primary-group-id')).not.toBe('primary-X');
+    expect(selectedGroup()?.textContent).toContain('Destination D');
   });
   expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).toBe(originalA);
+  // A compact layout shows only the selected group; elsewhere X still shows its own conversation.
+  if (navigation !== 'Favorites') expect(x()?.textContent).toContain('Secondary X');
   const current = navigation === 'Track' || navigation === 'Favorites' ? setup.windowDocument : JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window;
-  expect(current.selectedPrimaryViewId).toBe('primary-X');
+  const opened = current.views.find((view: { binding?: { nativeSessionId: string } }) => view.binding?.nativeSessionId === 'D');
+  expect(opened?.placement).toBe('primary');
+  expect(current.selectedPrimaryViewId).toBe(opened.id);
   expect(current.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-  expect(current.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('D');
+  expect(current.views.find((view: { id: string }) => view.id === 'primary-X')?.binding?.nativeSessionId).toBe('X');
 });
 
 it('selects another primary group while a native attachment is pending without restoring stale selection', async () => {
@@ -2900,7 +2924,7 @@ it('selects another primary group while a native attachment is pending without r
 });
 
 
-it.each([false, true])('binds the global directory selection into a focused ordinary dock view (empty=%s) without replacing primary', async empty => {
+it.each([false, true])('opens the global directory selection in a focused empty dock, or beside a focused dock bot (empty=%s), without replacing primary', async empty => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realDirectory = directoryComponents.SessionDirectory;
   let directory!: ComponentProps<typeof realDirectory>;
@@ -2921,13 +2945,23 @@ it.each([false, true])('binds the global directory selection into a focused ordi
     const saved = JSON.parse(localStorage.getItem(`agent-remote:recovery:${f.scope}:shared-window:${document.id}`)!).window;
     expect(saved.selectedPrimaryViewId).toBe('primary-A');
     expect(saved.views.find((view: { id: string }) => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-    expect(saved.views.find((view: { id: string }) => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
+    expectDockedBeside(saved.views, empty);
   });
   expect(f.view.querySelector('[data-primary-group-id="primary-A"]')).not.toBeNull();
 });
 
+/** An empty dock takes the session; a dock bot keeps X and the session opens in a new dock right after it (rule 6). */
+function expectDockedBeside(views: readonly WorkspaceWindow['views'][number][], empty: boolean) {
+  const index = views.findIndex(view => view.binding?.nativeSessionId === 'D');
+  expect(views[index]?.placement).toBe('dock');
+  if (empty) { expect(views[index]?.id).toBe('ordinary-dock'); return; }
+  expect(views[index]?.id).not.toBe('ordinary-dock');
+  expect(views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('X');
+  expect(views[index - 1]?.id).toBe('ordinary-dock');
+}
 
-it.each([false, true])('uses the focused mobile dock for Favorites context (empty=%s)', async empty => {
+
+it.each([false, true])('uses the focused mobile dock for Favorites context, opening beside a dock bot (empty=%s)', async empty => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   const realFavorites = favoritesComponents.FavoritesMenu;
@@ -2949,7 +2983,7 @@ it.each([false, true])('uses the focused mobile dock for Favorites context (empt
   await settleApp(() => {
     expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
     expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-    expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
+    expectDockedBeside(setup.windowDocument.views, empty);
     expect(menu.currentSession?.nativeSessionId).toBe('D');
   });
 });
@@ -3006,7 +3040,7 @@ it.each([false, true])('keeps the global Ask preference independent of the focus
 }, testDeadline);
 
 it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, true].map(empty => ({ placement, empty, mobile: false }))).concat([{ placement: 'dock', empty: true, mobile: true }]))
-('opens Track into the selected ordinary $placement view (empty=$empty, mobile=$mobile) and preserves primary', async ({ placement, empty, mobile }) => {
+('opens Track into the selected empty $placement view, or beside a bot there (empty=$empty, mobile=$mobile), and preserves primary', async ({ placement, empty, mobile }) => {
   if (mobile) vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 1180px'), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })));
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realAttention = attentionHooks.useSessionAttention;
@@ -3027,15 +3061,28 @@ it.each((['dock', 'attached', 'float'] as const).flatMap(placement => [false, tr
   const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Track D'));
   await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
   await act(async () => row()!.click());
-  await settleApp(() => expect(setup.windowDocument.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('D'));
-  expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
-  expect(setup.windowDocument.selectedViewId).toBe(selected.id);
-  expect(setup.windowDocument.views.map(view => view.id)).toEqual(['primary-A', selected.id]);
+  const openedD = () => setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'D');
+  await settleApp(() => expect(openedD()).toBeDefined());
   expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-  const opened = setup.windowDocument.views.find(view => view.id === selected.id)!;
-  expect(opened.placement).toBe(placement);
-  expect(opened.attachedTo).toBe(selected.attachedTo);
-  expect(opened.geometry).toEqual(selected.geometry);
+  const opened = openedD()!;
+  if (empty) {
+    // An empty view takes the session in place.
+    expect(setup.windowDocument.selectedPrimaryViewId).toBe('primary-A');
+    expect(setup.windowDocument.selectedViewId).toBe(selected.id);
+    expect(setup.windowDocument.views.map(view => view.id)).toEqual(['primary-A', selected.id]);
+    expect(opened.id).toBe(selected.id);
+    expect(opened.placement).toBe(placement);
+    expect(opened.attachedTo).toBe(selected.attachedTo);
+    expect(opened.geometry).toEqual(selected.geometry);
+    return;
+  }
+  // A bot keeps X; D opens beside it: a dock after the dock, a float for a float, a primary group for a Side.
+  expect(setup.windowDocument.views.find(view => view.id === selected.id)?.binding?.nativeSessionId).toBe('X');
+  expect(opened.id).not.toBe(selected.id);
+  expect(opened.placement).toBe(placement === 'attached' ? 'primary' : placement);
+  expect(opened.attachedTo).toBeUndefined();
+  expect(setup.windowDocument.selectedViewId).toBe(opened.id);
+  if (placement === 'dock') expect(setup.windowDocument.views.map(view => view.id)).toEqual(['primary-A', selected.id, opened.id]);
 });
 
 it('rejects Track replacement of the selected managed view without changing primary', async () => {
@@ -3060,7 +3107,7 @@ it('rejects Track replacement of the selected managed view without changing prim
   expect(setup.windowDocument.selectedViewId).toBe(managed.id);
 });
 
-it('opens Track against the latest local binding while an earlier save is pending', async () => {
+it('opens Track beside a dock bot whose replacement is still saving, leaving that dock to its own save', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} });
   const realAttention = attentionHooks.useSessionAttention, realWindow = windowWorkspaceHooks.useWindowWorkspace;
   let workspace!: ReturnType<typeof realWindow>;
@@ -3088,15 +3135,20 @@ it('opens Track against the latest local binding while an earlier save is pendin
     const row = () => [...f.view.querySelectorAll<HTMLButtonElement>('.lab-tracking-floating .lab-session-row')].find(item => item.textContent?.includes('Queued D'));
     await settleApp(() => { expect(row()).toBeDefined(); expect(row()!.disabled).toBe(false); });
     await act(async () => row()!.click());
-    expect(workspace.readWindow()?.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D');
+    // The dock is a bot showing Y (still saving): D opens beside it in a new dock, queued after that save, and the dock keeps Y.
+    expect(workspace.readWindow()?.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('Y');
     expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('X');
   } finally { await act(async () => { release(); await replacement; }); }
-  await settleApp(() => expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('D'));
+  const opened = () => setup.windowDocument.views.find(view => view.binding?.nativeSessionId === 'D');
+  await settleApp(() => expect(opened()).toBeDefined());
+  expect(setup.windowDocument.views.find(view => view.id === 'ordinary-dock')?.binding?.nativeSessionId).toBe('Y');
+  expect(opened()!.placement).toBe('dock');
+  expect(setup.windowDocument.views.map(view => view.id)).toEqual(['primary-A', 'ordinary-dock', opened()!.id]);
   const operation = f.requests.map(request => request.body?.operation as WindowMutation['operation'] | undefined)
     .find(operation => operation?.type === 'view.bind' && operation.binding.nativeSessionId === 'D');
-  expect(operation).toMatchObject({ type: 'view.bind', viewId: 'ordinary-dock', expectedBinding: binding('Y') });
+  expect(operation).toMatchObject({ type: 'view.bind', viewId: opened()!.id });
   expect(setup.windowDocument.views.find(view => view.id === 'primary-A')?.binding?.nativeSessionId).toBe('A');
-  expect(setup.windowDocument.selectedViewId).toBe('ordinary-dock');
+  expect(setup.windowDocument.selectedViewId).toBe(opened()!.id);
 });
 
 it.each((['dock', 'attached', 'empty-dock'] as const).flatMap(destination => (['Team', 'TPM'] as const).map(feature => ({ destination, feature }))))

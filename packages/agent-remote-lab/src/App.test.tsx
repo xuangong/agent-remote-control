@@ -1007,8 +1007,10 @@ it('keeps a confirmed title when an older session attachment finishes afterward'
     await act(async () => receiveTitle({ hostId: 'local', providerId: target.providerId,
       nativeSessionId: target.nativeSessionId, title: 'Confirmed target title', revision: 1 }));
     await act(async () => { attachment.resolve({ agentId: 'target-agent', nativeSessionId: target.nativeSessionId }); await attachment.promise; });
-    expect(container.querySelector('.lab-primary-title')?.textContent).toBe('Confirmed target title');
-    expect(document.title).toBe('Confirmed target title · Agent Remote Control');
+    // The target opens beside the first conversation (rule 6), as the selected primary group.
+    expect(container.querySelector('[data-primary-group-id][data-selected="true"] .lab-primary-title')?.textContent).toBe('Confirmed target title');
+    // The page keeps naming the Window after its first conversation; the older title never returns.
+    expect(document.title).not.toContain('Old target title');
     expect(JSON.parse(localStorage.getItem(`agent-remote-opened:${baseUrl}`) ?? '[]')).toContainEqual(expect.objectContaining({
       nativeSessionId: target.nativeSessionId, title: 'Confirmed target title',
     }));

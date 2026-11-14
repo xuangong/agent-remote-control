@@ -68,10 +68,12 @@ A pane of a group shown in Bot mode is a bot, so it keeps its conversation every
 
 **Files:** `packages/agent-remote-lab/src/App.tsx` (`bindDirectorySession`), the Window tests that describe in-place opens (`App.window*.test.tsx`, `App.test.tsx`, `App.succession.test.tsx`).
 
-- [ ] Opening another session (directory, Favorites, search, Track, a new session) on a bot's pane opens it beside: a new view in the target's place (a primary group beside a primary, a dock after a dock, a float for a float, a primary group for a Side), then the ordinary binding into that empty view, so Track restore, drafts and succession work unchanged. A session that is already a bot of the group is selected instead.
-- [ ] In place: a pane of a group hidden in Bot mode, an empty view, a history view, and navigation within the bot's own chain (opening its handoff history; returning to current from history).
-- [ ] Rewrite the in-place expectations of the 19 Window tests to the beside behavior; keep the chain ones in place.
-- [ ] Commit `feat(lab): open another session beside a bot's pane`.
+- [x] Opening another session (directory, Favorites, search, Track, a new session) on a bot's pane opens it beside: a new view in the target's place (a primary group beside a primary, a dock after a dock, a float for a float, a primary group for a Side), then the ordinary binding into that empty view, so Track restore, drafts and succession work unchanged. A session that is already a bot of the group is selected instead.
+- [x] In place: a pane of a group hidden in Bot mode, an empty view, a history view, and navigation within the bot's own chain (opening its handoff history; returning to current from history).
+- [x] Rewrite the in-place expectations of the 19 Window tests to the beside behavior; keep the chain ones in place.
+- [x] Boundary kept on purpose: the Session View's own session switcher (▸ Sessions) and its Back/Forward keep navigating in place, because the Session View is protected; a pane navigated that way rebinds its bot, as Window mode always did.
+- [x] A restored Track lands beside the bot it was opened on, and its saved Sides and focus follow it there.
+- [x] Commit `feat(lab): open another session beside a bot's pane`.
 
 ### Task 7: Closing a bot's pane folds it; removing is explicit
 

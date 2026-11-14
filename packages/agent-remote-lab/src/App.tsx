@@ -676,6 +676,16 @@ function AppContent({
     const slot = succession.document.slots.find(slot => slot.id === sideSelections[sourceId]);
     return slot ? [sessionKey(compositionSelection(slot))] : [];
   }
+  /**
+   * The shared Window's view holding a slot, also while the bridge waits for discovery: a primary group opened beside a bot
+   * moments ago (a restored Track) gets its Sides even before the bridge maps it.
+   */
+  function sharedViewOf(slotId: string) {
+    const known = sharedViewForSlot(slotId), current = windowWorkspace.readWindow();
+    if (known || !current) return known;
+    const entry = succession.document.windowBindings?.find(entry => entry.windowId === current.id && entry.slotId === slotId);
+    return entry ? current.views.find(view => view.id === entry.viewId && !!view.binding && windowBindingKey(view.binding) === entry.bindingKey) : undefined;
+  }
   function setSideSelections(change: SideSelections | ((current: SideSelections) => SideSelections)) {
     const current = Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target]));
     const next = typeof change === 'function' ? change(current) : change;
@@ -683,7 +693,7 @@ function AppContent({
       const operations: WindowEdit[] = [];
       for (const [sourceId, targetId] of Object.entries(next)) {
         if (current[sourceId] === targetId) continue;
-        const source = sharedViewForSlot(sourceId); if (!source) continue;
+        const source = sharedViewOf(sourceId); if (!source) continue;
         const existing = targetId ? sharedViewForSlot(targetId) : undefined;
         if (existing?.attachedTo === source.id) {
           operations.push({ type: 'view.select', viewId: existing.id });
@@ -945,10 +955,10 @@ function AppContent({
         if (await openSession(primary, undefined, undefined, false, view ? () => trackedViews.get(entryId) : undefined, undefined, undefined, view?.primarySlot ?? slot.id)) trackedViews.select(entryId);
         return;
       }
+      // The session lands in the destination, or beside it when the destination is a bot (rule 6): the selected primary group shows it.
       const selectedDestination = () => {
-        const current = windowWorkspace.readWindow(), binding = current?.views.find(view => view.id === destination.viewId)?.binding;
-        return current?.id === destination.windowId && current.selectedPrimaryViewId === destination.viewId
-          && windowPrimaryViewId(current, current.selectedViewId) === destination.viewId
+        const current = windowWorkspace.readWindow(), viewId = current?.selectedPrimaryViewId, binding = current?.views.find(view => view.id === viewId)?.binding;
+        return current?.id === destination.windowId && !!viewId && windowPrimaryViewId(current, current.selectedViewId) === viewId
           && binding && sessionKey(binding) === sessionKey(primary) && binding.parentNativeSessionId === primary.parentNativeSessionId && !binding.sessionIntent;
       };
       letterRequest.current?.abort(); trackedViews.select();
@@ -956,7 +966,7 @@ function AppContent({
       setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined); closeContext();
       if (compactLayoutRef.current) setInspectorOpen(false);
       const opened = await bindDirectorySession(primary, destination, { primarySlot: view?.primarySlot ?? slot.id,
-        read: view ? () => selectedDestination() && windowWorkspace.readWindow()?.selectedViewId === destination.viewId ? trackedViews.get(entryId) : undefined : undefined });
+        read: view ? () => selectedDestination() && windowWorkspace.readWindow()?.selectedViewId === windowWorkspace.readWindow()?.selectedPrimaryViewId ? trackedViews.get(entryId) : undefined : undefined });
       if (opened && selectedDestination()) trackedViews.select(entryId);
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
@@ -1391,30 +1401,38 @@ function AppContent({
     if (current?.id !== destination.windowId || !view) return false;
     const expectedBinding = JSON.parse(destination.binding) as WindowSessionBinding | null;
     if (JSON.stringify(view.binding ?? null) !== destination.binding) throw new Error('The target session view changed. Choose a session again.');
-    // Rule 6 for a group whose bots carry details: a bot keeps its conversation, so another session opens beside it.
-    // Window panes of other groups still take another session in place until stage 2 gives panes the whole rule (close folds, remove is explicit).
+    // Rule 6: a pane of a group shown in Bot mode is a bot and keeps its conversation, so another session opens beside it:
+    // a new view in its place, bound as an empty view is, so Track restore, drafts and succession work as usual. A session that
+    // is already a bot here is selected instead. Navigation within the bot's own chain (its handoff history) stays in place.
+    let target = view, expected = expectedBinding;
     const shownGroup = windowWorkspace.readGroup(current.id);
-    if (shownGroup?.bots && hasBotAppearance(shownGroup) && isBotView(view)
+    if (shownGroup && hasBotAppearance(shownGroup) && isBotView(view) && session.sessionIntent !== 'history'
       && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session))) {
       const binding = windowSessionBinding(session);
-      const existing = current.views.find(candidate => candidate.placement === 'primary' && candidate.binding && windowBindingKey(candidate.binding) === windowBindingKey(binding));
-      const beside = existing ?? createWindowView(crypto.randomUUID(), binding, 'primary');
-      await windowWorkspace.operate({ type: 'batch', operations: [
-        ...(existing ? [] : [{ type: 'view.create' as const, view: beside }]), { type: 'view.select', viewId: beside.id },
-      ] });
-      return windowSession.openPrimary(session, session.agentId ? session as OpenedSession : undefined, false, undefined, undefined, beside.id, session.sessionIntent);
+      const existing = current.views.find(candidate => isBotView(candidate) && windowBindingKey(candidate.binding) === windowBindingKey(binding));
+      if (existing) {
+        await windowWorkspace.operate({ type: 'view.select', viewId: existing.id });
+        return existing.placement === 'primary'
+          ? windowSession.openPrimary(session, session.agentId ? session as OpenedSession : undefined, false, undefined, undefined, existing.id, session.sessionIntent) : true;
+      }
+      // A Side's place holds sessions of its source, so another session takes a primary group.
+      const placement = view.placement === 'dock' || view.placement === 'float' ? view.placement : 'primary';
+      const beside = createWindowView(crypto.randomUUID(), undefined, placement);
+      await windowWorkspace.operate({ type: 'batch', operations: [{ type: 'view.create', view: beside },
+        ...(placement === 'dock' ? [{ type: 'view.move' as const, viewId: beside.id, afterId: view.id }] : []), { type: 'view.select', viewId: beside.id }] });
+      target = beside; expected = null;
     }
 
-    if (view.placement === 'primary') {
+    if (target.placement === 'primary') {
       const pending = trackedView?.read ? { scope: baseUrl, transport, slotId: trackedView.primarySlot, read: trackedView.read } : undefined;
       if (trackedView) pendingViewRestore.current = pending;
       let opened = false;
       try {
-        opened = await windowSession.openPrimary(session, !trackedView && session.agentId ? session as OpenedSession : undefined, false, undefined, trackedView?.primarySlot, view.id, session.sessionIntent, expectedBinding);
+        opened = await windowSession.openPrimary(session, !trackedView && session.agentId ? session as OpenedSession : undefined, false, undefined, trackedView?.primarySlot, target.id, session.sessionIntent, expected);
         return opened;
       } finally { if (!opened && trackedView && pendingViewRestore.current === pending) pendingViewRestore.current = undefined; }
     }
-    editWindow({ type: 'view.bind', viewId: view.id, binding: windowSessionBinding(session), expectedBinding });
+    editWindow({ type: 'view.bind', viewId: target.id, binding: windowSessionBinding(session), expectedBinding: expected });
     return true;
   }
   async function openTeamLayout(team: Team, sourceViewAddress?: string): Promise<boolean> {

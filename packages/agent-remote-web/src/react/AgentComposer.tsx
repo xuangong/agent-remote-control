@@ -362,8 +362,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   }
 
   async function submitLater(): Promise<void> {
-    if (!laterMode || laterBlocked || !hasContent || currentDraft.pending || !sendLater) return;
+    // The draft object holds the text typed so far, even before this render saw it.
     const submitted = currentDraft.text;
+    if (!laterMode || laterBlocked || !submitted.trim() || currentDraft.pending || !sendLater) return;
     currentDraft.pending = 'send';
     currentDraft.feedback = undefined;
     refresh((value) => value + 1);
@@ -465,7 +466,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement> | globalThis.KeyboardEvent): void {
-    if (readOnly) return;
+    // A session that reads as read-only while its Host is offline can still be written to later.
+    if (readOnly && !laterMode) return;
     const nativeEvent = 'nativeEvent' in event ? event.nativeEvent : event;
     if (nativeEvent.isComposing || nativeEvent.keyCode === 229 || composing.current) return;
     if (showCommands && event.key === 'Escape') {
@@ -553,7 +555,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     </div> : null}
     <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">Message</label>
     {richEnabled ? <ComposerEditor key={editorIdentity} ref={editorRef} id={`${controlId}-input`} parts={imageDraft.parts} images={imageDraft.images}
-      disabled={(!state?.agent && !draftOnly) || readOnly || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
+      disabled={(!state?.agent && !draftOnly && !laterMode) || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
       onFiles={addImageFiles} onImport={importImageParts} onRetry={imageId => { if (!blockFirstInputImages()) imageDraft.retry(imageId); }} onKeyDown={handleKeyDown}
       describedBy={`${controlId}-hint`} controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       activeDescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined} /> : <textarea
@@ -566,16 +568,16 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       onKeyDown={handleKeyDown}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
-      disabled={!ownershipReadOnly && ((!state?.agent && !draftOnly) || readOnly || busy)}
+      disabled={!ownershipReadOnly && ((!state?.agent && !draftOnly && !laterMode) || readOnly && !laterMode || busy)}
       readOnly={ownershipReadOnly}
-      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly ? readOnlyHint : state?.agent || draftOnly ? 'Message…' : 'Open or attach to an Agent first.'}
+      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly && !laterMode ? readOnlyHint : state?.agent || draftOnly || laterMode ? 'Message…' : 'Open or attach to an Agent first.'}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
     />}
     </div>
     </div>
-    <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly ? '' : ' agent-visually-hidden'}`}>{readOnly ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
+    <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly && !laterMode ? '' : ' agent-visually-hidden'}`}>{readOnly && !laterMode ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     {!ownershipReadOnly ? <div className="agent-composer-actions">
       {state?.agent && !draftOnly ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}

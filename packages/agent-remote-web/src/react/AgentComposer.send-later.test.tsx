@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
+import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
 
@@ -38,6 +39,21 @@ it('sends later while the Host is offline even if the session still looks attach
   await act(async () => view.button().click());
   expect(send).toHaveBeenCalledWith('Run the suite');
   expect(sendMessage).not.toHaveBeenCalled();
+});
+
+it('sends later with Enter while the reconnecting session reads as read-only', async () => {
+  const send = vi.fn(async () => {});
+  const state = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
+    id: 'one', providerId: 'test', createdAt: '2026-11-14T00:00:00Z', updatedAt: '2026-11-14T00:00:00Z', status: 'idle' as const, activeTurn: null,
+    capabilities: { history: true, sendMessage: false, steer: false, cancel: false, readResource: false },
+    pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' as const } } };
+  const view = await setup({ draftOnly: false, state, sendLater: { label: 'Send when Mac mini is back', send } });
+  // It stays writable, without the read-only hint.
+  expect(view.input().disabled).toBe(false);
+  expect(view.input().placeholder).toBe('Message…');
+  await view.type('Run the suite');
+  await view.enter();
+  expect(send).toHaveBeenCalledWith('Run the suite');
 });
 
 it('keeps the draft and says why when the message cannot wait', async () => {

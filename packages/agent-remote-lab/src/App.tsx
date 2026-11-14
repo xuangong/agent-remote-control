@@ -146,6 +146,7 @@ import {
 } from '@orchardworks/agent-remote-web';
 import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } from './conversation-recovery.js';
 import { compositionRoleKey, compositionSession, compositionSelection, type StoreOwner } from './session-composition.js';
+import type { CompositionDocument } from './session-composition-model.js';
 import { useRemoteHosts } from './hooks/useRemoteHosts.js';
 import { useVisualViewport } from './hooks/useVisualViewport.js';
 import { arrangeFloatingEntries } from './hooks/useTrackingPosition.js';
@@ -153,6 +154,7 @@ import { HostPairing, type HostPairingService, type RemoteHost } from './compone
 import { HostOverview } from './components/HostOverview.js';
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { unavailableSessions } from './unavailable-sessions.js';
+import { AsleepNotice } from './components/AsleepNotice.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useNativeTitles } from './hooks/useNativeTitles.js';
@@ -450,8 +452,12 @@ function AppContent({
     setMissingSessions(current => current.has(key) ? current : new Set([...current, key]));
   }, []);
   const liveConnections = useLiveBudget(baseUrl);
+  /** Whether a slot shows a sleeping bot, which nothing attaches until it wakes (set once the Window workspace exists). */
+  const asleepSlot = useRef<(slotId: string, document: CompositionDocument) => boolean>(() => false);
   const succession = useSessionSuccession({
-    attachmentAllowed: slotId => liveConnections.live(slotId),
+    // A slot the live budget has not met yet counts as live, so a sleeping bot is checked here too: attaching it would
+    // resume its native session before its conversation says it is folded.
+    attachmentAllowed: (slotId, document) => liveConnections.live(slotId) && !asleepSlot.current(slotId, document),
     targetRevision: JSON.stringify(teamRoster),
     validateTarget(selection, viewId, document) {
       const roster = teamRosterRef.current;
@@ -507,6 +513,10 @@ function AppContent({
   }, [workspaceController.deletedWindowIds, windowRetention]);
   const windowWorkspace = { ...workspaceController,
     ...(initialState ? { window: undefined, authority: undefined, sessionBridge: undefined, unavailable: false, provisional: false } : {}),
+  };
+  asleepSlot.current = (slotId, document) => {
+    const placed = document.windowBindings?.find(entry => entry.slotId === slotId);
+    return !!placed && !!workspaceController.readGroup(placed.windowId)?.bots?.members[placed.viewId]?.asleep;
   };
   // One set of Window actions for the sidebar's Windows list and the Window toolbar: one busy state, one notice, shown as a toast.
   const windowActions = useWindowActions(windowWorkspace, baseUrl);
@@ -1399,11 +1409,14 @@ function AppContent({
    * How a dock or float of the shown Window folds: a bot's × folds it where it stands, and folded or asleep it is a slim
    * card on desktop (compact layouts show one view at a time and do not fold).
    */
-  function windowPaneFolding(viewId: string): { fold?: FoldedBot; onFold?(): void; onRestore?(): void; onRemove?(): void; onCloseView?(viewId: string): void } {
+  function windowPaneFolding(viewId: string): { fold?: FoldedBot; asleep?: boolean; onWake?(): void; onFold?(): void; onRestore?(): void; onRemove?(): void; onCloseView?(viewId: string): void } {
     if (!sharedWindow) return {};
     const view = sharedWindow.views.find(item => item.id === viewId);
     const folded = !compactLayout && !!view && isBotView(view) && !missingSessions.has(sessionKey(view.binding)) && (view.collapsed || asleepBot(view));
+    // A compact layout does not fold: a sleeping bot there shows its Asleep bar over its released conversation.
+    const asleep = compactLayout && !!view && isBotView(view) && !missingSessions.has(sessionKey(view.binding)) && asleepBot(view);
     return { onCloseView: closeView, ...(foldsOnClose(view) ? { onFold: () => closeView(viewId) } : {}),
+      ...(asleep ? { asleep: true, onWake: () => restoreView(viewId) } : {}),
       ...(folded ? { fold: foldedBot(view), onRestore: () => restoreView(viewId), onRemove: () => setRemovingBot({ windowId: sharedWindow.id, viewId }) } : {}) };
   }
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
@@ -3450,7 +3463,7 @@ function AppContent({
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed || asleepBot(view),
               // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
               ...((view.collapsed || asleepBot(view)) && !missing && isBotView(view) ? { fold: foldedBot(view) } : {}),
-              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)} onCloseView={closeView}
+              content: view.binding && !missing ? <>{compactLayout && asleepBot(view) ? <AsleepNotice onWake={() => restoreView(view.id)} /> : null}<SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)} onCloseView={closeView}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}
                 directoryFor={hostId => hostId === selectedHost.id ? directory : undefined}
@@ -3465,7 +3478,7 @@ function AppContent({
                 transport={transport} draftStore={messageDrafts} replicaFor={replicaFor} onSessionBound={receiveViewSession} onSessionUnavailable={markSessionMissing}
                 draftBinding={slot ? draftOwnerBinding(slot.owners.text) : undefined} imageDraftBinding={slot?.owners.image}
                 displayBinding={{ scope: baseUrl, key: view.id }} navigation={viewNavigation}
-                sessionPresentation={presentSessionView} />
+                sessionPresentation={presentSessionView} /></>
                 : <div className="lab-empty-session-view" role="status" data-view-id={view.id} aria-current={view.id === presentedViewId || undefined}>
                   <header className="lab-empty-session-heading">
                     <strong>Select session</strong>

@@ -206,8 +206,9 @@ export function SessionFamily(props: Props) {
     const children = [...path.slice(1, index + 1), ...descendants];
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }
-  // A folded primary group releases every conversation in it; a folded Side releases its own (compact layouts do not fold).
-  const familyFolded = !compact && (!!rootView?.collapsed || !!props.folded);
+  // A folded primary group releases every conversation in it; a folded Side releases its own. Compact layouts do not
+  // fold a closed pane, but a sleeping bot's family (props.folded) is released in every layout.
+  const familyFolded = !!props.folded || !compact && !!rootView?.collapsed;
   return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
       const paneView = index === 0 ? rootView : attached[index - 1];

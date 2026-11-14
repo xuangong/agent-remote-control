@@ -5,6 +5,7 @@ import type { DraftBinding } from '../draft-store.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { type SessionWindowEntry } from '../hooks/useSessionWindows.js';
 import { useAskPosition } from '../hooks/useAskPosition.js';
+import { AsleepNotice } from './AsleepNotice.js';
 import { FoldedBotCard, SessionViewPlacement, useRemoveSessionDocks, type FoldedBot } from './SessionDock.js';
 import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
@@ -28,6 +29,9 @@ interface Props {
   onClose(): void;
   /** A folded bot (desktop): the pane stands as a slim card and its conversation is released. */
   fold?: FoldedBot;
+  /** A sleeping bot in a compact layout, which does not fold: a quiet Asleep bar over its released conversation. */
+  asleep?: boolean;
+  onWake?(): void;
   /** × folds the pane where it stands instead of closing it: a bot stays in its group. */
   onFold?(): void;
   onRestore?(): void;
@@ -48,7 +52,7 @@ export function SessionWindow(props: Props) {
     {({ docked, controls }) => <WindowBody {...props} onClose={close} docked={docked} controls={controls} onAdditionalWidthChange={setAdditionalWidth} />}
   </SessionViewPlacement>;
 }
-function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, transport, draftStore, draftBinding, imageDraftBinding, navigation, docked, controls, actions, onClose, onAdditionalWidthChange, selected, onFocus, onChangeSession, onSessionBound, sessionPresentation, renderSessionFooter, missing, onSessionUnavailable, fold, onFold, onRestore, onRemove, onCloseView }: Props & {
+function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, transport, draftStore, draftBinding, imageDraftBinding, navigation, docked, controls, actions, onClose, onAdditionalWidthChange, selected, onFocus, onChangeSession, onSessionBound, sessionPresentation, renderSessionFooter, missing, onSessionUnavailable, fold, asleep, onWake, onFold, onRestore, onRemove, onCloseView }: Props & {
   docked: boolean; controls: React.ReactNode; onAdditionalWidthChange(width: number): void;
 }) {
   const shared = useWindowLayout();
@@ -81,7 +85,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
           <button type="button" data-pane-selection-ignore className="lab-folded-remove" aria-label={`Remove ${title} from this group`} title="Remove from group…" onClick={onRemove}>×</button>
           <FoldedBotCard label={`Restore ${title}`} fold={fold} onRestore={() => onRestore?.()} />
         </> : null}
-        {target ? <SessionFamily folded={!!fold} onCloseView={onCloseView} storageScope={baseUrl} baseUrl={baseUrl} target={target} hostLabel={hostLabel} offline={offline}
+        {asleep && !fold && onWake ? <AsleepNotice onWake={onWake} /> : null}
+        {target ? <SessionFamily folded={!!fold || !!asleep} onCloseView={onCloseView} storageScope={baseUrl} baseUrl={baseUrl} target={target} hostLabel={hostLabel} offline={offline}
           viewId={shared ? entry.id : entry.slotId} sessionIntent={shared?.window.views.find(view => view.id === entry.id)?.binding?.sessionIntent}
           onSessionBound={onSessionBound} onSessionUnavailable={onSessionUnavailable} sessionPresentation={sessionPresentation} renderSessionFooter={renderSessionFooter}
           displayBinding={{ scope: baseUrl, key: entry.id }} active={visible} compact={compact} onAdditionalWidthChange={onAdditionalWidthChange}

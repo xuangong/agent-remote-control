@@ -9,6 +9,7 @@ import type { BotPlace } from '../workbench-mode.js';
 import { BotRoster, botDisplayName, botPlaceKey } from './BotRoster.js';
 import { useSharedFeed, type SharedFeedsSnapshot } from '../shared-feeds.js';
 import { useBotActions, type BotInfo } from './BotActions.js';
+import { AsleepNotice } from './AsleepNotice.js';
 import { Menu } from '../ui/Menu.js';
 import { WorkbenchModeSwitch } from './WorkbenchModeSwitch.js';
 import { SessionConversationMount, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
@@ -174,8 +175,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
         title={place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}
         trailing={compact ? <><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />{botMenu}</> : botMenu ?? undefined} />
       {!unavailable ? availabilityNotice : null}
-      {asleep && descriptor ? <p className="lab-bot-asleep" role="status">Asleep. Its conversation catches up when it wakes.{' '}
-        <button type="button" onClick={() => place?.kind === 'bot' && void actions.wake(place)}>Wake</button></p> : null}
+      {asleep && descriptor ? <AsleepNotice onWake={() => place?.kind === 'bot' && void actions.wake(place)} /> : null}
       {descriptor ? <SessionConversationMount mode="bot" active={visible && showConversation} descriptor={{ ...descriptor, props: { ...descriptor.props, visible: visible && showConversation, active: visible && showConversation, fixedDisplayMode: 'content', folded: asleep } }} />
         : !selected.loading && !selected.error ? <p className="lab-bot-empty">{place?.kind === 'section' ? 'No bot selected. Choose a bot from this group.' : 'Choose a bot to continue its conversation.'}</p> : null}
     </section>

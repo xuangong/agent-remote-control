@@ -85,3 +85,22 @@ it('can close a minimized group without restoring or selecting it first', async 
   expect(closed).toHaveBeenCalledWith('a');
   expect(selected).not.toHaveBeenCalled();
 });
+
+it('folds a primary group into a slim card naming its bot, with picture, role tag and status', async () => {
+  const collapsed = vi.fn();
+  const view = await render(<SessionDockProvider enabled><SessionDockRail onCollapsePrimaryGroup={collapsed} primaryGroups={[{ id: 'a', title: 'Release check', width: 400, collapsed: true, selected: false,
+    fold: { name: 'Release check', role: 'Team Leader', status: 'Needs you' }, content: <textarea aria-label="draft" /> }]} /></SessionDockProvider>);
+  const pane = view.querySelector<HTMLElement>('[data-primary-group-id="a"]')!;
+  const card = pane.querySelector<HTMLButtonElement>('button.lab-folded-bot')!;
+  expect(card.getAttribute('aria-label')).toBe('Restore primary group: Release check');
+  expect(card.getAttribute('aria-description')).toBe('Team Leader · Needs you');
+  expect(card.querySelector('.ui-avatar')).not.toBeNull();
+  expect(card.querySelector('.lab-folded-bot-status')?.getAttribute('data-attention')).toBe('true');
+  expect(card.querySelector('.lab-folded-bot-name')?.textContent).toBe('Release check');
+  expect(card.querySelector('.lab-folded-bot-role')?.textContent).toBe('Team Leader');
+  // The conversation stays mounted, folded away.
+  expect(pane.querySelector<HTMLElement>('.lab-primary-group-content')!.hidden).toBe(true);
+  expect(pane.querySelector('[aria-label="draft"]')).not.toBeNull();
+  await act(async () => card.click());
+  expect(collapsed).toHaveBeenCalledWith('a', false);
+});

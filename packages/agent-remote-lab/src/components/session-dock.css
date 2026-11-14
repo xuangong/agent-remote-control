@@ -102,3 +102,22 @@
 @container session-view (max-width: 760px) {
   .lab-primary-group:has(> .lab-primary-group-minimize):not(:has(.lab-ask-viewport:not([hidden]))) > .lab-primary-group-content > .lab-session-family > .lab-session-family-pane:not([hidden]):not(:has(~ .lab-session-family-pane:not([hidden]))) .lab-session-heading-trailing { padding-inline-end: 0; }
 }
+
+/* A folded bot: a slim card standing where its pane was, like a collapsed sidebar in a native app. Its conversation is
+   released; the status comes from the shared channel. */
+.lab-folded-bot { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; padding: 12px 6px;
+  border: 0; border-radius: 0; background: transparent; color: var(--ui-label); cursor: pointer; overflow: hidden;
+  transition: background-color var(--ui-duration-short) var(--ui-ease); }
+.lab-folded-bot:hover { background: var(--ui-row-hover); }
+.lab-folded-bot:active { background: var(--ui-fill-strong); }
+.lab-folded-bot:focus-visible { outline: 2px solid var(--ui-focus-ring); outline-offset: -3px; }
+.lab-folded-bot-picture { position: relative; flex: none; display: inline-flex; }
+.lab-folded-bot-status { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border: 2px solid var(--ui-background); border-radius: 50%;
+  background: var(--ui-status-working); }
+.lab-folded-bot-status[data-attention] { background: var(--ui-status-attention); }
+.lab-folded-bot-status[data-failed] { background: var(--ui-status-failure); }
+.lab-folded-bot-name { writing-mode: vertical-rl; max-height: calc(100% - 120px); overflow: hidden; color: var(--ui-label); font: 600 12px/1.2 var(--ui-font);
+  text-overflow: ellipsis; white-space: nowrap; }
+.lab-folded-bot-role { writing-mode: vertical-rl; padding: 6px 1px; border-radius: 4px; background: var(--ui-fill); color: var(--ui-label-secondary);
+  font: 500 10px/1.2 var(--ui-font); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .lab-folded-bot { transition: none; } }

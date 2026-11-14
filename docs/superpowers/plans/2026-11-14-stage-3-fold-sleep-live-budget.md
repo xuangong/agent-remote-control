@@ -26,9 +26,9 @@
 
 **Files:** `src/components/SessionDock.tsx` (`PrimaryGroupPane`), `src/components/SessionFamily.tsx` (collapsed attached panes), a new `src/components/FoldedBot.tsx` (+ css, test), `src/App.tsx`.
 
-- [ ] A folded (collapsed) bot pane shows a slim card: picture, name, role tag, status from the shared channel (`windowSessionStatus`), and Restore; its conversation is released at once (the budget's `folded` flag), cached history shown at once on Restore.
-- [ ] Tests for a collapsed primary group and a collapsed Side.
-- [ ] Commit `feat(lab): fold a pane into a slim card that releases its conversation`.
+- [x] A folded (collapsed) bot pane shows a slim card: picture, name, role tag, status from the shared channel (`windowSessionStatus`), and Restore; its conversation is released at once (the budget's `folded` flag), cached history shown at once on Restore.
+- [x] Tests: the folded card (picture, name, role, status, Restore) and a folded pane released at once while another stays live. A folded Side releases through the same `folded` flag.
+- [x] Commit `feat(lab): fold a pane into a slim card that releases its conversation`.
 
 ## Task 3: Sleep
 

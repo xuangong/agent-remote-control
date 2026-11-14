@@ -8,7 +8,7 @@ import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
-import { projectBotRoster } from './bot-roster.js';
+import { botActivityLabel, botRole, projectBotRoster } from './bot-roster.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -3183,6 +3183,10 @@ function AppContent({
             const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
             return { id: view.id, title: view.binding && !missing ? view.binding.title : 'Select session', width: view.width, additionalWidth,
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed,
+              // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
+              ...(view.collapsed && view.binding && !missing && isBotView(view) ? { fold: {
+                name: botDisplayName(view.binding), picture: windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture,
+                role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)) } } : {}),
               content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}

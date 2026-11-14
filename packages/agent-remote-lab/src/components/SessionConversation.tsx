@@ -47,6 +47,8 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   transport: RemoteAgentTransport; draftStore: DraftBinding['store']; draftBinding?: DraftBinding; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; navigation?: SessionViewNavigationFactory;
   displayBinding?: DisplayPreferenceBinding;
   visible?: boolean; fixedDisplayMode?: TimelineDisplayMode;
+  /** The pane is folded into a slim card: its conversation is released at once (see LiveBudget). */
+  folded?: boolean;
   attachmentEnabled?: boolean; mutationBlocked?: boolean; onPendingInputChange?(count: number): void;
   familyRoot: boolean; entries: SessionWindowTarget[];
   onNavigate(destination: SessionEntry | AgentChildSessionView, childrenFor: (id: string) => readonly AgentChildSessionView[], source: OpenedSession): Promise<void>;
@@ -96,16 +98,17 @@ export function SessionConversation(props: SessionConversationProps) {
   // This device keeps a bounded set of conversations live (see LiveBudget): one on screen or with pending input is live;
   // a released one shows its cached history, keeps its draft and attaches again by itself once it is live.
   const liveConnections = useContext(LiveConnectionsContext);
-  const onScreen = (props.visible ?? true) && props.active, pinned = !!inputOwner?.count;
+  const folded = !!props.folded, onScreen = (props.visible ?? true) && props.active && !folded, pinned = !!inputOwner?.count;
   const registration = useRef<LiveRegistration>();
-  const liveRegistration = useRef({ onScreen, pinned }); liveRegistration.current = { onScreen, pinned };
+  const liveState = { visible: onScreen, pinned, folded };
+  const latestLiveState = useRef(liveState); latestLiveState.current = liveState;
   useEffect(() => {
     if (!liveConnections || !props.viewId) return;
-    const current = liveConnections.register(props.viewId, { visible: liveRegistration.current.onScreen, pinned: liveRegistration.current.pinned });
+    const current = liveConnections.register(props.viewId, latestLiveState.current);
     registration.current = current;
     return () => { current.release(); if (registration.current === current) registration.current = undefined; };
   }, [liveConnections?.register, props.viewId]);
-  useEffect(() => { registration.current?.update({ visible: onScreen, pinned }); }, [onScreen, pinned]);
+  useEffect(() => { registration.current?.update({ visible: onScreen, pinned, folded }); }, [onScreen, pinned, folded]);
   const disconnected = !!props.viewId && liveConnections?.live(props.viewId) === false;
   const discardedAttachment = useRef(false);
   if (disconnected) discardedAttachment.current = true;

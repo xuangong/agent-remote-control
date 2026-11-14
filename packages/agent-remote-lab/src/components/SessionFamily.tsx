@@ -200,6 +200,8 @@ export function SessionFamily(props: Props) {
     const children = [...path.slice(1, index + 1), ...descendants];
     setLayout({ children, focus: children.length }); setReveal({ index: children.length });
   }
+  // A folded primary group releases every conversation in it; a folded Side releases its own (compact layouts do not fold).
+  const familyFolded = !compact && !!rootView?.collapsed;
   return <div className="lab-session-family" ref={container} data-compact={compact || undefined} hidden={!active} aria-label={`${target.title} session family`}>
     {path.map((item, index) => {
       const paneView = index === 0 ? rootView : attached[index - 1];
@@ -218,6 +220,7 @@ export function SessionFamily(props: Props) {
           slotId={index === 0 ? rootView && isBotView(rootView) ? sessionBridge?.slotForView(rootView.id)?.id : undefined : childSlot?.id}
           onSelectWindowPane={() => focusPane(index)} familyActive={active} retainHidden={index > 0}
           visible={active && (!compact || focus === index) && !(index > 0 && attached[index - 1]?.collapsed)}
+          folded={familyFolded || !compact && index > 0 && !!attached[index - 1]?.collapsed}
           familyRoot={index === 0} controls={controls} menuActions={index === 0 ? props.menuActions : undefined} target={item} entries={path}
           replica={index === 0 ? props.replica : undefined} onSessionReady={index === 0 ? props.onSessionReady : undefined}
           attachedSession={index === 0 ? props.attachedSession : openedChildren[sessionKey(item)]}

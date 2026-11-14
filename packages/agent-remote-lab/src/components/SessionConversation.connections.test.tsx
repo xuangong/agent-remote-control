@@ -74,3 +74,41 @@ it('releases conversations the live budget no longer keeps, keeping history and 
     expect(promptText(pane('first').querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Keep this draft');
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 15000);
+
+it('releases a folded pane at once, without waiting for the grace period, and keeps the other pane live', async () => {
+  const server = createRecordedValidationServer();
+  const { url } = await server.http.listen();
+  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address =>
+    new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
+  const first = await transport.createAgent('agent-first', 'recorded', { sessionId: 'native-first' });
+  const second = await transport.createAgent('agent-second', 'recorded', { sessionId: 'native-second' });
+  const targets = { first: { hostId: 'local', providerId: 'recorded', nativeSessionId: first.payload.sessionId, title: 'First' },
+    second: { hostId: 'local', providerId: 'recorded', nativeSessionId: second.payload.sessionId, title: 'Second' } };
+  const connections = new ConversationConnections(transport, url), drafts = new DraftStore(url);
+  const directory = new SessionDirectoryClient(url);
+  const attach = vi.spyOn(directory, 'attach').mockImplementation(async (_provider, nativeSessionId) =>
+    ({ agentId: nativeSessionId === targets.first.nativeSessionId ? 'agent-first' : 'agent-second', nativeSessionId }));
+  const budget = new LiveBudget({ recent: 4, graceMs: 60_000 });
+  let fold!: (value: boolean) => void;
+  function Harness() {
+    const [folded, setFolded] = useState(false); fold = setFolded;
+    const version = useSyncExternalStore(listener => budget.subscribe(listener), () => budget.version);
+    const live = useMemo(() => liveConnections(budget), [version]);
+    return <WorkspaceReady.Provider value={true}><ConversationConnectionScope.Provider value={connections}><LiveConnectionsContext.Provider value={live}>
+      {(['first', 'second'] as const).map(id => <section key={id} data-view={id}><SessionConversation viewId={id} windowViewId={id} folded={id === 'first' && folded}
+        storageScope={url} baseUrl={url} target={targets[id]} hostLabel="Test Host" directoryFor={() => directory}
+        compact={false} active offline={false} transport={transport} draftStore={drafts} familyRoot entries={[targets[id]]} onNavigate={async () => {}} /></section>)}
+    </LiveConnectionsContext.Provider></ConversationConnectionScope.Provider></WorkspaceReady.Provider>;
+  }
+  const container = await render(<Harness />);
+  try {
+    await vi.waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
+    await vi.waitFor(() => expect(connections.find(targets.second)?.client.getSessionState().connection).toBe('ready'));
+    await act(async () => fold(true));
+    expect(budget.live('first')).toBe(false);
+    await vi.waitFor(() => expect(connections.find(targets.first)).toBeUndefined());
+    expect(connections.find(targets.second)?.client.getSessionState().connection).toBe('ready');
+    await act(async () => fold(false));
+    await vi.waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
+  } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
+}, 15000);

@@ -6,6 +6,8 @@ import { useSessionRailWheel, useSessionViewMouseNavigation } from '../hooks/use
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
+import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
+import { Avatar } from '../ui/Avatar.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
 interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number }
@@ -178,6 +180,8 @@ export function MinimizeMainSession() {
 export interface PrimarySessionGroupPane {
   id: string; title: string; width: number; additionalWidth?: number;
   collapsed: boolean; selected: boolean; content: ReactNode;
+  /** The bot a folded group shows: its picture, name, role tag and status from the shared channel. */
+  fold?: { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed' };
 }
 interface SessionDockRailProps {
   children?: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void;
@@ -258,7 +262,16 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     {minimized ? minimizedHeader : null}
     {minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
       title="Close this session view. Agent sessions keep running." onClick={() => onClose(group.id)}>×</button> : null}
-    {minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
+    {minimized && group.fold ? <button type="button" className="lab-folded-bot" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
+      aria-description={[group.fold.role, group.fold.status].filter(Boolean).join(' · ') || undefined} title={group.fold.name}
+      onClick={() => onCollapse?.(group.id, false)}>
+      {/* A folded bot: its picture with the status beside it, then its name and role running down the slim card. */}
+      <span className="lab-folded-bot-picture"><Avatar name={group.fold.name} picture={group.fold.picture} size={28} />
+        {group.fold.status ? <span className="lab-folded-bot-status" data-attention={group.fold.status === 'Needs you' || undefined} data-failed={group.fold.status === 'Failed' || undefined} /> : null}</span>
+      <span className="lab-folded-bot-name">{group.fold.name}</span>
+      {group.fold.role ? <span className="lab-folded-bot-role">{group.fold.role}</span> : null}
+    </button>
+    : minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
       onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
       : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}
         onClick={() => onCollapse(group.id, true)}>−</button> : null}

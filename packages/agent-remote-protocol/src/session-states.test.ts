@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
-import { SESSION_STATE_LIMIT } from './session-states.js';
+import { SESSION_PREVIEW_LENGTH, SESSION_PREVIEW_MAX_LENGTH, SESSION_STATE_LIMIT } from './session-states.js';
 
 const report = (fields: Record<string, unknown>) => JSON.stringify({ uplinkVersion: 2, type: 'session_states', full: false, states: [], ...fields });
 
@@ -14,8 +14,19 @@ it('accepts bounded Host session state reports carrying only identities, states 
   }
 });
 
-it('lets the Relay acknowledge session states when it registers a Host', () => {
+it('lets the Relay acknowledge session states, and reply facts with them, when it registers a Host', () => {
   const registered = { uplinkVersion: 2, type: 'registered', sessionStates: 1, hostId: 'host', heartbeat: { intervalMs: 20_000, timeoutMs: 10_000 } };
   expect(decodeRemoteHostUplinkMessage(JSON.stringify(registered)).status).toBe('ok');
-  expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, sessionStates: 2 })).status).toBe('rejected');
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, sessionStates: 2 })).status).toBe('ok');
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, sessionStates: 3 })).status).toBe('rejected');
+});
+
+it("carries a session's latest reply time and a bounded plain preview of it", () => {
+  const state = { providerId: 'codex', nativeSessionId: 'thread', state: 'idle', updatedAt: 1, replyAt: 2, preview: 'Done: the release notes are ready.' };
+  expect(decodeRemoteHostUplinkMessage(report({ states: [state] })).status).toBe('ok');
+  expect(decodeRemoteHostUplinkMessage(report({ states: [{ ...state, preview: 'x'.repeat(SESSION_PREVIEW_MAX_LENGTH) }] })).status).toBe('ok');
+  expect(SESSION_PREVIEW_LENGTH).toBeLessThan(SESSION_PREVIEW_MAX_LENGTH);
+  for (const invalid of [{ ...state, preview: '' }, { ...state, preview: 'x'.repeat(SESSION_PREVIEW_MAX_LENGTH + 1) }, { ...state, replyAt: -1 }, { ...state, replyAt: 1.5 }]) {
+    expect(decodeRemoteHostUplinkMessage(report({ states: [invalid] })).status).toBe('rejected');
+  }
 });

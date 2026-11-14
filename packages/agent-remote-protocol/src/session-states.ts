@@ -2,7 +2,8 @@ import { Type, type Static } from '@sinclair/typebox';
 
 /**
  * Session states a Controller reports to its Relay, which shares them with every page of the account without
- * opening session streams. Only identities, the state and the native update time travel; no titles or content.
+ * opening session streams. Identities, the state and the native update time travel, and, between parties that
+ * agreed to them, two facts about the session's latest reply; no titles and no other content.
  * A session without a reported state is unknown.
  */
 export const SessionActivityState = Type.Union([Type.Literal('running'), Type.Literal('waiting'), Type.Literal('idle'), Type.Literal('failed')]);
@@ -14,13 +15,22 @@ export const SESSION_STATE_CONFIRMATION_MS = 60_000;
 export const SESSION_STATE_STALE_MS = 3 * SESSION_STATE_CONFIRMATION_MS;
 /** The most states one Host reports. */
 export const SESSION_STATE_LIMIT = 4096;
+/** The length of the reply previews Controllers produce, and the most a preview may hold. */
+export const SESSION_PREVIEW_LENGTH = 160;
+export const SESSION_PREVIEW_MAX_LENGTH = 200;
 
 const object = { additionalProperties: false } as const;
 const identity = Type.String({ minLength: 1, maxLength: 512 });
 const nativeId = Type.String({ minLength: 1, maxLength: 4096 });
 const milliseconds = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 
-export const HostSessionState = Type.Object({ providerId: identity, nativeSessionId: nativeId, state: SessionActivityState, updatedAt: Type.Optional(milliseconds) }, object);
+/**
+ * Reply facts are derived from the session and never authored: `replyAt` is when its latest reply was produced and
+ * `preview` a short plain-text excerpt of that reply. A Controller sends them only after the Relay acknowledged
+ * `sessionStates: 2`; a page receives them only on a channel opened with `states=2`.
+ */
+export const HostSessionState = Type.Object({ providerId: identity, nativeSessionId: nativeId, state: SessionActivityState, updatedAt: Type.Optional(milliseconds),
+  replyAt: Type.Optional(milliseconds), preview: Type.Optional(Type.String({ minLength: 1, maxLength: SESSION_PREVIEW_MAX_LENGTH })) }, object);
 export type HostSessionState = Static<typeof HostSessionState>;
 export const HostSessionRef = Type.Object({ providerId: identity, nativeSessionId: nativeId }, object);
 export type HostSessionRef = Static<typeof HostSessionRef>;

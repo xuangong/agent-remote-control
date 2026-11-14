@@ -85,3 +85,38 @@ it('says a bot has messages waiting to send when nothing more urgent shows', asy
   expect(quiet.getAttribute('aria-description')).toContain('Waiting to send');
   expect(urgent.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
 });
+
+it("offers a bot's own actions as a context menu on its row, at the pointer or from the keyboard, on desktop only", async () => {
+  const model = projectBotRoster([botGroup('A')], [], { status: () => 'idle' });
+  const chosen: string[] = [];
+  const rowActions = (row: { viewId: string }) => [{ label: 'Info', onSelect: () => chosen.push(`info ${row.viewId}`) }, { label: 'Sleep', onSelect: () => chosen.push(`sleep ${row.viewId}`) }];
+  const container = await render(<BotRoster model={model} place={{ kind: 'bot', groupId: 'A', viewId: 'A2' }} onSelect={() => {}} directoryControls={null} rowActions={rowActions} />);
+  const row = visibleButton(container, 'A1');
+  const menu = () => document.querySelector<HTMLElement>('[role="menu"]');
+  // A right click opens the menu of the row it was on (not the selected bot), where the pointer is.
+  const opened = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 200 });
+  await act(async () => row.dispatchEvent(opened));
+  expect(opened.defaultPrevented).toBe(true);
+  expect(menu()?.getAttribute('aria-label')).toBe('Bot actions: A1');
+  expect(menu()!.style.left).toBe('120px');
+  await act(async () => [...menu()!.querySelectorAll('button')].find(button => button.textContent === 'Sleep')!.click());
+  expect(chosen).toEqual(['sleep A1']);
+  expect(menu()).toBeNull();
+  expect(document.activeElement).toBe(row);
+  // Shift+F10 (or the context menu key) opens it at the row, on its first item; Escape returns focus to the row.
+  row.focus();
+  await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })));
+  expect(document.activeElement?.textContent).toBe('Info');
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(menu()).toBeNull();
+  expect(document.activeElement).toBe(row);
+});
+
+it('leaves a long press to the phone: a compact roster has no context menu', async () => {
+  const model = projectBotRoster([botGroup('A')], [], { status: () => 'idle' });
+  const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} compact rowActions={() => [{ label: 'Info', onSelect: () => {} }]} />);
+  const pressed = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 });
+  await act(async () => visibleButton(container, 'A1').dispatchEvent(pressed));
+  expect(pressed.defaultPrevented).toBe(false);
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});

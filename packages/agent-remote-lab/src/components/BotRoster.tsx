@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { WindowBotDetails, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { BotRosterModel, BotRow, BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { sessionKey } from '../session-tree.js';
 import { Avatar } from '../ui/Avatar.js';
 import { Icon } from '../ui/Icon.js';
-import { Menu, type MenuEntry } from '../ui/Menu.js';
+import { Menu, MenuPanel, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
 import { TypingDots } from './TypingBubble.js';
 
@@ -20,7 +20,9 @@ export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
 }
 
-function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void }) {
+function BotMember({ row, current, compact, hostName, onSelect, onContextMenu }: { row: BotRow; current: boolean; compact: boolean; hostName(hostId: string): string; onSelect(place: BotPlace): void;
+  /** Opens the bot's own actions at a pointer, or at the row from the keyboard. */
+  onContextMenu?(row: HTMLElement, point?: { x: number; y: number }): void }) {
   const name = botDisplayName(row.binding), destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
@@ -33,7 +35,12 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
   return <div className="lab-bot-member">
     <button type="button" className="lab-bot-row" aria-label={name} aria-description={description || undefined}
       title={`${hostName(row.binding.hostId)} · ${row.binding.providerId}`}
-      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}>
+      data-bot-place={botPlaceKey(destination)} data-asleep={row.details.asleep || undefined} data-unread={row.unread || undefined} aria-current={current || undefined} onClick={() => onSelect(destination)}
+      onContextMenu={onContextMenu ? event => { event.preventDefault(); onContextMenu(event.currentTarget, { x: event.clientX, y: event.clientY }); } : undefined}
+      onKeyDown={onContextMenu ? event => {
+        if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+        event.preventDefault(); onContextMenu(event.currentTarget);
+      } : undefined}>
       <BotPicture picture={row.details.picture} name={name} size={compact ? 36 : 26} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
@@ -59,8 +66,13 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
   </div>;
 }
 
-export function BotRoster({ model, place, onSelect, directoryControls, hostName = id => id, groupActions, compact = false }: {
+export function BotRoster({ model, place, onSelect, directoryControls, hostName = id => id, groupActions, rowActions, compact = false }: {
   model: BotRosterModel; place?: BotPlace; onSelect(place: BotPlace): void; directoryControls: ReactNode;
+  /**
+   * A bot's own actions (those of its ⋯ menu), offered on its row as a context menu: a right click opens them at the
+   * pointer, Shift+F10 or the context menu key at the row. Desktop only: a phone keeps a long press for scrolling and selecting.
+   */
+  rowActions?(row: BotRow, section: BotSection): readonly MenuEntry[];
   /** A phone's roster: larger pictures and taller rows, as in a native chat list. */
   compact?: boolean;
   /** A Host's display name for a Host ID; rows show names, never raw IDs. */
@@ -68,7 +80,13 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
   /** The actions of a group's header menu, beside its title. */
   groupActions?(section: BotSection): readonly MenuEntry[];
 }) {
+  const [context, setContext] = useState<{ row: BotRow; section: BotSection; element: HTMLElement; point?: { x: number; y: number } }>();
+  const contextMenu = (row: BotRow, section: BotSection) => rowActions && !compact
+    ? (element: HTMLElement, point?: { x: number; y: number }) => setContext({ row, section, element, ...(point ? { point } : {}) }) : undefined;
   return <nav aria-label="Bots" className="lab-bot-roster-list">
+    {context ? <MenuPanel label={`Bot actions: ${botDisplayName(context.row.binding)}`} items={rowActions!(context.row, context.section)} host={document.body}
+      focus={context.point ? 'menu' : 'first'} anchor={() => context.element} {...(context.point ? { point: context.point } : {})}
+      onClose={restoreFocus => { setContext(undefined); if (restoreFocus) context.element.focus(); }} /> : null}
     {model.sections.map(section => <section key={section.groupId} className="lab-bot-section" aria-labelledby={`bot-section-${section.groupId}`}>
       <div className="lab-bot-section-head">
         <h2 id={`bot-section-${section.groupId}`}><button type="button" onClick={() => onSelect({ kind: 'section', groupId: section.groupId })}>{section.title}</button>
@@ -77,7 +95,7 @@ export function BotRoster({ model, place, onSelect, directoryControls, hostName 
         {groupActions ? <Menu label={`Group actions: ${section.title}`} items={groupActions(section)} /> : null}
       </div>
       {!section.rows.length ? <p className="lab-bot-empty">{section.hidden.length ? 'Its bots are hidden in Bot mode.' : 'No bots in this group yet.'}</p> : null}
-      {section.rows.map(row => <BotMember key={row.viewId} row={row} compact={compact} hostName={hostName} onSelect={onSelect}
+      {section.rows.map(row => <BotMember key={row.viewId} row={row} compact={compact} hostName={hostName} onSelect={onSelect} onContextMenu={contextMenu(row, section)}
         current={place?.kind === 'bot' && place.groupId === row.groupId && place.viewId === row.viewId} />)}
     </section>)}
     <details className="lab-bot-section lab-bot-other">

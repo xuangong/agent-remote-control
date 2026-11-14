@@ -177,3 +177,12 @@ it('places a menu below its button, or above it when it fits better there, insid
   expect(placeMenu({ top: 100, bottom: 128, right: 100 }, size, viewport).left).toBe(8);
   expect(placeMenu({ top: 100, bottom: 128, right: 1000 }, size, viewport).left).toBe(772);
 });
+
+it('places a context menu from its point toward the lower right, inside the viewport', () => {
+  const viewport = { width: 1000, height: 800 }, size = { width: 220, height: 200 };
+  const at = (x: number, y: number) => ({ top: y, bottom: y, left: x, right: x });
+  expect(placeMenu(at(120, 200), size, viewport, 'start')).toEqual({ top: 204, left: 120, maxHeight: 588, up: false });
+  // Near the right edge it moves left to fit; near the bottom it opens upward.
+  expect(placeMenu(at(950, 200), size, viewport, 'start').left).toBe(772);
+  expect(placeMenu(at(120, 760), size, viewport, 'start')).toMatchObject({ top: 556, up: true });
+});

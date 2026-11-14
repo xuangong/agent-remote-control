@@ -110,6 +110,23 @@ it("opens a Side from a bot in Bot mode, as a bot of the same group beside it", 
   await app.close();
 });
 
+it('opens a Side from a bot of the shown Window in Bot mode, and offers none to a session that is not a bot', async () => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-S', nativeSessionId: 'S' });
+  const app = await setup('bot-side-shown');
+  await act(async () => app.button('A1').click());
+  await until(() => expect(leaves.get('A1')?.consoleCommands?.map(command => command.id)).toContain('console:side'));
+  await act(async () => { await leaves.get('A1')!.onExecuteConsoleCommand!('console:side', ''); });
+  await until(() => expect(app.hostedGroups.get('A')!.window.views.find(view => view.binding?.nativeSessionId === 'S')).toMatchObject({ placement: 'attached', attachedTo: 'A1' }));
+  await until(() => expect(app.container.querySelector('.lab-bot-row[aria-current="true"]')?.getAttribute('aria-label')).toBe('Fork of A1'));
+  // A session listed under Other sessions has no group for a Side to join.
+  const other = [...app.container.querySelectorAll<HTMLButtonElement>('.lab-bot-other .lab-bot-row')].find(button => button.getAttribute('aria-label')?.startsWith('Other'));
+  expect(other).toBeDefined();
+  await act(async () => other!.click());
+  await until(() => expect(leaves.get('Other')?.consoleCommands).toBeDefined());
+  expect(leaves.get('Other')!.consoleCommands!.map(command => command.id)).not.toContain('console:side');
+  await app.close();
+});
+
 it('blocks Handoff on the exact pending Bot slot even on a section-only page', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'describeSuccession').mockResolvedValue(description);
   const prepared: string[] = [];

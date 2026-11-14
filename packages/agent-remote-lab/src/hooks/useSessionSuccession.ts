@@ -414,7 +414,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
           const finish = (settle: () => void) => { controller.signal.removeEventListener('abort', abort); stop(); settle(); };
           const abort = () => finish(() => reject(controller.signal.reason));
           controller.signal.addEventListener('abort', abort, { once: true });
-          stop = restoreSession({ active: current,
+          stop = restoreSession({ hostId: identity.hostId ?? 'local', active: current,
             open: signal => resolve(AbortSignal.any([signal, controller.signal])),
             restored: value => finish(() => accept(value)),
             failed: (error, retrying) => {

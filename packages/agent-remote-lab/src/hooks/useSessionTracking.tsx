@@ -336,6 +336,7 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
       const directory = new SessionDirectoryClient(baseUrl, undefined, session.hostId);
       update(key, { connection: 'connecting' });
       stopAttachment = restoreSession({
+        hostId: session.hostId ?? 'local',
         active: () => !abort.signal.aborted && !connectedAgentId,
         open: signal => session.parentNativeSessionId
           ? directory.attachChild(session.providerId, session.parentNativeSessionId, session.nativeSessionId, signal)

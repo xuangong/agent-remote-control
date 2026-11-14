@@ -37,6 +37,8 @@ export function unavailableSessions(page: object): UnavailableSessions {
     },
     remember(session, error) {
       if (!nativeSessionMissing(error)) return;
+      // A view replaying a remembered report is not news from the Host: the ten minutes count from the Host's answer.
+      if (sessions!.get(session)) return;
       missing.set(key(session), { hostId: session.hostId ?? 'local', error: error as DirectoryError, at: Date.now() });
     },
     forget(session) { missing.delete(key(session)); },

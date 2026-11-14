@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { restoreSession } from './session-restoration.js';
+import { announceHostReturned, restoreSession } from './session-restoration.js';
 import { DirectoryError } from './directory-client.js';
 
 afterEach(() => vi.useRealTimers());
@@ -71,24 +71,24 @@ it('stops automatic restoration after native session unavailability even when th
   } finally { stop(); }
 });
 
-it('backs off a Host that keeps failing, doubling the wait up to five minutes', async () => {
+it('backs off a Host that keeps failing, doubling the wait up to a minute', async () => {
   vi.useFakeTimers();
   const failing = (random: number) => {
     vi.spyOn(Math, 'random').mockReturnValue(random);
     const open = vi.fn(async () => { throw new DirectoryError('The Host could not open the session.', 'session_attach_failed', 503); });
     return { open, stop: restoreSession({ active: () => true, open, restored: vi.fn(), failed: vi.fn() }) };
   };
-  // Without jitter: attempts at 0, 5, 15, 35, 75, 155, 315, 615, 915, 1215 and 1515 seconds.
+  // Without jitter: attempts at 0, 5, 15, 35, then every minute from 75 seconds on (361 before backing off).
   const steady = failing(1);
   try {
     await vi.advanceTimersByTimeAsync(30 * 60_000);
-    expect(steady.open).toHaveBeenCalledTimes(11);
+    expect(steady.open).toHaveBeenCalledTimes(33);
   } finally { steady.stop(); vi.restoreAllMocks(); }
   // Jitter only shortens a wait, by up to a fifth, so pages that failed together spread out.
   const hurried = failing(0);
   try {
     await vi.advanceTimersByTimeAsync(30 * 60_000);
-    expect(hurried.open).toHaveBeenCalledTimes(13);
+    expect(hurried.open).toHaveBeenCalledTimes(41);
   } finally { hurried.stop(); }
 });
 
@@ -98,9 +98,29 @@ it('retries at once when the page resumes, and waits from the first delay again'
   const open = vi.fn(async () => { throw new DirectoryError('The Host could not open the session.', 'session_attach_failed', 503); });
   const stop = restoreSession({ active: () => true, open, restored: vi.fn(), failed: vi.fn() });
   try {
-    await vi.advanceTimersByTimeAsync(155_001);
+    await vi.advanceTimersByTimeAsync(135_001);
     expect(open).toHaveBeenCalledTimes(6);
     window.dispatchEvent(new Event('online'));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(open).toHaveBeenCalledTimes(7);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(open).toHaveBeenCalledTimes(8);
+  } finally { stop(); vi.restoreAllMocks(); }
+});
+
+it('retries at once when its Host comes back, and waits from the first delay again', async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, 'random').mockReturnValue(1);
+  const open = vi.fn(async () => { throw new DirectoryError('The Remote Host is offline.', 'host_offline', 503); });
+  const stop = restoreSession({ hostId: 'laptop', active: () => true, open, restored: vi.fn(), failed: vi.fn() });
+  try {
+    await vi.advanceTimersByTimeAsync(135_001);
+    expect(open).toHaveBeenCalledTimes(6);
+    // Another Host coming back changes nothing here.
+    announceHostReturned('studio');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(open).toHaveBeenCalledTimes(6);
+    announceHostReturned('laptop');
     await vi.advanceTimersByTimeAsync(1);
     expect(open).toHaveBeenCalledTimes(7);
     await vi.advanceTimersByTimeAsync(5_000);

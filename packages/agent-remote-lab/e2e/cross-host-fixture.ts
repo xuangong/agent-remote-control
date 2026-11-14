@@ -94,11 +94,15 @@ interface HostSpec { name: string; providers: ReadonlyArray<{ providerId: string
  */
 export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-cross-host-')));
+  // The owner's identity authority. The Relay gives up on a request after 5 s and aborts it, which leaves a truncated
+  // body here when the machine is busy: answer that with an error rather than throwing out of the server.
   const authority = createServer(async (request, response) => {
-    let text = ''; for await (const chunk of request) text += String(chunk);
-    const input = JSON.parse(text), subject = input.subject ?? input.continuation;
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify({ active: true, subject, authenticatedAt: Date.now(), validUntil: Date.now() + 60000, expiresAt: Date.now() + 600000 }));
+    try {
+      let text = ''; for await (const chunk of request) text += String(chunk);
+      const input = JSON.parse(text), subject = input.subject ?? input.continuation;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ active: true, subject, authenticatedAt: Date.now(), validUntil: Date.now() + 60000, expiresAt: Date.now() + 3_600_000 }));
+    } catch { if (!response.headersSent) response.writeHead(400); response.end(); }
   });
   await new Promise<void>(done => authority.listen(0, '127.0.0.1', done));
   const server = createServer(); await new Promise<void>(done => server.listen(0, '127.0.0.1', done));

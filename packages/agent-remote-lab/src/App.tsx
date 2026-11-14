@@ -154,6 +154,7 @@ import { HostPairing, type HostPairingService, type RemoteHost } from './compone
 import { HostOverview } from './components/HostOverview.js';
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
 import { unavailableSessions } from './unavailable-sessions.js';
+import { announceHostReturned } from './session-restoration.js';
 import { AsleepNotice } from './components/AsleepNotice.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
@@ -672,12 +673,13 @@ function AppContent({
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible || pageOpen) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
-  // A Host that comes back is asked again for the sessions it reported missing (see unavailableSessions).
+  // A Host that comes back is asked again for the sessions it reported missing (see unavailableSessions), and the views
+  // waiting on it try again at once instead of at their next backed-off retry.
   const offlineHosts = useRef(new Set<string>());
   useEffect(() => {
     for (const host of remoteHosts) {
       if (host.online === false) offlineHosts.current.add(host.id);
-      else if (offlineHosts.current.delete(host.id)) unavailableSessions(transport).forgetHost(host.id);
+      else if (offlineHosts.current.delete(host.id)) { unavailableSessions(transport).forgetHost(host.id); announceHostReturned(host.id); }
     }
   }, [remoteHosts, transport]);
   const availableProviders = selectedHost.id === 'local' ? providers : hostProviders(currentHost);
@@ -2331,7 +2333,10 @@ function AppContent({
       succession.rememberSide(opened);
       setSideSessions(current => [...current.filter(entry => viewKey(entry) !== opened.viewId), opened]);
       nextSideRequest(source);
-      editWindow(operation);
+      // In Bot mode the new Side is a bot of this group: open it, as for a group that is not the shown Window.
+      if (windowMode) editWindow(operation);
+      else void windowWorkspace.operate(operation).then(() => navigation.select({ kind: 'bot', groupId: sharedWindow.id, viewId }))
+        .catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
       return;
     }
     nextSideRequest(source);
@@ -2962,7 +2967,7 @@ function AppContent({
       ...(quoteView && context.state ? { entrySelection: quoteEntrySelection(quoteView, context.state.timeline.epoch) } : {}),
       ...(quoteView ? { receiveQuotes: (excerpts: readonly SessionExcerpt[]) => restoreQuotes(baseUrl, quoteView, excerpts) } : {}),
       // In Bot mode a Side joins the bot's group beside it (a Side is a bot); a fork or an Ask would open elsewhere.
-      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? botPresentation ? forkCommands.filter(command => command.id === 'console:side') : forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
+      consoleCommands: [...(available && directory && context.state?.agent?.capabilities.sendMessage && context.state.agent.capabilities.history ? botPresentation ? options.bot ? forkCommands.filter(command => command.id === 'console:side') : [] : forkCommands : []), ...(handoffAvailable ? [handoffCommand] : []),
         ...(!botPresentation && referencing && available ? [refCommand] : [])],
       onExecuteConsoleCommand: async (id: string, args: string): Promise<AgentCommandResult> => {
         if (id === refCommand.id) {
@@ -2978,7 +2983,8 @@ function AppContent({
           setSuccessionDialog({ scope: baseUrl, source, visible: true, initialProvider: handoffProvider(args), directory: labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)) });
           return {};
         }
-        if (botPresentation && id !== 'console:side') throw new Error('This command is unavailable in Bot mode.');
+        // A Side joins a bot's group; a session listed under Other sessions has no group to join.
+        if (botPresentation && (id !== 'console:side' || !options.bot)) throw new Error('This command is unavailable in Bot mode.');
         if (!context.state || !available) throw new Error('Wait for this session to finish synchronizing.');
         return createFork(context.state, source, id, args);
       },

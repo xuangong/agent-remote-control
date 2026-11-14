@@ -41,3 +41,14 @@ it('remembers only a missing native session, not other failures', () => {
   expect(sessions.get(session('A'))).toBeUndefined();
   expect(sessions.get(session('B'))).toBeUndefined();
 });
+
+it('counts the ten minutes from the Host\'s own report, not from reports this page replays', () => {
+  vi.useFakeTimers();
+  const sessions = unavailableSessions({}), error = missing();
+  sessions.remember(session('A'), error);
+  vi.advanceTimersByTime(UNAVAILABLE_SESSION_MS - 1_000);
+  // A view replays the remembered report; that is not news from the Host.
+  sessions.remember(session('A'), sessions.get(session('A')));
+  vi.advanceTimersByTime(1_000);
+  expect(sessions.get(session('A'))).toBeUndefined();
+});

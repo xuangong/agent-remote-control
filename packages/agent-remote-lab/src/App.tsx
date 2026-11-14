@@ -165,7 +165,9 @@ import { refCommand, SessionReferences } from './components/SessionReferences.js
 import { loadSessionRefs, sessionRefsEntry, withSessionReferences, type LabSessionRef } from './session-references.js';
 import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, forkDisplayState, ForkStore, type SessionFork } from './session-forks.js';
 import { CollapsedConversations } from './components/CollapsedConversations.js';
-import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from './components/SessionDock.js';
+import { MinimizeMainSession, SessionDockProvider, SessionDockRail, type FoldedBot } from './components/SessionDock.js';
+import { RemoveBotSheet } from './components/RemoveBotSheet.js';
+import { foldOperation } from './window-fold.js';
 import { ConversationPane, ConversationSplit } from './components/ConversationSplit.js';
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
@@ -361,6 +363,8 @@ function AppContent({
   const [creationLocked, setCreationLocked] = useState(false);
   /** Bot mode's New bot sheet, and the failure of its last start. */
   const [newBot, setNewBot] = useState<{ open: boolean; failure?: string }>({ open: false });
+  /** A bot of the shown Window waiting for confirmation before it is removed from the group. */
+  const [removingBot, setRemovingBot] = useState<{ windowId: string; viewId: string }>();
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
@@ -1364,6 +1368,17 @@ function AppContent({
   const windowToolbarShown = !!sharedWindow && !compactLayout && !windowWorkspace.unavailable;
   // The toolbar's sheets belong to its Window: switching Windows, or the toolbar going away (a compact layout, Bot mode, an unavailable Window), closes them.
   useEffect(() => { setAgentControlOpen(false); setDeleteConfirmOpen(false); }, [windowWorkspace.client, sharedWindow?.id, windowToolbarShown, windowMode]);
+  /**
+   * How a dock or float of the shown Window folds: a bot's × folds it where it stands, and folded or asleep it is a slim
+   * card on desktop (compact layouts show one view at a time and do not fold).
+   */
+  function windowPaneFolding(viewId: string): { fold?: FoldedBot; onFold?(): void; onRestore?(): void; onRemove?(): void; onCloseView?(viewId: string): void } {
+    if (!sharedWindow) return {};
+    const view = sharedWindow.views.find(item => item.id === viewId);
+    const folded = !compactLayout && !!view && isBotView(view) && !missingSessions.has(sessionKey(view.binding)) && (view.collapsed || asleepBot(view));
+    return { onCloseView: closeView, ...(foldsOnClose(view) ? { onFold: () => closeView(viewId) } : {}),
+      ...(folded ? { fold: foldedBot(view), onRestore: () => restoreView(viewId), onRemove: () => setRemovingBot({ windowId: sharedWindow.id, viewId }) } : {}) };
+  }
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
     const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
     if (slot && entry.managed) {
@@ -2826,8 +2841,8 @@ function AppContent({
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
       composerNotice: botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
       sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
-        title="Close this session view. Agent sessions keep running."
-        onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button> : null}
+        title={foldsOnClose(view) ? 'Fold. It stays in this group.' : 'Close this session view. Agent sessions keep running.'}
+        onClick={() => closeView(view.id)}>×</button> : null}
         {!compactLayout ? <StarButton session={source} favorites={favorites} /> : null}
         <SessionHeadingActions sessionKey={sessionKey(source)} alwaysCollapsed={!!context.menuActions}>
           {context.menuActions}
@@ -2854,6 +2869,36 @@ function AppContent({
   function wakeBot(groupId: string, viewId: string) {
     const { asleep: _asleep, ...details } = windowWorkspace.readGroup(groupId)?.bots?.members[viewId] ?? {};
     void windowWorkspace.operateGroup(groupId, { type: 'bot.update', viewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
+  }
+  /** A bot of a group shown in Bot mode folds when its pane closes; removing it from the group is a separate, confirmed step. */
+  function foldsOnClose(view: WindowView | undefined): view is WindowView & { binding: WindowSessionBinding } {
+    const group = sharedWindow ? windowWorkspace.readGroup(sharedWindow.id) : undefined;
+    return !!view && !!group && hasBotAppearance(group) && isBotView(view) && !missingSessions.has(sessionKey(view.binding));
+  }
+  /** The × of a pane in the shown Window: a bot folds where it stands, any other view closes. */
+  function closeView(viewId: string) {
+    const authority = windowWorkspace.authority, current = authority?.readWindow?.() ?? authority?.window;
+    if (!authority || !current) return;
+    authority.operate(foldsOnClose(current.views.find(view => view.id === viewId)) ? foldOperation(current, viewId) : { type: 'view.close', viewId });
+  }
+  /** Removing a view from the shown Window's list: a bot of a group in Bot mode asks first. */
+  function confirmBotRemoval(view: WindowView): boolean {
+    if (!sharedWindow || !foldsOnClose(view)) return false;
+    setRemovingBot({ windowId: sharedWindow.id, viewId: view.id });
+    return true;
+  }
+  /** Restores a folded or sleeping bot's pane and selects it; a sleeping bot wakes for every device. */
+  function restoreView(viewId: string) {
+    const authority = windowWorkspace.authority, current = authority?.readWindow?.() ?? authority?.window;
+    const view = current?.views.find(item => item.id === viewId);
+    if (!authority || !current || !view) return;
+    if (asleepBot(view)) wakeBot(current.id, viewId);
+    if (view.collapsed || current.selectedViewId !== viewId) authority.operate(viewSelection(view));
+  }
+  /** What a folded bot's slim card shows: who it is and how it is doing, from the shared channel, while its conversation is released. */
+  function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {
+    return { name: botDisplayName(view.binding), picture: sharedWindow ? windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture : undefined,
+      role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)), asleep: asleepBot(view) };
   }
   function providerDisplayName(hostId: string, id: string): string {
     return remoteHosts.find(host => host.id === hostId)?.providers?.find(provider => provider.providerId === id)?.displayName
@@ -2993,7 +3038,8 @@ function AppContent({
     {!windowWorkspace.unavailable ? <>
     {windowMode && scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     <WindowMenu workspace={windowWorkspace} current={menuCurrentBinding}
-      visible={windowMode && windowView.visible && !sidebarShortcuts} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus} />
+      visible={windowMode && windowView.visible && !sidebarShortcuts} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus}
+      onRemoveView={confirmBotRemoval} />
     <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowMode && windowOverviewOpen} sessionStatus={windowSessionStatus} onOpenChange={setWindowOverviewOpen} />
     <div ref={shortcutFloatingSlot} className="lab-movable-slot" />
     <div className="lab-ask-workspaces" {...backgroundInert}>
@@ -3118,7 +3164,7 @@ function AppContent({
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
-            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf}
+            <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf} onRemoveView={confirmBotRemoval}
               onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
@@ -3187,7 +3233,8 @@ function AppContent({
           onSessionBound={entry.managed ? undefined : receiveViewSession}
           missing={!!entry.target && missingSessions.has(sessionKey(entry.target))} onSessionUnavailable={markSessionMissing}
           sessionPresentation={context => presentSessionView(context, { team: !!entry.groupId || !!entry.teamMemberId })}
-          transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)} />)}</div>
+          transport={transport} draftStore={messageDrafts} {...windowDraftBinding(entry)} navigation={viewNavigation} onClose={() => sessionWindows.close(entry.id)}
+          {...windowPaneFolding(entry.id)} />)}</div>
         {sharedWindow && !sharedWindow.views.length ? <div className="lab-window-empty" data-testid="empty-window">
           <p>No session views</p><button type="button" onClick={createSessionView}>New session view</button>
         </div> : null}
@@ -3205,6 +3252,7 @@ function AppContent({
             if (collapsed || view?.collapsed) windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed });
           }}
           onClosePrimaryGroup={viewId => windowWorkspace.authority?.operate({ type: 'view.close', viewId })}
+          onRemovePrimaryGroup={viewId => setRemovingBot({ windowId: sharedWindow.id, viewId })}
           primaryGroups={primaryGroups.map(view => {
             const pendingSlot = view.id === sharedWindow.selectedPrimaryViewId ? succession.displaySlot : undefined;
             const slot = sharedSlots?.get(view.id) ?? (pendingSlot && view.binding
@@ -3216,10 +3264,8 @@ function AppContent({
               // A sleeping bot stands folded and dimmed; restoring it wakes it for every device.
               selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed || asleepBot(view),
               // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
-              ...((view.collapsed || asleepBot(view)) && view.binding && !missing && isBotView(view) ? { fold: {
-                name: botDisplayName(view.binding), picture: windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.picture,
-                role: botRole(view, teamId => supportTeams.has(teamId)), status: botActivityLabel(windowSessionStatus(view.binding)), asleep: asleepBot(view) } } : {}),
-              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)}
+              ...((view.collapsed || asleepBot(view)) && !missing && isBotView(view) ? { fold: foldedBot(view) } : {}),
+              content: view.binding && !missing ? <SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)} onCloseView={closeView}
                 sessionIntent={view.binding.sessionIntent}
                 successionContext={succession.successionContextFor(slot?.id)}
                 directoryFor={hostId => hostId === selectedHost.id ? directory : undefined}
@@ -3368,6 +3414,12 @@ function AppContent({
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
       hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot}
       onNewBot={directory ? openNewBot : undefined} />
+    {removingBot && windowMode && sharedWindow?.id === removingBot.windowId && sharedWindow.views.some(view => view.id === removingBot.viewId) ? (() => {
+      const view = sharedWindow.views.find(item => item.id === removingBot.viewId)!;
+      return <RemoveBotSheet name={view.binding ? botDisplayName(view.binding) : 'Session view'} window={sharedWindow} viewId={view.id}
+        onCancel={() => setRemovingBot(undefined)}
+        onRemove={() => { windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id }); setRemovingBot(undefined); }} />;
+    })() : null}
     {!windowMode && directory && newBot.open ? <NewBotSheet open onClose={() => setNewBot({ open: false })}
       hosts={selectableHosts.map(host => ({ id: host.id, name: host.name, disabled: host.online === false }))} hostId={selectedHost.id}
       onHostChange={id => { const host = selectableHosts.find(item => item.id === id); if (host) selectHost(host as RemoteHost); }}

@@ -46,6 +46,8 @@
 
 .lab-window-row[data-depth="1"] { padding-left: 16px; }
 .lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }
+/* A folded view reads as set aside; only a status that asks for attention keeps its color. */
+.lab-window-row[data-collapsed] .agent-session-title:is([data-session-status="idle"], [data-session-status="closed"]) { color: inherit; }
 
 /* The desktop sidebar: headings, Window rows and view rows follow the sidebar's flat rows (.lab-sidebar-link) and icon buttons.
    Every rule starts with `.lab-window-workspaces[data-placement="sidebar"]` (0,2,0): a row's open button is (0,3,0) and its hover

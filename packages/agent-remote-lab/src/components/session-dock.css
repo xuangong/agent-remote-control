@@ -122,3 +122,9 @@
   font: 500 10px/1.2 var(--ui-font); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .lab-folded-bot { transition: none; } }
 .lab-folded-bot[data-asleep] .ui-avatar, .lab-folded-bot[data-asleep] .lab-folded-bot-name { opacity: .5; }
+
+/* A folded dock or float is the same slim card: the conversation stays mounted, unseen and released, beneath it. */
+.lab-session-dock-pane[data-folded] { min-width: 0; }
+.lab-ask-window[data-folded] > :not(.lab-folded-bot, .lab-folded-remove) { display: none !important; }
+.lab-ask-viewport[data-presentation="floating"] > .lab-ask-window[data-folded] { width: 44px; height: min(var(--ask-height, 560px), 360px); }
+.lab-folded-remove { flex: none; width: 100%; min-height: 36px; padding: 4px; border: 0; border-radius: 0; background: transparent; color: var(--obs-text-secondary); }

@@ -10,7 +10,7 @@ import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import { Avatar } from '../ui/Avatar.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
-interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number }
+interface DockItem { id: string; title: string; host: HTMLElement; visible: boolean; width: number; additionalWidth?: number; folded?: boolean }
 interface DockLayout { panes: Array<{ id: string; width: number }>; baseWidth?: number; mainMinimized?: boolean }
 interface DockContext {
   enabled: boolean; items: DockItem[]; layout: DockLayout;
@@ -58,7 +58,7 @@ export function SessionDockProvider({ enabled, docksHidden = false, storageScope
   const hadVisibleDock = useRef(false);
   const register = useCallback((item: Omit<DockItem, 'width'>) => setRegistered(current => {
     const previous = current.find(value => value.id === item.id);
-    return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible && previous.additionalWidth === item.additionalWidth ? current
+    return previous?.host === item.host && previous.title === item.title && previous.visible === item.visible && previous.additionalWidth === item.additionalWidth && previous.folded === item.folded ? current
       : [...current.filter(value => value.id !== item.id), item];
   }), []);
   const unregister = useCallback((id: string, host: HTMLElement) => setRegistered(current => current.some(item => item.id === id && item.host === host)
@@ -137,8 +137,8 @@ export function moveSessionHost(host: HTMLElement, parent: HTMLElement) {
   if (range && selection) { selection.removeAllRanges(); selection.addRange(range); }
 }
 
-export function SessionViewPlacement({ id, title, visible, additionalWidth, dockRequest, children }: {
-  id: string; title: string; visible: boolean; additionalWidth?: number; dockRequest?: string; children(placement: { docked: boolean; controls: ReactNode }): ReactNode;
+export function SessionViewPlacement({ id, title, visible, additionalWidth, folded, dockRequest, children }: {
+  id: string; title: string; visible: boolean; additionalWidth?: number; folded?: boolean; dockRequest?: string; children(placement: { docked: boolean; controls: ReactNode }): ReactNode;
 }) {
   const dock = useContext(Context);
   const [host] = useState(() => { const element = document.createElement('div'); element.className = 'lab-session-placement'; return element; });
@@ -153,7 +153,7 @@ export function SessionViewPlacement({ id, title, visible, additionalWidth, dock
     if (!docked && home.current) moveSessionHost(host, home.current);
     setMounted(true);
   }, [host, docked]);
-  useLayoutEffect(() => { register?.({ id, title, host, visible, additionalWidth }); }, [register, id, title, host, visible, additionalWidth]);
+  useLayoutEffect(() => { register?.({ id, title, host, visible, additionalWidth, folded }); }, [register, id, title, host, visible, additionalWidth, folded]);
   useLayoutEffect(() => () => { unregister?.(id, host); host.remove(); }, [unregister, id, host]);
   const titleInteraction = useSessionDockDrag({ id, title, enabled: docked, move: dock?.move, reorder: dock?.reorder });
   const controls = dock?.enabled ? <>
@@ -177,11 +177,25 @@ export function MinimizeMainSession() {
   </button>;
 }
 
+/** The bot a folded pane shows: its picture, name, role tag and status from the shared channel. */
+export interface FoldedBot { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean }
 export interface PrimarySessionGroupPane {
   id: string; title: string; width: number; additionalWidth?: number;
   collapsed: boolean; selected: boolean; content: ReactNode;
-  /** The bot a folded group shows: its picture, name, role tag and status from the shared channel. */
-  fold?: { name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean };
+  fold?: FoldedBot;
+}
+/** A folded bot: a slim card standing where its pane was; pressing it restores the pane. */
+export function FoldedBotCard({ label, fold, controls, onRestore }: { label: string; fold: FoldedBot; controls?: string; onRestore(): void }) {
+  return <button type="button" className="lab-folded-bot" aria-label={label} aria-controls={controls} aria-expanded={controls ? false : undefined}
+    data-asleep={fold.asleep || undefined}
+    aria-description={[fold.role, fold.asleep && fold.status !== 'Needs you' ? 'Asleep' : fold.status].filter(Boolean).join(' · ') || undefined} title={fold.name}
+    onClick={onRestore}>
+    {/* Its picture with the status beside it, then its name and role running down the slim card. */}
+    <span className="lab-folded-bot-picture"><Avatar name={fold.name} picture={fold.picture} size={28} />
+      {fold.status ? <span className="lab-folded-bot-status" data-attention={fold.status === 'Needs you' || undefined} data-failed={fold.status === 'Failed' || undefined} /> : null}</span>
+    <span className="lab-folded-bot-name">{fold.name}</span>
+    {fold.role ? <span className="lab-folded-bot-role">{fold.role}</span> : null}
+  </button>;
 }
 interface SessionDockRailProps {
   children?: ReactNode; minimizedHeader?: ReactNode; mainTitle?: string; minimumBaseWidth?: number; onCreateView?(): void;
@@ -190,8 +204,10 @@ interface SessionDockRailProps {
   onResizePrimaryGroup?(id: string, width: number): void;
   onCollapsePrimaryGroup?(id: string, collapsed: boolean): void;
   onClosePrimaryGroup?(id: string): void;
+  /** The × of a folded bot's card: removing the bot from its group, after a confirmation. */
+  onRemovePrimaryGroup?(id: string): void;
 }
-export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup }: SessionDockRailProps) {
+export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main session', minimumBaseWidth = minimumWidth, onCreateView, compact = false, primaryGroups, onSelectPrimaryGroup, onResizePrimaryGroup, onCollapsePrimaryGroup, onClosePrimaryGroup, onRemovePrimaryGroup }: SessionDockRailProps) {
   const dock = useContext(Context);
   const rail = useRef<HTMLDivElement>(null);
   const shared = useWindowLayout();
@@ -226,7 +242,7 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   }, []);
   const baseWidth = Math.max(minimumBaseWidth, preferredBaseWidth ?? width - defaultWidth);
   return <div ref={rail} className="lab-session-dock-rail" data-docked={shown.length > 0 || primaryGroups && !compact || undefined} data-docks-hidden={docksHidden || undefined} data-primary-groups={primaryGroups ? true : undefined} data-compact={compact || undefined}>
-    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
+    {primaryGroups ? primaryGroups.map((group, index) => <PrimaryGroupPane key={group.id} group={group} compact={compact} minimizedHeader={index === 0 ? minimizedHeader : undefined} onSelect={onSelectPrimaryGroup} onResize={onResizePrimaryGroup} onCollapse={onCollapsePrimaryGroup} onClose={onClosePrimaryGroup} onRemove={onRemovePrimaryGroup} />) : <div className="lab-session-dock-base" data-minimized={minimized || undefined} style={shown.length ? { flexBasis: minimized ? 44 : baseWidth } : undefined}>
       <div ref={content} id={contentId} className="lab-session-dock-main-content" hidden={minimized}>{children}</div>
       {minimized ? minimizedHeader : null}
       {minimized ? <button ref={restore} type="button" className="lab-session-main-restore" aria-label={`Restore main session: ${mainTitle}`} title={`Restore main session: ${mainTitle}`} aria-expanded={false} aria-controls={contentId}
@@ -241,12 +257,13 @@ export function SessionDockRail({ children, minimizedHeader, mainTitle = 'Main s
   </div>;
 }
 
-function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse, onClose }: {
+function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize, onCollapse, onClose, onRemove }: {
   group: PrimarySessionGroupPane; compact: boolean; minimizedHeader?: ReactNode;
   onSelect?: SessionDockRailProps['onSelectPrimaryGroup'];
   onResize?: SessionDockRailProps['onResizePrimaryGroup'];
   onCollapse?: SessionDockRailProps['onCollapsePrimaryGroup'];
   onClose?: SessionDockRailProps['onClosePrimaryGroup'];
+  onRemove?: SessionDockRailProps['onRemovePrimaryGroup'];
 }) {
   const minimized = !compact && group.collapsed;
   const contentId = useId();
@@ -260,18 +277,12 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
     onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
     {minimized ? minimizedHeader : null}
-    {minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
+    {/* A folded bot is removed from its group only on request; other views close at once. */}
+    {minimized && group.fold && onRemove ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Remove ${group.title} from this group`}
+      title="Remove from group…" onClick={() => onRemove(group.id)}>×</button>
+      : minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={`Close primary group: ${group.title}`}
       title="Close this session view. Agent sessions keep running." onClick={() => onClose(group.id)}>×</button> : null}
-    {minimized && group.fold ? <button type="button" className="lab-folded-bot" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
-      data-asleep={group.fold.asleep || undefined}
-      aria-description={[group.fold.role, group.fold.asleep && group.fold.status !== 'Needs you' ? 'Asleep' : group.fold.status].filter(Boolean).join(' · ') || undefined} title={group.fold.name}
-      onClick={() => onCollapse?.(group.id, false)}>
-      {/* A folded bot: its picture with the status beside it, then its name and role running down the slim card. */}
-      <span className="lab-folded-bot-picture"><Avatar name={group.fold.name} picture={group.fold.picture} size={28} />
-        {group.fold.status ? <span className="lab-folded-bot-status" data-attention={group.fold.status === 'Needs you' || undefined} data-failed={group.fold.status === 'Failed' || undefined} /> : null}</span>
-      <span className="lab-folded-bot-name">{group.fold.name}</span>
-      {group.fold.role ? <span className="lab-folded-bot-role">{group.fold.role}</span> : null}
-    </button>
+    {minimized && group.fold ? <FoldedBotCard label={`Restore primary group: ${group.title}`} fold={group.fold} controls={contentId} onRestore={() => onCollapse?.(group.id, false)} />
     : minimized ? <button type="button" className="lab-session-main-restore" aria-label={`Restore primary group: ${group.title}`} aria-controls={contentId} aria-expanded={false}
       onClick={() => onCollapse?.(group.id, false)}><span className="lab-session-main-label">Group</span><span className="lab-session-main-title">{group.title}</span></button>
       : !compact && onCollapse ? <button type="button" className="lab-primary-group-minimize" aria-label={`Minimize primary group: ${group.title}`} aria-controls={contentId} aria-expanded={true}
@@ -290,9 +301,11 @@ function DockPane({ item, order, hidden }: { item: DockItem; order: number; hidd
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
-  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} hidden={hidden} style={{ width: item.width + (item.additionalWidth ?? 0), minWidth: shared ? 240 : undefined, order }}>
+  // A folded bot stands as a slim card, as a folded primary group does.
+  return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} hidden={hidden} data-folded={item.folded || undefined}
+    style={{ width: item.folded ? 44 : item.width + (item.additionalWidth ?? 0), minWidth: item.folded ? 0 : shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
-    <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />
+    {item.folded ? null : <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />}
   </section>;
 }
 

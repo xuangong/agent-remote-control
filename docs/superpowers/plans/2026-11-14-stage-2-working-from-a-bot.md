@@ -79,9 +79,9 @@ A pane of a group shown in Bot mode is a bot, so it keeps its conversation every
 
 **Files:** `App.tsx` (primary header ×, dock and float ×, the folded primary card's ×), `SessionFamily.tsx` (a Side's ×), `SessionWindow.tsx` and `SessionDock.tsx` (a folded dock or float as a slim card), a confirmation sheet, tests.
 
-- [ ] × on a bot's pane folds it (`view.collapse`); Asks, empty and history views close as before.
-- [ ] A folded dock or float is the same slim card as a folded primary group (DockPane 44 px wide, no resize); a folded Side is hidden and listed in the sidebar and Bot mode.
-- [ ] × on a folded card asks "Remove “name” from this group?" (sheet, naming what closes with it) and closes the view on Remove.
-- [ ] Commit `feat(lab): fold a bot's pane on close and remove it only on request`.
+- [x] × on a bot's pane folds it (`view.collapse`); Asks, empty and history views, and every view of a group not shown in Bot mode, close as before. When the selection was in the folded pane it moves on as a close would (a Side's to its source, otherwise the nearest open primary group, else an open dock), never unfolding another pane.
+- [x] A folded dock or float is the same slim card as a folded primary group (DockPane 44 px wide, no resize); a folded Side is hidden and listed in the sidebar and Bot mode. A sleeping bot's dock or float folds the same way. Compact layouts do not fold: × folds and the selection moves on.
+- [x] × on a folded card asks "Remove “name” from this group?" (sheet, naming what closes with it) and closes the view on Remove. The Window list's × on a bot asks the same; Bot mode's Remove from group shares the sheet.
+- [x] Commit `feat(lab): fold a bot's pane on close and remove it only on request`.
 
 Later (not in 2b): Side, TPM, Team and Support created from a bot in Bot mode join its group (needs those creation commands in Bot mode).

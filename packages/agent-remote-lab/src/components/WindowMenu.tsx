@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { hasWindowAppearance, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
@@ -6,12 +6,13 @@ import type { SessionActivityStatus } from '../session-activity-status.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
-export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus }: {
+export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, onRemoveView }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
   /** Shows every Window side by side; offered where the overview is available. */
   onOverview?(): void;
   /** Each session's status, as Track shows it. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
+  onRemoveView?: ComponentProps<typeof WindowWorkspaces>['onRemoveView'];
 }) {
   const [open, setOpen] = useState(false);
   const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
@@ -46,7 +47,7 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
         {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp"
           onClick={() => { close(); onOverview(); }}>All Windows</button> : null}
         <button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
-      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} /></div>
+      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} onRemoveView={onRemoveView} /></div>
     </section>
     <span className="agent-visually-hidden" role="status">{pendingElsewhere ? 'Another Window has pending sessions.' : ''}</span>
   </div>;

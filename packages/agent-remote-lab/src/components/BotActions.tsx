@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { applyWindowOperation, type WindowBotDetails, type WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
+import type { WindowBotDetails, WindowGroupOperation } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { appendedRank, type BotRow, type BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
@@ -7,6 +7,7 @@ import type { MenuEntry } from '../ui/Menu.js';
 import { Sheet } from '../ui/Sheet.js';
 import { Button } from '../ui/Button.js';
 import { BotPicture, botDisplayName } from './BotRoster.js';
+import { RemoveBotSheet } from './RemoveBotSheet.js';
 
 /** Where a bot runs, for its Info sheet. App knows the Hosts, the providers and the bot's handoff chain. */
 export interface BotInfo {
@@ -17,27 +18,6 @@ export interface BotInfo {
 type OpenSheet = { kind: 'info' | 'label' | 'remove'; row: BotRow; groupTitle: string };
 type Workspace = Pick<ReturnType<typeof useWindowWorkspace>, 'readGroup' | 'operateGroup' | 'groups'>;
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
-const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
-
-/** “Its session keeps running.”, then what closes with the bot: “Edge cases” and 1 Ask close with it. */
-function removalMessage(closing: { asks: number; bots: string[] } | undefined): string {
-  const items = [...closing?.bots.map(name => `“${name}”`) ?? [], ...closing?.asks ? [plural(closing.asks, 'Ask', 'Asks')] : []];
-  if (!items.length) return 'Its session keeps running.';
-  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
-  const single = items.length === 1 && !(closing!.asks > 1 && !closing!.bots.length);
-  return `Its session keeps running. ${list} ${single ? 'closes' : 'close'} with it.`;
-}
-/** What closes with a bot: its Asks and the views attached to it or closing with it, such as a Team leader's members. */
-function closingWith(workspace: Workspace, row: BotRow): { asks: number; bots: string[] } {
-  const group = workspace.readGroup(row.groupId);
-  // The bot may already be gone (removed here or on another device) while its sheet is still closing.
-  if (!group?.window.views.some(view => view.id === row.viewId)) return { asks: 0, bots: [] };
-  const staying = new Set(applyWindowOperation(group.window, { type: 'view.close', viewId: row.viewId }).views.map(view => view.id));
-  const leaving = group.window.views.filter(view => !staying.has(view.id) && view.id !== row.viewId);
-  return { asks: leaving.filter(view => view.feature?.kind === 'ask').length,
-    bots: leaving.filter(view => view.feature?.kind !== 'ask' && view.binding).map(view => botDisplayName(view.binding!)) };
-}
-
 /**
  * A bot's own actions (Info, Label, Hide in Bot mode, Remove from group) and the group's way to show hidden bots again.
  * Every change is a group operation, shared by every device; a group formed from sessions gains its bot details in the same change.
@@ -126,7 +106,6 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
   const close = () => { if (!busy) setOpen(undefined); };
   const row = open?.row, name = row ? botDisplayName(row.binding) : '';
   const info = open?.kind === 'info' && row ? botInfo?.({ groupId: row.groupId, viewId: row.viewId }) : undefined;
-  const closing = open?.kind === 'remove' && row ? closingWith(workspace, row) : undefined;
   const sheets: ReactNode = !open || !row ? null
     : open.kind === 'info' ? <Sheet open title={name} detent="content" onClose={close}>
       <div className="lab-bot-info-head">
@@ -152,13 +131,8 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
         </div>
       </form>
     </Sheet>
-    : <Sheet open title={`Remove “${name}” from “${open.groupTitle}”?`} detent="content" onClose={close}>
-      <p className="lab-sheet-message">{removalMessage(closing)}</p>
-      <div className="lab-sheet-actions">
-        <Button disabled={busy} onClick={close}>Cancel</Button>
-        <Button variant="destructive" disabled={busy} aria-busy={busy || undefined} onClick={() => void remove()}>Remove</Button>
-      </div>
-    </Sheet>;
+    : <RemoveBotSheet name={name} groupTitle={open.groupTitle} window={workspace.readGroup(row.groupId)?.window} viewId={row.viewId} busy={busy}
+      onCancel={close} onRemove={() => void remove()} />;
   const noticeLine: ReactNode = notice ? <p className="lab-bot-notice" role="status">{notice.text}
     {notice.undo ? <button type="button" onClick={() => void notice.undo!()}>Undo</button> : null}</p> : null;
   return { botMenu, groupMenu, wake, sheets, notice: noticeLine, clearNotice: () => setNotice(undefined) };

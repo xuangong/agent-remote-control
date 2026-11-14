@@ -20,6 +20,8 @@ type FamilyTarget = SessionWindowTarget;
 interface Layout { children: FamilyTarget[]; focus: number }
 interface Props extends Omit<SessionConversationProps, 'familyRoot' | 'entries' | 'onNavigate'> {
   onAdditionalWidthChange?(width: number): void;
+  /** Closing an attached view of a shared Window; a bot's Side folds instead of closing. */
+  onCloseView?(viewId: string): void;
 }
 function restore(key: string, root: SessionWindowTarget): Layout {
   try {
@@ -123,7 +125,11 @@ export function SessionFamily(props: Props) {
   }
   function show(index: number) { if (shared && rootView) { focusPane(index); setReveal({ index }); return; } setLayout(current => ({ ...current, focus: index })); setReveal({ index }); }
   function close(index: number) {
-    if (shared && rootView) { const view = attached[index - 1]; if (view) shared.operate({ type: 'view.close', viewId: view.id }); setReveal({ index: parentIndex(index) }); return; }
+    if (shared && rootView) {
+      const view = attached[index - 1];
+      if (view) { if (props.onCloseView) props.onCloseView(view.id); else shared.operate({ type: 'view.close', viewId: view.id }); }
+      setReveal({ index: parentIndex(index) }); return;
+    }
     setLayout(current => ({ children: current.children.slice(0, index - 1), focus: Math.min(current.focus, index - 1) }));
     setReveal({ index: index - 1 });
   }

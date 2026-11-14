@@ -25,7 +25,7 @@ function viewRole(view: WindowView): string {
   return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, placement = 'panel', actions: sharedActions }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, onRemoveView, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /**
    * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
@@ -40,6 +40,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   onNavigate?(): void;
   /** Called when a view of the open Window is chosen, once its selection is sent. */
   onChooseView?(view: WindowView): void;
+  /** Takes over removing a view of the open Window (a bot asks first); returns false to let the row close it at once. */
+  onRemoveView?(view: WindowView): boolean;
   /** Where the list sits: the floating Windows panel, or the desktop sidebar, where headings and rows follow its flat rows and icon actions. */
   placement?: 'panel' | 'sidebar';
 }) {
@@ -178,10 +180,10 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
         {view.id === workspace.window!.selectedViewId && !sidebar ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
         </button>
         {sidebar ? <IconButton icon="close" label={`Close session view: ${viewTitle(view)}`} className="lab-window-view-close" data-window-view-close={view.id}
-          title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable} onClick={() => edit({ type: 'view.close', viewId: view.id })} />
+          title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable} onClick={() => { if (!onRemoveView?.(view)) edit({ type: 'view.close', viewId: view.id }); }} />
           : <button type="button" className="lab-window-view-close" data-window-view-close={view.id} aria-label={`Close session view: ${viewTitle(view)}`}
           title="Close this session view. Agent sessions keep running." disabled={busy || workspace.unavailable}
-          onClick={() => edit({ type: 'view.close', viewId: view.id })}>×</button>}
+          onClick={() => { if (!onRemoveView?.(view)) edit({ type: 'view.close', viewId: view.id }); }}>×</button>}
       </div>; })}</nav>
       {!workspace.window.views.length ? <p className="lab-window-note">No session views. Add one or open one from {sidebar ? 'All sessions' : 'Sessions'}.</p> : null}
       <details ref={options} className="lab-window-options"><summary>Window options</summary>

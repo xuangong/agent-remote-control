@@ -4,7 +4,7 @@ import { activityLabel, sessionActivity, windowActivity } from './session-activi
 import { sessionKey } from './session-tree.js';
 
 const session = { hostId: 'host', providerId: 'claude', nativeSessionId: 'one' };
-const shared = (state: SharedSessionState): SessionStatesView => ({ state: () => ({ state }) });
+const shared = (state: SharedSessionState): SessionStatesView => ({ state: () => ({ state }), reply: () => undefined });
 
 describe('sessionActivity', () => {
   it('prefers Track’s live observation to the shared state', () => {

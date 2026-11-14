@@ -9,6 +9,7 @@ import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
 import { botActivityLabel, botRole, projectBotRoster } from './bot-roster.js';
+import { sharedReminders } from './bot-attention.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -271,6 +272,7 @@ function AppContent({
 }: AppProps) {
   const navigation = useWorkbenchMode(baseUrl);
   const windowMode = navigation.mode === 'window';
+  const windowModeRef = useRef(windowMode); windowModeRef.current = windowMode;
   const accessReady = useContext(WorkspaceReady);
   const [activated, setActivated] = useState(accessReady);
   useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
@@ -1850,12 +1852,14 @@ function AppContent({
     if (source) { revealSession(source); openAsk(source, sourceStateFor(source)); }
     else void openSession(item, undefined, undefined, false, undefined, 'history');
   }, navigation.mode);
+  // Bot mode reminds from the shared channel (below), so only Window mode's observations notify.
   const observeAttention = useCallback((session: SessionEntry, value: import('./tracking-state.js').SessionObservation) => {
-    if (latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
+    if (windowModeRef.current && latestEligible.current.has(sessionKey(session))) attention.observe(session, value);
   }, [attention.observe]);
+  // Bot mode follows its bots through the states the Relay shares, not a stream each (decision 11).
   const tracking = useSessionTracking(baseUrl, transport, windowMode && addressSession ? sessionKey(addressSession) : undefined,
     windowMode ? openWindows : [], windowMode ? askActivitySessions : [], connections, accessReady && succession.observerReady,
-    windowMode ? visibleWindows : visibleBots, observeAttention, !windowMode ? { includeTracked: false, additionalSessions: botTargets } : undefined);
+    windowMode ? visibleWindows : visibleBots, observeAttention, !windowMode ? { includeTracked: false, additionalSessions: [] } : undefined);
   const eligible = attention.enabled ? windowMode ? [...tracking.sessions, ...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
   latestEligible.current = new Set(eligible.map(sessionKey));
   const displayed = attention.enabled ? windowMode ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
@@ -1866,6 +1870,17 @@ function AppContent({
     attention.notifier.setDisplayed(displayed);
   }, [attention.notifier, eligibleKeys, displayedKeys, attention.enabled, navigation.mode]);
   const windowSessionStatus = useCallback((session: SessionStateRef) => sessionActivity(session, tracking.liveObservations, sessionStates), [tracking.liveObservations, sessionStates]);
+  // Bot mode's reminders: a bot that starts waiting or finishes, unless its conversation is on screen.
+  const sharedAttention = useRef(new Map<string, 'running' | 'waiting' | 'idle' | 'failed'>());
+  const botTargetKeys = JSON.stringify(botTargets.map(sessionKey).sort());
+  const onScreenBots = visibleBots.map(sessionKey).join('\n');
+  useEffect(() => {
+    if (windowMode || !attention.enabled) { sharedAttention.current = new Map(); return; }
+    const { next, reminders } = sharedReminders(sharedAttention.current, botTargets, sessionStates);
+    sharedAttention.current = next;
+    const onScreen = new Set(document.visibilityState === 'hidden' ? [] : onScreenBots.split('\n'));
+    for (const { session, reminder, identity } of reminders) if (!onScreen.has(sessionKey(session))) void attention.notifier.remind(session, reminder, identity);
+  }, [sessionStates, windowMode, attention.enabled, attention.notifier, botTargetKeys, onScreenBots]);
   const botDirectorySources = useMemo<OtherSessionSource[]>(() => {
     const sources: OtherSessionSource[] = [];
     if (providers.length && directory && selectedHost.id === 'local') for (const provider of providers) sources.push({ id: `local/${provider.providerId}`, hostId: 'local', providerId: provider.providerId, directory, online: true });

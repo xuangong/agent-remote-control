@@ -81,9 +81,23 @@ export class SessionAttentionNotifications {
     if (previous.cursor?.epoch !== next.cursor?.epoch) return;
     const reminder: Reminder | undefined = next.activity === 'waiting' ? 'waiting'
       : (previous.activity === 'running' || visibleResult) && next.activity === 'idle' ? 'idle' : undefined;
-    if (!reminder || !this.enabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!reminder) return;
     // A cursor gives all observers the same identity without inventing a native turn ID.
-    const identity = JSON.stringify([this.scope, key, reminder, next.cursor]);
+    await this.deliver(session, key, reminder, JSON.stringify([this.scope, key, reminder, next.cursor]), !!next.cursor, admission, clickScope);
+  }
+
+  /**
+   * A reminder decided from the states the Relay shares: `identity` names the transition the same way on every page of
+   * this browser, so one notification shows for it.
+   */
+  async remind(session: SessionEntry, reminder: Reminder, identity: string): Promise<void> {
+    const key = sessionKey(session);
+    if (!this.accepts(key) || !this.enabled()) return;
+    await this.deliver(session, key, reminder, JSON.stringify([this.scope, key, reminder, identity]), true, this.eligible?.get(key), this.clickScope());
+  }
+
+  private async deliver(session: SessionEntry, key: string, reminder: Reminder, identity: string, dedupe: boolean, admission: symbol | undefined, clickScope: NotificationClickScope): Promise<void> {
+    if (!this.enabled() || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
       const id = crypto.subtle ? await fingerprint(identity) : identity;
       const deliver = () => {
@@ -92,7 +106,7 @@ export class SessionAttentionNotifications {
         try {
           const stored: unknown = JSON.parse(localStorage.getItem(ledgerKey) ?? '[]');
           if (Array.isArray(stored)) receipts = stored.filter((item): item is string => typeof item === 'string');
-          if (next.cursor && receipts.includes(id)) return;
+          if (dedupe && receipts.includes(id)) return;
         } catch { /* Browser tags still collapse active notifications if storage is blocked. */ }
         const notification = new Notification(reminder === 'waiting' ? 'Session needs your input' : 'Session completed', {
           body: session.title, tag: `arc:${id}`,
@@ -105,7 +119,7 @@ export class SessionAttentionNotifications {
           notification.close();
         };
         // Only opaque, bounded deduplication receipts are persisted; never message contents.
-        if (next.cursor && crypto.subtle) try { localStorage.setItem(ledgerKey, JSON.stringify([...receipts, id].slice(-256))); } catch { /* Tag fallback. */ }
+        if (dedupe && crypto.subtle) try { localStorage.setItem(ledgerKey, JSON.stringify([...receipts, id].slice(-256))); } catch { /* Tag fallback. */ }
       };
       const once = () => navigator.locks ? navigator.locks.request('arc:notification-receipts', deliver) : deliver();
       if (this.displayed.has(key) || !navigator.locks || !crypto.subtle) await once();

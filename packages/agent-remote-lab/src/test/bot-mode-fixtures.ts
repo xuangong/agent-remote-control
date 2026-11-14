@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
-import { WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import { SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
@@ -52,6 +52,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   const acknowledgements: Array<() => void> = [];
   const activityListeners = new Map<string, RemoteTransportListener>();
   const titleListeners = new Set<(session: SessionTitleUpdate) => void>();
+  // Shared session states and read positions, as the Relay pushes them on the states channel.
+  const sharedStates = new SessionStateStore(), sharedReads = new SessionReadStore();
+  const markedReads: Array<{ nativeSessionId: string; readAt: number }> = [];
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
@@ -60,6 +63,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     window: { minSeq: 1, maxSeq: options.timeline?.at(-1)?.seqEnd ?? 0, nextSeq: (options.timeline?.at(-1)?.seqEnd ?? 0) + 1 }, startCursor: null, endCursor: null, entries: options.timeline ?? [], hasOlder: false, hasNewer: false, error: null,
   } });
   const transport: LabTransport = {
+    watchSessionStates: listener => sharedStates.subscribe(listener),
+    watchSessionReads: listener => sharedReads.subscribe(listener),
+    markSessionRead: (session, readAt) => { if (sharedReads.advance(session, readAt)) markedReads.push({ nativeSessionId: session.nativeSessionId, readAt }); },
     listProviders: async () => options.hosted && !options.serverProviders ? [] : [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
     createAgent: async () => { throw new Error('No session creation in this fixture.'); },
     resumeAgent: async () => { throw new Error('Use directory attachment.'); },
@@ -104,6 +110,11 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   const container = await render(createElement(Access));
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     activityListeners, releaseInspect: () => releaseInspect(),
+    /** Session states (with reply facts) as the Relay shares them. */
+    emitStates(frame: Omit<SessionStatesFrame, 'protocolVersion' | 'type'>) { sharedStates.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_states', ...frame }); },
+    /** The account's read positions as the Relay shares them. */
+    emitReads(frame: Omit<SessionReadsFrame, 'protocolVersion' | 'type'>) { sharedReads.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_reads', ...frame }); },
+    markedReads,
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     /** A native title the Host reports for a session, as the Relay pushes it. */
     emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },

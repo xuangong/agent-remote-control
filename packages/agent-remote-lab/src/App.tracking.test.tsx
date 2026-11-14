@@ -17,6 +17,9 @@ import type { SessionObservation } from './tracking-state.js';
 import type { SessionEntry } from './session-tree.js';
 
 const baseUrl = 'http://localhost/u/alice/';
+const sharedHost = { hostId: 'local', online: true, confirmedAgeMs: 0 };
+/** A bot's state as the Relay shares it. */
+const sharedState = (id: string, state: 'running' | 'waiting' | 'idle') => { const { title: _title, ...session } = botTarget(id); return { ...session, state, ageMs: 0 }; };
 const star: SessionStar = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'tracked', title: 'Tracked research', starredAt: 1 };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '', '/'); });
 
@@ -31,7 +34,7 @@ it('continues Bot activity delivery after confirmed deletion of its remembered W
     await until(() => expect(app.workspace().window?.id).toBe('A'));
     await app.switchMode('bot'); await act(async () => app.button('B1').click());
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
-    await until(() => expect(app.activityListeners.has('agent-B2')).toBe(true));
+    await act(async () => app.emitStates({ snapshot: true, hosts: [sharedHost], states: [sharedState('B2', 'idle')] }));
     app.hostedGroups.delete('A');
     vi.mocked(WindowWorkspaceClient.prototype.inspect).mockImplementation(async id => {
       const group = app.hostedGroups.get(id);
@@ -42,12 +45,9 @@ it('continues Bot activity delivery after confirmed deletion of its remembered W
     await until(() => expect(app.workspace().deletedWindowIds).toContain('A'));
     expect(app.workspace().unavailable).toBe(true);
     expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull();
-    expect(app.activityListeners.has('agent-B2')).toBe(true);
-    for (const [status, seq] of [['running', 1], ['waiting', 2]] as const) await act(async () => {
-      app.activityListeners.get('agent-B2')!.onMessage({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload: {
-        agentId: 'agent-B2', status, cursor: { epoch: 'bot-B2', seq },
-      } });
-    });
+    // Bots are followed through the shared channel, without a stream each.
+    expect(app.activityListeners.has('agent-B2')).toBe(false);
+    for (const status of ['running', 'waiting'] as const) await act(async () => app.emitStates({ states: [sharedState('B2', status)] }));
     await until(() => expect(notices.map(notice => notice.options.body)).toEqual(['B2']));
     expect(app.sendMessages).toEqual([]);
   } finally { await app.close(); }
@@ -77,11 +77,13 @@ it('scopes App reminders to the current Bot roster and routes clicks by its curr
     await app.switchMode('bot'); await act(async () => app.button('A1').click());
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     expect(notices[0]!.close).toHaveBeenCalledOnce();
-    for (const target of [tracked, botTarget('B2'), botTarget('Other'), botTarget('Ask')]) {
-      await emit(target, 'running', 3); await emit(target, 'idle', 4); await emit(target, 'waiting', 5);
-    }
+    // Bot mode reminds of its roster's bots from the shared channel; Track's observations no longer notify there.
+    const shared = async (id: string, state: 'running' | 'waiting' | 'idle') => { await act(async () => app.emitStates({ states: [sharedState(id, state)] })); await act(async () => {}); };
+    await act(async () => app.emitStates({ snapshot: true, hosts: [sharedHost], states: [] }));
+    for (const id of ['Tracked', 'B2', 'Other', 'Ask']) { await shared(id, 'running'); await shared(id, 'idle'); await shared(id, 'waiting'); }
+    await emit(botTarget('B1'), 'running', 1); await emit(botTarget('B1'), 'idle', 2);
     expect(notices).toHaveLength(1);
-    await emit(botTarget('B1'), 'running', 1); await emit(botTarget('B1'), 'idle', 2); await emit(botTarget('B1'), 'waiting', 3);
+    await shared('B1', 'running'); await shared('B1', 'idle'); await shared('B1', 'waiting');
     await until(() => expect(notices).toHaveLength(3));
     const windowBefore = structuredClone(app.workspace().window);
     await act(async () => notices[1]!.onclick!());

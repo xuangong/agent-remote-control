@@ -532,6 +532,10 @@ function AppContent({
   // A docked view that is chosen (sidebar row, search) would stay invisible behind hidden docks, so they show again.
   const showDockOf = useCallback((view: Pick<WindowView, 'placement'>) => { if (view.placement === 'dock') setDocksHidden(false); }, []);
   const selectedBot = useBotWorkspace(windowWorkspace, succession, navigation.place, activated && accessReady && !windowMode);
+  // A Team member's conversation in this workspace (the main conversation in a member's seat, a managed Team window, a Team
+  // view of the current Window, or the selected bot): Team routing moves its seat to the member's successor, so the Team roster refreshes closely meanwhile.
+  const teamConversationsOpen = !!succession.desired?.slot.metadata?.teamId || !!succession.document.windows?.some(window => window.managed)
+    || !!sharedWindow?.views.some(view => view.feature?.kind === 'team') || selectedBot.view?.feature?.kind === 'team';
   const botPresentation = useMemo(() => ({ recovering: false, confirmed: undefined as { groupId: string; viewId: string; slotId: string; bindingKey: string } | undefined }), [baseUrl, transport]);
   if (!accessReady) botPresentation.recovering = true;
   if (selectedBot.group && selectedBot.view && selectedBot.slot) {
@@ -3065,7 +3069,7 @@ function AppContent({
   // Track, Team and TPM; Ask has its own host because its capsule floats inside .lab-ask-workspaces.
   const trackTeamTpmEntries = <>
     {windowMode && userScoped && attention.trackVisible ? <SessionTrackingMenu catchUp={catchUp} tracking={tracking} teams={teamRoster?.baseUrl === baseUrl ? teamRoster.teams : []} knownSessions={[...favorites.stars, ...sessionEntries]} busy={transitioning} inert={supportingRailOpen} onOpen={item => void openTrackedSession(item)} /> : null}
-    <TeamMenu visible={windowMode && teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
+    <TeamMenu visible={windowMode && teamView.visible} baseUrl={baseUrl} enabled={accessReady && !!directory} following={teamConversationsOpen} hosts={remoteHosts} source={featureSource} sourceViewId={sharedWindow && presentedViewId ? `${sharedWindow.id}/${presentedViewId}` : undefined}
       compact={compactLayout} currentSession={focusedMenuSession} onTeamsChange={updateTeamRoster} reveal={teamReveal?.baseUrl === baseUrl ? teamReveal : undefined}
       onOpen={openTeamLayout} onOpenSession={target => openSession(target, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined)} />
     <TpmMenu tpm={tpm} open={tpmListOpen} onOpenChange={setTpmListOpen} mainSessions={tpmMainSessions} main={featureSource} visible={windowMode && tpmView.visible} triggerRef={tpmTriggerRef} inert={supportingRailOpen} />
@@ -3152,6 +3156,10 @@ function AppContent({
     navigate: (...args) => latestContexts.current.descriptions.navigate!(...args),
   }), []);
   const operationsEnabled = accessReady && activated;
+  // Where locators lead changes with succession (a handoff, a discovery) and with the Team roster (a seat moving to its
+  // member's successor): a new value then reaches every conversation, also those a dock or a hidden pane keeps, so each
+  // resolves its target again. Nothing else App renders for changes it.
+  const resolutionRevision = JSON.stringify([succession.revision, teamRoster?.baseUrl === baseUrl ? teamRoster.teams.map(team => [team.id, team.revision]) : null]);
   const sessionViewOperations = useMemo<ContextType<typeof SessionViewOperationsContext>>(() => ({
     storageScope: baseUrl, transport, enabled: operationsEnabled,
     resolveTarget: (source, requested) => latestContexts.current.operations.resolveTarget(source, requested),
@@ -3159,7 +3167,7 @@ function AppContent({
     refreshSettled: (...args) => latestContexts.current.operations.refreshSettled(...args),
     successionContextFor: (...args) => latestContexts.current.operations.successionContextFor?.(...args),
     synchronize: () => latestContexts.current.operations.synchronize?.(),
-  }), [baseUrl, transport, operationsEnabled]);
+  }), [baseUrl, transport, operationsEnabled, resolutionRevision]);
   return <SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}
     docksHidden={!!sharedWindow && !compactLayout && docksHidden}><TeamViewScope.Provider value={teamView.execute}><TpmViewScope.Provider value={tpmView.execute}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}><ToastActivity.Provider value={windowMode}><main hidden={!windowMode} {...(!windowMode ? { inert: '' } : {})} data-workbench-mode="window" ref={shellRef} onPointerDownCapture={focusManagedWindow} onFocusCapture={focusManagedWindow} style={sidebar.style} className={`lab-shell lab-window-mode${headerHidden ? ' lab-header-hidden' : ''}${!compactLayout && !desktopContextVisible ? ' lab-context-hidden' : ''}${state?.agent ? ' lab-has-agent' : ''}${supportingRailOpen ? ' lab-supporting-open' : ''}${inspectorOpen ? ' lab-inspector-open' : ''}`}>
     {windowWorkspace.unavailable ? <div className="lab-window-recovery" data-deleted={windowWorkspace.deleted || undefined}><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} /><p role="status">{windowWorkspace.deleted ? 'Window deleted. Choose another Window or create a new one.' : windowWorkspace.error ?? 'Opening Window…'}</p><WindowWorkspaces workspace={windowWorkspace} onNavigate={closePage} /></div> : null}

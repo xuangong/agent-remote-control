@@ -16,6 +16,8 @@ import './team.css';
 interface Host { teamManagement?: true; id: string; name: string; online: boolean; providers?: Array<{providerId:string;displayName:string}> }
 interface Props {
   baseUrl: string; enabled: boolean; visible?: boolean; hosts: Host[]; source?: TeamSource;
+  /** A Team member's conversation is open: its seat follows the member's successor through the roster, which then refreshes closely. */
+  following?: boolean;
   compact?: boolean; currentSession?: Pick<TeamSource, 'providerId' | 'nativeSessionId'> & { hostId?: string };
   sourceViewId?: string;
   reveal?: { teamId: string; requestId: string };
@@ -70,12 +72,15 @@ export function TeamMenu(props: Props) {
     document.addEventListener('visibilitychange', load);
     return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; document.removeEventListener('visibilitychange', load); };
   }, [client, enabled, baseUrl]);
-  // The roster follows changes closely while someone looks at it or a Team is forming; otherwise it stays current for
+  // The roster follows changes closely while someone looks at it, a Team is forming or a member's conversation is open (its
+  // seat follows the member's successor through the roster); otherwise it stays current for
   // roles and attention twice a minute instead of polling every few seconds on every open page (stage 6).
   const forming = !!pendingCreate || teams.some(team => team.status === 'active' && team.members.some(member => member.creation === 'reserved'));
-  const watching = open || revealing || forming;
+  const watching = open || revealing || forming || !!props.following;
   useEffect(() => {
     if (!enabled) return;
+    // Something to follow just appeared (a member's conversation opened, a Team began forming): refresh at once.
+    if (watching) void loader.current?.();
     const timer = setInterval(() => void loader.current?.(), watching ? TEAM_REFRESH_MS : TEAM_IDLE_REFRESH_MS);
     return () => clearInterval(timer);
   }, [client, enabled, baseUrl, watching]);

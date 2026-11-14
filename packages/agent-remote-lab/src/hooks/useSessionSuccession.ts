@@ -97,7 +97,7 @@ export function sessionSuccessionHistory({ scope, replays, current, selected, in
 
 /** Product ownership and binding glue. Composition participants perform no native work. */
 export function useSessionSuccession(options: SuccessionOptions) {
-  const [, render] = useReducer(value => value + 1, 0);
+  const [revision, render] = useReducer(value => value + 1, 0);
   const latest = useRef(options); latest.current = options;
   const supported = !!options.transport.fetchSessionSuccessions && !!options.transport.fetchSessionSuccessionCurrent && !!options.transport.fetchSessionSuccessionOperation
     && options.transport.sessionSuccessionSupport !== 'disabled';
@@ -1083,6 +1083,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     if (agent.providerId !== source.providerId || agent.runtimeInfo.providerId !== source.providerId || agent.runtimeInfo.sessionId !== source.nativeSessionId) return 'native';
   }
   return {
+    /** Changes whenever this hook published a change; what follows locators reads it to resolve them again. */
+    revision,
     active: runtime.active && (options.enabled || !!desired), discovering: options.enabled && (!runtime.discovered || runtime.discovering), document: runtime.document, desired, selected, displaySlot,
     state: visibleState, sessionState: runtime.binding?.getSessionState() ?? remoteSessionState(undefined, runtime.active ? 'connecting' : 'idle'),
     layoutView, layoutRevision: runtime.layoutRevision, captureLayout, binding: bound, imageRecipient: bound?.recipient, error: runtime.error, result: runtime.result,

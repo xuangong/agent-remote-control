@@ -1,4 +1,4 @@
-import { SESSION_READ_BATCH, type SessionRead as SessionReadPosition, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { isSessionDraft, SESSION_READ_BATCH, type SessionDraft, type SessionRead as SessionReadPosition, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   isSessionSuccessionReplay, isSessionSuccessionReplayPage, isSessionSuccessionCurrent,
@@ -25,6 +25,7 @@ import { watchPageResume } from './page-resume.js';
 import { SessionChannelPool } from './session-channel-transport.js';
 import { SessionStateStore, type SessionStateRef, type SessionStatesView } from './session-states.js';
 import { SessionReadStore, type SessionReadsView } from './session-reads.js';
+import { SessionDraftStore, type SessionDraftsView } from './session-drafts.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -145,6 +146,25 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   private async postReads(reads: SessionReadPosition[]): Promise<void> {
     await this.fetchBody('v1/session-reads', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reads }) });
   }
+  private readonly sessionDrafts = new SessionDraftStore();
+  /**
+   * The account's drafts, shared by every device; the listener receives the current view at once and again whenever a
+   * draft changes. Keeps the activity channel open while watched.
+   */
+  watchSessionDrafts(listener: (drafts: SessionDraftsView) => void): () => void {
+    if (!this.sessionChannels) { listener(this.sessionDrafts.view()); return () => {}; }
+    const unsubscribe = this.sessionDrafts.subscribe(listener), stopWatching = this.sessionChannels.watchStates();
+    return () => { unsubscribe(); stopWatching(); };
+  }
+  /** Saves a session's draft for every device; an empty text clears it. The saved revision is known here at once. */
+  async saveSessionDraft(session: SessionStateRef, text: string): Promise<SessionDraft> {
+    const body = await this.fetchBody('v1/session-drafts', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, text }) });
+    const draft: unknown = JSON.parse(body);
+    if (!isSessionDraft(draft)) throw new Error('The Relay returned an invalid draft.');
+    this.sessionDrafts.accept(draft);
+    return draft;
+  }
   private readonly migrations = new Map<string, SessionMigration>();
   onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
     this.migrationListeners.add(listener);
@@ -196,8 +216,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           // The first page that understands read positions starts them for the account.
           if (frame.snapshot && frame.since === undefined && !this.readsStarted) { this.readsStarted = true; void this.postReads([]).catch(() => { this.readsStarted = false; }); }
         },
+        onSessionDrafts: frame => this.sessionDrafts.apply(frame),
         // Only the activity channel carries shared session states, so a page receives them once.
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=2&reads=1' : ''}`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=2&reads=1&drafts=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -321,6 +342,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.sessionStates.dispose();
     clearTimeout(this.pendingReadTimer); this.pendingReadTimer = undefined; this.pendingReads.clear();
     this.sessionReads.dispose();
+    this.sessionDrafts.dispose();
   }
 
   private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {

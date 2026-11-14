@@ -99,6 +99,30 @@ describe('shared read positions', () => {
   });
 });
 
+describe('shared drafts', () => {
+  it('follows the account\'s drafts and saves one, taking the saved revision at once', async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    const fetchImplementation = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push({ url: String(url), body });
+      return new Response(JSON.stringify({ ...body, revision: 9 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const harness = await server(true, fetchImplementation);
+    const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
+    const texts: Array<string | undefined> = [];
+    const stop = harness.transport.watchSessionDrafts(view => texts.push(view.draft(thread)?.text));
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    expect(harness.urls[0]).toContain('drafts=1');
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_drafts', snapshot: true, drafts: [{ ...thread, text: 'From the phone', revision: 4 }] }));
+    await vi.waitFor(() => expect(texts.at(-1)).toBe('From the phone'));
+    const saved = await harness.transport.saveSessionDraft(thread, 'From the desk');
+    expect(saved).toEqual({ ...thread, text: 'From the desk', revision: 9 });
+    expect(requests).toEqual([{ url: expect.stringContaining('/base/v1/session-drafts'), body: { ...thread, text: 'From the desk' } }]);
+    expect(texts.at(-1)).toBe('From the desk');
+    stop();
+  });
+});
+
 describe('session channel transport', () => {
   it('delivers ordered title updates once across channels and replays the latest name', async () => {
     const harness = await server(); connect(harness.transport, 'session'); connect(harness.transport, 'session', true);
@@ -140,7 +164,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1&drafts=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;

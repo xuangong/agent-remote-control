@@ -3,6 +3,7 @@ export * from './client/remote-session-client.js';
 export * from './client/transport.js';
 export * from './client/session-states.js';
 export * from './client/session-reads.js';
+export * from './client/session-drafts.js';
 export * from './replica/reducer.js';
 export * from './replica/selectors.js';
 export * from './replica/store.js';

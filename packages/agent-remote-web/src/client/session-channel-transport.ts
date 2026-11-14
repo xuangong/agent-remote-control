@@ -22,6 +22,7 @@ interface Dependencies {
   /** Shared session states, delivered on the activity channel while someone watches them. */
   onSessionStates?(frame: Extract<import('@orchardworks/agent-remote-protocol').SessionChannelServerMessage, { type: 'session_states' }>): void;
   onSessionReads?(frame: Extract<import('@orchardworks/agent-remote-protocol').SessionChannelServerMessage, { type: 'session_reads' }>): void;
+  onSessionDrafts?(frame: Extract<import('@orchardworks/agent-remote-protocol').SessionChannelServerMessage, { type: 'session_drafts' }>): void;
   createSocket(mode: Mode): WebSocketLike;
   connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection;
   observe(observation: RemoteProtocolObservation): void;
@@ -292,6 +293,7 @@ export class SessionChannelPool {
       if (frame.type === 'session_title_updated') { this.dependencies.onTitle?.(frame.session); return; }
       if (frame.type === 'session_states') { if (channel.ready) this.dependencies.onSessionStates?.(frame); return; }
       if (frame.type === 'session_reads') { if (channel.ready) this.dependencies.onSessionReads?.(frame); return; }
+      if (frame.type === 'session_drafts') { if (channel.ready) this.dependencies.onSessionDrafts?.(frame); return; }
       if (frame.type === 'session_migrated') { this.dependencies.onMigration?.(frame.migration); return; }
       if (frame.type === 'ready' && !channel.ready) {
         channel.ready = true;

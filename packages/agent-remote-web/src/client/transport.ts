@@ -89,6 +89,10 @@ export interface RemoteAgentTransport {
   watchSessionReads?(listener: (reads: import('./session-reads.js').SessionReadsView) => void): () => void;
   /** Records that the owner has seen a session's replies up to readAt; positions never move back. */
   markSessionRead?(session: import('./session-states.js').SessionStateRef, readAt: number): void;
+  /** The account's drafts, shared by every device; the listener receives the current view at once and on each change. */
+  watchSessionDrafts?(listener: (drafts: import('./session-drafts.js').SessionDraftsView) => void): () => void;
+  /** Saves a session's draft for every device (an empty text clears it) and resolves with the revision it got. */
+  saveSessionDraft?(session: import('./session-states.js').SessionStateRef, text: string): Promise<import('@orchardworks/agent-remote-protocol').SessionDraft>;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;
   fetchTimeline(
     agentId: string,

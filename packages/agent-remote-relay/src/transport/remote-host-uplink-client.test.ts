@@ -332,3 +332,44 @@ it.each([[true, true], [true, false], [false, true]])('requests Call For Support
   expect(client.callForSupport).toBe(requested&&acknowledged);
   if(!(requested&&acknowledged))await expect(client.teamRequest({action:'support_enablement'})).rejects.toThrow('Update the Relay to use Call For Support.');
 });
+
+it.each([true, false])('asks for the outbox, and polls and hears about waiting messages only once acknowledged (acknowledged=%s)', async acknowledged => {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+  await new Promise<void>(resolve => server.once('listening', resolve));
+  closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
+  let asked: string | null = null, requests = 0, relaySocket: import('ws').WebSocket | undefined;
+  server.on('connection', (socket, request) => {
+    relaySocket = socket;
+    asked = new URL(request.url!, 'http://relay').searchParams.get('outbox');
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, ...(acknowledged ? { outbox: 1 } : {}) }));
+      if (message.type === 'outbox_request') {
+        requests++;
+        const refused = message.call.action === 'claim';
+        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'outbox_response', requestId: message.requestId, status: refused ? 409 : 200,
+          body: JSON.stringify(refused ? { code: 'outbox_not_waiting', error: 'This message is not waiting.' } : { entries: [] }) }));
+      }
+    });
+  });
+  const relay = createAgentRemoteRelay({ providers: [] }); closeables.push(() => relay.close());
+  const available: boolean[] = []; let readies = 0;
+  const client = createRemoteHostUplinkClient({ relay, installationId: 'machine', name: 'Machine', remoteKey: 'key', providers: [],
+    url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
+    outbox: { onAvailable: value => { available.push(value); }, onReady: () => { readies++; } } });
+  closeables.push(() => client.close()); await client.ready;
+  expect(asked).toBe('1');
+  expect(available).toEqual([acknowledged]);
+  if (!acknowledged) {
+    await expect(client.outboxRequest({ action: 'poll' })).rejects.toThrow('outbox is unavailable');
+    expect(requests).toBe(0);
+    return;
+  }
+  expect(await client.outboxRequest({ action: 'poll' })).toEqual({ entries: [] });
+  // A refusal carries the Relay's code, so the Controller can tell a message that is no longer waiting.
+  await expect(client.outboxRequest({ action: 'claim', id: '00000000-0000-4000-8000-000000000001' })).rejects.toMatchObject({ code: 'outbox_not_waiting', status: 409 });
+  relaySocket!.send(JSON.stringify({ uplinkVersion: 2, type: 'outbox_ready' }));
+  await until(() => readies === 1);
+  await client.close();
+  expect(available.at(-1)).toBe(false);
+});

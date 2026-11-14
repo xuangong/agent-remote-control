@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import type { OutboxHostCall, TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { WebSocket } from 'ws';
 
 import {
@@ -81,10 +81,17 @@ export interface RemoteHostUplinkClientOptions {
   readonly reconnectMaxDelayMs?: number;
   readonly onStateChange?: (state: 'connecting' | 'registered' | 'disconnected' | 'rejected' | 'closed') => void;
   readonly onDiagnostic?: (diagnostic: RemoteHostUplinkDiagnostic) => void | Promise<void>;
+  /**
+   * Delivers messages that waited in the outbox for this Host: asks the Relay for them, then says whether this connection
+   * may poll, claim and settle them (onAvailable), and when the Relay says a message arrived (onReady).
+   */
+  readonly outbox?: { onAvailable(available: boolean): void; onReady(): void };
 }
 
 export interface RemoteHostUplinkClient {
   teamRequest(call: TeamHostCall): Promise<unknown>;
+  /** A call for the messages waiting for this Host; rejects with the Relay's status and code when it refuses. */
+  outboxRequest(call: OutboxHostCall): Promise<unknown>;
   /** The Relay routes Team recipients across a generic succession of their session, including a provider change. */
   readonly teamSuccession: boolean;
   /** The Relay sends this Host Call For Support groups. */
@@ -116,6 +123,14 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
   let teamSuccession = false;
   let callForSupport = false;
   let sendTeam: ((json: string) => void) | undefined;
+  const outboxPending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
+  let sendOutbox: ((json: string) => void) | undefined;
+  const rejectOutbox = () => {
+    const available = !!sendOutbox; sendOutbox = undefined;
+    for (const pending of outboxPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('The outbox connection closed; the Relay keeps the messages.')); }
+    outboxPending.clear();
+    if (available) options.outbox?.onAvailable(false);
+  };
   const rejectTeam = () => { teamInbox = false; teamRecipients = false; teamSuccession = false; callForSupport = false; teamResources = false; sendTeam = undefined; for (const pending of teamPending.values()) { clearTimeout(pending.timer); pending.reject(new Error('Team transport disconnected; query the original operation before retrying.')); } teamPending.clear(); };
   let remoteKey = options.remoteKey;
   let credentialWrite: Promise<void> | undefined;
@@ -152,6 +167,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     // A Relay that understands reply facts acknowledges sessionStates: 2; older ones keep acknowledging 1.
     if (options.sessionStates) { endpoint.searchParams.set('sessionStates', '1'); endpoint.searchParams.set('sessionReplyFacts', '1'); }
     if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
+    if (options.outbox) endpoint.searchParams.set('outbox', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -201,7 +217,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     function retire(cause: DisconnectCause): void {
       if (retired) return;
-      rejectTeam();
+      rejectTeam(); rejectOutbox();
       retired = true;
       unsubscribeProviders?.(); unsubscribeProviders = undefined; unsubscribePreviews?.();
       unsubscribeStates?.(); unsubscribeStates = undefined;
@@ -279,7 +295,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
+          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -309,6 +325,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         diagnose({ ...details(), event: 'registered' });
         attempts = 0;
         resolveReady({ hostId: decoded.value.hostId, ...(decoded.value.pairingPurpose ? { pairingPurpose: decoded.value.pairingPurpose } : {}) });
+        if (options.outbox) {
+          sendOutbox = decoded.value.outbox === 1 ? json => { writer.send(json); } : undefined;
+          options.outbox.onAvailable(!!sendOutbox);
+        }
         if (options.providerChanges) {
           const publish = () => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'provider_snapshot', providers: options.providerChanges!.current() })); };
           unsubscribeProviders = options.providerChanges.subscribe(publish);
@@ -334,6 +354,18 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         }
         return;
       }
+      if (decoded.value.type === 'outbox_response') {
+        const pending = outboxPending.get(decoded.value.requestId);
+        if (pending) { outboxPending.delete(decoded.value.requestId); clearTimeout(pending.timer);
+          try {
+            const value = JSON.parse(decoded.value.body);
+            if (decoded.value.status < 400) pending.resolve(value);
+            else pending.reject(Object.assign(new Error(typeof value?.error === 'string' ? value.error : 'Outbox request failed.'), { status: decoded.value.status, ...(typeof value?.code === 'string' ? { code: value.code } : {}) }));
+          } catch { pending.reject(new Error('Invalid outbox response.')); }
+        }
+        return;
+      }
+      if (decoded.value.type === 'outbox_ready') { if (sendOutbox) options.outbox?.onReady(); return; }
       if (decoded.value.type === 'team_response') {
         const pending = teamPending.get(decoded.value.requestId);
         if (pending) { teamPending.delete(decoded.value.requestId); clearTimeout(pending.timer);
@@ -358,6 +390,16 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     ready,
     get teamSuccession() { return teamSuccession; },
     get callForSupport() { return callForSupport; },
+    outboxRequest(call) {
+      if (!sendOutbox || closed || outboxPending.size >= 32) return Promise.reject(new Error('The outbox is unavailable on this connection.'));
+      const requestId = randomUUID();
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { outboxPending.delete(requestId); reject(new Error('The outbox request timed out.')); }, 15000);
+        outboxPending.set(requestId, { resolve, reject, timer });
+        try { sendOutbox!(JSON.stringify({ uplinkVersion: 2, type: 'outbox_request', requestId, call })); }
+        catch (error) { clearTimeout(timer); outboxPending.delete(requestId); reject(error instanceof Error ? error : new Error('The outbox write failed.')); }
+      });
+    },
     teamRequest(call) {
       if (call.action === 'acknowledge' && (!teamInbox || !teamRecipients)) return Promise.reject(new Error('Update the Relay to support Team inbox acknowledgement before confirming these messages.'));
       if (!teamRecipients && (call.action === 'claim' || call.action === 'settle' && call.resolvedTarget)) return Promise.reject(new Error('Update the Relay to support exact Team recipients before dispatching or settling this delivery.'));
@@ -378,6 +420,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       diagnose({ ...describeConnection(), event: 'closed', reason: 'client_closed' });
       options.onStateChange?.('closed');
       clearTimeout(retry);
+      rejectOutbox();
       rejectReady(new Error('Remote Host uplink closed before registration.'));
       retireConnection?.();
       closePromise = Promise.all([connectionClosed, credentialWrite]).then(() => undefined);

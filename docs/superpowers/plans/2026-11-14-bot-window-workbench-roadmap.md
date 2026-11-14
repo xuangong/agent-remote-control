@@ -24,7 +24,7 @@ Each stage ships on its own: tests first, `pnpm verify:changed` (full `pnpm veri
 | 4 | IM layer, part 1 | Shared read positions and the unread dot (no counts); typing presence in Bot mode; latest-reply previews and times in rows (decision C); phone list → chat with "‹ Bots" | [stage 4](2026-11-14-stage-4-im-part-1.md): shipped (main 1652491e, Worker 17805431, Controller 0.2.81) |
 | 5 | IM layer, part 2 | Shared drafts; the outbox for offline Hosts, visible and cancellable on every device | [stage 5](2026-11-14-stage-5-im-part-2.md): shipped — 5a shared drafts (main 7b120b1d, Worker 9dc163b1; rate budget fix d3943ea4, Worker bf8d68e4), 5b the outbox (main a02c4640, Worker 5374bba6, Controller 0.2.82) |
 | 6 | Performance | Measured client and server budgets: switch timing, live budget size, render cost of large groups, Relay commit and fan-out cost, bundle size; regressions guarded by tests | [stage 6](2026-11-14-stage-6-performance.md): shipped (main 28001475, Worker 2765de5d, website only) |
-| 7 | Stability | Cross-Host end-to-end coverage (two Hosts, offline Host, handoff across providers), flake removal, soak on the local instance, release notes and docs | [stage 7](2026-11-14-stage-7-stability.md) |
+| 7 | Stability | Cross-Host end-to-end coverage (two Hosts, offline Host, handoff across providers), flake removal, soak on the local instance, release notes and docs | [stage 7](2026-11-14-stage-7-stability.md): shipped (main 1cd7c724, Worker 69cc5571, website only) |
 
 Later, outside this roadmap unless time allows: notifications without an open page (IM stage 3), group chats for Teams and stored history (IM stage 4).
 
@@ -47,3 +47,14 @@ These fill gaps the specs left open. Each is recorded where it is implemented as
 9. **Groups keep catalog order in Bot mode, as Windows do.** No interface orders sections, and labeling or hiding a bot gives a group formed from sessions its bot details (and so a rank): ranked-first ordering would make that group jump. Ranks stay in the data for a later reordering feature. A session still shows once, claimed first by a group with bot details (where the Relay keeps it unique), then by the first group in catalog order.
 10. **Stage 2b follows stage 3.** Rule 6 in every pane needs "closing a bot's pane folds it", and folding is stage 3's shared, released state; with open beside applied alone, 19 Window tests describing in-place navigation (directory, Favorites and Track opens, handoff history, Track restore) break. Stage 3 ships fold first; 2b then gives panes open beside, fold on close, explicit removal and in-place navigation within a bot's own chain together.
 11. **Bot attention streams move with stage 4.** Bot mode observes every bot through Track's per-session activity streams, which count toward the Relay's per-account stream limit; they also carry the content cursors the unread dot needs. Moving them to the shared states channel needs those cursors on the Relay, which is stage 4's read-position work, so stage 3 bounds conversation streams and leaves activity streams as they are.
+
+## Outcome
+
+All seven stages shipped on 2026-11-14 and 2026-11-15. Production runs Worker 69cc5571 with Controller 0.2.82, which this Mac's Controller already runs. The [user guide](../../guides/bot-window-workbench.md) describes what shipped, and the [performance notes](../../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-7) hold the budgets and the soak.
+
+What remains outside this roadmap:
+- Notifications without an open page (IM stage 3).
+- Group chats for Teams and stored history (IM stage 4).
+- Previews for bots not opened since their Controller started keeping replies. Native history has neither a tail read nor reply times; each preview arrives with the bot's next reply or opening.
+- Starting a Team, TPM work or a call for support from Bot mode. These are started from the bot's group in Window mode; Bot mode offers /side.
+- Worker rollback. Once stage 1, 3, 4 or 5 data exists on the Relay, earlier Workers cannot read its state; fix forward.

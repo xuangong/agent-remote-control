@@ -170,3 +170,5 @@ Stage 7 changes no Controller code (Task 8 needed none), so it ships as a Worker
 4. A local check on desktop and phone, light and dark.
 5. Merge, push and deploy the Worker; record versions in the roadmap and the release memory.
 6. This Mac's Controller already runs 0.2.82 (updated 2026-11-14 12:34Z), so the roadmap's last step needs no update.
+
+Shipped on 2026-11-15: main 1cd7c724, Worker 69cc5571 (previous 2765de5d), website only. The Relay's stored format did not change, so rolling back to 2765de5d is safe.

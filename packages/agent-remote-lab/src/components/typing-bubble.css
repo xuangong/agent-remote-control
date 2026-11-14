@@ -1,5 +1,6 @@
 /* Presence, as in a chat app: an incoming bubble with three dots rising in turn while a bot works. */
-.lab-typing { display: inline-flex; align-items: center; gap: 4px; margin: 4px 0 12px; padding: 10px 12px; border-radius: 16px 16px 16px 6px;
+/* The timeline is a one-column grid: the bubble keeps its own width at the start, as an incoming message does. */
+.lab-typing { display: inline-flex; justify-self: start; width: max-content; align-items: center; gap: 4px; margin: 4px 0 12px; padding: 10px 12px; border-radius: 16px 16px 16px 6px;
   background: var(--ui-fill); animation: lab-typing-in var(--ui-duration-short, 160ms) var(--ui-ease, ease-out); }
 .lab-typing > span, .lab-bot-typing > span { width: 6px; height: 6px; border-radius: 50%; background: var(--ui-label-secondary);
   animation: lab-typing-dot 1.2s ease-in-out infinite; }

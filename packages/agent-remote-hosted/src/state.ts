@@ -8,7 +8,7 @@ import { validSourceRelation } from './session-relations.js';
 import { MAX_SESSION_TITLES } from './session-titles.js';
 import { validBrowserId } from './browser-devices.js';
 import { validFavoritesState, type SavedFavoritesTree } from './favorites.js';
-import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, PROTOCOL_VERSION, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { decodeSessionChannelServerMessage, decodeWorkspaceWindow, isSessionRead, PROTOCOL_VERSION, SESSION_READ_LIMIT, type SessionRead, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import type { SavedSessionMigration } from './session-migrations.js';
 import { validPairingHistory } from './pairing-keys.js';
 import { hasHostRecoveryMetadata, retainedHostIdentities, validHostRecovery, validRevokedHosts } from './host-recovery.js';
@@ -39,6 +39,9 @@ export interface HostedRelayState {
   sessionMigrations?: SavedSessionMigration[];
   sessionTitles?: SessionTitleUpdate[];
   sessionTitleRevision?: number;
+  /** Each account's read positions, one record per session, and when the account started keeping them. */
+  sessionReads?: SavedSessionRead[];
+  sessionReadAccounts?: SavedSessionReadAccount[];
   config: { origin: string; issuer: string; provider?: 'google'; clientId?: string };
   googleIdentities?: Array<{ subject: string; email: string }>;
   sessions: SavedHostedSession[];
@@ -46,6 +49,10 @@ export interface HostedRelayState {
   loginChallenges: Array<[string, LoginChallenge]>;
   consumedProofs: Array<[string, number]>;
 }
+export type SavedSessionRead = SessionRead & { subject: string };
+export interface SavedSessionReadAccount { subject: string; since: number }
+/** Read positions kept across every account. */
+export const MAX_SESSION_READS = 16384;
 export interface LoginChallenge { expiresAt: number; hostId?: string; returnPath?: string; google?: { nonce: string; verifier: string; browserHash: string; browserId?: string } }
 /** What a store's commit wrote, for diagnostics. */
 export interface RelayStateCommitStats {
@@ -109,18 +116,18 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
 /** Frozen parts of committed state that passed validation; equal identity is equal content because nobody can change them. */
 interface ValidationMemo {
   tenants: WeakSet<object>; sessions: WeakSet<object>; challenges: WeakSet<object>; proofs: WeakSet<object>; events: WeakSet<object>;
-  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; authorities: WeakSet<object>;
+  windows: WeakSet<object>; migrations: WeakSet<object>; stars: WeakSet<object>; titles: WeakSet<object>; reads: WeakSet<object>; authorities: WeakSet<object>;
   progress: WeakSet<object>; favorites: WeakMap<object, WeakSet<object>>; normalized: WeakMap<object, boolean>;
   /** Whole collections that passed, with their uniqueness and per-account counts. */
-  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars', WeakSet<object>>;
+  lists: Record<'sessions' | 'tenants' | 'challenges' | 'proofs' | 'events' | 'migrations' | 'stars' | 'reads', WeakSet<object>>;
 }
 const memos = new WeakMap<HostedAuthOptions, ValidationMemo>();
 function memoFor(auth: HostedAuthOptions): ValidationMemo {
   let memo = memos.get(auth);
   if (!memo) memos.set(auth, memo = { tenants: new WeakSet(), sessions: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(),
-    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
+    windows: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), titles: new WeakSet(), reads: new WeakSet(), authorities: new WeakSet(), progress: new WeakSet(),
     favorites: new WeakMap(), normalized: new WeakMap(),
-    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet() } });
+    lists: { sessions: new WeakSet(), tenants: new WeakSet(), challenges: new WeakSet(), proofs: new WeakSet(), events: new WeakSet(), migrations: new WeakSet(), stars: new WeakSet(), reads: new WeakSet() } });
   return memo;
 }
 /** check(item), skipped for a frozen item that passed it before. */
@@ -171,6 +178,19 @@ function checkRelayState(value: unknown, auth: HostedAuthOptions, memo?: Validat
     for (const item of stars) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > MAX_USER_STARS) return false; counts.set(item.subject, count); }
     return true;
   }))) return invalid();
+  if (value.sessionReads !== undefined && (!Array.isArray(value.sessionReads) || value.sessionReads.length > MAX_SESSION_READS || !once(memo?.lists.reads, value.sessionReads, (reads: any[]) => {
+    if (!reads.every((item: unknown) => once(memo?.reads, item, (item: unknown) => {
+      if (!record(item) || !string(item.subject)) return false;
+      const { subject: _, ...read } = item;
+      return isSessionRead(read);
+    })) || !unique(reads, (item: SavedSessionRead) => JSON.stringify([item.subject, item.hostId, item.providerId, item.nativeSessionId]))) return false;
+    const counts = new Map<string, number>();
+    for (const item of reads) { const count = (counts.get(item.subject) ?? 0) + 1; if (count > SESSION_READ_LIMIT) return false; counts.set(item.subject, count); }
+    return true;
+  }))) return invalid();
+  if (value.sessionReadAccounts !== undefined && (!Array.isArray(value.sessionReadAccounts) || value.sessionReadAccounts.length > 4096
+    || !value.sessionReadAccounts.every((item: unknown) => record(item) && Object.keys(item).length === 2 && string(item.subject) && time(item.since))
+    || !unique(value.sessionReadAccounts, (item: SavedSessionReadAccount) => item.subject))) return invalid();
   if (value.sessionTitleRevision !== undefined && !time(value.sessionTitleRevision)) return invalid();
   if (value.sessionTitles !== undefined) {
     let hosts: Set<string> | undefined;

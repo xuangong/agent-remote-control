@@ -9,6 +9,7 @@ import type { RelayDiagnosticStore, RelayDiagnosticContext } from './relay-diagn
 import { createFavorites } from './favorites.js';
 import { createSessionTitles, pruneSessionTitles } from './session-titles.js';
 import { createSessionMigrations } from './session-migrations.js';
+import { createSessionReads, SessionReadsError } from './session-reads.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
 import { acceptSessionChannel } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
@@ -92,7 +93,9 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const hostKeyOperations = new Map<string, Promise<unknown>>();
   /** What a channel was last sent of each Host and session state; a fresh feed starts with a snapshot. facts: it asked for reply facts. */
   type StateFeed = { snapshot: boolean; facts: boolean; hosts: Map<string, string>; entries: Map<string, string> };
-  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed }>();
+  /** What a channel was last sent of its account's read positions; a fresh feed starts with a snapshot. */
+  type ReadFeed = { snapshot: boolean; since?: number; positions: Map<string, number> };
+  const browserChannels = new Map<RelaySocket, { subject: string; expiresAt(): number; migrations?: Set<string>; titles?: Map<string, string>; successions?: Set<string>; states?: StateFeed; reads?: ReadFeed }>();
   const userStreamCount = (subject: string) => [...tenants.values()].reduce((sum, owned) => sum + owned.broker.activeStreamCount(subject), 0);
   const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
@@ -138,6 +141,22 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const sessionTitles = createSessionTitles(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
   const successions = createSuccessionReplay(() => state.read(), (subject, hostId, source) => successionLocator(state.read(), subject, hostId, source));
   const migrations = createSessionMigrations(state, (subject, item) => [...tenants.values()].some(value => value.broker.canStarSession(item, subject)));
+  const sessionReads = createSessionReads(state);
+  /** Shares the account's read positions: everything in a snapshot, then the positions that advanced. */
+  function publishReads(socket: RelaySocket, channel: { subject: string; reads?: ReadFeed }) {
+    const feed = channel.reads;
+    if (!feed || socket.readyState !== 1) return;
+    const current = sessionReads.read(channel.subject);
+    const key = (read: { hostId: string; providerId: string; nativeSessionId: string }) => JSON.stringify([read.hostId, read.providerId, read.nativeSessionId]);
+    const advanced = feed.snapshot ? current.reads : current.reads.filter(read => feed.positions.get(key(read)) !== read.readAt);
+    if (!feed.snapshot && !advanced.length && feed.since === current.since) return;
+    const encoded = encodeSessionChannelServerMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_reads', ...(feed.snapshot ? { snapshot: true as const } : {}),
+      ...(current.since === undefined ? {} : { since: current.since }), reads: advanced });
+    if (encoded.status !== 'ok') return;
+    feed.snapshot = false; feed.since = current.since;
+    for (const read of advanced) feed.positions.set(key(read), read.readAt);
+    try { socket.send(encoded.json); } catch { socket.close(1011, 'Read position delivery failed'); }
+  }
   let successionPublishing: Promise<void> = Promise.resolve();
   function publishSuccessions(socket: RelaySocket, channel: { subject: string; expiresAt(): number; successions?: Set<string> }) {
     if (!channel.successions) return;
@@ -282,7 +301,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   }
   function published() {
     enforceChannels();
-    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); publishStates(socket, channel); }
+    for (const [socket, channel] of browserChannels) { publishMigrations(socket, channel); publishTitles(socket, channel); publishSuccessions(socket, channel); publishStates(socket, channel); publishReads(socket, channel); }
     for (const owned of tenants.values()) owned.broker.enforceExpiry();
     void previewAccess.enforce(); void subdomainAccess?.enforce();
     if (initialized && !refreshing) queueSchedule();
@@ -735,6 +754,16 @@ export function createHostedRelay(options: HostedRelayOptions) {
       } catch (error) { if (error instanceof StarError) return json(error.status, { code: error.code, error: error.message }); throw error; }
     }
     if (path === '/v1/session-migrations' && request.method === 'GET') return json(200, { migrations: migrations.list(grant.subject) });
+    if (path === '/v1/session-reads') {
+      try {
+        if (request.method === 'GET') return json(200, sessionReads.read(grant.subject));
+        if (request.method === 'POST') return json(200, await sessionReads.mark(grant.subject, await readJson(request)));
+        return json(405, { error: 'Method is not allowed.' });
+      } catch (error) {
+        if (error instanceof SessionReadsError) return json(error.status, { code: error.code, error: error.message });
+        throw error;
+      }
+    }
     if (path === '/v1/favorites' || path === '/v1/stars') {
       const saved = state.read().tenants.find(tenant => tenant.subject === grant.subject);
       const pending = saved?.broker.associations?.freezes.some(row => row.projection
@@ -914,7 +943,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
         if (closing || failed || sessions.expiresAt(request, grant) <= Date.now()) { socket.close(1008, 'Session expired'); return; }
         if (count() >= 16) { socket.close(1013, 'Channel capacity reached'); return; }
         browserChannels.set(socket, { subject: grant.subject, expiresAt: () => sessions.expiresAt(request, grant), ...(route.searchParams.get('migrations') === '1' ? { migrations: new Set<string>() } : {}), ...(route.searchParams.get('titles') === '1' ? { titles: new Map<string, string>() } : {}), ...(route.searchParams.get('successions') === '1' ? { successions: new Set<string>() } : {}),
-          ...(['1', '2'].includes(route.searchParams.get('states') ?? '') ? { states: { snapshot: true, facts: route.searchParams.get('states') === '2', hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}) });
+          ...(['1', '2'].includes(route.searchParams.get('states') ?? '') ? { states: { snapshot: true, facts: route.searchParams.get('states') === '2', hosts: new Map<string, string>(), entries: new Map<string, string>() } } : {}),
+          ...(route.searchParams.get('reads') === '1' ? { reads: { snapshot: true, positions: new Map<string, number>() } } : {}) });
         socket.onClose(() => { browserChannels.delete(socket); queueSchedule(); });
         queueSchedule();
         // Clients that report which subscriptions are in use let the account's least recently used streams go first.
@@ -940,6 +970,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         publishTitles(socket, browserChannels.get(socket)!);
         publishSuccessions(socket, browserChannels.get(socket)!);
         publishStates(socket, browserChannels.get(socket)!);
+        publishReads(socket, browserChannels.get(socket)!);
       } };
     }
     const destination = routeTenant(route.pathname, grant.subject) ?? owned;

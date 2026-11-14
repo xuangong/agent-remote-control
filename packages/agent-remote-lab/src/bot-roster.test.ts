@@ -96,6 +96,12 @@ it("carries the unsent draft of a bot's current session", () => {
   expect(followed.sections[0]!.rows.map(row => row.draft)).toEqual(['Ship the notes', 'Continue from here']);
 });
 
+it("marks a bot whose current session has messages waiting for its Host", () => {
+  const groups = [group('A', [createWindowView('a1', binding('a1'), 'primary'), createWindowView('a2', binding('a2'), 'primary')])];
+  const model = projectBotRoster(groups, [], { status: () => 'idle', waiting: value => value.nativeSessionId === 'a2' });
+  expect(model.sections[0]!.rows.map(row => row.waiting)).toEqual([undefined, true]);
+});
+
 it("follows a bot's current session after a handoff and keeps the latest reply of its chain", () => {
   const groups = [group('A', [createWindowView('a1', binding('before'), 'primary')])];
   const replies: Record<string, { replyAt: number; preview: string }> = { before: { replyAt: 7, preview: 'Handing off.' } };

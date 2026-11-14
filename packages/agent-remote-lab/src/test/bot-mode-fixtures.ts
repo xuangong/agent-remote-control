@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
-import { SessionDraftStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
+import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
@@ -27,7 +27,9 @@ export function visibleButton(container: ParentNode, label: string) {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
     (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label && !button.closest('[hidden]'))!;
 }
-export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean; serverProviders?: boolean } = {}) {
+export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean; serverProviders?: boolean;
+  /** The listed Host: offline, or with a Controller that delivers from the outbox. */
+  host?: { online?: boolean; outbox?: 1 } } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
@@ -60,6 +62,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   // Drafts shared across devices, as the Relay keeps them, and the ones this page saved.
   const sharedDrafts = new SessionDraftStore(), savedDrafts: Array<{ nativeSessionId: string; text: string }> = [];
   let draftRevision = 1000;
+  // The outbox, as the Relay keeps it, and what this page queued and cancelled.
+  const sharedOutbox = new SessionOutboxStore(), queued: Array<{ id: string; nativeSessionId: string; text: string }> = [], cancelled: string[] = [];
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
@@ -72,6 +76,16 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     watchSessionReads: listener => sharedReads.subscribe(listener),
     markSessionRead: (session, readAt) => { if (sharedReads.advance(session, readAt)) markedReads.push({ nativeSessionId: session.nativeSessionId, readAt }); },
     watchSessionDrafts: listener => sharedDrafts.subscribe(listener),
+    watchSessionOutbox: listener => sharedOutbox.subscribe(listener),
+    queueMessage: async (session, text) => {
+      const entry = { id: `00000000-0000-4000-8000-${(queued.length + 1).toString(16).padStart(12, '0')}`, hostId: session.hostId, providerId: session.providerId,
+        nativeSessionId: session.nativeSessionId, text, createdAt: Date.now(), status: 'waiting' as const };
+      queued.push({ id: entry.id, nativeSessionId: session.nativeSessionId, text });
+      sharedOutbox.accept(entry);
+      return entry;
+    },
+    cancelQueuedMessage: async id => { cancelled.push(id); sharedOutbox.remove(id); },
+    retryQueuedMessage: async id => { const entry = sharedOutbox.view().all().find(item => item.id === id)!; sharedOutbox.accept({ ...entry, status: 'waiting' }); return { ...entry, status: 'waiting' }; },
     saveSessionDraft: async (session, text) => {
       savedDrafts.push({ nativeSessionId: session.nativeSessionId, text });
       const draft = { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, text, revision: ++draftRevision };
@@ -114,7 +128,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
   vi.spyOn(directory, 'attach').mockImplementation(async (_provider, nativeSessionId) => { attachments.push(nativeSessionId); return { agentId: `agent-${nativeSessionId}`, nativeSessionId }; });
   let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
-  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: true, access: 'owner' as const, providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
+  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: options.host?.online ?? true, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
+    providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
   function Access() {
     const inheritedReady = useContext(WorkspaceReady);
     const [ready, setReady] = useState(true), [baseUrl, changeScope] = useState(scope); setAccessReady = setReady; setScope = changeScope;
@@ -137,6 +152,9 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     /** The account's drafts as the Relay shares them; revisions above 1000 are this page's saves. */
     emitDrafts(frame: Omit<SessionDraftsFrame, 'protocolVersion' | 'type'>) { sharedDrafts.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_drafts', ...frame }); },
     savedDrafts,
+    /** The account's outbox as the Relay shares it. */
+    emitOutbox(frame: Omit<SessionOutboxFrame, 'protocolVersion' | 'type' | 'entries'> & { entries?: SessionOutboxFrame['entries'] }) { sharedOutbox.apply({ protocolVersion: PROTOCOL_VERSION, type: 'session_outbox', entries: [], ...frame }); },
+    queued, cancelled,
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
     /** A native title the Host reports for a session, as the Relay pushes it. */
     emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },

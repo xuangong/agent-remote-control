@@ -74,3 +74,14 @@ it("shows a bot's unsent draft where its latest reply would be, except for the b
   expect(other.querySelector('.lab-bot-preview:not(.lab-bot-draft)')).toBeNull();
   expect(other.getAttribute('aria-description')).toContain('Draft: Draft of A2 second line');
 });
+
+it('says a bot has messages waiting to send when nothing more urgent shows', async () => {
+  const group = botGroup('A');
+  const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A2' ? 'waiting' : 'idle', waiting: () => true });
+  const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
+  const quiet = visibleButton(container, 'A1'), urgent = visibleButton(container, 'A2');
+  expect(quiet.querySelector('.lab-bot-status')?.textContent).toBe('Waiting to send');
+  expect(quiet.querySelector('.lab-bot-status')?.getAttribute('data-outbox')).toBe('true');
+  expect(quiet.getAttribute('aria-description')).toContain('Waiting to send');
+  expect(urgent.querySelector('.lab-bot-status')?.textContent).toBe('Needs you');
+});

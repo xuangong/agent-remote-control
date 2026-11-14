@@ -66,6 +66,12 @@ export interface AgentComposerProps {
   onSendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
   draft?: string;
   onDraftChange?(text: string): void;
+  /**
+   * Sends text to a session whose Host is offline: the message waits for the Host and is delivered when it returns. Given
+   * only while the Host is offline, it replaces sending, even if the session still looks attached. label names the
+   * action, for example "Send when Mac mini is back".
+   */
+  sendLater?: { label: string; send(text: string): Promise<void> };
   /** Current-session waiting messages and unsettled message submissions. */
   onPendingInputChange?(count: number): void;
   onSendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
@@ -94,7 +100,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
@@ -173,6 +179,10 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const canInterrupt = ready && session.operations.cancel.allowed && (session.busy || pending === 'command')
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
+  // While the Host is offline, text can still be sent to wait for it; images, files and commands need the Host itself.
+  const laterMode = !!sendLater && !mutationBlocked && !forcedReadOnly;
+  const laterBlocked = !laterMode ? undefined : hasAttachments ? 'Images and files cannot wait for the Host. Send them when it is back.'
+    : isCommand || currentDraft.selectedSkill ? 'Commands need the Host. Send them when it is back.' : undefined;
   const dispatchReady = ready && !readOnly && !terminal && !operationBusy && session.operations.send_message.allowed;
   const sendAllowed = ready && !readOnly && !terminal && session.operations.send_message.allowed;
   const queueAllowed = ready && !readOnly && !terminal && session.operations.queue_message.allowed;
@@ -245,7 +255,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     refresh(value => value + 1);
   }
 
-  const sendButtonPress = useSendButtonPress(agentId, canSubmit && !readOnly && !busy, () => {
+  const sendButtonPress = useSendButtonPress(agentId, (canSubmit || laterMode && !laterBlocked && hasContent) && !readOnly && !busy, () => {
     if (richEnabled) { editorRef.current?.insertText('\n'); return; }
     const input = inputRef.current;
     if (!input || input.disabled || composing.current) return;
@@ -351,7 +361,26 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     }
   }
 
+  async function submitLater(): Promise<void> {
+    if (!laterMode || laterBlocked || !hasContent || currentDraft.pending || !sendLater) return;
+    const submitted = currentDraft.text;
+    currentDraft.pending = 'send';
+    currentDraft.feedback = undefined;
+    refresh((value) => value + 1);
+    try {
+      await sendLater.send(submitted.trim());
+      // The message now shows as waiting in the conversation; the composer is ready for the next one.
+      if (currentDraft.text === submitted) { if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); } }
+    } catch (error) {
+      currentDraft.feedback = { kind: 'error', message: error instanceof Error && error.message ? error.message : 'The message could not wait for the Host.' };
+    } finally {
+      currentDraft.pending = undefined;
+      if (mounted.current) refresh((value) => value + 1);
+    }
+  }
+
   async function run(kind: 'send' | 'queue' | 'cancel'): Promise<void> {
+    if (kind === 'send' && laterMode && latest.current.agentId === agentId) { await submitLater(); return; }
     if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
     if (kind === 'cancel') {
       if (!onCancel || !canInterrupt || currentDraft.interruptPending) return;
@@ -560,8 +589,11 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} />
-      <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
+      {laterMode ? <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : sendLater!.label} title={laterBlocked ?? `${sendLater!.label} · Hold for a new line`}
+        disabled={busy || !hasContent || !!laterBlocked} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
+      : <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>}
     </div> : null}
+    {laterBlocked ? <p className="agent-composer-note" role="status">{laterBlocked}</p> : null}
     {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">
       {waiting.items[0].reason}{waiting.items[0].dispatched ? ' Check the conversation before dismissing this message to continue the queue.' : ''}
     </p> : null}

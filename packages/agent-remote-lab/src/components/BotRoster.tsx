@@ -24,7 +24,8 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
   const name = botDisplayName(row.binding), destination: BotPlace = { kind: 'bot', groupId: row.groupId, viewId: row.viewId };
   // The role and label are tags beside the name, like a job title; screen readers hear them after the name.
   // A sleeping bot is quiet: it says Asleep, unless it waits for the owner, which it still says (dimmed with the row).
-  const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status;
+  // Messages that wait for the bot's Host show when nothing more urgent does.
+  const status = row.details.asleep && row.status !== 'Needs you' ? 'Asleep' : row.status ?? (row.waiting ? 'Waiting to send' : undefined);
   const time = row.reply ? replyTime(row.reply.replyAt) : undefined;
   // Like a chat list, an unsent draft shows where the latest reply would; the bot on screen has it in its composer.
   const draft = !current && row.draft ? row.draft.replace(/\s+/g, ' ').trim() : undefined;
@@ -42,7 +43,7 @@ function BotMember({ row, current, compact, hostName, onSelect }: { row: BotRow;
         {/* Like a chat list: the status that asks for something, then the latest reply; an unread one is a dot, never a number. */}
         {status || row.reply || draft ? <span className="lab-bot-summary">
           {status === 'Working' ? <TypingDots />
-            : status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined}>{status}</span> : null}
+            : status ? <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined} data-outbox={status === 'Waiting to send' || undefined}>{status}</span> : null}
           {draft ? <span className="lab-bot-preview lab-bot-draft" aria-hidden="true"><span className="lab-bot-draft-label">Draft</span>{draft}</span>
             : row.reply ? <span className="lab-bot-preview" aria-hidden="true">{row.reply.preview}</span> : null}
           {row.unread ? <span className="lab-bot-unread" aria-hidden="true" /> : null}

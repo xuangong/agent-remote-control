@@ -1,0 +1,57 @@
+import { act } from 'react';
+import { afterEach, expect, it, vi } from 'vitest';
+import { botGroup, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
+import { setPromptText } from './test/setup.js';
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
+
+async function openBot(app: Awaited<ReturnType<typeof mountBotApp>>) {
+  await until(() => expect(app.workspace().window?.id).toBe('A'));
+  await app.switchMode('bot');
+  await act(async () => app.button('A1').click());
+  await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+}
+
+it("sends to a bot whose Host is offline: the message waits in the outbox on every page until it is cancelled", async () => {
+  const scope = 'http://localhost/u/bot-outbox/';
+  seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true, host: { online: false, outbox: 1 } });
+  const input = () => app.container.querySelector<HTMLElement>('.lab-bot-conversation [role="textbox"]')!;
+  const submit = () => app.container.querySelector<HTMLButtonElement>('.lab-bot-conversation [data-testid="prompt-submit"]')!;
+  const bubbles = () => [...app.container.querySelectorAll<HTMLElement>('.lab-bot-conversation .lab-outbox-message')];
+  try {
+    await openBot(app);
+    await act(async () => app.emitOutbox({ snapshot: true }));
+    await act(async () => { setPromptText(input(), 'Run the suite when you are back.'); input().dispatchEvent(new Event('input', { bubbles: true })); });
+    await until(() => expect(submit().getAttribute('aria-label')).toBe('Send when Test Host is back'));
+    expect(submit().disabled).toBe(false);
+    await act(async () => submit().click());
+    await until(() => expect(app.queued).toEqual([{ id: expect.any(String), nativeSessionId: 'A1', text: 'Run the suite when you are back.' }]));
+    await until(() => expect(input().textContent).toBe(''));
+    // It shows after the conversation as an outgoing message that has not gone out yet.
+    await until(() => expect(bubbles()).toHaveLength(1));
+    expect(bubbles()[0]!.textContent).toContain('Run the suite when you are back.');
+    expect(bubbles()[0]!.querySelector('.agent-message-delivery')!.textContent).toBe('Waiting for Test Host');
+    // Another device cancels it: it leaves this page too.
+    await act(async () => app.emitOutbox({ removed: [app.queued[0]!.id] }));
+    await until(() => expect(bubbles()).toHaveLength(0));
+    // And here, Cancel takes it back.
+    await act(async () => { setPromptText(input(), 'Never mind.'); input().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => submit().click());
+    await until(() => expect(bubbles()).toHaveLength(1));
+    await act(async () => bubbles()[0]!.querySelector<HTMLButtonElement>('[aria-label="Cancel message"]')!.click());
+    await until(() => expect(app.cancelled).toEqual([app.queued[1]!.id]));
+    await until(() => expect(bubbles()).toHaveLength(0));
+  } finally { await app.close(); }
+});
+
+it('says to update the Controller of an offline Host that cannot keep messages', async () => {
+  const scope = 'http://localhost/u/bot-outbox-old/';
+  seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope, { hosted: true, host: { online: false } });
+  try {
+    await openBot(app);
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation')!.textContent).toContain('Update the Controller on Test Host to send while it is offline.'));
+    expect(app.container.querySelector('.lab-bot-conversation [data-testid="prompt-submit"]')!.getAttribute('aria-label')).toBe('Send message');
+  } finally { await app.close(); }
+});

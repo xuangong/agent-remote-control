@@ -12,6 +12,8 @@ import { botActivityLabel, botRole, projectBotRoster, type BotSessionRef } from 
 import { sharedReminders } from './bot-attention.js';
 import { useSessionReads } from './hooks/useSessionReads.js';
 import { SharedDraftsContext, useSessionDrafts } from './hooks/useSharedDraft.js';
+import { useSessionOutbox } from './hooks/useSessionOutbox.js';
+import { OutboxMessages } from './components/OutboxMessages.js';
 import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbench-mode.js';
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
@@ -1504,6 +1506,8 @@ function AppContent({
   const sessionReads = useSessionReads(transport, sharedStatesWanted);
   // Drafts follow the owner to every device while the workbench is open.
   const sharedDrafts = useSessionDrafts(transport, activated && accessReady);
+  // Messages waiting for offline Hosts, shown in their conversations and rows on every device.
+  const sessionOutbox = useSessionOutbox(transport, activated && accessReady);
   const updateTeamRoster = useCallback((baseUrl: string, teams: Team[]) => setTeamRoster({ baseUrl, teams }), []);
   const [tpmListOpen, setTpmListOpen] = useState(false);
   // Most recent use orders the Window overview; a page in front counts as using its Window.
@@ -1929,7 +1933,7 @@ function AppContent({
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId),
     current: currentBotSession, earlier: earlierBotSessions, reply: session => sessionStates?.reply(session), unread: (session, replyAt) => !!sessionReads?.unread(session, replyAt),
-    draft: session => sharedDrafts?.view.draft(session)?.text });
+    draft: session => sharedDrafts?.view.draft(session)?.text, waiting: session => (sessionOutbox?.entries(session).length ?? 0) > 0 });
   // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
   // continues into the session before a handoff, whose last reply may still be the latest.
   const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = windowMode ? visibleWindows
@@ -2839,6 +2843,12 @@ function AppContent({
     const refHolder = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
     // A Controller that tells the agent itself needs no note from this page.
     const pageNotes = referencing && !host?.providers?.some(provider => provider.providerId === source.providerId && provider.referenceNotes);
+    // A conversation whose Host is offline can still be written to: the message waits for the Host when its Controller delivers from the outbox.
+    const outboxTarget = { hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.nativeSessionId };
+    const waiting = sessionOutbox?.entries(outboxTarget) ?? [];
+    const writable = !!context.offline && !!host && host.access !== 'shared' && !source.parentNativeSessionId && !context.operationBinding.historical;
+    const laterHost = writable && host!.outbox === 1 && transport.queueMessage ? host : undefined;
+    const outdatedOffline = writable && host!.outbox !== 1 && !!transport.queueMessage;
     const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
@@ -2896,7 +2906,10 @@ function AppContent({
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
       timelineStart: botPresentation ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
       // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
-      timelineEnd: botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : undefined,
+      timelineEnd: <>{waiting.length ? <OutboxMessages entries={waiting} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
+          onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
+        {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
+      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
         onOpen={(session, intent) => view && sharedWindow
           ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
@@ -2907,7 +2920,8 @@ function AppContent({
           onOpen={ref => void openExcerptSource({ hostId: source.hostId, providerId: ref.providerId, nativeSessionId: ref.nativeSessionId, title: ref.title ?? '' })}
           onRemoved={(ref, restore) => removedReference(ref, restore, fork)} onRestore={() => restoredReference(fork)} /> : forkReference}
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
-      composerNotice: botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
+      composerNotice: outdatedOffline ? <p className="agent-composer-note lab-outbox-hint" role="status">Update the Controller on {host!.name} to send while it is offline.</p>
+        : botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
       sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
         title={foldsOnClose(view) ? 'Fold. It stays in this group.' : 'Close this session view. Agent sessions keep running.'}
         onClick={() => closeView(view.id)}>×</button> : null}

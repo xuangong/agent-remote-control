@@ -1,0 +1,17 @@
+/* A message in the outbox reads as the owner's outgoing message that has not gone out yet: the same bubble, quieter, with a clock. */
+.lab-outbox-message[data-delivery-state="waiting"] > .agent-message { opacity: .78; }
+.lab-outbox-message .agent-message-delivery { gap: 6px; }
+.lab-outbox-message .agent-message-delivery:has(.agent-delivery-actions) { gap: 4px; }
+.lab-outbox-icon { flex: none; }
+.lab-outbox-label { font-variant-numeric: tabular-nums; }
+.lab-outbox-message .agent-delivery-actions button { transition: background-color var(--ui-duration-short, 120ms) ease-out; }
+.lab-outbox-message .agent-delivery-actions button:hover:not(:disabled) { background: var(--ui-fill); }
+.lab-outbox-message .agent-delivery-actions button:active:not(:disabled) { transform: scale(.94); }
+@media (pointer: coarse) {
+  .lab-outbox-message .agent-delivery-actions button { min-width: 44px; width: 44px; min-height: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lab-outbox-message .agent-delivery-actions button { transition: none; }
+  .lab-outbox-message .agent-delivery-actions button:active:not(:disabled) { transform: none; }
+}
+.lab-outbox-hint { padding: 0 2px 6px; }

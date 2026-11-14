@@ -45,7 +45,7 @@ function idle(lease: RemoteHostSessionLease): boolean {
   const state = lease.agent.snapshot().payload;
   return state.status === 'idle' && state.activeTurn === null && !state.pendingInteractions.length && sessionOperationAvailability(state, 'send_message').allowed;
 }
-type TeamDelivery = 'immediate' | 'next_turn';
+export type TeamDelivery = 'immediate' | 'next_turn';
 function deliveryAllowed(lease: RemoteHostSessionLease, delivery: TeamDelivery): boolean {
   const state = lease.agent.snapshot().payload;
   const readyIdle = state.status === 'idle' && state.activeTurn === null && !state.pendingInteractions.length;
@@ -55,7 +55,7 @@ function deliveryAllowed(lease: RemoteHostSessionLease, delivery: TeamDelivery):
   return delivery === 'next_turn' || readyIdle || sessionOperationAvailability(state, 'steer').allowed;
 }
 /** steer: input may join a running turn. A worker's support reports never do; they wait for its next turn. */
-function availableDelivery(lease: RemoteHostSessionLease, steer = true): TeamDelivery | undefined {
+export function availableDelivery(lease: RemoteHostSessionLease, steer = true): TeamDelivery | undefined {
   if (deliveryAllowed(lease, 'immediate') && (steer || lease.agent.snapshot().payload.activeTurn === null)) return 'immediate';
   if (deliveryAllowed(lease, 'next_turn')) return 'next_turn';
 }

@@ -1,5 +1,5 @@
 import { TeamRuntime } from './team.js';
-import { isTeamSeat, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { isTeamSeat, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { directoryNativeEffect, directoryOperationId, type DirectoryMutationEvidence } from './directory-mutation.js';
 import { admitNativeOwnerTransfer } from './native-owner-admission.js';
 import { isCreationSource } from '@orchardworks/agent-remote-protocol';
@@ -41,6 +41,7 @@ import { AgentOperationRejectedError, bindAgentSessionTools, AgentSessionInUseEr
 import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
+import { SessionOutbox } from './session-outbox.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
 import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
 import { withReferenceNotes } from './session-reference-notes.js';
@@ -145,6 +146,8 @@ export interface AgentHostRuntimeOptions {
   inputResources?: InputResourceStoreOptions;
   /** Where each session's latest reply is kept across restarts; without it, replies are known only while this process runs. */
   sessionRepliesFile?: string;
+  /** Delivers messages that waited on the Relay for this Host; receipts of claimed messages are kept in file. */
+  outbox?: { file: string; request(call: OutboxHostCall): Promise<unknown> };
   /** Credentials through which sessions' shell commands reach this Controller as themselves. */
   sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string; sessionBin?: string };
   /** The sessions each session refers to; without it, sessions have only their source. */
@@ -183,6 +186,8 @@ export interface AgentHostRuntime {
   readonly sessionCatalog: SessionCallerCatalog;
   /** The sessions each session refers to, for session commands; absent without a reference store. */
   readonly sessionRefs?: SessionRefContext;
+  /** Messages that waited on the Relay for this Host, delivered while the Relay acknowledges the outbox. */
+  readonly outbox?: SessionOutbox;
   /** Answers one session command; forward sends requests naming other Hosts to them. */
   callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult>;
   /** Answers one role command of the session that asks. */
@@ -241,7 +246,8 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     genericSuccession: () => connection.client.teamSuccession, callForSupport: () => connection.client.callForSupport } } : {}), controllerId: options.installationId,
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}),
-    ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }) });
+    ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }),
+    ...(stateDirectory ? { outbox: { file: join(stateDirectory, 'outbox-receipts.json'), request: (call: OutboxHostCall) => connection.client.outboxRequest(call) } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
   const updater = options.controller ? createControllerUpdater({ ...options.controller, beginRestart: runtime.beginControllerRestart, cancelRestart: runtime.cancelControllerRestart }) : undefined;
@@ -285,6 +291,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       hostStatus: true,
+      ...(runtime.outbox ? { outbox: {
+        onAvailable: (available: boolean) => { if (generation === current && !closed) runtime.outbox!.setAvailable(available); },
+        onReady: () => { if (generation === current && !closed) runtime.outbox!.wake(); } } } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
@@ -1562,6 +1571,17 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => registration(providerId).adapter.descriptor.sessionAccess?.readOnly),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
+  // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
+  const outbox = options.outbox ? new SessionOutbox({ file: options.outbox.file, request: options.outbox.request, access: {
+    available: automationAccess.available,
+    route: target => {
+      try {
+        const resolved = automationAccess.sessionRouting!.resolve({ controllerId: automationAccess.controllerId, ...target }).target;
+        return resolved.controllerId === automationAccess.controllerId ? { providerId: resolved.providerId, nativeSessionId: resolved.nativeSessionId } : target;
+      } catch { return target; }
+    },
+    acquire: automationAccess.acquire,
+  } }) : undefined;
   const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true,
     stateDirectory: options.team.stateDirectory, title: async ref => await registration(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
   const workerToolsApplied = new Map<string, boolean>();
@@ -1578,7 +1598,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -1593,6 +1613,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
       if (workerSupportTimer) clearInterval(workerSupportTimer);
       await bounded(team?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
+      await bounded(outbox?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       try {
         await bounded(successionBoundary?.close() ?? Promise.resolve(), shutdownTimeoutMs);

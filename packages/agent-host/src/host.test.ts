@@ -122,6 +122,26 @@ describe('Agent Host runtime', () => {
     } finally { await restarted.close(); await rm(root, { recursive: true, force: true }); }
   });
 
+  it('delivers a message that waited for this Host into its native session once the Relay acknowledges the outbox', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'host-outbox-'));
+    const registration = fixture('codex');
+    const native = new Session('codex', 'native', [{ type: 'history_boundary' }]);
+    registration.sessions.set('native', native);
+    const id = '00000000-0000-4000-8000-000000000001';
+    const entries = new Map([[id, { id, providerId: 'codex', nativeSessionId: 'native', text: 'Run the suite when you are back.', createdAt: 1, status: 'waiting' as 'waiting' | 'delivering' }]]);
+    const settled: unknown[] = [];
+    const host = createAgentHostRuntime({ registrations: [registration], outbox: { file: join(root, 'outbox-receipts.json'), request: async call => {
+      if (call.action === 'poll') return { entries: [...entries.values()] };
+      if (call.action === 'claim') { entries.get(call.id)!.status = 'delivering'; return entries.get(call.id); }
+      settled.push(call); entries.delete(call.id); return { ok: true };
+    } } });
+    try {
+      host.outbox!.setAvailable(true);
+      await expect.poll(() => settled).toEqual([{ action: 'settle', id, outcome: 'accepted' }]);
+      expect(native.sentMessages).toEqual(['Run the suite when you are back.']);
+    } finally { await host.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it('wires a durable resource store into an attached native session', async () => {
     const root = await mkdtemp(join(tmpdir(), 'host-resource-'));
     const received: import('@orchardworks/agent-provider-sdk').AgentInputPart[][] = [];

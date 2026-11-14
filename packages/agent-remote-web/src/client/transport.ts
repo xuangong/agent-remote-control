@@ -85,6 +85,10 @@ export interface RemoteAgentTransport {
    * listener receives the current view at once and again whenever a state changes or turns unknown.
    */
   watchSessionStates?(listener: (states: import('./session-states.js').SessionStatesView) => void): () => void;
+  /** The account's read positions, shared by every device; the listener receives the current view at once and on each change. */
+  watchSessionReads?(listener: (reads: import('./session-reads.js').SessionReadsView) => void): () => void;
+  /** Records that the owner has seen a session's replies up to readAt; positions never move back. */
+  markSessionRead?(session: import('./session-states.js').SessionStateRef, readAt: number): void;
   fetchSnapshot(agentId: string, options?: RemoteRequestOptions): Promise<AgentSnapshot>;
   fetchTimeline(
     agentId: string,

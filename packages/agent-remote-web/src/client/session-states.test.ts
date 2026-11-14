@@ -39,3 +39,20 @@ it('separates offline Hosts, unknown sessions and removed states, and replaces e
   store.apply(frame({ snapshot: true }));
   expect(store.view().state({ ...thread, nativeSessionId: 'other' }).state).toBe('unknown');
 });
+
+it("keeps each session's latest reply, also after its state goes away or its Host goes offline", () => {
+  const store = new SessionStateStore();
+  expect(store.view().reply(thread)).toBeUndefined();
+  store.apply(frame({ snapshot: true, hosts: [{ hostId: 'host', online: true, confirmedAgeMs: 0 }], states: [{ ...thread, state: 'idle', ageMs: 0, replyAt: 7, preview: 'Shipped.' }] }));
+  expect(store.view().reply(thread)).toEqual({ replyAt: 7, preview: 'Shipped.' });
+  // A state without facts keeps the known reply; a newer reply replaces it.
+  store.apply(frame({ states: [{ ...thread, state: 'running', ageMs: 0 }] }));
+  expect(store.view().reply(thread)).toEqual({ replyAt: 7, preview: 'Shipped.' });
+  store.apply(frame({ states: [{ ...thread, state: 'idle', ageMs: 0, replyAt: 9, preview: 'All tests pass.' }] }));
+  expect(store.view().reply(thread)).toEqual({ replyAt: 9, preview: 'All tests pass.' });
+  store.apply(frame({ hosts: [{ hostId: 'host', online: false }], removed: [thread] }));
+  expect(store.view().state(thread).state).toBe('offline');
+  expect(store.view().reply(thread)).toEqual({ replyAt: 9, preview: 'All tests pass.' });
+  store.apply(frame({ snapshot: true }));
+  expect(store.view().reply(thread)?.replyAt).toBe(9);
+});

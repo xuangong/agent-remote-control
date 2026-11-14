@@ -53,7 +53,7 @@ describe('shared session states', () => {
     const stop = harness.transport.watchSessionStates(view => views.push(ref => view.state(ref).state));
     await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
     expect(harness.urls[0]).toContain('observation=activity');
-    expect(harness.urls[0]).toContain('states=1');
+    expect(harness.urls[0]).toContain('states=2');
     const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_states', snapshot: true, hosts: [{ hostId: 'host', online: true, confirmedAgeMs: 0 }],
       states: [{ ...thread, state: 'waiting', ageMs: 0 }] }));
@@ -61,11 +61,40 @@ describe('shared session states', () => {
     // Session channels for content do not ask for states.
     connect(harness.transport, 'session');
     await vi.waitFor(() => expect(harness.urls).toHaveLength(2));
-    expect(harness.urls[1]).not.toContain('states=1');
+    expect(harness.urls[1]).not.toContain('states=');
     harness.sockets[0]!.terminate();
-    await vi.waitFor(() => expect(harness.urls.filter(url => url.includes('states=1'))).toHaveLength(2), { timeout: 4000 });
+    await vi.waitFor(() => expect(harness.urls.filter(url => url.includes('states=2'))).toHaveLength(2), { timeout: 4000 });
     harness.sockets.at(-1)!.send(JSON.stringify({ protocolVersion: version, type: 'session_states', snapshot: true, hosts: [{ hostId: 'host', online: false }] }));
     await vi.waitFor(() => expect(views.at(-1)!(thread)).toBe('offline'));
+    stop();
+  });
+});
+
+describe('shared read positions', () => {
+  it('starts the account, shares positions and sends advanced ones once, coalesced', async () => {
+    const posts: unknown[] = [];
+    const fetchImplementation = (async (_url: string, init?: RequestInit) => {
+      posts.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ since: 5, reads: [] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const harness = await server(true, fetchImplementation);
+    const thread = { hostId: 'host', providerId: 'codex', nativeSessionId: 'thread' };
+    const unread: boolean[] = [];
+    const stop = harness.transport.watchSessionReads(view => unread.push(view.unread(thread, 10)));
+    await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
+    expect(harness.urls[0]).toContain('reads=1');
+    // A snapshot without since starts the account's positions.
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_reads', snapshot: true, reads: [] }));
+    await vi.waitFor(() => expect(posts).toEqual([{ reads: [] }]));
+    harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'session_reads', since: 5, reads: [] }));
+    await vi.waitFor(() => expect(unread.at(-1)).toBe(true));
+    // Marking clears the dot at once and sends the newest position once.
+    harness.transport.markSessionRead(thread, 8);
+    harness.transport.markSessionRead(thread, 10);
+    harness.transport.markSessionRead(thread, 9);
+    expect(unread.at(-1)).toBe(false);
+    await vi.waitFor(() => expect(posts).toHaveLength(2), { timeout: 2000 });
+    expect(posts[1]).toEqual({ reads: [{ ...thread, readAt: 10 }] });
     stop();
   });
 });
@@ -111,7 +140,7 @@ describe('session channel transport', () => {
     const b = connect(harness.transport, 'b');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(3));
-    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
+    expect(harness.urls.sort()).toEqual(['/base/v1/session-channel?observation=activity&migrations=1&titles=1&preemption=1&states=2&reads=1', '/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1']);
     const subscriptions = harness.frames.map(({ frame }) => frame);
     expect(subscriptions.map((frame) => frame.type)).toEqual(['subscribe', 'subscribe', 'subscribe']);
     const firstId = subscriptions.find((frame) => frame.agentId === 'a' && !frame.message.observation).subscriptionId;

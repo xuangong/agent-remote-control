@@ -4,8 +4,11 @@ export type SessionStatesFrame = Extract<SessionChannelServerMessage, { type: 's
 /** offline: the session's Host is not connected. unknown: no state confirmed recently enough to trust. */
 export type SharedSessionState = SessionActivityState | 'unknown' | 'offline';
 export interface SessionStateRef { hostId: string; providerId: string; nativeSessionId: string }
+export interface SessionReply { replyAt: number; preview: string }
 export interface SessionStatesView {
   state(session: SessionStateRef): { state: SharedSessionState; updatedAt?: number };
+  /** The session's latest reply, when its Host reported it; kept after the state goes away, since it describes the past. */
+  reply(session: SessionStateRef): SessionReply | undefined;
 }
 
 const key = (session: SessionStateRef) => JSON.stringify([session.hostId, session.providerId, session.nativeSessionId]);
@@ -17,6 +20,8 @@ const key = (session: SessionStateRef) => JSON.stringify([session.hostId, sessio
 export class SessionStateStore {
   private readonly hosts = new Map<string, { online: boolean; confirmedAt?: number }>();
   private readonly entries = new Map<string, { state: SessionActivityState; updatedAt?: number; changedAt: number }>();
+  /** The latest reply of each session this page has heard of, the most recently reported last. */
+  private readonly replies = new Map<string, SessionReply>();
   private readonly listeners = new Set<(view: SessionStatesView) => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -28,15 +33,20 @@ export class SessionStateStore {
     for (const host of frame.hosts ?? []) {
       this.hosts.set(host.hostId, { online: host.online, ...(host.confirmedAgeMs === undefined ? {} : { confirmedAt: at - host.confirmedAgeMs }) });
     }
-    for (const { hostId, providerId, nativeSessionId, state, updatedAt, ageMs } of frame.states ?? []) {
-      this.entries.set(key({ hostId, providerId, nativeSessionId }), { state, ...(updatedAt === undefined ? {} : { updatedAt }), changedAt: at - ageMs });
+    for (const { hostId, providerId, nativeSessionId, state, updatedAt, ageMs, replyAt, preview } of frame.states ?? []) {
+      const id = key({ hostId, providerId, nativeSessionId });
+      this.entries.set(id, { state, ...(updatedAt === undefined ? {} : { updatedAt }), changedAt: at - ageMs });
+      const known = this.replies.get(id);
+      if (replyAt === undefined || preview === undefined || known && (known.replyAt > replyAt || known.replyAt === replyAt && known.preview === preview)) continue;
+      this.replies.delete(id); this.replies.set(id, { replyAt, preview });
+      if (this.replies.size > 4096) this.replies.delete(this.replies.keys().next().value!);
     }
     for (const removed of frame.removed ?? []) this.entries.delete(key(removed));
     this.notify();
   }
 
   view(): SessionStatesView {
-    return { state: session => this.state(session) };
+    return { state: session => this.state(session), reply: session => { const reply = this.replies.get(key(session)); return reply && { ...reply }; } };
   }
 
   subscribe(listener: (view: SessionStatesView) => void): () => void {
@@ -47,7 +57,7 @@ export class SessionStateStore {
 
   dispose(): void {
     clearTimeout(this.timer); this.timer = undefined;
-    this.listeners.clear(); this.hosts.clear(); this.entries.clear();
+    this.listeners.clear(); this.hosts.clear(); this.entries.clear(); this.replies.clear();
   }
 
   private state(session: SessionStateRef): { state: SharedSessionState; updatedAt?: number } {

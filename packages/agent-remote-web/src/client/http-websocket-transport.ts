@@ -1,4 +1,4 @@
-import type { SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
+import { SESSION_READ_BATCH, type SessionRead as SessionReadPosition, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   isSessionSuccessionReplay, isSessionSuccessionReplayPage, isSessionSuccessionCurrent,
@@ -23,7 +23,8 @@ import {
 
 import { watchPageResume } from './page-resume.js';
 import { SessionChannelPool } from './session-channel-transport.js';
-import { SessionStateStore, type SessionStatesView } from './session-states.js';
+import { SessionStateStore, type SessionStateRef, type SessionStatesView } from './session-states.js';
+import { SessionReadStore, type SessionReadsView } from './session-reads.js';
 import { RemoteOperationError } from './transport.js';
 import type {
   RemoteAgentTransport,
@@ -105,6 +106,45 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     const unsubscribe = this.sessionStates.subscribe(listener), stopWatching = this.sessionChannels.watchStates();
     return () => { unsubscribe(); stopWatching(); };
   }
+  private readonly sessionReads = new SessionReadStore();
+  private readonly pendingReads = new Map<string, SessionReadPosition>();
+  private pendingReadTimer: ReturnType<typeof setTimeout> | undefined;
+  private readsStarted = false;
+  /**
+   * The account's read positions, shared by every device; the listener receives the current view at once and again
+   * whenever a position advances. Keeps the activity channel open while watched.
+   */
+  watchSessionReads(listener: (reads: SessionReadsView) => void): () => void {
+    if (!this.sessionChannels) { listener(this.sessionReads.view()); return () => {}; }
+    const unsubscribe = this.sessionReads.subscribe(listener), stopWatching = this.sessionChannels.watchStates();
+    return () => { unsubscribe(); stopWatching(); };
+  }
+  /** Records that the owner has seen a session's replies up to readAt: at once on this page, and on the Relay shortly after. */
+  markSessionRead(session: SessionStateRef, readAt: number): void {
+    if (!this.sessionChannels || !this.sessionReads.advance(session, readAt)) return;
+    const position = { hostId: session.hostId, providerId: session.providerId, nativeSessionId: session.nativeSessionId, readAt };
+    this.pendingReads.set(JSON.stringify([position.hostId, position.providerId, position.nativeSessionId]), position);
+    this.scheduleReads(500);
+  }
+  private scheduleReads(delay: number): void {
+    if (this.pendingReadTimer) return;
+    this.pendingReadTimer = setTimeout(() => { this.pendingReadTimer = undefined; void this.sendReads(); }, delay);
+  }
+  private async sendReads(): Promise<void> {
+    const reads = [...this.pendingReads.values()].slice(0, SESSION_READ_BATCH);
+    for (const read of reads) this.pendingReads.delete(JSON.stringify([read.hostId, read.providerId, read.nativeSessionId]));
+    try { await this.postReads(reads); }
+    catch {
+      // Kept for the next attempt unless a newer position replaced it meanwhile.
+      for (const read of reads) { const id = JSON.stringify([read.hostId, read.providerId, read.nativeSessionId]); if (!this.pendingReads.has(id)) this.pendingReads.set(id, read); }
+      if (this.pendingReads.size) this.scheduleReads(5_000);
+      return;
+    }
+    if (this.pendingReads.size) this.scheduleReads(500);
+  }
+  private async postReads(reads: SessionReadPosition[]): Promise<void> {
+    await this.fetchBody('v1/session-reads', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reads }) });
+  }
   private readonly migrations = new Map<string, SessionMigration>();
   onSessionMigration(listener: (migration: SessionMigration) => void): () => void {
     this.migrationListeners.add(listener);
@@ -151,8 +191,13 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
           for (const listener of this.migrationListeners) listener(migration);
         },
         onSessionStates: frame => this.sessionStates.apply(frame),
+        onSessionReads: frame => {
+          this.sessionReads.apply(frame);
+          // The first page that understands read positions starts them for the account.
+          if (frame.snapshot && frame.since === undefined && !this.readsStarted) { this.readsStarted = true; void this.postReads([]).catch(() => { this.readsStarted = false; }); }
+        },
         // Only the activity channel carries shared session states, so a page receives them once.
-        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=1' : ''}`)),
+        createSocket: (mode) => this.createWebSocket(this.websocketUrl(`v1/session-channel?observation=${mode}&migrations=1&titles=1&preemption=1${dependencies.sessionSuccessions ? '&successions=1' : ''}${mode === 'activity' ? '&states=2&reads=1' : ''}`)),
         connectDirect: (agentId, listener) => this.connectDirect(agentId, listener),
         observe: (observation) => this.observe(observation),
         diagnostic: (diagnostic) => this.diagnostic(diagnostic),
@@ -274,6 +319,8 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     this.titles.clear(); this.titleListeners.clear();
     this.migrations.clear(); this.migrationListeners.clear();
     this.sessionStates.dispose();
+    clearTimeout(this.pendingReadTimer); this.pendingReadTimer = undefined; this.pendingReads.clear();
+    this.sessionReads.dispose();
   }
 
   private connectDirect(agentId: string, listener: RemoteTransportListener): RemoteConnection {

@@ -152,6 +152,7 @@ import { arrangeFloatingEntries } from './hooks/useTrackingPosition.js';
 import { HostPairing, type HostPairingService, type RemoteHost } from './components/HostPairing.js';
 import { HostOverview } from './components/HostOverview.js';
 import { DirectoryError, nativeSessionMissing, RemoteHostClient, SessionDirectoryClient, type CreateSessionOptions, type OpenedSession, type SessionSummary } from './directory-client.js';
+import { unavailableSessions } from './unavailable-sessions.js';
 import { SessionConfiguration, SessionDirectory } from './components/SessionDirectory.js';
 import { useSessionEntries } from './hooks/useSessionEntries.js';
 import { useNativeTitles } from './hooks/useNativeTitles.js';
@@ -484,7 +485,7 @@ function AppContent({
       setProviderName(providerConnectionName(session.hostId ?? 'local', session.providerId));
     },
     failed: (error, selection, retrying = false) => {
-      if (!retrying && nativeSessionMissing(error)) markSessionMissing(selection);
+      if (!retrying && nativeSessionMissing(error)) { markSessionMissing(selection); unavailableSessions(transport).remember(selection, error); }
       setSessionNotice({ ...sessionConnectionFailure(error, retrying), successionError: error instanceof Error ? error.message : 'The session could not be opened.' });
       if (error instanceof DirectoryError && error.nativeOwner) setNativeTakeover({ item: selection, owner: error.nativeOwner, message: error.message });
     },
@@ -661,6 +662,14 @@ function AppContent({
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible || pageOpen) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
+  // A Host that comes back is asked again for the sessions it reported missing (see unavailableSessions).
+  const offlineHosts = useRef(new Set<string>());
+  useEffect(() => {
+    for (const host of remoteHosts) {
+      if (host.online === false) offlineHosts.current.add(host.id);
+      else if (offlineHosts.current.delete(host.id)) unavailableSessions(transport).forgetHost(host.id);
+    }
+  }, [remoteHosts, transport]);
   const availableProviders = selectedHost.id === 'local' ? providers : hostProviders(currentHost);
   const preferredProviderId = selectedHost.id === 'local' ? localProviderId : selectedHost.providerId;
   const providerId = availableProviders.find((provider) => provider.providerId === preferredProviderId)?.providerId

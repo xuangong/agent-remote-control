@@ -51,6 +51,8 @@ function saveSessionComposition(scope: string, value: { path: OpenedSession[]; f
 // environment for every later test in the file. So each wait gives up long before the deadline, waits stop once their test
 // has ended, and the hooks let React work already running finish, for a bounded time, before the next test or the cleanup.
 const testDeadline = 30_000;
+// Every test here renders the whole App through succession and recovery; under a busy full run 10 s is not enough.
+vi.setConfig({ testTimeout: testDeadline });
 const actSettleBound = 5_000;
 vi.setConfig({ testTimeout: testDeadline, hookTimeout: 3 * actSettleBound });
 const runningActs = new Set<Promise<unknown>>();

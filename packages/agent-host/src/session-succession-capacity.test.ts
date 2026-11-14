@@ -1,10 +1,13 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
+// These tests write and read back succession state files of up to 8 MiB several times each (one takes about 4 s alone),
+// so under a busy full run they need longer than the package's 10 s default.
+vi.setConfig({ testTimeout: 60_000 });
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }))); });
 const ref = (nativeSessionId: string) => ({ controllerId: 'host', providerId: 'fixture', nativeSessionId });

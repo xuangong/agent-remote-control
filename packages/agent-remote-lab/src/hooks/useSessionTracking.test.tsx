@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
-import { SessionDirectoryClient } from '../directory-client.js';
+import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
 import { readTrackedSessions, saveTrackedSessions, trackingEditRevision } from '../tracking-state.js';
 import { useSessionStars } from './useSessionStars.js';
@@ -236,6 +236,30 @@ it('retries only an unbound observer after access renewal and ignores the suspen
   await act(async () => accessReady(true));
   expect(attach).toHaveBeenCalledTimes(2);
   expect(connect).toHaveBeenCalledOnce();
+});
+it('does not ask again for a tracked session its Host reported missing when access is renewed', async () => {
+  saveTrackedSessions('http://localhost/u/alice/', [star]);
+  const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(
+    new DirectoryError('The native runtime could not find this session.', 'native_session_unavailable', 404));
+  const transport = { connect: vi.fn(), onDiagnostic: () => () => {}, onProtocolMessage: () => () => {} } as unknown as RemoteAgentTransport;
+  let accessReady!: (ready: boolean) => void, tracking!: SessionTracking;
+  function Fixture() {
+    const [ready, setReady] = useState(true); accessReady = setReady;
+    tracking = useSessionTracking('http://localhost/u/alice/', transport, undefined, undefined, undefined, undefined, ready);
+    return <>{tracking.observers}</>;
+  }
+  await render(<Fixture />);
+  await act(async () => {});
+  expect(attach).toHaveBeenCalledOnce();
+  for (let index = 0; index < 3; index++) {
+    await act(async () => accessReady(false));
+    await act(async () => accessReady(true));
+  }
+  expect(attach).toHaveBeenCalledOnce();
+  expect(tracking.observations[sessionKey(star)]).toMatchObject({ connection: 'disconnected', error: 'The native runtime could not find this session.' });
+  // Retry asks again.
+  await act(async () => tracking.retry(sessionKey(star)));
+  expect(attach).toHaveBeenCalledTimes(2);
 });
 it('migrates only exact native identities, resolves out-of-order branches and persists the local selection', async () => {
   const transport = {} as RemoteAgentTransport;

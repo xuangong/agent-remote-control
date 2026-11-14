@@ -12,6 +12,7 @@ import { SessionControlNotice } from './SessionControlNotice.js';
 import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-remote-web';
 import type { NativeSessionOwner, NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
+import { unavailableSessions } from '../unavailable-sessions.js';
 import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { useSharedDraft } from '../hooks/useSharedDraft.js';
@@ -132,6 +133,7 @@ export function SessionConversation(props: SessionConversationProps) {
     restorations.current.clear();
   }, [baseUrl, props.transport, targetKey, directory, enabled, canAttach]);
   const handoff = sessionHandoffScope(props.transport).forTarget(targetKey);
+  const unavailable = unavailableSessions(props.transport);
   const [, refreshHandoff] = useState(0);
   useEffect(() => handoff.subscribe(() => refreshHandoff(value => value + 1)), [handoff]);
   const availability = useRef({ targetKey, enabled: enabled && canAttach, offline: props.offline });
@@ -170,7 +172,9 @@ export function SessionConversation(props: SessionConversationProps) {
     const cached = connections?.find(currentTarget);
     if (cached && !historyRoleId) { setSession({ ...currentTarget, agentId: cached.agentId }); return () => { stopped = true; abort.abort(); }; }
     const client = directory;
-    const attachment = currentTarget.parentNativeSessionId
+    // A session its Host already reported missing is not asked for again by another mount of this view (see unavailableSessions).
+    const known = historyRoleId ? undefined : unavailable.get(currentTarget);
+    const attachment = known ? Promise.reject(known) : currentTarget.parentNativeSessionId
       ? client.attachChild(currentTarget.providerId, currentTarget.parentNativeSessionId, currentTarget.nativeSessionId, abort.signal)
       : historyRoleId ? client.attachHistorical(currentTarget.providerId, currentTarget.nativeSessionId, historyRoleId, abort.signal)
       : client.attach(currentTarget.providerId, currentTarget.nativeSessionId, abort.signal);
@@ -179,6 +183,7 @@ export function SessionConversation(props: SessionConversationProps) {
       if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
       setSession({ ...currentTarget, agentId: value.agentId }); setNativeOwner(undefined);
     }).catch(error => {
+      if (!historyRoleId) unavailable.remember(currentTarget, error);
       if (stopped || !availability.current.enabled || availability.current.targetKey !== targetKey) return;
       if (props.familyRoot && props.onSessionUnavailable && nativeSessionMissing(error) && !historyRoleId && !currentTarget.parentNativeSessionId
         && sessionKey(currentTarget) === sessionKey(target)) { props.onSessionUnavailable(currentTarget); return; }
@@ -192,7 +197,7 @@ export function SessionConversation(props: SessionConversationProps) {
   useEffect(() => {
     const returned = wasOffline.current && !props.offline;
     wasOffline.current = props.offline;
-    if (returned && (error || !session)) setAttempt(value => value + 1);
+    if (returned && (error || !session)) { unavailable.forget(currentTarget); setAttempt(value => value + 1); }
   }, [props.offline]);
   const displayedSession = session && sessionKey(session) === targetKey ? session : undefined;
   // A view whose locator was restored while the Relay is unreachable keeps showing its last resolved target, attached;
@@ -204,7 +209,7 @@ export function SessionConversation(props: SessionConversationProps) {
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!disconnected && !!session} target={currentTarget} pending={pending} preview={preview} availabilityError={disconnected || owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
-    onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => setAttempt(value => value + 1) : undefined)} />;
+    onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => { unavailable.forget(currentTarget); setAttempt(value => value + 1); } : undefined)} />;
 }
 function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });

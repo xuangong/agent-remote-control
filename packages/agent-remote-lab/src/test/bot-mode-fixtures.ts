@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
-import { SessionDirectoryClient } from '../directory-client.js';
+import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';
 import * as workspaceHooks from '../hooks/useWindowWorkspace.js';
 import * as successionHooks from '../hooks/useSessionSuccession.js';
 import { replicaState } from './fixtures.js';
@@ -29,7 +29,9 @@ export function visibleButton(container: ParentNode, label: string) {
 }
 export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean; serverProviders?: boolean;
   /** The listed Host: offline, or with a Controller that delivers from the outbox. */
-  host?: { online?: boolean; outbox?: 1 } } = {}) {
+  host?: { online?: boolean; outbox?: 1 };
+  /** Sessions the Host reports missing when the page attaches them. */
+  missing?: readonly string[] } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
@@ -126,7 +128,11 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   const directory = new SessionDirectoryClient(scope);
   vi.spyOn(directory, 'list').mockResolvedValue({ items: [{ ...botTarget('Other'), createdAt: '2026-11-08', updatedAt: '2026-11-08', state: 'idle' }], hasMore: false, revision: '1' });
   vi.spyOn(directory, 'workspaces').mockResolvedValue({ workspaces: [] });
-  vi.spyOn(directory, 'attach').mockImplementation(async (_provider, nativeSessionId) => { attachments.push(nativeSessionId); return { agentId: `agent-${nativeSessionId}`, nativeSessionId }; });
+  vi.spyOn(directory, 'attach').mockImplementation(async (_provider, nativeSessionId) => {
+    attachments.push(nativeSessionId);
+    if (options.missing?.includes(nativeSessionId)) throw new DirectoryError('The native runtime could not find this session.', 'native_session_unavailable', 404);
+    return { agentId: `agent-${nativeSessionId}`, nativeSessionId };
+  });
   let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
   const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: options.host?.online ?? true, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
     providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };

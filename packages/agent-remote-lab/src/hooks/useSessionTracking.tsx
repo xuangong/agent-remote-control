@@ -9,6 +9,7 @@ import type { SessionStar } from '../session-stars-client.js';
 import { MAX_TRACKED_SESSIONS, nextObservation, readTrackedSessionsChecked, readTrackedSessions, saveTrackedSessions, type SessionObservation, patchTrackedSessions, trackingEditRevision, type TrackedSessionPatch, type LocalTrackedSession } from '../tracking-state.js';
 import { useFeedbackToast } from '../components/Toast.js';
 import { restoreSession } from '../session-restoration.js';
+import { unavailableSessions } from '../unavailable-sessions.js';
 
 export type TrackRefreshResult =
   | { status: 'ready'; revision: number; sessions: readonly LocalTrackedSession[] }
@@ -209,7 +210,12 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     const value = previous[key];
     return value?.changed || value?.attention ? { ...previous, [key]: { ...value, changed: false, attention: undefined } } : previous;
   }), [setObservations]);
-  const retry = (key: string) => { setObservations(values => { const next = { ...values }; delete next[key]; return next; }); setRetries(values => ({ ...values, [key]: (values[key] ?? 0) + 1 })); };
+  const retry = (key: string) => {
+    // An explicit Retry asks the Host again, also for a session it reported missing.
+    const session = observedSessions.find(item => sessionKey(item.session) === key)?.session ?? sessions.find(item => sessionKey(item) === key);
+    if (session) unavailableSessions(transport).forget(session);
+    setObservations(values => { const next = { ...values }; delete next[key]; return next; }); setRetries(values => ({ ...values, [key]: (values[key] ?? 0) + 1 }));
+  };
   const migrations = useRef({ scope: baseUrl, values: new Map<string, import('@orchardworks/agent-remote-protocol').SessionMigration>() });
   if (migrations.current.scope !== baseUrl) migrations.current = { scope: baseUrl, values: new Map() };
   function replace(migration: import('@orchardworks/agent-remote-protocol').SessionMigration) {
@@ -324,6 +330,9 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
       if (!ready || connectedAgentId) return;
       const attached = connections?.find(session);
       if (attached) { start(attached.agentId); return; }
+      // A session its Host reported missing is not asked for again each time access is renewed (see unavailableSessions).
+      const unavailable = unavailableSessions(transport), known = unavailable.get(session);
+      if (known) { update(key, { connection: 'disconnected', error: known.message }); return; }
       const directory = new SessionDirectoryClient(baseUrl, undefined, session.hostId);
       update(key, { connection: 'connecting' });
       stopAttachment = restoreSession({
@@ -332,7 +341,10 @@ function SessionObserver({ session, liveAgentId, baseUrl, transport, connections
           ? directory.attachChild(session.providerId, session.parentNativeSessionId, session.nativeSessionId, signal)
           : directory.attach(session.providerId, session.nativeSessionId, signal),
         restored: attached => start(attached.agentId),
-        failed: error => update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' }),
+        failed: error => {
+          unavailable.remember(session, error);
+          update(key, { connection: 'disconnected', error: error instanceof Error ? error.message : 'Tracking could not connect. Try again.' });
+        },
       });
     };
     return () => { abort.abort(); stopAttachment?.(); unwatchConnections?.(); stopSource(); binding.current = undefined; attachment.current = undefined; };

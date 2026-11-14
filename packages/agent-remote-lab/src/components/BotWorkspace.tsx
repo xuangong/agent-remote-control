@@ -15,6 +15,7 @@ import { SidebarHeader } from '../shell/SidebarHeader.js';
 import { Toolbar } from '../ui/Toolbar.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
+import { Icon } from '../ui/Icon.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { botViews, hasBotAppearance, hasWindowAppearance } from '@orchardworks/agent-remote-protocol';
 import type { BotSection } from '../bot-roster.js';
@@ -101,6 +102,21 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
       ...hidden.length ? [{ kind: 'separator' as const }, ...hidden] : [],
     ];
   }
+  // A phone moves between the list and a chat like a navigation stack: the chat pushes in, Back pops to the list at the
+  // place it left. Hiding the list drops its scroll position, so it is kept here.
+  const [motion, setMotion] = useState<'push' | 'pop'>();
+  const rosterScroll = useRef(0);
+  const compactChat = compact && showConversation;
+  const wasCompactChat = useRef(compactChat);
+  useLayoutEffect(() => {
+    if (wasCompactChat.current === compactChat) return;
+    wasCompactChat.current = compactChat;
+    if (compactChat) setMotion('push');
+    else if (compact) {
+      setMotion('pop');
+      if (rosterElement.current) rosterElement.current.scrollTop = rosterScroll.current;
+    }
+  }, [compactChat, compact]);
   function back() { returning.current = true; navigation.back(); }
   /** Opening a sleeping bot wakes it for every device. */
   function open(next: BotPlace) {
@@ -118,6 +134,8 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     } catch (reason) { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); }
   }
   return <main ref={root} className="lab-bot-workspace" hidden={!visible} {...(!visible ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-roster-collapsed={rosterHidden || undefined}
+    data-navigation={compact ? motion : undefined}
+    onClickCapture={() => { if (compact && !showConversation && rosterElement.current) rosterScroll.current = rosterElement.current.scrollTop; }}
     onPointerDown={event => event.stopPropagation()} onFocus={event => event.stopPropagation()}
     onKeyDown={event => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.key !== 'Escape') return;
@@ -143,7 +161,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     </aside>
     <section className="lab-bot-conversation" aria-label="Bot conversation" hidden={compact && !showConversation}>
       <Toolbar className="lab-bot-conversation-toolbar" titleRef={heading} titleFocusable
-        leading={compact ? <Button ref={backButton} variant="plain" aria-label="Back to bots" onClick={back}>Back</Button>
+        leading={compact ? <Button ref={backButton} variant="plain" className="lab-bot-back" aria-label="Back to bots" onClick={back}><Icon name="chevron-left" size={20} />Bots</Button>
           : <IconButton ref={toggleRef} icon="sidebar" label={rosterCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-expanded={!rosterCollapsed} aria-controls={rosterId} onClick={onToggleRoster} />}
         title={place?.kind === 'session' ? place.session.title : selected.view?.binding.title ?? descriptor?.props.target.title ?? selected.group?.window.title ?? 'Choose a bot'}
         trailing={compact ? <><WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />{botMenu}</> : botMenu ?? undefined} />

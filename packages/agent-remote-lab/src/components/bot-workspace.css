@@ -142,3 +142,14 @@
   background: var(--ui-fill); color: var(--ui-label-secondary); font-size: 12px; }
 .lab-bot-asleep > button { padding: 2px 6px; border: 0; background: none; color: var(--ui-accent-text); font: inherit; font-weight: 600; cursor: pointer; }
 .lab-bot-asleep > button:hover { text-decoration: underline; }
+
+/* A phone moves between the bot list and a chat like a navigation stack: ‹ Bots, a push in and a pop back. */
+.lab-bot-back { display: inline-flex; align-items: center; gap: 0; min-height: 44px; padding-inline: 2px 8px; color: var(--ui-accent-text); font-weight: 400; }
+.lab-bot-back > svg { margin-inline-end: -2px; }
+.lab-bot-workspace[data-compact][data-navigation="push"] > .lab-bot-conversation:not([hidden]) { animation: lab-bot-push 240ms cubic-bezier(.2, .8, .2, 1); }
+.lab-bot-workspace[data-compact][data-navigation="pop"] > .lab-bot-roster:not([hidden]) { animation: lab-bot-pop 240ms cubic-bezier(.2, .8, .2, 1); }
+@keyframes lab-bot-push { from { opacity: .4; transform: translateX(32%); } to { opacity: 1; transform: none; } }
+@keyframes lab-bot-pop { from { opacity: .6; transform: translateX(-12%); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .lab-bot-workspace[data-compact][data-navigation] > :is(.lab-bot-conversation, .lab-bot-roster) { animation: none; }
+}

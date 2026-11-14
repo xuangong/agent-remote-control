@@ -76,6 +76,29 @@ it('compact Back restores the roster row and preserves the same editor without f
   await app.close();
 });
 
+it('goes back to the bot list from a chat on a phone with ‹ Bots, at the place it left', async () => {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} }));
+  const scope = 'http://localhost/bot-phone-back/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot&section=A');
+  const app = await mountBotApp(scope);
+  try {
+    const roster = () => app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
+    roster().scrollTop = 120;
+    await act(async () => app.button('A1').click());
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    const back = app.button('Back to bots');
+    // Like a phone's navigation bar: a chevron and the list's name, never a bare Back.
+    expect(back.textContent).toBe('Bots');
+    expect(back.querySelector('svg')).not.toBeNull();
+    expect(app.container.querySelector('.lab-bot-workspace')!.getAttribute('data-navigation')).toBe('push');
+    // A browser drops the scroll position of a list it stops displaying.
+    roster().scrollTop = 0;
+    await act(async () => back.click());
+    expect(roster().hidden).toBe(false);
+    expect(roster().scrollTop).toBe(120);
+    expect(app.container.querySelector('.lab-bot-workspace')!.getAttribute('data-navigation')).toBe('pop');
+  } finally { await app.close(); }
+});
+
 it('starts a new bot in its own group, named after its session, and opens its conversation', async () => {
   const scope = 'http://localhost/bot-new/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
   const create = vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-N1', nativeSessionId: 'N1' });

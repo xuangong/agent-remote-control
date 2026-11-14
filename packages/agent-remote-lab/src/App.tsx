@@ -13,6 +13,7 @@ import { parseWorkbenchRoute, type BotPlace, type WorkbenchMode } from './workbe
 import { windowBindingKey } from './window-composition.js';
 import { BotWorkspace } from './components/BotWorkspace.js';
 import type { BotInfo } from './components/BotActions.js';
+import { NewBotSheet } from './components/NewBotSheet.js';
 import { BotPicture, botDisplayName } from './components/BotRoster.js';
 import { WorkbenchModeSwitch } from './components/WorkbenchModeSwitch.js';
 import { SessionConversationSurfaces, SessionConversationMount, type SessionSurfaceDescriptor } from './components/SessionConversationSurfaces.js';
@@ -356,8 +357,10 @@ function AppContent({
   const [referencePicker, setReferencePicker] = useState<string>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
-  const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string; destination?: { windowId: string; viewId: string; binding: string } }>();
+  const creationReservation = useRef<{ operationId: string; options: CreateSessionOptions; providerId: string; destination?: { windowId: string; viewId: string; binding: string }; bot?: true }>();
   const [creationLocked, setCreationLocked] = useState(false);
+  /** Bot mode's New bot sheet, and the failure of its last start. */
+  const [newBot, setNewBot] = useState<{ open: boolean; failure?: string }>({ open: false });
   const { value: catchUp, begin: beginCatchUp, focus: focusCatchUp } = useSessionCatchUp();
   useEffect(() => beginCatchUp(), [baseUrl, transport, beginCatchUp]);
   const replicas = useMemo(() => new ReplicaCache(), [baseUrl, transport]);
@@ -1072,13 +1075,50 @@ function AppContent({
     }
   }
 
-  async function createAgent(): Promise<void> {
+  /**
+   * Opens New bot where a new bot most likely belongs: the Host and provider of the selected bot, else the selected Host,
+   * else the first online Host with a provider.
+   */
+  function openNewBot() {
+    const usable = (host: RemoteHost) => host.online !== false && (host.id === 'local' ? providers.length > 0 : hostProviders(host).length > 0);
+    const like = !windowMode ? selectedBot.view?.binding : undefined;
+    const likeHost = like && selectableHosts.find(host => host.id === (like.hostId ?? 'local') && usable(host as RemoteHost));
+    const current = selectableHosts.find(host => host.id === selectedHost.id);
+    if (likeHost) selectHost(likeHost as RemoteHost, like.providerId);
+    else if (!current || !usable(current as RemoteHost)) {
+      const first = selectableHosts.find(host => usable(host as RemoteHost));
+      if (first) selectHost(first as RemoteHost);
+    }
+    setNewBot({ open: true });
+  }
+  /** Creates a session from the New session form or, for `bot`, Bot mode's New bot, which starts a group named after it. */
+  async function createAgent(bot = false): Promise<void> {
     if (!providerId || creationUnavailableReason || transitionRef.current) return;
+    if (bot && !directory) return;
     transitionRef.current = true;
     setTransitioning(true);
     setFailure(undefined); setSessionNotice(undefined);
+    if (bot) setNewBot(current => ({ ...current, failure: undefined }));
     const agentId = createAgentId();
+    let botSession = false;
     try {
+      if (bot && directory) {
+        const reservation = creationReservation.current?.bot ? creationReservation.current
+          : { operationId: crypto.randomUUID(), providerId, bot: true as const, options: { ...sessionOptions } };
+        creationReservation.current = reservation;
+        setCreationLocked(true);
+        const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
+        const session = { agentId: response.agentId, nativeSessionId: response.nativeSessionId ?? response.agentId, providerId: reservation.providerId, title: 'New session', hostId: selectedHost.id };
+        creationReservation.current = undefined;
+        setCreationLocked(false); botSession = true;
+        rememberSession(session);
+        setDirectoryRevision((current) => current + 1);
+        // The session exists now: a group that is not confirmed stays in the roster with Retry.
+        setNewBot({ open: false });
+        const created = await windowWorkspace.createBotGroup(windowSessionBinding(session));
+        navigation.select({ kind: 'bot', groupId: created.groupId, viewId: created.viewId });
+        return;
+      }
       if (directory) {
         const reservation = creationReservation.current ?? { operationId: crypto.randomUUID(), providerId, destination: directoryDestination(), options: { ...sessionOptions, ...(createPlanning && providerId !== 'dsh' ? { planning: true } : {}) } };
         creationReservation.current = reservation;
@@ -1105,7 +1145,11 @@ function AppContent({
       }
       const invalid = error instanceof DirectoryError && ['invalid_request', 'workspace_not_found', 'provider_not_found', 'session_quota_exceeded', 'operation_conflict'].includes(error.code ?? '');
       if (invalid) { creationReservation.current = undefined; setCreationLocked(false); }
-      if (!(error instanceof DirectoryError && error.code === 'native_file_limit')) setFailure(`${message(error, 'Agent could not be created.')}${directory && !invalid ? ' Retry keeps the same session reservation and settings.' : ''}`);
+      const failed = `${message(error, 'Agent could not be created.')}${directory && !invalid && creationReservation.current ? ' Retry keeps the same session reservation and settings.' : ''}`;
+      if (bot) {
+        // Before the session exists the sheet shows why; after, the roster shows the group's creation state and its Retry.
+        if (!botSession) setNewBot(current => ({ ...current, failure: failed }));
+      } else if (!(error instanceof DirectoryError && error.code === 'native_file_limit')) setFailure(failed);
     } finally {
       if (directory && selectedHost.id !== 'local') retryHosts();
       transitionRef.current = false;
@@ -1804,6 +1848,9 @@ function AppContent({
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
   const supportTeams = new Set(teamRoster?.baseUrl === baseUrl ? teamRoster.teams.filter(team => team.callForSupport).map(team => team.id) : []);
   const botRoster = projectBotRoster(windowWorkspace.groups, otherSessions.sessions, { status: windowSessionStatus, supportTeam: teamId => supportTeams.has(teamId) });
+  const botPlace = navigation.place?.kind === 'bot' ? navigation.place : undefined;
+  /** The selected bot's activity: a finished turn may have named its session. */
+  const selectedBotStatus = botPlace ? botRoster.sections.find(section => section.groupId === botPlace.groupId)?.rows.find(row => row.viewId === botPlace.viewId)?.status : undefined;
   /** Selects a view of the open Window as its sidebar row does: expanded, selected and scrolled into view, in place of a page. */
   function selectWindowView(view: WindowView) {
     showDockOf(view);
@@ -1885,6 +1932,7 @@ function AppContent({
     const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
       ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
     const actions: CommandItem[] = [
+      ...(!windowMode && directory ? [action('new-bot', 'New bot', openNewBot)] : []),
       action('new-session', 'New session', () => { toWindow(); openNewSessionPanel(); }),
       action('new-window', 'New Window', inWindow(() => searchRuns.current.createWindowFromMenu())),
       ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }, true))] : []),
@@ -1922,13 +1970,15 @@ function AppContent({
     succession.updateTitles([session]);
     setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
   }, [baseUrl, tracking.rename, succession.document]);
+  // In Bot mode the selected bot's group is named like the open Window: its sessions, and the group itself while it is named after its first session.
+  const titledBotGroup = !windowMode ? selectedBot.group : undefined;
   // Window views name sessions that need not be open on this page; Ask, Team and TPM views name their own.
-  const titledSessions = useMemo(() => [...sessionEntries, ...(sharedWindow?.views ?? []).flatMap(({ binding, bindingPolicy }) => binding && bindingPolicy !== 'managed'
+  const titledSessions = useMemo(() => [...sessionEntries, ...[...sharedWindow?.views ?? [], ...titledBotGroup?.window.views ?? []].flatMap(({ binding, bindingPolicy }) => binding && bindingPolicy !== 'managed'
     ? [{ hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, title: binding.title }] : [])],
-    [sessionEntries, sharedWindow?.views]);
+    [sessionEntries, sharedWindow?.views, titledBotGroup?.window.views]);
   useNativeTitles({ entries: titledSessions, confirmed: confirmedTitles, apply: applySessionTitle,
     // A session's native title can appear once a turn ends, so a change in the sessions' activity asks again.
-    trigger: `${state?.agent?.status ?? ''}|${Object.values(sideActivity).join(',')}`,
+    trigger: `${state?.agent?.status ?? ''}|${Object.values(sideActivity).join(',')}|${selectedBotStatus ?? ''}`,
     describe: (hostId, providerId, nativeSessionId, signal) => new SessionDirectoryClient(baseUrl, undefined, hostId).nativeTitle(providerId, nativeSessionId, signal) });
   const titleProjection = useRef<ReadonlyMap<string, string>>();
   useEffect(() => {
@@ -1943,6 +1993,16 @@ function AppContent({
       }
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }, [sharedWindow?.id, sharedWindow?.revision, windowWorkspace.provisional, confirmedTitles]);
+  const botTitleProjection = useRef<{ titles?: ReadonlyMap<string, string>; revision?: string }>({});
+  useEffect(() => {
+    if (!titledBotGroup || !confirmedTitles?.size) return;
+    const revision = JSON.stringify([titledBotGroup.window.id, titledBotGroup.window.revision]);
+    if (botTitleProjection.current.titles === confirmedTitles && botTitleProjection.current.revision === revision) return;
+    botTitleProjection.current = { titles: confirmedTitles, revision };
+    const edits = windowTitleEdits(titledBotGroup.window, confirmedTitles);
+    // A view given another session meanwhile keeps it, and a newer title wins: neither is a failure to report.
+    if (edits.length) void windowWorkspace.operateGroup(titledBotGroup.window.id, edits.length === 1 ? edits[0]! : { type: 'batch', operations: edits }).catch(() => {});
+  }, [titledBotGroup?.window.id, titledBotGroup?.window.revision, confirmedTitles]);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const remove = transport.onSessionTitle?.(session => {
@@ -3279,7 +3339,15 @@ function AppContent({
       </div>
     </Sheet> : null}
   </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
-      hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot} />
+      hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot}
+      onNewBot={directory ? openNewBot : undefined} />
+    {!windowMode && directory && newBot.open ? <NewBotSheet open onClose={() => setNewBot({ open: false })}
+      hosts={selectableHosts.map(host => ({ id: host.id, name: host.name, disabled: host.online === false }))} hostId={selectedHost.id}
+      onHostChange={id => { const host = selectableHosts.find(item => item.id === id); if (host) selectHost(host as RemoteHost); }}
+      providers={providerChoices.map(choice => ({ id: choice.selectionId, name: choice.displayName }))} providerId={selectedProviderChoice?.selectionId ?? ''} nativeProviderId={selectedProviderChoice ? providerId : ''} onProviderChange={selectProvider}
+      directory={directory} options={sessionOptions} onOptionsChange={setSessionOptions} canBrowse={remoteHosts.find(host => host.id === selectedHost.id)?.access !== 'shared'}
+      unavailableReason={windowWorkspace.sectionCreationState.state === 'unknown' ? 'A new group is not confirmed yet. Retry it in the roster first.' : creationUnavailableReason}
+      starting={transitioning} failure={newBot.failure} onStart={() => void createAgent(true)} /> : null}
     {/* Mounted only while open (it closes its modal as it unmounts, returning focus), so a closed palette adds no dialog to the page. */}
     {searchOpen ? <CommandPalette open items={commandItems()} onClose={() => setSearchOpen(false)} /> : null}</SessionConversationSurfaces></RecoveryScope.Provider></PreviewScope></VscodeTunnelScope></ConversationConnectionScope.Provider></TrackViewScope.Provider></TpmViewScope.Provider></TeamViewScope.Provider></SessionDockProvider></WindowLayoutContext.Provider></WindowSessionBridgeContext.Provider></AskViewScope.Provider></SessionViewOperationsContext.Provider></SessionExcerptNavigation.Provider></SessionDescriptionsContext.Provider></WindowConnectionsContext.Provider>;
 }

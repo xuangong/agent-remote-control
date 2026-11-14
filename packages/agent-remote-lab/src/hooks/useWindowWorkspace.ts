@@ -368,12 +368,16 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     if (!group || !isWindowGroupCreateRequest({ ...group, operationId: value.operationId, issuedAt: value.issuedAt })) throw new Error('The pending section creation cannot be recovered. Preserve its saved request before creating another section.');
     sectionCreation.pending = { ...value, group }; return sectionCreation.pending;
   };
-  const createSectionRequest = (title: string | undefined, explicitRetry: boolean): Promise<string> => {
+  /**
+   * Creates a group in the background, never choosing it in Window mode: an empty section (`title`) or a group started from a new
+   * session (`template`). An uncertain request is kept and only Retry submits it again.
+   */
+  const createSectionRequest = (title: string | undefined, explicitRetry: boolean, template?: () => WindowGroup): Promise<string> => {
     if (!inScope() || !access.current) return Promise.reject(new Error('The group scope or access changed.'));
     if (sectionCreation.running) return sectionCreation.running;
     const previous = pendingSection();
-    if (!previous && title === undefined) return Promise.resolve('');
-    const group: WindowGroup = previous?.group ?? { window: { ...emptyWindow(), title: title! }, bots: { rank: appendedRank(catalog.groups), members: {} }, presentation: { window: false } };
+    if (!previous && title === undefined && !template) return Promise.resolve('');
+    const group: WindowGroup = previous?.group ?? template?.() ?? { window: { ...emptyWindow(), title: title! }, bots: { rank: appendedRank(catalog.groups), members: {} }, presentation: { window: false } };
     const pending = previous ?? { group, operationId: crypto.randomUUID(), issuedAt: Date.now() };
     const ticket = admission;
     const clear = () => { sectionCreation.pending = null; try { conversationSessionStorage.removeItem(`${key}:pending-section-create`); } catch { /* A settled request can safely be inspected again. */ } };
@@ -575,6 +579,15 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
     retrySave: () => currentStore.current?.retry() ?? Promise.resolve(),
     sectionCreationState, retrySection: () => createSectionRequest(undefined, true),
     acquireGroup, readGroup, operateGroup, refreshGroups,
+    /** Starts a group from a new session: its Window holds the session as the primary view, and it shows in both modes, named after the session. */
+    async createBotGroup(binding: WindowSessionBinding): Promise<{ groupId: string; viewId: string }> {
+      if (pendingSection()) throw new Error('A new group is not confirmed yet. Retry it before starting another bot.');
+      const viewId = 'main';
+      const groupId = await createSectionRequest(undefined, false, () => ({
+        window: { ...emptyWindow(), title: binding.title || 'New session', views: [createWindowView(viewId, binding, 'primary')], selectedPrimaryViewId: viewId, selectedViewId: viewId },
+        bots: { rank: appendedRank(catalog.groups), members: {} } }));
+      return { groupId, viewId };
+    },
     async createSection(title: string): Promise<string> {
       const trimmed = title.trim(); if (!trimmed) throw new Error('A section title is required.'); if (trimmed.length > 256) throw new Error('A section title must be at most 256 characters.');
       return createSectionRequest(trimmed, false);

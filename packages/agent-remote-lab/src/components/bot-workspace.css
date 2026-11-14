@@ -16,6 +16,9 @@
 .lab-bot-section-head { display: flex; align-items: center; gap: 4px; }
 .lab-bot-section-head > h2 { flex: 1; min-width: 0; }
 .lab-bot-section h2 button { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; }
+/* A section header is one line, as in native lists: a long group name (one named after its first message) is truncated. */
+.lab-bot-section-head > h2 > button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-align: start; text-overflow: ellipsis; white-space: nowrap; }
+.lab-bot-section-head > h2 > small { flex: none; }
 .lab-bot-section small, .lab-bot-empty, .lab-bot-row-text > span { color: var(--obs-text-secondary); font-size: 12px; }
 .lab-bot-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; text-align: left; border: 0; border-radius: 8px; background: transparent; color: var(--ui-label); font: inherit;
   transition: background-color var(--ui-duration-short) var(--ui-ease); -webkit-tap-highlight-color: transparent; }
@@ -79,7 +82,8 @@
 /* Info: the bot's picture and tags, then an inset grouped list of where it runs. */
 .lab-bot-info-head { display: grid; justify-items: center; gap: 8px; padding: 4px 0 16px; }
 .lab-bot-info-head .lab-bot-name-line { justify-content: center; margin: 0; }
-.lab-bot-info { margin: 0 0 8px; padding: 0 14px; border-radius: var(--ui-radius-pane); background: var(--ui-background-grouped); }
+/* On a sheet an inset group is a tint of the sheet (grey on white, lighter grey on dark), as macOS grouped boxes are. */
+.lab-bot-info { margin: 0 0 8px; padding: 0 14px; border-radius: var(--ui-radius-pane); background: var(--ui-fill); }
 .lab-bot-info > div { display: flex; align-items: baseline; gap: 16px; min-height: 44px; padding: 11px 0; box-sizing: border-box; }
 .lab-bot-info > div + div { border-top: 0.5px solid var(--ui-separator); }
 .lab-bot-info dt { flex: none; color: var(--ui-label); font: var(--ui-size-body)/1.35 var(--ui-font); }
@@ -94,3 +98,25 @@
 .lab-sheet-note { margin: 0 2px 8px; color: var(--ui-label-secondary); font: var(--ui-size-caption)/1.4 var(--ui-font); }
 .lab-sheet-actions > .lab-sheet-leading { margin-right: auto; }
 @media (prefers-reduced-motion: reduce) { .lab-bot-notice { animation: none; } }
+
+/* New bot: an inset grouped form, label on the left and the control on the right, as in native settings sheets. */
+.lab-new-bot { display: grid; gap: 8px; padding-top: 4px; }
+.lab-new-bot-fields { padding: 0 14px; border-radius: var(--ui-radius-pane); background: var(--ui-fill); }
+.lab-new-bot-field { display: flex; align-items: center; gap: 16px; min-height: 44px; padding: 6px 0; box-sizing: border-box; }
+.lab-new-bot-field + .lab-new-bot-field { border-top: 0.5px solid var(--ui-separator); }
+.lab-new-bot-field > label { flex: none; color: var(--ui-label); font: var(--ui-size-body)/1.35 var(--ui-font); }
+.lab-new-bot-field > select { flex: 1; min-width: 0; min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--ui-radius-input); background: transparent;
+  color: var(--ui-label-secondary); font: var(--ui-size-body)/1.3 var(--ui-font); text-align: end; text-align-last: end; cursor: pointer; }
+.lab-new-bot-field > select:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: 0; }
+.lab-new-bot-field > select:disabled { cursor: default; opacity: .6; }
+/* The workspace field keeps its own layout (a menu and Browse…) on one row. */
+.lab-new-bot-workspace .lab-workspace-selection { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
+.lab-new-bot-workspace .lab-workspace-selection > label { flex: none; color: var(--ui-label); font: var(--ui-size-body)/1.35 var(--ui-font); }
+.lab-new-bot-workspace .lab-workspace-field { display: flex; flex: 1; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.lab-new-bot-workspace .lab-workspace-field select { flex: 1; min-width: 0; min-height: 32px; padding: 4px 8px; border: 0; background: transparent;
+  color: var(--ui-label-secondary); font: var(--ui-size-body)/1.3 var(--ui-font); text-align: end; text-align-last: end; }
+.lab-new-bot-workspace .lab-workspace-field button { flex: none; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 999px; background: var(--ui-fill); color: var(--ui-accent-text); font: inherit; font-size: 13px; cursor: pointer; }
+.lab-new-bot-workspace .lab-workspace-field button:hover:not(:disabled) { background: var(--ui-fill-strong); }
+@media (pointer: coarse) { .lab-new-bot-field > select, .lab-new-bot-workspace .lab-workspace-field :is(select, button) { min-height: 44px; } }
+.lab-new-bot-field > span:first-child { flex: none; color: var(--ui-label); font: var(--ui-size-body)/1.35 var(--ui-font); }
+.lab-new-bot-value { flex: 1; min-width: 0; overflow: hidden; color: var(--ui-label-secondary); font: var(--ui-size-body)/1.35 var(--ui-font); text-align: end; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }

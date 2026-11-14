@@ -16,7 +16,7 @@ import { Toolbar } from '../ui/Toolbar.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
 import type { MenuEntry } from '../ui/Menu.js';
-import { hasBotAppearance, hasWindowAppearance } from '@orchardworks/agent-remote-protocol';
+import { botViews, hasBotAppearance, hasWindowAppearance } from '@orchardworks/agent-remote-protocol';
 import type { BotSection } from '../bot-roster.js';
 import './bot-workspace.css';
 
@@ -33,12 +33,14 @@ export interface BotWorkspaceProps {
   onSearch?(): void;
   /** A Host's display name for a Host ID. */
   hostName?(hostId: string): string;
+  /** Opens New bot, which starts a session in a group of its own. */
+  onNewBot?(): void;
   /** Where a bot runs, for its Info sheet. */
   botInfo?(place: { groupId: string; viewId: string }): BotInfo | undefined;
 }
-export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo }: BotWorkspaceProps) {
+export function BotWorkspace({ visible, compact, scope, workspace, navigation, selected, roster, directory, describeConversation, rosterCollapsed, onToggleRoster, onSearch, hostName = id => id, botInfo, onNewBot }: BotWorkspaceProps) {
   const root = useVisualViewport(), heading = useRef<HTMLHeadingElement>(null), keyboardOpen = useRef(false), returning = useRef(false);
-  const [creating, setCreating] = useState(false), [title, setTitle] = useState(''), [error, setError] = useState<string>();
+  const [error, setError] = useState<string>();
   const currentScope = useRef(scope); currentScope.current = scope;
   const rosterId = useId(), rosterElement = useRef<HTMLElement>(null), rosterToggle = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement>(null), toggleHadFocus = useRef(false);
@@ -62,7 +64,7 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
   const botMenu = botRow && botSection && descriptor ? <Menu label={`Bot actions: ${botDisplayName(botRow.binding)}`} items={actions.botMenu(botRow, botSection.title)} /> : null;
   // Choosing another bot dismisses a notice about the last one.
   useEffect(() => { if (place?.kind === 'bot') actions.clearNotice(); }, [key]);
-  useEffect(() => { setCreating(false); setTitle(''); setError(undefined); }, [scope]);
+  useEffect(() => { setError(undefined); }, [scope]);
   useEffect(() => {
     if (!visible) return;
     if (returning.current && navigation.rosterVisible) {
@@ -80,7 +82,6 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     toggleHadFocus.current = false;
     if (showConversation) (backButton.current ?? heading.current)?.focus({ preventScroll: true });
   }, [compact]);
-  function startSection() { setCreating(true); setError(undefined); }
   /** A group's appearance in either mode, from its header menu; a group always stays visible in one of them. */
   function groupActions(section: BotSection): MenuEntry[] {
     const group = workspace.readGroup(section.groupId);
@@ -99,33 +100,29 @@ export function BotWorkspace({ visible, compact, scope, workspace, navigation, s
     ];
   }
   function back() { returning.current = true; navigation.back(); }
-  async function save(retry = false) {
+  /** Retries an unconfirmed new group, then opens its bot. */
+  async function retryGroup() {
     const requestScope = scope; setError(undefined);
     try {
-      const id = await (retry ? workspace.retrySection() : workspace.createSection(title));
-      if (currentScope.current !== requestScope) return;
-      setCreating(false); setTitle(''); navigation.select({ kind: 'section', groupId: id });
+      const id = await workspace.retrySection();
+      if (currentScope.current !== requestScope || !id) return;
+      const group = workspace.readGroup(id), bot = group ? botViews(group)[0] : undefined;
+      navigation.select(bot ? { kind: 'bot', groupId: id, viewId: bot.id } : { kind: 'section', groupId: id });
     } catch (reason) { if (currentScope.current === requestScope) setError(reason instanceof Error ? reason.message : String(reason)); }
   }
   return <main ref={root} className="lab-bot-workspace" hidden={!visible} {...(!visible ? { inert: '' } : {})} data-workbench-mode="bot" data-compact={compact || undefined} data-roster-collapsed={rosterHidden || undefined}
     onPointerDown={event => event.stopPropagation()} onFocus={event => event.stopPropagation()}
     onKeyDown={event => {
       if (event.defaultPrevented || event.nativeEvent.isComposing || event.key !== 'Escape') return;
-      if (creating) { event.preventDefault(); setCreating(false); }
-      else if (compact && showConversation) { event.preventDefault(); back(); }
+      if (compact && showConversation) { event.preventDefault(); back(); }
     }}>
     <h1 className={compact && !showConversation ? 'lab-bot-title' : 'lab-bot-title agent-visually-hidden'}>Bots</h1>
     <aside ref={rosterElement} id={rosterId} className="lab-bot-roster" hidden={(compact && showConversation) || rosterHidden}>
-      <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={onSearch} actions={<IconButton icon="plus" label="New section" onClick={startSection} />} />
+      <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={onSearch} actions={onNewBot ? <IconButton icon="plus" label="New bot" onClick={onNewBot} /> : undefined} />
       {unavailable ? availabilityNotice : null}
-      {creating ? <form className="lab-bot-new-section" aria-label="New section" onSubmit={event => { event.preventDefault(); void save(); }}
-        onKeyDown={event => { if (!event.nativeEvent.isComposing && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setCreating(false); } }}>
-        <label>Section title<input autoFocus required maxLength={256} aria-label="Section title" disabled={saving || creation.state === 'unknown'} value={title} onChange={event => setTitle(event.target.value)} /></label>
-        <div><button type="submit" disabled={saving || creation.state === 'unknown' || !title.trim()}>Save</button><button type="button" onClick={() => setCreating(false)}>Cancel</button></div>
-      </form> : null}
-      {saving ? <p role="status">Saving section…</p> : null}
-      {error || creation.error ? <p role="alert">{error ?? creation.error}</p> : null}
-      {creation.state === 'unknown' ? <p role="status">Section creation is not confirmed. <button type="button" onClick={() => void save(true)}>Retry</button></p> : null}
+      {saving ? <p className="lab-bot-notice" role="status">Saving the new group…</p> : null}
+      {error || creation.error ? <p className="lab-bot-notice" role="alert">{error ?? creation.error}</p> : null}
+      {creation.state === 'unknown' ? <p className="lab-bot-notice" role="status">The new group is not confirmed. <button type="button" onClick={() => void retryGroup()}>Retry</button></p> : null}
       {actions.notice}
       <div onClickCapture={event => { keyboardOpen.current = event.detail === 0; }}><BotRoster model={roster} place={place} onSelect={navigation.select} hostName={hostName} groupActions={groupActions} compact={compact}
         directoryControls={<div className="lab-bot-directory-controls">

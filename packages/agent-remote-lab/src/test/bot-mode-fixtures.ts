@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
-import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
 import { WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
 import { App, type LabTransport } from '../App.js';
 import { SessionDirectoryClient } from '../directory-client.js';
@@ -27,7 +27,7 @@ export function visibleButton(container: ParentNode, label: string) {
   return [...container.querySelectorAll<HTMLButtonElement>('button')].find(button =>
     (button.getAttribute('aria-label') ?? button.textContent?.trim()) === label && !button.closest('[hidden]'))!;
 }
-export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean } = {}) {
+export async function mountBotApp(scope: string, options: { hosted?: boolean; holdMessages?: boolean; timeline?: ProjectedTimelineEntry[]; holdInspect?: boolean; serverProviders?: boolean } = {}) {
   let workspace!: ReturnType<typeof workspaceHooks.useWindowWorkspace>;
   let succession!: ReturnType<typeof successionHooks.useSessionSuccession>;
   const useWorkspace = workspaceHooks.useWindowWorkspace, useSuccession = successionHooks.useSessionSuccession;
@@ -51,6 +51,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   let replays: SessionSuccessionReplay[] = [];
   const acknowledgements: Array<() => void> = [];
   const activityListeners = new Map<string, RemoteTransportListener>();
+  const titleListeners = new Set<(session: SessionTitleUpdate) => void>();
   const attachments: string[] = [], sendMessages: Array<{ agentId: string; text?: string }> = [];
   const snapshot = (agentId: string) => ({ ...replicaState.agent!, id: agentId, status: 'idle' as const,
     runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId.slice(6), connection: { state: 'connected' as const } } });
@@ -59,7 +60,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
     window: { minSeq: 1, maxSeq: options.timeline?.at(-1)?.seqEnd ?? 0, nextSeq: (options.timeline?.at(-1)?.seqEnd ?? 0) + 1 }, startCursor: null, endCursor: null, entries: options.timeline ?? [], hasOlder: false, hasNewer: false, error: null,
   } });
   const transport: LabTransport = {
-    listProviders: async () => options.hosted ? [] : [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
+    listProviders: async () => options.hosted && !options.serverProviders ? [] : [{ providerId: 'recorded', displayName: 'Recorded Provider' }],
     createAgent: async () => { throw new Error('No session creation in this fixture.'); },
     resumeAgent: async () => { throw new Error('Use directory attachment.'); },
     fetchSnapshot: async agentId => ({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshot(agentId) }),
@@ -82,6 +83,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
         }
       } };
     }, onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    onSessionTitle: listener => { titleListeners.add(listener); return () => titleListeners.delete(listener); },
   };
   if (options.hosted) {
     transport.fetchSessionSuccessions = async () => ({ version: 1, successions: replays, nextCursor: null });
@@ -103,6 +105,8 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   return { container, workspace: () => workspace, succession: () => succession, sendMessages, attachments, transport, hostedGroups, setAccessReady: (ready: boolean) => setAccessReady(ready), setScope: (scope: string) => setScope(scope), setReplays(value: SessionSuccessionReplay[]) { replays = value; },
     activityListeners, releaseInspect: () => releaseInspect(),
     releaseMessages() { for (const acknowledge of acknowledgements.splice(0)) acknowledge(); },
+    /** A native title the Host reports for a session, as the Relay pushes it. */
+    emitTitle(session: SessionTitleUpdate) { for (const listener of titleListeners) listener(session); },
     button: (label: string) => visibleButton(container, label),
     async switchMode(mode: 'window' | 'bot') {
       const label = mode === 'bot' ? 'Bot mode' : 'Window mode';

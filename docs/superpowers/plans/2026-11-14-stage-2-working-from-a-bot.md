@@ -55,9 +55,10 @@ Entries: Info (Host name, provider, model when known, previous providers from th
 
 **Files:** `BotWorkspace.tsx` (the roster `+`), `App.tsx` (the existing New session flow), tests.
 
-- [ ] Test: Bot mode's `+` opens New session; creating a session there creates a group whose Window holds it as the primary view, titled after the session, hidden in no mode, and selects the new bot; the empty New section form is gone.
-- [ ] Implement by reusing the New session panel in a sheet (desktop) or the compact page (phone) and `useWindowWorkspace`'s creation with the session bound.
-- [ ] Commit `feat(lab): start a group from a new session in Bot mode`.
+- [x] Test: Bot mode's `+` opens New session; creating a session there creates a group whose Window holds it as the primary view, titled after the session, hidden in no mode, and selects the new bot; the empty New section form is gone.
+- [x] Implement as a New bot sheet (Host, provider, workspace; model and permissions stay in the composer) that defaults to the selected bot's Host and provider, and `useWindowWorkspace.createBotGroup`, which reuses the section creation's recovery (an unconfirmed group keeps Retry in the roster). The palette offers New bot in Bot mode.
+- [x] A Window named after its one primary session follows that session's native title (`windowTitleEdits`), and Bot mode projects titles into the selected bot's group, so a new bot and its group take the session's name after its first turn (verified on the local instance).
+- [x] Commit `feat(lab): start a group from a new session in Bot mode`.
 
 ## 2b — rule 6 in Window panes, creation joins the bot's group
 

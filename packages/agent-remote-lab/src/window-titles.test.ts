@@ -53,3 +53,13 @@ it('leaves a view that was given another session meanwhile with that session', a
   await expect(store.operate(rename!)).rejects.toThrow('The target session view changed');
   expect(store.getCommittedSnapshot().views[0]!.binding).toEqual(binding('other', 'Other'));
 });
+
+it('renames a Window named after its primary session together with that session, and keeps any other title', () => {
+  const named = { ...window(createWindowView('main', binding('created', 'New session'), 'primary'), createWindowView('dock', binding('docked', 'Notes'))), title: 'New session' };
+  const bind = { type: 'view.bind', viewId: 'main', binding: binding('created', 'Fix the build'), expectedBinding: binding('created', 'New session') };
+  expect(windowTitleEdits(named, titles(['created', 'Fix the build']))).toEqual([bind, { type: 'rename', title: 'Fix the build' }]);
+  expect(windowTitleEdits({ ...named, title: 'Release' }, titles(['created', 'Fix the build']))).toEqual([bind]);
+  // A docked session never names its Window.
+  expect(windowTitleEdits({ ...named, title: 'Notes' }, titles(['docked', 'Meeting notes']))).toEqual([
+    { type: 'view.bind', viewId: 'dock', binding: binding('docked', 'Meeting notes'), expectedBinding: binding('docked', 'Notes') }]);
+});

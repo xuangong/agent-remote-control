@@ -62,6 +62,19 @@ it('loads only sections in Bot mode and initializes a Window only when switched 
   const harness = await mount('https://sections/', true, 'bot'); expect(harness.read().groups).toEqual([section]); expect(harness.read().window).toBeUndefined(); expect(create).not.toHaveBeenCalled();
   await harness.render('window'); expect(create).toHaveBeenCalledTimes(1); expect(harness.read().window).toBeDefined(); expect(backend.groups.has('section')).toBe(true);
 });
+it('starts a group from a new session, shown in both modes with bot details, without changing the open Window', async () => {
+  const backend = server(group('a')); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://bot-group/', true);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async created => { backend.groups.set(created.window.id, created); return created; });
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe('a'); }, { timeout: 3000, interval: 5 });
+  const before = read().window, url = location.href;
+  let created!: { groupId: string; viewId: string };
+  await act(async () => { created = await read().createBotGroup({ hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' }); });
+  const made = read().readGroup(created.groupId)!;
+  expect(read().window).toEqual(before); expect(location.href).toBe(url);
+  expect(made.presentation).toBeUndefined(); expect(made.bots).toEqual({ rank: 'm', members: {} }); expect(made.window.title).toBe('New session');
+  expect(made.window.views).toEqual([expect.objectContaining({ id: created.viewId, placement: 'primary', binding: { hostId: 'h', providerId: 'p', nativeSessionId: 'new', title: 'New session' } })]);
+  expect(made.window.selectedPrimaryViewId).toBe(created.viewId);
+});
 it('creates local empty sections separately from Window place and uses ranked group envelopes', async () => {
   const { read } = await mount('local-sections'); const before = read().window; const url = location.href;
   let id!: string, second!: string; await act(async () => { id = await read().createSection('  First  '); second = await read().createSection('Second'); });

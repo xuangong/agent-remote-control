@@ -1,11 +1,25 @@
 import { act } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
-import type { WindowGroup } from '@orchardworks/agent-remote-protocol';
-import { botGroup, mountBotApp, seedGroup, until } from '../test/bot-mode-fixtures.js';
+import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from '../test/bot-mode-fixtures.js';
+import { SessionDirectoryClient } from '../directory-client.js';
 import { promptText, setPromptText } from '../test/setup.js';
 
+const dialogMethods = ['showModal', 'close'] as const;
+const originalDialog = Object.fromEntries(dialogMethods.map(name => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)]));
+beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); } });
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
+afterAll(() => {
+  for (const name of dialogMethods) {
+    const original = originalDialog[name];
+    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
+    else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
+  }
+});
 
 it.each(['deleted', 'hidden', 'ineligible'] as const)('shows the compact roster and unavailable notice immediately after the selected Bot becomes %s', async change => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(max-width: 1180px)', addEventListener() {}, removeEventListener() {} }));
@@ -24,7 +38,7 @@ it.each(['deleted', 'hidden', 'ineligible'] as const)('shows the compact roster 
     await until(() => expect(editor.isConnected).toBe(false));
     expect(app.container.querySelector<HTMLElement>('.lab-bot-roster')!.hidden).toBe(false);
     expect(app.container.querySelector('.lab-bot-roster [role="alert"]')?.textContent).toContain('unavailable');
-    expect(app.button('New section')).toBeDefined(); expect(app.button('Retry')).toBeDefined();
+    expect(app.button('New bot')).toBeDefined(); expect(app.button('Retry')).toBeDefined();
     expect(location.href).toBe(beforeUrl); expect(app.sendMessages).toEqual([]);
   } finally { await app.close(); }
 });
@@ -62,44 +76,69 @@ it('compact Back restores the roster row and preserves the same editor without f
   await app.close();
 });
 
-it('creates an empty section only after Save and keeps it out of Windows', async () => {
-  const scope = 'http://localhost/bot-new-section/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
+it('starts a new bot in its own group, named after its session, and opens its conversation', async () => {
+  const scope = 'http://localhost/bot-new/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
+  const create = vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-N1', nativeSessionId: 'N1' });
   const app = await mountBotApp(scope);
-  await act(async () => app.button('New section').click());
-  expect(app.button('Save').disabled).toBe(true);
-  const input = app.container.querySelector<HTMLInputElement>('input[aria-label="Section title"]')!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Review'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => app.button('Save').click());
-  await until(() => expect(app.workspace().groups.find(group => group.window.title === 'Review')).toBeDefined());
-  const created = app.workspace().groups.find(group => group.window.title === 'Review')!;
-  expect(created.presentation).toEqual({ window: false });
-  expect(app.container.textContent).toContain('No bots in this group yet.');
-  expect(new URL(location.href).searchParams.get('section')).toBe(created.window.id);
-  await app.close();
+  try {
+    expect(app.container.querySelector('input[aria-label="Section title"]')).toBeNull();
+    await act(async () => app.button('New bot').click());
+    const sheet = () => app.container.querySelector<HTMLDialogElement>('dialog.ui-sheet[open]');
+    expect(sheet()?.querySelector('h2')?.textContent).toBe('New bot');
+    expect(sheet()?.querySelector<HTMLSelectElement>('select[aria-label="Provider"]')?.selectedOptions[0]?.textContent).toBe('Recorded Provider');
+    await act(async () => visibleButton(sheet()!, 'Start').click());
+    await until(() => expect(create).toHaveBeenCalledTimes(1));
+    const made = () => app.workspace().groups.find(group => group.window.views.some(view => view.binding?.nativeSessionId === 'N1'));
+    await until(() => expect(made()).toBeDefined());
+    expect(made()!.window.title).toBe('New session'); expect(made()!.presentation).toBeUndefined(); expect(made()!.bots?.members).toEqual({});
+    await until(() => expect(new URL(location.href).searchParams.get('bot')).toBe('main'));
+    expect(new URL(location.href).searchParams.get('section')).toBe(made()!.window.id);
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    expect(sheet()).toBeNull();
+  } finally { await app.close(); }
 });
 
-it('retains an uncertain section request after Cancel and recovers that same creation on Retry', async () => {
-  const scope = 'http://localhost/bot-uncertain-section/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
+it('names a new bot and the group it started once its session is named, and leaves a renamed group alone', async () => {
+  const scope = 'http://localhost/bot-titles/';
+  const started = (id: string, title: string): WindowGroup => ({ window: { schemaVersion: 3, id, revision: 0, title, selectedPrimaryViewId: 'main', selectedViewId: 'main',
+    views: [createWindowView('main', { ...botTarget(`${id}-session`), title: 'New session' }, 'primary')] }, bots: { rank: id.toLowerCase(), members: {} } });
+  seedGroup(scope, started('G', 'New session')); seedGroup(scope, started('R', 'Release'));
+  history.replaceState(null, '', '/?mode=bot&section=G&bot=main');
   const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
+    await act(async () => app.emitTitle({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'G-session', title: 'Fix the build', revision: 1 }));
+    await until(() => expect(app.workspace().readGroup('G')?.window.title).toBe('Fix the build'));
+    expect(app.workspace().readGroup('G')?.window.views[0]?.binding?.title).toBe('Fix the build');
+    await until(() => expect(app.container.querySelector(`[data-bot-place='${JSON.stringify(['G', 'main'])}'] .lab-bot-name`)?.textContent).toBe('Fix the build'));
+    await act(async () => app.container.querySelector<HTMLButtonElement>(`[data-bot-place='${JSON.stringify(['R', 'main'])}']`)!.click());
+    await act(async () => app.emitTitle({ hostId: 'local', providerId: 'recorded', nativeSessionId: 'R-session', title: 'Ship notes', revision: 1 }));
+    await until(() => expect(app.workspace().readGroup('R')?.window.views[0]?.binding?.title).toBe('Ship notes'));
+    expect(app.workspace().readGroup('R')?.window.title).toBe('Release');
+  } finally { await app.close(); }
+});
+
+it('keeps an unconfirmed new group and recovers that same creation on Retry', async () => {
+  const scope = 'http://localhost/bot-new-uncertain/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?mode=bot');
+  vi.spyOn(SessionDirectoryClient.prototype, 'create').mockResolvedValue({ agentId: 'agent-N2', nativeSessionId: 'N2' });
+  const app = await mountBotApp(scope, { hosted: true, serverProviders: true });
   let original!: WindowGroup, identity!: { operationId: string; issuedAt: number };
   const creation = vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async (group, operation) => {
     original = group; identity = operation!; throw new Error('Creation receipt unavailable.');
   });
   const recovery = vi.spyOn(WindowWorkspaceClient.prototype, 'recoverCreate').mockImplementation(async (window, operation) => {
-    expect(window.id).toBe(original.window.id); expect(operation).toEqual(identity); return original;
+    expect(window.id).toBe(original.window.id); expect(operation).toEqual(identity); app.hostedGroups.set(original.window.id, original); return original;
   });
-  await act(async () => app.button('New section').click());
-  const input = app.container.querySelector<HTMLInputElement>('input[aria-label="Section title"]')!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Retained'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => app.button('Save').click());
-  expect(app.container.textContent).toContain('Section creation is not confirmed');
-  await act(async () => app.button('Cancel').click());
-  expect(app.container.querySelector('input[aria-label="Section title"]')).toBeNull();
-  await act(async () => app.button('Retry').click());
-  expect(creation).toHaveBeenCalledOnce(); expect(recovery).toHaveBeenCalledOnce();
-  expect(new URL(location.href).searchParams.get('section')).toBe(original.window.id);
-  expect(app.workspace().readGroup(original.window.id)?.window.title).toBe('Retained');
-  await app.close();
+  try {
+    await act(async () => app.button('New bot').click());
+    await act(async () => visibleButton(app.container.querySelector('dialog.ui-sheet[open]')!, 'Start').click());
+    await until(() => expect(app.container.textContent).toContain('The new group is not confirmed.'));
+    expect(original.window.views[0]?.binding?.nativeSessionId).toBe('N2');
+    await act(async () => app.button('Retry').click());
+    expect(creation).toHaveBeenCalledOnce(); expect(recovery).toHaveBeenCalledOnce();
+    await until(() => expect(new URL(location.href).searchParams.get('section')).toBe(original.window.id));
+    expect(new URL(location.href).searchParams.get('bot')).toBe('main');
+  } finally { await app.close(); }
 });
 
 it('shows the shared sidebar header, a toolbar above the conversation, and collapses the roster', async () => {
@@ -110,7 +149,7 @@ it('shows the shared sidebar header, a toolbar above the conversation, and colla
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
     expect(roster.querySelector('.lab-sidebar-header nav[aria-label="Workbench mode"] [aria-pressed="true"]')?.textContent).toBe('Bot mode');
-    expect(roster.querySelector('.lab-sidebar-header-actions button[aria-label="New section"]')).not.toBeNull();
+    expect(roster.querySelector('.lab-sidebar-header-actions button[aria-label="New bot"]')).not.toBeNull();
     expect(app.container.querySelector('header.ui-toolbar.lab-bot-conversation-toolbar h2.ui-toolbar-title')).not.toBeNull();
     await act(async () => app.button('Hide sidebar').click());
     expect(roster.hidden).toBe(true);
@@ -129,7 +168,7 @@ it('moves focus from a collapsing roster to the sidebar button', async () => {
   try {
     await until(() => expect(app.container.querySelector('.lab-bot-conversation [role="textbox"]')).not.toBeNull());
     const roster = app.container.querySelector<HTMLElement>('.lab-bot-roster')!;
-    roster.querySelector<HTMLButtonElement>('button[aria-label="New section"]')!.focus();
+    roster.querySelector<HTMLButtonElement>('button[aria-label="New bot"]')!.focus();
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', ctrlKey: !/Mac/.test(navigator.platform), metaKey: /Mac/.test(navigator.platform), bubbles: true, cancelable: true })); });
     expect(roster.hidden).toBe(true);
     const toggle = document.activeElement as HTMLElement;

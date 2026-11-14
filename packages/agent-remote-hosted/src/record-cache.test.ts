@@ -101,3 +101,27 @@ it('commits copy only what a change touches, keep the committed state frozen and
   expect(after.tenants[1]!.broker.hosts[0]).not.toBe(before.tenants[1]!.broker.hosts[0]);
   expect(Object.isFrozen(after.tenants[1]!.broker.hosts[0])).toBe(true);
 });
+
+it('a draft, read or outbox change on a Relay holding thousands of them encodes that record alone', () => {
+  // Stage 6's commit budget: these records change with typing, reading and sending, far more often than anything else.
+  const subjects = Array.from({ length: 20 }, (_, index) => `account-${index}`);
+  const session = (subject: string, index: number) => ({ subject, hostId: 'host', providerId: 'codex', nativeSessionId: `session-${index}` });
+  const base = relayState();
+  base.sessionDrafts = subjects.flatMap(subject => Array.from({ length: 50 }, (_, index) => ({ ...session(subject, index), text: `Draft ${index}`, revision: index + 1 })));
+  base.sessionReads = subjects.flatMap(subject => Array.from({ length: 100 }, (_, index) => ({ ...session(subject, index), readAt: 1_000 + index })));
+  base.outbox = subjects.slice(0, 1).flatMap(subject => Array.from({ length: 32 }, (_, index) => ({ ...session(subject, index), subject,
+    id: `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`, text: `Later ${index}`, createdAt: 1_000, status: 'waiting' as const })));
+  const first = freeze(base, true), cache = new HostedRecordCache();
+  encodeHostedSnapshot(first, auth, undefined, cache);
+  const replace = <T,>(items: readonly T[], index: number, item: T) => items.map((value, at) => at === index ? item : value);
+  // Each change follows the last, as commits do.
+  const edited = freeze({ ...first, sessionDrafts: replace(first.sessionDrafts!, 10, { ...first.sessionDrafts![10]!, text: 'Edited', revision: 99 }) }, true);
+  expect(encodeHostedSnapshot(edited, auth, undefined, cache).encoded).toBe(1);
+  const read = freeze({ ...edited, sessionReads: replace(edited.sessionReads!, 10, { ...edited.sessionReads![10]!, readAt: 9_999 }) }, true);
+  expect(encodeHostedSnapshot(read, auth, undefined, cache).encoded).toBe(1);
+  const settled = freeze({ ...read, outbox: replace(read.outbox!, 3, { ...read.outbox![3]!, status: 'failed' as const, error: 'Not delivered.' }) }, true);
+  expect(encodeHostedSnapshot(settled, auth, undefined, cache).encoded).toBe(1);
+  // A new record also changes the list of records the header keeps.
+  const added = freeze({ ...settled, sessionDrafts: [...settled.sessionDrafts!, { ...session('account-1', 60), text: 'New', revision: 1 }] }, true);
+  expect(encodeHostedSnapshot(added, auth, undefined, cache).encoded).toBe(2);
+});

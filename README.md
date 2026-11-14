@@ -14,11 +14,15 @@ Use a wide screen to work across several conversations, or open the same workspa
 
 Keep an implementation conversation, a review, and another project's work open together. Each **Session View** has its own conversation, composer, runtime status, and display mode. On wide screens, resize panes and scroll the workspace horizontally; attached Sides and subagents stay beside their source view as a group, and opening another Side from the same source adds it beside the ones already open.
 
-Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, replaces that pane's conversation. To keep the current conversation open, first use **Window → New session view** to add an empty pane and select its session afterward. Ask, Team, and TPM panes stay attached to their own conversations; use an ordinary or empty pane to open a different session.
+Click a pane's title, conversation, or composer to select it. Choosing a session from the sidebar, Favorites, or Track, or creating a new session, opens it beside the selected pane, so the conversation there stays open; an empty pane, a history view, or a pane of a group hidden in Bot mode takes it in place. Ask, Team, and TPM panes stay attached to their own conversations.
 
 Use **Ask** for a separate contextual discussion and **/side** for a related working conversation. A session's references sit above its composer: remove a Side's source to make it an independent session, or add other sessions of the Host with **+** or **/ref**; the agent reads them with `agent-remote-controller session read`. Show the Ask entry with **View → Ask view** or **/ask**. Both use the same Session View as other sessions. Ask can float above the workspace or **Dock** alongside it when there is enough room. On narrow screens, the foreground conversation is already selected; switch views through the Window list instead of navigating a horizontal canvas.
 
 *Screenshots show real working sessions. Click any image to view it at full size.*
+
+### Talk to your agents like a chat list
+
+Switch to **Bot mode** to see every session of your Windows as a bot in a list, grouped by Window, with its role (Side, Team, TPM, Support), its latest reply, an unread dot and its draft, then open one conversation at a time; on a phone it is a list and a chat, like a messaging app. Bots can live on different Hosts in one group. Fold or put a bot to sleep, label it, hand it off to another provider, or open a Side beside it; send to a bot whose Host is offline and the message waits on every device until the Host is back. See [Bots and Windows](docs/guides/bot-window-workbench.md).
 
 ### Keep and share your Window layouts
 

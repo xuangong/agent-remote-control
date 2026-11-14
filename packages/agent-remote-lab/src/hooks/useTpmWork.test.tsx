@@ -594,3 +594,23 @@ it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
   expect(document.views.some(view => view.feature?.kind === 'tpm')).toBe(false);
   expect(attach).not.toHaveBeenCalled();
 });
+
+it('refreshes TPM catalogs every 10 s while TPM is in view and once a minute otherwise', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  try {
+    let lists = 0;
+    const service: TpmService = { tpmList: async () => { lists++; return { supported: true, supportedProviders: ['codex'], works: [work()] }; },
+      tpmWork: async () => work(), tpmCreate: async () => work(), tpmAction: async () => work() };
+    let setListOpen!: (open: boolean) => void;
+    function Harness() {
+      const [listOpen, change] = useState(false); setListOpen = change;
+      useTpmWork(service, [{ id: 'one', name: 'One', online: true }], true, async value => ({ ...value, agentId: 'tpm-agent' }), true, 'tpm-polling', undefined, undefined, listOpen);
+      return null;
+    }
+    await render(<Harness />);
+    const minute = async () => { lists = 0; await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); return lists; };
+    expect(await minute()).toBe(1);
+    await act(async () => setListOpen(true));
+    expect(await minute()).toBe(6);
+  } finally { vi.useRealTimers(); }
+});

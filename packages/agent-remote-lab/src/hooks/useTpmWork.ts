@@ -36,9 +36,13 @@ function accessDenied(error: unknown): boolean {
 }
 
 /** Catalog observation stays active independently of floating-view visibility. */
+/** How often TPM catalogs refresh while TPM is in view (its list or an open TPM workspace), and otherwise. */
+export const TPM_REFRESH_MS = 10_000, TPM_IDLE_REFRESH_MS = 60_000;
 export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmHost[], enabled: boolean,
   attach: (session: SessionEntry) => Promise<OpenedSession>, presentationVisible = true, storageScope?: string, authority?: WindowLayoutAuthority,
-  presentedSource?: { windowId: string; viewId: string }) {
+  presentedSource?: { windowId: string; viewId: string },
+  /** Whether the TPM list is open: with an open TPM workspace, what keeps catalogs refreshing closely. */
+  listOpen = false) {
   const storageKey = storageScope ? `agent-remote:recovery:${storageScope}:tpm-windows` : undefined;
   const shared = useRef(authority); shared.current = authority;
   const [restored] = useState(() => authority ? [] : readWindows(storageKey));
@@ -153,15 +157,18 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     for (const result of results) if (result.status === 'fulfilled') accept(result.value.host.id, result.value.catalog.works);
     setLoading(false);
   }, [service, enabled, stableHosts, accept]);
+  // Catalogs follow changes closely while TPM is in view and stay current once a minute otherwise; a page in the background
+  // does not poll, and refreshes when it comes back to the front (stage 6).
+  const watching = presentationVisible && (listOpen || expanded);
   useEffect(() => {
     generation.current++;
     void refresh();
     if (!enabled || !service) { setLoading(false); return; }
-    const timer = window.setInterval(() => void refresh(), 10_000);
+    const timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') void refresh(); }, watching ? TPM_REFRESH_MS : TPM_IDLE_REFRESH_MS);
     const foreground = () => void refresh();
     window.addEventListener('focus', foreground);
     return () => { generation.current++; window.clearInterval(timer); window.removeEventListener('focus', foreground); };
-  }, [refresh, enabled, service]);
+  }, [refresh, enabled, service, watching]);
 
   const works = useMemo<TpmItem[]>(() => sameScope ? stableHosts.filter(host => host.access !== 'shared').flatMap(host => (catalogs[host.id]?.works ?? []).map(work => {
     const key = tpmKey(host.id, work.id), detail = details[key];

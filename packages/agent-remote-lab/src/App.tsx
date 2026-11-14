@@ -1531,7 +1531,7 @@ function AppContent({
   }, [baseUrl]);
   // TPM runs on Controllers, so only paired Hosts are asked for TPM works; the Lab server has none.
   const tpm = useTpmWork(tpmService, remoteHosts, accessReady && !!directory, attachTpm, tpmView.visible, baseUrl, windowWorkspace.authority,
-    sharedWindow && presentedViewId ? { windowId: sharedWindow.id, viewId: presentedViewId } : undefined);
+    sharedWindow && presentedViewId ? { windowId: sharedWindow.id, viewId: presentedViewId } : undefined, tpmListOpen);
   const tpmMainSessions = useTpmMainSessions(baseUrl, accessReady, tpmView.visible && (tpmListOpen || tpm.expanded), tpm.works, [...favorites.stars, ...sessionEntries], transport);
   const tpmMainState = useRef({ scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works });
   tpmMainState.current = { scope: baseUrl, transport, hosts: remoteHosts, providers, works: tpm.works };

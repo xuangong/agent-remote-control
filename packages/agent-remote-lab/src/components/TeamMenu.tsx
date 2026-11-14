@@ -22,6 +22,8 @@ interface Props {
   onOpen(team: Team, sourceViewId?: string): Promise<boolean>; onOpenSession(target: TeamSource & { teamId?: string; teamMemberId?: string }): Promise<boolean>;
   onTeamsChange?(baseUrl: string, teams: Team[]): void;
 }
+/** How often the Team roster refreshes while someone looks at it or a Team is forming, and otherwise. */
+export const TEAM_REFRESH_MS = 4_000, TEAM_IDLE_REFRESH_MS = 30_000;
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'Team operation failed.';
 const isCurrentMember = (member: Team['members'][number], current: Props['currentSession']) => !!current
   && member.hostId === (current.hostId ?? 'local') && member.providerId === current.providerId && member.nativeSessionId === current.nativeSessionId;
@@ -54,6 +56,7 @@ export function TeamMenu(props: Props) {
   useEffect(() => {
     setTeams([]); setRosterClient(undefined); setSelected(''); setError(''); setLoadError(''); setPendingCreate(undefined);
   }, [client]);
+  const loader = useRef<() => Promise<void>>();
   useEffect(() => {
     ++generation.current;
     if (!enabled) { setLoading(false); return; }
@@ -62,10 +65,20 @@ export function TeamMenu(props: Props) {
       try { await refresh(); }
       catch (error) { if (!stopped) setLoadError(errorMessage(error)); } finally { inFlight = false; if (!stopped) setLoading(false); }
     };
-    setLoading(true); void load(); const timer = setInterval(() => void load(), 4000);
+    loader.current = load;
+    setLoading(true); void load();
     document.addEventListener('visibilitychange', load);
-    return () => { stopped = true; ++generation.current; clearInterval(timer); document.removeEventListener('visibilitychange', load); };
+    return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; document.removeEventListener('visibilitychange', load); };
   }, [client, enabled, baseUrl]);
+  // The roster follows changes closely while someone looks at it or a Team is forming; otherwise it stays current for
+  // roles and attention twice a minute instead of polling every few seconds on every open page (stage 6).
+  const forming = !!pendingCreate || teams.some(team => team.status === 'active' && team.members.some(member => member.creation === 'reserved'));
+  const watching = open || revealing || forming;
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => void loader.current?.(), watching ? TEAM_REFRESH_MS : TEAM_IDLE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [client, enabled, baseUrl, watching]);
   useEffect(() => {
     // Temporary access or catalog failures must not discard the last confirmed retention set.
     if (!enabled || rosterClient !== client) return;

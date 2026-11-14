@@ -5,8 +5,8 @@ import { useState } from 'react';
 import type { Team, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
-const fixture=vi.hoisted(()=>({teams:[] as any[],attached:[] as string[],actions:[] as any[],deleted:[] as string[],failure:'',listFailure:'',create:undefined as ((input:unknown)=>Promise<Team>)|undefined}));
-vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async create(input:unknown){return fixture.create!(input);}async list(){if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}async delete(teamId:string){fixture.deleted.push(teamId);}}}));
+const fixture=vi.hoisted(()=>({lists:0,teams:[] as any[],attached:[] as string[],actions:[] as any[],deleted:[] as string[],failure:'',listFailure:'',create:undefined as ((input:unknown)=>Promise<Team>)|undefined}));
+vi.mock('@orchardworks/agent-remote-web/headless',async importOriginal=>({...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),RemoteTeamClient:class{async create(input:unknown){return fixture.create!(input);}async list(){fixture.lists++;if(fixture.listFailure)throw new Error(fixture.listFailure);return structuredClone(fixture.teams);}async action(input:unknown){fixture.actions.push(input);if(fixture.failure)throw new Error(fixture.failure);return fixture.teams[0];}async delete(teamId:string){fixture.deleted.push(teamId);}}}));
 vi.mock('../directory-client.js',()=>({SessionDirectoryClient:class{async attach(_:string,id:string){fixture.attached.push(id);return {agentId:id};}}}));
 vi.mock('../hooks/useConversationSession.js',()=>({useConversationSession:()=>({state:undefined,sessionState:undefined,status:'connected',actions:{},questions:{},setQuestions:()=>{}})}));
 vi.mock('./LabWorkbench.js',()=>({LabWorkbench:(props:any)=><div data-testid="standard-session-view">{props.conversationPath}<textarea aria-label="Message" /></div>}));
@@ -334,4 +334,25 @@ it('renders Teams as a sidebar row whose panel stays open for clicks inside it',
   await act(async () => { document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })); });
   expect(row.querySelector('section.lab-session-popover-panel')).toBeNull();
   await unmount(view);
+});
+
+it('refreshes the roster every 4 s while it is open or a Team is forming, and twice a minute otherwise', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  try {
+    fixture.teams = [structuredClone(team)];
+    const view = await render(<App />);
+    const minute = async () => { fixture.lists = 0; await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); return fixture.lists; };
+    // Nobody looks at the roster: it stays current for roles and attention without polling every few seconds.
+    expect(await minute()).toBe(2);
+    const trigger = view.querySelector<HTMLButtonElement>('.lab-session-popover-trigger')!;
+    await act(async () => trigger.click());
+    expect(await minute()).toBe(15);
+    await act(async () => trigger.click());
+    expect(await minute()).toBe(2);
+    // A member still being created: its progress shows promptly.
+    fixture.teams = [{ ...structuredClone(team), members: team.members.map((member, index) => index ? { ...member, creation: 'reserved' } : member) }];
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(await minute()).toBe(15);
+    await unmount(view);
+  } finally { vi.useRealTimers(); }
 });

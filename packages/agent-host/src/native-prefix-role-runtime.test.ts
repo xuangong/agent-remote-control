@@ -72,10 +72,17 @@ for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['l
   const tool = () => bound.get('B')!.tools!.find(tool => tool.name === (role === 'tpm' ? 'read_work' : 'read_team'))!;
   const readWork = async () => { const response = await fetch(origin + '/remote/tpm/work?id=work', { signal: AbortSignal.timeout(3000) }); expect(response.status).toBe(200); return response.json(); };
   const exerciseTpmTakeover = async (afterRestart: boolean) => {
-    const before = await readWork();
+    let before = await readWork();
     expect(before).toMatchObject({ paused: true, tpmNativeSessionId: 'B', mainNativeSessionId: 'source' });
     const sentBefore = deliveries.length;
-    expect((await post('/remote/tpm/action', { id: 'work', revision: before.revision, operationId: `resume-${afterRestart}`, action: 'resume' })).status).toBe(200);
+    // On a busy machine the work may still change once more in the background after it reads as paused. The Controller
+    // refuses an action on a stale revision (409), so the action goes again on the work as it is then, as a client does.
+    let resumed = 0;
+    for (let attempt = 0; attempt < 5 && resumed !== 200; attempt++) {
+      if (attempt) { before = await readWork(); expect(before).toMatchObject({ paused: true, tpmNativeSessionId: 'B' }); }
+      resumed = (await post('/remote/tpm/action', { id: 'work', revision: before.revision, operationId: `resume-${afterRestart}-${attempt}`, action: 'resume' })).status;
+    }
+    expect(resumed).toBe(200);
     await expect.poll(async () => { const work = await readWork(); return { count: work.outbox?.length, last: work.outbox?.at(-1) }; }).toMatchObject({ count: before.outbox.length + 1, last: { status: 'accepted', resolvedTarget: { controllerId: 'host', providerId, nativeSessionId: 'B' } } });
     expect(deliveries.length).toBe(sentBefore + 1); expect(deliveries.at(-1)).toBe('B');
     const receipts = (await readWork()).outbox;

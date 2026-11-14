@@ -107,6 +107,10 @@ function fixtureClient(context: BrowserContext, scope: string, origin: string) {
     return new Response(await response.text(), { status: response.status(), headers: response.headers() });
   });
 }
+/** Labeling or hiding a bot needs its group's bot details, which the Lab adds with the first such change. */
+async function withBotDetails(client: WindowWorkspaceClient, id: string) {
+  if (!(await client.inspect(id)).bots) await mutate(client, id, { type: 'bots.add', rank: 'm' });
+}
 async function mutate(client: WindowWorkspaceClient, id: string, operation: WindowGroupOperation) {
   const before = await client.inspect(id);
   const after = await client.mutate(id, { operationId: randomUUID(), issuedAt: Date.now(), baseRevision: before.window.revision, operation });
@@ -127,10 +131,7 @@ test('keeps Window A while selecting another group, handles section-only routes 
     const bId = randomUUID();
     await client.create({ schemaVersion: 3, id: bId, revision: 0, title: 'Window B', views: [createWindowView('B1', { ...binding, title: 'Bot B' }, 'primary')], selectedViewId: 'B1', selectedPrimaryViewId: 'B1' });
     await page.goto(`${fixture.url}/?window=${bId}`); await showWindowConversation(page);
-    let menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
-    await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-    await expect.poll(async () => !!(await client.inspect(bId)).bots).toBe(true);
-    await closeWindows(page);
+    await withBotDetails(client, bId);
     await page.goto(`${fixture.url}/?window=${aId}`); await showWindowConversation(page);
     const before = await client.inspect(aId); await mode(page, 'bot');
     const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name: 'Bot B', exact: true }).click();
@@ -147,22 +148,22 @@ test('keeps Window A while selecting another group, handles section-only routes 
     await expect(bot.getByTestId('prompt-input').locator('visible=true')).toHaveCount(0);
     await screenshot(page, 'removed-selected-bot');
     await expect(bot.locator('.lab-bot-roster')).toBeVisible();
-    await expect(bot.getByRole('button', { name: 'New section', exact: true })).toBeVisible();
-    await bot.getByRole('button', { name: 'New section', exact: true }).click();
-    await bot.getByRole('textbox', { name: 'Section title', exact: true }).fill('Empty section');
-    await bot.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect(page).toHaveURL(url => !!url.searchParams.get('section') && url.searchParams.get('section') !== bId);
-    await expect(bot.getByRole('region', { name: 'Empty section', exact: true }).getByText('No bots in this section yet. Organize sessions in a Window, then choose Show as section.', { exact: true })).toBeVisible();
-    const sectionId = new URL(page.url()).searchParams.get('section')!;
+    await expect(bot.getByRole('button', { name: 'New bot', exact: true })).toBeVisible();
+    // A group hidden in Window mode lives in Bot mode only: its Window route opens it there, without the session the URL names.
+    const sectionId = randomUUID();
+    await client.create({ schemaVersion: 3, id: sectionId, revision: 0, title: 'Bot-only group', views: [createWindowView('C1', { ...binding, title: 'Bot C' }, 'primary')], selectedViewId: 'C1', selectedPrimaryViewId: 'C1' });
+    // Bot C shows the session Window A also holds; a group with bot details shows it (each session once).
+    await withBotDetails(client, sectionId);
+    await mutate(client, sectionId, { type: 'window.remove' });
     expect((await client.inspect(sectionId)).presentation).toEqual({ window: false });
     const createsBefore = captured.creates.length, attachesBefore = captured.attaches.length;
     await page.goto(`${fixture.url}/?window=${sectionId}&session=stale&host=${fixture.hostId}&provider=recorded`);
     await expect(modeRegion(page, 'bot')).toBeVisible();
     await expect(modeRegion(page, 'window')).toBeHidden();
     await expect(page).toHaveURL(url => url.searchParams.get('mode') === 'bot' && url.searchParams.get('section') === sectionId && !url.searchParams.has('window'));
-    await expect(bot.getByRole('region', { name: 'Empty section', exact: true }).getByText('No bots in this section yet. Organize sessions in a Window, then choose Show as section.', { exact: true })).toBeVisible();
+    await expect(bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name: 'Bot C', exact: true })).toBeVisible();
     expect(captured.creates).toHaveLength(createsBefore); expect(captured.attaches.slice(attachesBefore)).not.toContain('stale');
-    expect(captured.sends).toHaveLength(0); await screenshot(page, 'empty-section-route');
+    expect(captured.sends).toHaveLength(0); await screenshot(page, 'bot-only-group-route');
   } finally { await page.close(); await fixture.close(); }
 });
 for (const change of ['hidden', 'ineligible'] as const) {
@@ -177,22 +178,21 @@ for (const change of ['hidden', 'ineligible'] as const) {
       const access = await (await context.request.get(fixture.url + '/auth/status')).json();
       const client = fixtureClient(context, fixture.url + access.basePath, fixture.url), id = new URL(page.url()).searchParams.get('window')!;
       const group = await client.inspect(id), view = group.window.views.find(view => view.binding)!;
-      const menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
-      await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-      await expect.poll(async () => !!(await client.inspect(id)).bots).toBe(true);
-      await closeWindows(page); await mode(page, 'bot');
+      await withBotDetails(client, id);
+      await mode(page, 'bot');
       const bot = modeRegion(page, 'bot'); await bot.getByRole('navigation', { name: 'Bots', exact: true }).getByRole('button', { name: 'New session', exact: true }).click();
       await expectDraft(composer(page, 'bot'), ''); const beforeUrl = page.url();
       if (change === 'hidden') await mutate(client, id, { type: 'bot.update', viewId: view.id, details: { hidden: true } });
       else {
         const window = (await client.inspect(id)).window;
         await mutate(client, id, { type: 'layout.apply', layout: { title: window.title, selectedViewId: window.selectedViewId,
-          selectedPrimaryViewId: window.selectedPrimaryViewId, views: window.views.map(item => item.id === view.id ? { ...item, bindingPolicy: 'managed' } : item) } });
+          // A history view is not a bot (managed views are, since stage 1).
+          selectedPrimaryViewId: window.selectedPrimaryViewId, views: window.views.map(item => item.id === view.id ? { ...item, binding: { ...item.binding!, sessionIntent: 'history' as const } } : item) } });
       }
       await expect(bot.locator('.lab-bot-roster')).toBeVisible();
       await expect(bot.locator('.lab-bot-roster').getByRole('alert')).toContainText('unavailable');
       await expect(bot.locator('.lab-bot-roster').getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
-      await expect(bot.getByRole('button', { name: 'New section', exact: true })).toBeVisible();
+      await expect(bot.getByRole('button', { name: 'New bot', exact: true })).toBeVisible();
       await expect(bot.getByTestId('prompt-input').locator('visible=true')).toHaveCount(0);
       expect(page.url()).toBe(beforeUrl); expect(captured.sends).toHaveLength(0); expect(captured.creates).toHaveLength(1);
       await noOverflow(page); await screenshot(page, `compact-${change}-roster`);
@@ -261,10 +261,8 @@ async function openRecordedBot(page: Page) {
   if (!await menu.locator('[data-window-id][aria-current="true"]').count()) {
     await menu.getByRole('button', { name: 'New Window', exact: true }).click();
   }
+  // Every group with a bot appears in Bot mode (stage 1): nothing to show.
   const windowId = (await menu.locator('[data-window-id][aria-current="true"]').getAttribute('data-window-id'))!;
-  const options = menu.locator('details.lab-window-options');
-  if (!await options.evaluate(element => element.hasAttribute('open'))) await options.locator('summary').click();
-  await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
   await closeWindows(page);
   return { windowId, captured, agentId: agentId as string };
 }
@@ -286,9 +284,7 @@ test('selects the Window pane through timeline clicks and composer focus while B
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const client = fixtureClient(context, fixture.url + access.basePath, fixture.url), id = new URL(page.url()).searchParams.get('window')!;
     const before = await client.inspect(id), first = before.window.views.find(view => view.binding)!;
-    const menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
-    await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-    await expect.poll(async () => !!(await client.inspect(id)).bots).toBe(true);
+    await withBotDetails(client, id);
     const response = await context.request.post(`${fixture.url}${access.basePath}v1/remote/hosts/${fixture.hostId}/create`, {
       headers: { origin: fixture.url }, data: { providerId: first.binding!.providerId, operationId: randomUUID() }, timeout: 10000,
     });
@@ -316,11 +312,12 @@ test('selects the Window pane through timeline clicks and composer focus while B
 test('keeps an offline queue hidden, dispatches once on return and preserves the later draft', async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const { captured } = await openRecordedBot(page);
-  await mode(page, 'bot');
-  const bot = modeRegion(page, 'bot'); await bot.getByRole('button', { name: 'New section', exact: true }).click();
-  await bot.getByRole('textbox', { name: 'Section title', exact: true }).fill('Queue home');
-  await bot.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(bot.getByRole('button', { name: 'Queue home', exact: true })).toBeVisible(); await mode(page, 'window');
+  // The bot's group, by a name of its own: a place in Bot mode beside the bot.
+  const toolbar = modeRegion(page, 'window').locator('header.lab-window-toolbar');
+  await toolbar.locator('button.lab-window-toolbar-title').click();
+  await toolbar.getByLabel('Window title', { exact: true }).fill('Queue home');
+  await toolbar.getByLabel('Window title', { exact: true }).press('Enter');
+  await expect(toolbar.locator('h2')).toHaveText('Queue home');
   const sockets: Array<() => void> = [];
   let restoring = false, reconnected = false, blockingSockets = false;
   page.on('websocket', socket => socket.on('framereceived', ({ payload }) => {
@@ -383,9 +380,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
     const access = await (await context.request.get(fixture.url + '/auth/status')).json();
     const client = fixtureClient(context, fixture.url + access.basePath, fixture.url), id = new URL(page.url()).searchParams.get('window')!;
     const group = await client.inspect(id), original = group.window.views.find(view => view.binding)!, binding = original.binding!;
-    const menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
-    await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-    await expect.poll(async () => !!(await client.inspect(id)).bots).toBe(true);
+    await withBotDetails(client, id);
     const otherBindings = [];
     for (let index = 1; index <= 35; index++) {
       const response = await context.request.post(`${fixture.url}${access.basePath}v1/remote/hosts/${fixture.hostId}/create`, {
@@ -402,7 +397,7 @@ test('reads long Bot labels with independent roster and conversation scrolling',
     ] });
     const label = 'A readable label that wraps naturally across the available roster width. '.repeat(2).slice(0, 120);
     await mutate(client, id, { type: 'bot.update', viewId: original.id, details: { label, picture: { shape: 'hexagon', color: '#35836b' }, pinned: true } });
-    await closeWindows(page); await mode(page, 'bot');
+    await mode(page, 'bot');
     const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Bots', exact: true });
     const row = nav.locator('[data-bot-place]').filter({ hasText: label }); await expect(row).toHaveCount(1); await row.click();
     await expect(row).toHaveAccessibleName(title);
@@ -436,9 +431,7 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
     await client.create({ schemaVersion: 3, id: bId, revision: 0, title: 'Window B', views: [createWindowView('B1', target('S', 'Bot source S'), 'primary'), createWindowView('B2', target('T', 'Bot other T'), 'primary')], selectedViewId: 'B2', selectedPrimaryViewId: 'B2' });
     await page.goto(`${fixture.origin}/?window=${bId}`); await showWindowConversation(page);
     await composer(page, 'window').first().fill('Readiness draft');
-    const menu = await windows(page); await menu.locator('details.lab-window-options > summary').click();
-    await menu.getByRole('button', { name: 'Show as section', exact: true }).click();
-    await expect.poll(async () => !!(await client.inspect(bId)).bots).toBe(true);
+    await withBotDetails(client, bId);
     await page.goto(`${fixture.origin}/?window=${aId}`); await showWindowConversation(page);
     await composer(page, 'window').fill('Window A draft');
     await mode(page, 'bot');
@@ -495,7 +488,7 @@ for (const [width, height] of [[1440, 900], [1181, 800], [1180, 800], [390, 844]
     await page.setViewportSize({ width, height }); await page.emulateMedia({ reducedMotion: 'reduce' });
     const { windowId, captured } = await openRecordedBot(page);
     const before = await savedLocalGroup(page, windowId);
-    expect(before.bots).toBeDefined();
+    expect(before.presentation?.bots).not.toBe(false);
     await composer(page, 'window').fill('Keep this draft across modes');
     await composer(page, 'window').evaluate(element => { (element as HTMLElement).dataset.task4Editor = 'retained'; });
     await mode(page, 'bot');
@@ -539,6 +532,7 @@ async function pressSearchShortcut(page: Page) {
 }
 
 test('opens a Window and a bot from the command palette, and returns focus when it closes', async ({ page }) => {
+  test.skip((page.viewportSize()?.width ?? 0) <= 1180, 'It checks the desktop sidebar header (the mode switch, Search and +).');
   await openRecordedBot(page);
   const window = modeRegion(page, 'window'), toolbar = window.locator('header.lab-window-toolbar');
   // The sidebar header holds the mode switch, Search and +; its segments keep their whole labels.
@@ -580,19 +574,18 @@ test('opens a Window and a bot from the command palette, and returns focus when 
   await expect(palette).toHaveCount(0);
   await expect(toolbar.locator('h2')).toHaveText('Palette Alpha');
 
-  // A bot, chosen from Window mode, opens in Bot mode.
+  // In Bot mode the palette lists each session as a bot under its group's name; choosing one opens it.
+  // (Window mode lists sessions instead, since stage 1: each session is one item.)
   await mode(page, 'bot');
   const bot = modeRegion(page, 'bot').locator('.lab-bot-section .lab-bot-row').first();
   const name = (await bot.getAttribute('aria-label'))!;
-  await expect(bot).not.toHaveAttribute('aria-current', 'true');
-  await mode(page, 'window');
-  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await modeRegion(page, 'bot').getByRole('button', { name: 'Search', exact: true }).click();
   // The recorded bot is named like the New session action, which ranks first; its section's name, its subtitle, narrows to it.
   await palette.getByRole('combobox', { name: 'Search Windows, Bots, sessions and actions', exact: true }).fill(`${name} Palette Alpha`);
-  await expect(palette.getByRole('option')).toHaveCount(1);
+  await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveCount(1);
   await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
-  await expect(modeRegion(page, 'bot')).toBeVisible();
+  await expect(palette).toHaveCount(0);
   await expect(bot).toHaveAttribute('aria-current', 'true');
   await expect(composer(page, 'bot')).toBeVisible();
 });

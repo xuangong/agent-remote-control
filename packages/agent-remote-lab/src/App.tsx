@@ -2624,9 +2624,13 @@ function AppContent({
     target: contextTarget?.controllerId ? { ...contextTarget, controllerId: contextTarget.controllerId } : undefined, enabled: userScoped && accessReady && !hostOffline && navigationIntent.sessionIntent !== 'history',
     refreshKey: `${state?.timeline.epoch}:${state?.timeline.entries.at(-1)?.seqEnd}:${pendingPrimaryCount}`,
   });
+  // A bot's Handoff shows its progress over the page (portaled), whichever mode or conversation is shown, so App renders it
+  // once, at its root. Rendered in the bot's conversation it froze while that conversation was hidden: a hidden
+  // conversation keeps its last render (stage 6), so Details stopped opening in Window mode.
+  const botHandoff = !!successionDialog && (!!(successionDialog.source as OpenedSession & { bot?: unknown }).bot || !!(successionDialog.source as OpenedSession & { fallback?: boolean }).fallback);
   const successionProgress = successionDialog ? <SessionSuccessionDialog
     source={successionDialog.source} directory={successionDialog.directory}
-    progressPortal={!!(successionDialog.source as OpenedSession & { bot?: unknown; fallback?: boolean }).bot || !!(successionDialog.source as OpenedSession & { fallback?: boolean }).fallback}
+    progressPortal={botHandoff}
     blockedReason={successionInputReason}
     initialProvider={successionDialog.initialProvider} visible={successionDialog.visible}
     resume={successionDialog.resume} resumeCancellation={successionDialog.cancelRequested}
@@ -2930,7 +2934,7 @@ function AppContent({
         if (!context.state || !available) throw new Error('Wait for this session to finish synchronizing.');
         return createFork(context.state, source, id, args);
       },
-      composerStatus: <>{gated || successionDialog && viewKey(successionDialog.source) === source.viewId ? successionProgress : null}
+      composerStatus: <>{!botHandoff && (gated || successionDialog && viewKey(successionDialog.source) === source.viewId) ? successionProgress : null}
         {quoteView && quoteSelection?.viewId === quoteView && context.state ? <QuoteSelectionBar count={quoteSelection.keys.size} windows={quoteTargets(quoteView, source)}
           busy={!!quoteSelection.busy} error={quoteSelection.error} onCancel={() => setQuoteSelection(undefined)}
           onQuote={target => void quoteSelected(quoteView, source, context.state!, target)} /> : null}
@@ -3442,7 +3446,7 @@ function AppContent({
           })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
-        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={openNewSessionPanel}>New session</button>{successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
+        {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>This session view is empty.</p><button type="button" onClick={openNewSessionPanel}>New session</button>{botHandoff ? null : successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}
           sessionIdentity={stackRoot ?? succession.selected ?? activeOpened}
           operationBinding={succession.binding ? { source: succession.binding.session, historical: navigationIntent.sessionIntent === 'history', scope: { agentId: succession.binding.session.agentId, client: succession.binding.client, replica: succession.binding.replica, transport, recipient: succession.imageRecipient, isCurrent: succession.binding.isCurrent } } : undefined}
           headingMode={compactLayout ? 'toolbar' : 'inline'}
@@ -3455,7 +3459,7 @@ function AppContent({
           onPendingInputChange={reportPendingPrimaryInput}
           pendingFirstInputContext={successionContext && successionContext.state !== 'materialized' ? { state: successionContext.state, onRetry: successionContext.onRetry } : undefined}
           headingContext={succession.historyNavigation ? <SessionSuccessionHistory navigation={succession.historyNavigation} onOpen={(session, intent) => openSession(session, undefined, undefined, false, undefined, intent)} /> : undefined}
-          composerStatus={successionProgress}
+          composerStatus={botHandoff ? undefined : successionProgress}
           imageDraftBinding={primaryDisplaySlot?.owners.image}
           imageRecipient={succession.imageRecipient}
           displayBinding={primaryDisplaySlot?.owners.display}
@@ -3557,7 +3561,7 @@ function AppContent({
         <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
       </div>
     </Sheet> : null}
-  </main></ToastActivity.Provider>{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
+  </main></ToastActivity.Provider>{botHandoff ? successionProgress : null}{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
       hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot}
       onNewBot={directory ? openNewBot : undefined} />
     {removingBot && windowMode && sharedWindow?.id === removingBot.windowId && sharedWindow.views.some(view => view.id === removingBot.viewId) ? (() => {

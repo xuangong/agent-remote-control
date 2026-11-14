@@ -67,6 +67,32 @@ it('captures Bot B while Window A stays selected and changing bots cannot retarg
   expect(document.querySelector('.lab-handoff-notice')).toBeNull();
 });
 
+it('opens and hides a bot Handoff\'s details in Window mode while the bot\'s conversation is hidden', async () => {
+  vi.spyOn(SessionDirectoryClient.prototype, 'describeSuccession').mockResolvedValue(description);
+  // The Handoff stays in progress, as while the Host creates its target.
+  let release = () => {};
+  vi.spyOn(SessionDirectoryClient.prototype, 'prepareSuccession').mockImplementation(input => new Promise(resolve => { release = () => resolve(response(input.operationId, 'unknown')); }));
+  vi.spyOn(SessionDirectoryClient.prototype, 'successionAction').mockImplementation(async (_action, id) => response(id, 'unknown'));
+  const app = await setup('bot-handoff-details');
+  await openHandoff();
+  await until(() => expect(document.querySelector('dialog')?.textContent).toContain('Hand off'));
+  await act(async () => visibleButton(document, 'Hand off').click());
+  const notice = () => document.querySelector<HTMLElement>('.lab-handoff-notice')!;
+  const toggle = (label: string) => [...notice().querySelectorAll('button')].find(button => button.textContent === label);
+  await until(() => expect(toggle('Details') ?? toggle('Hide details')).toBeDefined());
+  if (toggle('Hide details')) await act(async () => toggle('Hide details')!.click());
+  // Another bot is shown, then Window mode: the source bot's conversation is hidden.
+  await act(async () => app.button('B2').click());
+  await app.switchMode('window');
+  await act(async () => toggle('Details')!.click());
+  await until(() => expect(notice().querySelector('.lab-handoff-details')).not.toBeNull());
+  await act(async () => toggle('Hide details')!.click());
+  await until(() => expect(notice().querySelector('.lab-handoff-details')).toBeNull());
+  expect(document.querySelectorAll('.lab-handoff-notice')).toHaveLength(1);
+  release();
+  await app.close();
+});
+
 it('blocks Handoff on the exact pending Bot slot even on a section-only page', async () => {
   vi.spyOn(SessionDirectoryClient.prototype, 'describeSuccession').mockResolvedValue(description);
   const prepared: string[] = [];

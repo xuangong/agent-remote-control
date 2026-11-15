@@ -252,7 +252,7 @@ describe('the journals of primary over journal partitions', () => {
     const first = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'one'), append(2, 'm2', 'two')]);
     const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'three')]);
     await expect(first).rejects.toThrow('reset');
-    expect((await second).refusal).toEqual({ sequence: 3, reason: 'invalid' });
+    expect((await second).refusal).toEqual({ sequence: 3, reason: 'sequence_gap' });
     expect((await memory.catalog.list('')).length).toBe(1);
     expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 0 } });
     const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;

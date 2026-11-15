@@ -80,7 +80,7 @@ export const JournalPublishEntry = Type.Union([
 ]);
 export type JournalPublishEntry = Static<typeof JournalPublishEntry>;
 
-export const JOURNAL_REFUSAL_REASONS = ['fenced', 'stale_revision', 'unknown_item', 'body_missing', 'type_changed', 'duplicate_item', 'invalid', 'quota_exceeded', 'incomplete'] as const;
+export const JOURNAL_REFUSAL_REASONS = ['fenced', 'stale_revision', 'unknown_item', 'body_missing', 'type_changed', 'duplicate_item', 'invalid', 'quota_exceeded', 'incomplete', 'sequence_gap'] as const;
 export const JournalRefusalReason = Type.Union(JOURNAL_REFUSAL_REASONS.map(reason => Type.Literal(reason)));
 export type JournalRefusalReason = (typeof JOURNAL_REFUSAL_REASONS)[number];
 

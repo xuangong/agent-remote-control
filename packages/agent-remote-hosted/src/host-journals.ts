@@ -439,8 +439,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     if (error instanceof JournalItemTypeChangedError) return { sequence, reason: 'type_changed', itemKey: error.itemKey };
     if (error instanceof JournalDuplicateItemError) return { sequence, reason: 'duplicate_item', itemKey: error.itemKey };
     if (error instanceof JournalInvalidRowError) return { sequence, reason: 'invalid', itemKey: error.itemKey };
-    // Entries before the gap were lost: the publisher must open the journal again.
-    if (error instanceof JournalSequenceGapError) return { sequence, reason: 'invalid' };
+    // Entries before the gap were lost: the publisher must open the journal again, and must not skip this refusal.
+    if (error instanceof JournalSequenceGapError) return { sequence, reason: 'sequence_gap' };
     if (error instanceof JournalInvalidPublicationError) return { sequence, reason: 'invalid' };
     return undefined;
   }
@@ -507,7 +507,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         let liveOnlyChanged = false;
         for (const entry of entries) {
           const current = journal.publisher;
-          const fresh = current !== null && current.generation === generation && entry.sequence > current.watermark;
+          const fresh = current !== null && current.generation === generation && entry.sequence === current.watermark + 1;
           try {
             if (fresh) admit(entry);
             apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);

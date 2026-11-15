@@ -86,6 +86,19 @@ describe('the safety limits', () => {
     expect(refused.events).toEqual([]);
   });
 
+  it('refuses a gap as a gap even when the entry is over the limits, and neither fences the generation nor marks the journal incomplete', async () => {
+    const { journals } = fixture({ limits: { sessionBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'small', 1), head(2)]);
+    const gap = await journals.publish(HOST, SESSION, 1, [append(9, 'm2', 'x'.repeat(4000), 2)]);
+    expect(gap.refusal).toEqual({ sequence: 9, reason: 'sequence_gap' });
+    expect(gap).toMatchObject({ hasHead: true, watermark: 2 });
+    expect(gap.unserved).toBeUndefined();
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    // The generation still publishes: a head is not refused as incomplete, and the next sequence is applied.
+    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'fits', 2), head(4)])).refusal).toBeUndefined();
+  });
+
   it('refuses an entry larger than the room before it evicts anything', async () => {
     const { journals, store } = fixture({ limits: { sessionBytes: 3500 } });
     await open(journals, HOST, SESSION);
@@ -314,7 +327,7 @@ describe('a quota refusal and the live-only cap', () => {
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b')]);
     await open(journals, HOST, SESSION);
-    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'incomplete' });
+    expect((await journals.publish(HOST, SESSION, 2, [head(2)])).refusal).toEqual({ sequence: 2, reason: 'incomplete' });
     expect(journals.served(HOST, SESSION)).toBe(false);
   });
 

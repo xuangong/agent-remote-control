@@ -88,6 +88,7 @@ describe('createHostJournals', () => {
     expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m1', 'x'), item: { type: 'reasoning', text: 'x' } } })).toEqual({ sequence: 3, reason: 'type_changed', itemKey: 'm1' });
     expect(await refusal({ sequence: 3, op: 'replace', items: [{ row: row('a', 'x'), digest: 'd1' }, { row: row('a', 'y'), digest: 'd2' }] })).toEqual({ sequence: 3, reason: 'duplicate_item', itemKey: 'a' });
     expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m2', 'x'), occurredAt: Number.NaN } })).toEqual({ sequence: 3, reason: 'invalid', itemKey: 'm2' });
+    expect(await refusal(complete(9, 'm1'))).toEqual({ sequence: 9, reason: 'sequence_gap' });
   });
 
   it('refuses an append to an item whose body was evicted', async () => {

@@ -92,7 +92,9 @@ describe('a Controller stream', () => {
     [...f.timers.values()][0]!();
     expect(f.seen.ended).toEqual([[1013, 'Remote stream opening timed out']]);
     expect(f.streams.size).toBe(0);
-    expect(f.diagnostics).toEqual(['stream_opening', 'stream_open_timeout']);
+    expect(f.written.filter(message => message.type === 'stream_close')).toHaveLength(1);
+    expect(f.written.at(-1)).toMatchObject({ type: 'stream_close', code: 1000, reason: 'Browser disconnected' });
+    expect(f.diagnostics).toEqual(['stream_opening', 'stream_open_timeout', 'stream_closed']);
   });
 
   it('holds at most 32 messages before the Controller accepts the stream', async () => {
@@ -123,18 +125,78 @@ describe('a Controller stream and the Host\'s stream accounting', () => {
     await expect(make('alice').open(sink)).resolves.toBeDefined();
   });
 
-  it('ends with the broker\'s code when the share is revoked or the Host disconnects, and refuses later writes', async () => {
-    for (const [code, reason] of [[1008, 'Host share revoked'], [1008, 'Host access revoked'], [1012, 'Remote Host disconnected']] as const) {
-      const f = fixture();
-      const stream = await f.opener.open(f.sink);
-      const [, entry] = [...f.streams][0]!;
-      entry.socket.close(code, reason);
-      expect(f.seen.ended).toEqual([[code, reason]]);
-      expect(f.timers.size).toBe(0);
-      expect(() => stream.send(cancel)).toThrow(HostStreamRefusal);
-      stream.close();
-      expect(f.written.filter(message => message.type === 'stream_close')).toEqual([]);
-    }
+  it('frees its slot when the Controller ends the stream, as the broker does by deleting the entry and closing the socket', async () => {
+    const streams = new Map<string, HostStreamEntry>();
+    const opener = createHostStreamOpener({
+      streams, publicAgentId: 'public-1', runtimeAgentId: () => 'runtime-1', authorized: () => true, recover: async () => undefined,
+      capacity: () => streams.size >= 1 ? 'host' : undefined, write: () => undefined,
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined }, openTimeoutMs: 30_000, diagnostic: () => undefined,
+    });
+    const sink: HostStreamSink = { frame: () => undefined, ready: () => undefined, ended: () => undefined };
+    await opener.open(sink);
+    await expect(opener.open(sink)).rejects.toMatchObject({ code: 'session_stream_capacity' });
+    const [streamId, entry] = [...streams][0]!;
+    streams.delete(streamId);
+    entry.socket.close(1000, 'Closed by the Controller');
+    await expect(opener.open(sink)).resolves.toBeDefined();
+  });
+
+  it('ends once and tells the Controller once when the broker closes the socket while the entry is registered', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const [streamId, entry] = [...f.streams][0]!;
+    entry.socket.close(1008, 'Invalid Remote Host session identity');
+    expect(f.streams.size).toBe(0);
+    expect(f.written.filter(message => message.type === 'stream_close')).toEqual([{ uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }]);
+    expect(f.seen.ended).toEqual([[1008, 'Invalid Remote Host session identity']]);
+    expect(f.timers.size).toBe(0);
+    stream.close();
+    expect(f.written.filter(message => message.type === 'stream_close')).toHaveLength(1);
+    expect(() => stream.send(cancel)).toThrow(HostStreamRefusal);
+  });
+
+  it('writes no stream_close of its own when access is revoked and the broker already removed the entry and told the Controller', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const [streamId, entry] = [...f.streams][0]!;
+    f.streams.delete(streamId);
+    entry.socket.close(1008, 'Host share revoked');
+    expect(f.streams.size).toBe(0);
+    expect(f.seen.ended).toEqual([[1008, 'Host share revoked']]);
+    expect(f.written.filter(message => message.type === 'stream_close')).toEqual([]);
+    expect(f.timers.size).toBe(0);
+    stream.close();
+    expect(f.written.filter(message => message.type === 'stream_close')).toEqual([]);
+  });
+
+  it('ends with 1012 and does not throw when the Host disconnects while the entry is registered and the Host cannot be written', async () => {
+    let offline = false;
+    const f = fixture({ write: () => { if (offline) throw new Error('offline'); } });
+    await f.opener.open(f.sink);
+    offline = true;
+    for (const entry of f.streams.values()) entry.socket.close(1012, 'Remote Host disconnected');
+    f.streams.clear();
+    expect(f.seen.ended).toEqual([[1012, 'Remote Host disconnected']]);
+    expect(f.streams.size).toBe(0);
+    expect(f.timers.size).toBe(0);
+  });
+
+  it('refuses a frame that pushes the held bytes over 1 MiB while fewer than 32 messages are held', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const big = JSON.stringify({ type: 'cancel', payload: { agentId: 'public-1', requestId: 'x'.repeat(400 * 1024) } });
+    stream.send(big);
+    stream.send(big);
+    expect(() => stream.send(big)).toThrow(expect.objectContaining({ code: 'host_stream_not_ready' }));
+    expect(f.streams.values().next().value!.buffered).toHaveLength(2);
+  });
+
+  it('refuses a frame that addresses another session', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const other = JSON.stringify({ type: 'cancel', payload: { agentId: 'someone-else', requestId: 'r1' } });
+    expect(() => stream.send(other)).toThrow(expect.objectContaining({ code: 'invalid_session_target' }));
+    expect(f.streams.values().next().value!.buffered).toHaveLength(0);
   });
 
   it('refuses a message the identity rewrite cannot read without holding it', async () => {

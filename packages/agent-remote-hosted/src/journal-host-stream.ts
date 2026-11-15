@@ -31,12 +31,18 @@ export interface HostStreamSink {
   frame(raw: string): void;
   /** The Controller accepted the stream. */
   ready(): void;
-  /** The stream ended: the Controller closed it, the Host went away, access was revoked, or it was never accepted. */
+  /**
+   * The stream ended: the Controller closed it, the Host went away, access was revoked, or it was never accepted.
+   * Called once, and never after `HostStream.close()`.
+   */
   ended(code: number, reason: string): void;
 }
 
 export interface HostStream {
-  /** Sends a frame addressed with the public session id; holds it until the Controller accepts the stream. Throws a HostStreamRefusal or the Host write error. */
+  /**
+   * Sends a frame addressed with the public session id; holds it until the Controller accepts the stream. Throws a
+   * HostStreamRefusal (`invalid_session_target` when the frame addresses another session) or the Host write error.
+   */
   send(raw: string): void;
   /** The browser left: ends the stream and tells the Controller. */
   close(): void;
@@ -103,6 +109,15 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
       const streamId = randomUUID();
       let closed = false;
       const none = () => undefined;
+      /** What a browser stream does when it ends: free the slot and tell the Controller, unless the broker already did. */
+      const release = () => {
+        context.scheduler.clearTimeout(entry.timer);
+        if (context.streams.get(streamId) !== entry) return;
+        context.streams.delete(streamId);
+        context.diagnostic({ event: 'stream_closed', streamId });
+        try { context.write({ uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }); }
+        catch { /* The Host may already be offline. */ }
+      };
       const socket: RelaySocket = {
         get readyState() { return closed ? SOCKET_CLOSED : RELAY_SOCKET_OPEN; },
         bufferedAmount: undefined,
@@ -110,7 +125,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
         close: (code = 1000, reason = '') => {
           if (closed) return;
           closed = true;
-          context.scheduler.clearTimeout(entry.timer);
+          release();
           sink.ended(code, reason);
         },
         onMessage: () => none,
@@ -126,7 +141,6 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
       context.diagnostic({ event: 'stream_opening', streamId, agentId: context.publicAgentId });
       entry.timer = context.scheduler.setTimeout(() => {
         context.diagnostic({ event: 'stream_open_timeout', streamId });
-        context.streams.delete(streamId);
         socket.close(1013, 'Remote stream opening timed out');
       }, context.openTimeoutMs);
       try { context.write({ uplinkVersion: 2, type: 'stream_open', streamId, sessionId: entry.runtimeAgentId }); }
@@ -139,7 +153,9 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
       return {
         send(raw) {
           if (closed) throw new HostStreamRefusal('host_stream_closed', 'The Controller session closed.');
-          const outgoing = sessionIdentityMessage(raw, entry.publicAgentId, entry.runtimeAgentId, 'client');
+          let outgoing: string;
+          try { outgoing = sessionIdentityMessage(raw, entry.publicAgentId, entry.runtimeAgentId, 'client'); }
+          catch { throw new HostStreamRefusal('invalid_session_target', 'The message addresses another session.'); }
           if (!entry.ready) {
             const held = entry.buffered.reduce((sum, value) => sum + encoder.encode(value).byteLength, 0);
             if (entry.buffered.length >= BUFFER_MAX_MESSAGES || held + encoder.encode(outgoing).byteLength > BUFFER_MAX_BYTES) {
@@ -153,11 +169,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
         close() {
           if (closed) return;
           closed = true;
-          context.scheduler.clearTimeout(entry.timer);
-          context.streams.delete(streamId);
-          context.diagnostic({ event: 'stream_closed', streamId });
-          try { context.write({ uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }); }
-          catch { /* The Host may already be offline. */ }
+          release();
         },
       };
     },

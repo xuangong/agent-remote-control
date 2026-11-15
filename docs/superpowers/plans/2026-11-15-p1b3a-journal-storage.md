@@ -4273,54 +4273,95 @@ and in the same function change the condition that grants the journal connection
 (i) The deletion bookkeeping. Immediately before `  const handlesRequest = (url: URL) => {` add:
 
 ```ts
-  /** The deletion of each Host's journals in flight; a second ask for the same Host shares it, so a Host's journals are never deleted twice. */
-  const deletionRuns = new Map<string, Promise<boolean>>();
-  /** How many Hosts' journals one round deletes at the same time. */
+  /**
+   * Pending journal deletions. A revoke records a Host's id in the state; a round of deletions then clears the ids:
+   * - one round runs at a time, and a revoke or a registration during a round only makes another pass follow it;
+   * - four workers take ids one by one, so a store call that never answers holds one worker, not the round, and no more than
+   *   four store deletions run at once, whoever asks for them;
+   * - an id has one deletion in flight at a time, shared by every ask, kept until its confirmation is published;
+   * - each id is confirmed as soon as the store confirms it, and confirmations that wait for a running commit share the next one;
+   * - a re-revoke of an id bumps its revoke count, and a confirmation counts only for the count its deletion started under, so
+   *   an id revoked again while it was being deleted stays pending and is deleted again.
+   */
   const JOURNAL_DELETION_CONCURRENCY = 4;
-  /** Deletes one revoked Host's journals from the store. Resolves true once the store confirms, false when it fails. Never rejects. */
-  function eraseJournals(hostId: string): Promise<boolean> {
-    const service = journals;
-    if (!service) return Promise.resolve(false);
-    let run = deletionRuns.get(hostId);
-    if (!run) {
-      run = service.deleteHost(hostId).then(() => true, () => { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; })
-        .finally(() => { deletionRuns.delete(hostId); });
-      deletionRuns.set(hostId, run);
-    }
-    return run;
+  const revokeCounts = new Map<string, number>();
+  const deletionsInFlight = new Map<string, { revokeCount: number; run: Promise<boolean> }>();
+  const deletionConfirmations: Array<{ hostId: string; revokeCount: number; settle(confirmed: boolean): void }> = [];
+  let confirming = false;
+  let storeDeletions = 0;
+  const storeDeletionWaiters: Array<() => void> = [];
+  let deletionRoundRunning = false;
+  let deletionPassRequested = false;
+  async function withStoreDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
+    while (storeDeletions >= JOURNAL_DELETION_CONCURRENCY) await new Promise<void>(resolve => storeDeletionWaiters.push(resolve));
+    storeDeletions += 1;
+    try { return await operation(); } finally { storeDeletions -= 1; storeDeletionWaiters.shift()?.(); }
   }
-  /** Removes the ids whose journals the store confirmed deleted from the pending list, in one commit. Never rejects. */
-  async function confirmDeletions(hostIds: string[]): Promise<void> {
+  /** Removes the confirmed ids that were not revoked again meanwhile from the pending list, one commit for everything queued. Never rejects. */
+  async function confirmQueuedDeletions(): Promise<void> {
+    if (confirming) return;
+    confirming = true;
     try {
-      await commit(draft => {
-        const confirmed = new Set(hostIds);
-        const pending = draft.journalDeletions ?? [];
-        if (!pending.some(id => confirmed.has(id))) return { value: undefined, unchanged: true, publish() {} };
-        const rest = pending.filter(id => !confirmed.has(id));
-        if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-        return { value: undefined, publish() { journalDeletions = rest; } };
-      });
-    } catch { for (const hostId of hostIds) options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
-  }
-  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
-  async function deleteJournals(hostId: string): Promise<void> {
-    if (await eraseJournals(hostId)) await confirmDeletions([hostId]);
+      while (deletionConfirmations.length > 0) {
+        const batch = deletionConfirmations.splice(0);
+        let removed = new Set<string>();
+        try {
+          await commit(draft => {
+            const pending = draft.journalDeletions ?? [];
+            const current = new Set(batch.filter(item => (revokeCounts.get(item.hostId) ?? 0) === item.revokeCount && pending.includes(item.hostId)).map(item => item.hostId));
+            if (current.size === 0) return { value: undefined, unchanged: true, publish() {} };
+            const rest = pending.filter(id => !current.has(id));
+            if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+            return { value: undefined, publish() { journalDeletions = rest; removed = current; for (const id of current) revokeCounts.delete(id); } };
+          });
+        } catch { for (const item of batch) options.diagnostics?.record(item.hostId, { event: 'journal_store_failed' }); }
+        for (const item of batch) item.settle(removed.has(item.hostId));
+      }
+    } finally { confirming = false; }
   }
   /**
-   * Deletes the journals of every revoked Host the state still lists, until none is left that this round has not tried, so
-   * a Host revoked while a round is going is not left for the next start. Hosts are deleted a few at a time, and the ids a
-   * group's store calls confirm are removed from the state together, so a long list costs a few commits, not one per Host. Never rejects.
+   * Deletes one revoked Host's journals and removes its id from the state once the store confirms. Resolves true when the id is
+   * no longer pending, false when the store failed or the Host was revoked again meanwhile. Never rejects.
    */
-  async function finishJournalDeletions(): Promise<void> {
-    const tried = new Set<string>();
-    for (;;) {
-      const batch = journalDeletions.filter(id => !tried.has(id)).slice(0, JOURNAL_DELETION_CONCURRENCY);
-      if (batch.length === 0) return;
-      for (const id of batch) tried.add(id);
-      const results = await Promise.all(batch.map(async id => (await eraseJournals(id)) ? id : undefined));
-      const confirmed = results.filter((id): id is string => id !== undefined);
-      if (confirmed.length > 0) await confirmDeletions(confirmed);
-    }
+  function deleteJournals(hostId: string): Promise<boolean> {
+    const service = journals;
+    if (!service) return Promise.resolve(false);
+    const revokeCount = revokeCounts.get(hostId) ?? 0;
+    const existing = deletionsInFlight.get(hostId);
+    // A deletion that started before the Host was revoked again cannot clear the new revoke: it is waited for, then run afresh.
+    if (existing) return existing.revokeCount === revokeCount ? existing.run : existing.run.then(() => deleteJournals(hostId));
+    const run = (async () => {
+      try { await withStoreDeletionSlot(() => service.deleteHost(hostId)); }
+      catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
+      const confirmed = new Promise<boolean>(settle => deletionConfirmations.push({ hostId, revokeCount, settle }));
+      void confirmQueuedDeletions();
+      return confirmed;
+    })().finally(() => { deletionsInFlight.delete(hostId); });
+    deletionsInFlight.set(hostId, { revokeCount, run });
+    return run;
+  }
+  /** Asks for a pass over the pending ids. Never rejects; does nothing but flag the pass when a round is already running. */
+  function finishJournalDeletions(): void {
+    deletionPassRequested = true;
+    if (deletionRoundRunning) return;
+    deletionRoundRunning = true;
+    void (async () => {
+      try {
+        while (deletionPassRequested) {
+          deletionPassRequested = false;
+          const tried = new Set<string>();
+          const worker = async () => {
+            for (;;) {
+              const hostId = journalDeletions.find(id => !tried.has(id));
+              if (hostId === undefined) return;
+              tried.add(hostId);
+              await deleteJournals(hostId);
+            }
+          };
+          await Promise.all(Array.from({ length: JOURNAL_DELETION_CONCURRENCY }, worker));
+        }
+      } finally { deletionRoundRunning = false; }
+    })();
   }
 ```
 
@@ -4430,7 +4471,7 @@ Expected: PASS. The landed `broker-journal-sessions.test.ts` runs against a Host
 - [ ] **Step 9: Run the whole hosted package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new). A follow-up review change (`fix(hosted): delete pending journals four at a time and confirm each batch in one commit`) raised the count to 906: deletions run four at a time and the ids a group confirms leave `journalDeletions` in one commit; the fixture's `connectController` takes `journal: false`.
+Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new). A follow-up review change (`fix(hosted): delete pending journals four at a time and confirm each batch in one commit`) raised the count to 906, and a second one to 914 (the final deletion design, below): one round per broker, four workers, each id confirmed as soon as its store deletion succeeds under its revoke count (kept in memory, bumped by every revoke; a confirmation of an older count leaves the id pending), confirmations that wait for a running commit share the next one, an in-flight deletion is shared by every ask until its confirmation is published, and at most four store deletions run at once. The fixture's `connectController` takes `journal: false`.
 
 - [ ] **Step 10: Run the Cloudflare codec test.**
 
@@ -4448,7 +4489,7 @@ git commit -m "feat(hosted): gate journal reads on a persisted per-provider swit
 
 ### Task 7: One journal service for the whole hosted Relay, on durable state
 
-> **Landed (`d4cf9e87`):** as written; the three new tests failed first (no `loadJournalIndex`, journals accepted without storage).
+> **Landed (`d4cf9e87`):** as written, with `gateway-journals.test.ts` proving one `createHostJournals` call for many accounts and that a given `journalService` reaches every account; the three new tests failed first (no `loadJournalIndex`, journals accepted without storage).
 
 **Files:**
 - Modify: `packages/agent-remote-hosted/src/gateway.ts`
@@ -4544,7 +4585,7 @@ git commit -m "feat(hosted): one journal service for every account of a Relay, o
 
 ### Task 8: Enable journals on the Node hosts
 
-> **Landed (`5cf72c5c`):** as written, plus a runner test (`scripts/local/runner.test.mjs`: `ARC_LOCAL_JOURNALS=1` passes `journals: true` to the server factory, otherwise nothing), and `packages/agent-remote-lab/compatibility.json` is committed with this task because the Lab suite's live-launcher and Codex tests read the manifest and fail while it is stale. The Lab suite: 2795 tests pass on Node 22; `pnpm test:cloudflare`: 219.
+> **Landed (`5cf72c5c`, reworked in the follow-up fix):** `createGatewayRelay.listen` opens the journal database, builds the journal service with `createHostJournals` and awaits `loadAllServed()` before `server.listen`, so nothing connects while the gate is unloaded; it passes the service as `journalService` and closes the database when loading fails, when the port is taken, when the Relay cannot be built, and on `close()`. `HostedRelay.loadJournalIndex()` stays for hosts that build the relay on a store. Tests in `devbox.test.ts` watch the database handles and the service load. The journal file of `pnpm local` is `<instance>/relay/relay/journals.sqlite`. Also: a runner test (`scripts/local/runner.test.mjs`: `ARC_LOCAL_JOURNALS=1` passes `journals: true` to the server factory, otherwise nothing), and `packages/agent-remote-lab/compatibility.json` is committed with this task because the Lab suite's live-launcher and Codex tests read the manifest and fail while it is stale. The Lab suite: 2795 tests pass on Node 22; `pnpm test:cloudflare`: 219.
 
 **Files:**
 - Modify: `packages/agent-remote-lab/src/server/gateway-relay.ts`
@@ -4756,7 +4797,7 @@ git commit -m "feat(lab): store Host journals in SQLite on the Node hosts when c
 
 ### Task 9: Document the configuration
 
-> **Landed (`df667708`):** as written; `pnpm lint:docs` passes and the manifest digest is unchanged by the documents.
+> **Landed (`df667708`, revised):** the switch is shown through `agent-remote-controller api PUT`, retries are described (start and Host registration; a full list drops the oldest id with a diagnostic), and the local path is `relay/relay/journals.sqlite`; `pnpm lint:docs` passes and the manifest digest is unchanged by the documents.
 
 **Files:**
 - Modify: `docs/self-hosted-deployment.md`
@@ -4858,7 +4899,7 @@ Expected: exit 0, state ready, running build commit equal to the checkout commit
 Check the layers and report each as the skill's report format asks:
 
 1. **Site and Controller.** `agent-remote-controller-dev host providers` shows the expected providers `enabled`; `status` shows `uplink registered`. The development Controller does not request journals yet, so it registers exactly as before.
-2. **Feature: the store.** `ls -l <State>/relay/journals.sqlite` exists, mode `-rw-------`. `pnpm local logs` shows no store error. This is the Node store opened by the real Relay process, including `loadJournalIndex` at startup.
+2. **Feature: the store.** `ls -l <State>/relay/relay/journals.sqlite` exists (the runner's state directory is `relay/` and the Devbox adds its own `relay/`), mode `-rw-------`. `pnpm local logs` shows no store error. This is the Node store opened by the real Relay process, including `loadJournalIndex` at startup.
 3. **Feature: the switch.** `agent-remote-controller-dev api GET /v1/remote/hosts` gives the Host id. Then `agent-remote-controller-dev api PUT /v1/remote/hosts/<id>/smart-reading --body '{"providerId":"codex","enabled":true}'` answers `{"providers":["codex"]}` (if the command line `api` does not accept `PUT`, use `pnpm --silent local api v1/remote/hosts/<id>/smart-reading --method PUT --data '{"providerId":"codex","enabled":true}'`, which signs in once). Read it back with `GET`. Restart with `ARC_LOCAL_JOURNALS=1 pnpm local up --no-build` and read it again: it must survive. Turn it off again with `enabled:false` and read `{"providers":[]}`.
 4. **Model turn: the crude path is unchanged with journals on.** Create a session in the instance workspace and read a real reply, as `references/test-loop.md` describes: `agent-remote-controller-dev session create --provider claude --message "Reply with the single word ready."`, then `session read <address> --limit 2`. With smart reading on for the provider and no journal head, the session must still answer through the Controller. Release any Codex session you created (`session release <address>`).
 5. **Page.** Not exercised; nothing in this plan changes the page. Say so.

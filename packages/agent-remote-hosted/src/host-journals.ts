@@ -3,7 +3,7 @@ import {
   JournalStaleRevisionError, JournalUnknownItemError, SessionJournal, utf8ByteLength,
   type JournalHead, type JournalIndexEntry, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
-import { JOURNAL_INDEX_MAX_ITEMS, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { JOURNAL_INDEX_MAX_ITEMS, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
 import { JournalHeadIndex } from './journal-head-index.js';
 
@@ -55,6 +55,12 @@ export interface JournalOpenOptions {
    * guarantees that nothing is announced to a gone connection, not that nothing is claimed.
    */
   allowed?(): boolean;
+  /**
+   * Claims the journal without listing its index, whatever its size: the answer has an empty index, the head is cleared, and
+   * the journal is incomplete, so it accepts a replacement before anything else, the head included. This is the way out of an
+   * index over `maxIndexItems`, which a normal open refuses.
+   */
+  reset?: boolean;
 }
 
 /** What a reader asks of the journal in the same step as a fill, so no publication comes between the fill and the page. */
@@ -72,6 +78,8 @@ export interface JournalOpened {
   index: JournalIndexEntry[];
   /** Whether the index has entries beyond `index`. */
   more: boolean;
+  /** A reset took a served session out of serving: its head was cleared and the head index forgot the session. */
+  unserved?: true;
 }
 
 /** The journal could not be opened, and no generation was claimed. */
@@ -94,7 +102,11 @@ export type JournalLiveEvent =
   /** A replacement started a new epoch. */
   | { kind: 'replaced'; epoch: string }
   /** A head that was not already applied. */
-  | { kind: 'head'; head: JournalHead };
+  | { kind: 'head'; head: JournalHead }
+  /** A resource binding was replaced in place; clients find the item by its epoch and sequence. */
+  | { kind: 'rebound'; epoch: string; seq: number; previous: ResourceBinding; replacement: ResourceBinding }
+  /** A background outcome was applied in place to the items of that background. */
+  | { kind: 'outcome'; providerId: string; turnId?: string; background: BackgroundActivity; occurredAt: number };
 
 /** The journal's cursor, and its head once the Controller has published one. */
 export interface JournalStatus {
@@ -173,6 +185,13 @@ export interface HostJournals {
    * read through the Controller instead of looping. A later publication that sets a head serves it again.
    */
   unserve(hostId: string, sessionKey: string): void;
+  /**
+   * The Controller of generation `generation` can no longer keep the session's journal current: clears the head, stores that,
+   * and forgets the session in the head index, so it is read through the Controller until a later publication sets a head.
+   * Undefined when the session has no journal, `generation` is not the publisher's, or the session must be opened again.
+   * `unserved` is set only when a head was cleared.
+   */
+  unserveHead(hostId: string, sessionKey: string, generation: number): Promise<JournalPublished | undefined>;
   /** What the service behind the Host's journals can serve; the broker grants no more than `journal`. */
   capabilities(hostId: string): Promise<JournalCapabilities>;
   /** Deletes every journal of the Host; at most four Hosts are deleted at once across the service. */
@@ -187,7 +206,7 @@ class JournalQuotaRefused extends Error {
   }
 }
 
-/** A head published while the journal is missing rows: it is refused on its own, and the publisher is not fenced. */
+/** An entry other than a replacement published while the journal is missing rows: it is refused on its own, and the publisher is not fenced. */
 class JournalIncompleteRefused extends Error {
   constructor() {
     super('The journal is missing rows until a replacement rebuilds it.');
@@ -202,13 +221,6 @@ function wholeNumber(name: string, value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative whole number.`);
   return value;
 }
-
-/** The entries a grant 1 Controller sends: every item and correction is complete, and a head names no attention item. */
-type GrantOneEntry = Exclude<JournalPublishEntry, { op: 'rebind' | 'outcome' }> extends infer Entry
-  ? Entry extends { op: 'correct' } ? Entry & { digest: string }
-    : Entry extends { op: 'replace' | 'prepend' } ? Omit<Entry, 'items'> & { items: CompleteItemInput[] }
-    : Entry
-  : never;
 
 type Cached = { hostId: string; sessionKey: string; journal: SessionJournal; bytes: number };
 /** Where a journal's retained window began after its last eviction, in the epoch it was measured in. */
@@ -359,18 +371,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     return !host || host.total - (host.sessions.get(sessionKey) ?? 0) + size <= limits.hostBytes;
   }
 
-  /**
-   * A Controller holding grant 1 sends complete items only. Entries that need grant 2 (amendments, open items, attention
-   * item keys) are refused as invalid publications, so no journal ever holds what this Relay cannot serve.
-   */
-  function requireGrantOneEntry(entry: JournalPublishEntry): asserts entry is GrantOneEntry {
-    const needsGrantTwo = entry.op === 'rebind' || entry.op === 'outcome'
-      || (entry.op === 'correct' && entry.digest === undefined)
-      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
-      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined);
-    if (needsGrantTwo) throw new JournalInvalidPublicationError(entry.sequence);
-  }
-
   /** Evicts bodies, from the larger window to none, until the journal is within `target` or nothing more can go. */
   function shrink(journal: SessionJournal, target: number): number {
     let size = journal.residentBytes();
@@ -394,13 +394,12 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
    * carries over, without evicting first; the other entries evict bodies to make room before they are refused. An entry
    * larger than the room is refused before anything is evicted. The size is measured once and then counted up by the entries.
    */
-  function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: GrantOneEntry) => void {
+  function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: JournalPublishEntry) => void {
     let size: number | undefined;
     return entry => {
-      if (entry.op === 'head') {
-        if (journal.incomplete) throw new JournalIncompleteRefused();
-        return;
-      }
+      // A journal that is missing rows takes a replacement before anything else, the head included.
+      if (entry.op !== 'replace' && journal.incomplete) throw new JournalIncompleteRefused();
+      if (entry.op === 'head') return;
       if (entry.op === 'replace') {
         const carried = journal.carriedOnReplace(entry.items);
         if (entry.items.length + carried.count > limits.sessionItems) throw new JournalQuotaRefused('items');
@@ -410,7 +409,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         size = undefined;
         return;
       }
-      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend') return;
+      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend' && entry.op !== 'rebind') return;
       const itemsAfter = entry.op === 'append' ? journal.itemCount + (journal.has(entry.row.itemKey) ? 0 : 1)
         : entry.op === 'prepend' ? journal.itemCount + entry.items.length : journal.itemCount;
       if (itemsAfter > limits.sessionItems) throw new JournalQuotaRefused('items');
@@ -433,7 +432,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     windows.set(journal, { epoch: journal.epoch, start });
   }
 
-  function apply(journal: SessionJournal, publication: JournalPublication, entry: GrantOneEntry, published: JournalPublished): void {
+  function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
     switch (entry.op) {
       case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row }); break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
@@ -447,6 +446,16 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         break;
       }
       case 'prepend': journal.prepend(publication, entry.items); break;
+      case 'rebind': {
+        const at = journal.rebind(publication, entry.itemKey, entry.previous, entry.replacement);
+        if (at) published.events.push({ kind: 'rebound', ...at, previous: entry.previous, replacement: entry.replacement });
+        break;
+      }
+      case 'outcome':
+        if (journal.outcome(publication, entry.background)) {
+          published.events.push({ kind: 'outcome', providerId: entry.providerId, ...(entry.turnId === undefined ? {} : { turnId: entry.turnId }), background: entry.background, occurredAt: entry.occurredAt });
+        }
+        break;
       case 'head': {
         const before = journal.publisher?.watermark;
         journal.setHead(publication, entry.head);
@@ -487,6 +496,19 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         return { refused };
       };
       if (openOptions.allowed && !openOptions.allowed()) return refuse('unavailable');
+      if (openOptions.reset) {
+        const unserved = journal.hasHead;
+        if (unserved) journal.clearHead();
+        journal.markIncomplete();
+        const { generation, watermark } = journal.claim(publisherId);
+        const kept = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
+        needsReopen.delete(key);
+        account(hostId, sessionKey, kept);
+        remember(hostId, sessionKey, journal, kept);
+        if (unserved) { heads.remove(hostId, sessionKey); bump(hostId); }
+        trimCache(key);
+        return { generation, watermark, epoch: journal.epoch, index: [], more: false, ...(unserved ? { unserved: true as const } : {}) };
+      }
       const index = journal.index();
       if (index.length > openOptions.maxIndexItems) {
         if (!journal.hasHead) return refuse('index_too_large');
@@ -540,11 +562,11 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
           const current = journal.publisher;
           const fresh = current !== null && current.generation === generation && entry.sequence === current.watermark + 1;
           try {
-            requireGrantOneEntry(entry);
             if (fresh) admit(entry);
             apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);
             if (fresh) {
-              if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)) liveOnlyChanged = true;
+              if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)
+                || (entry.op === 'prepend' && entry.items.some(({ row: { liveOnly } }) => liveOnly === true))) liveOnlyChanged = true;
             }
           } catch (error) {
             const refusal = refusalOf(error, entry.sequence);
@@ -637,6 +659,32 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       heads.remove(hostId, sessionKey);
       bump(hostId);
     },
+
+    unserveHead: (hostId, sessionKey, generation) => serialized<JournalPublished | undefined>(hostId, async () => {
+      const key = storeKey(hostId, sessionKey);
+      if (needsReopen.has(key)) return undefined;
+      let journal: SessionJournal | undefined;
+      let cleared = false;
+      let bytes = 0;
+      try {
+        await loadHost(hostId);
+        journal = await load(hostId, sessionKey, false);
+        if (!journal || journal.publisher?.generation !== generation) return undefined;
+        cleared = journal.hasHead;
+        if (cleared) journal.clearHead();
+        bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
+      } catch (error) {
+        drop(key);
+        needsReopen.add(key);
+        throw error;
+      }
+      account(hostId, sessionKey, bytes);
+      remember(hostId, sessionKey, journal, bytes);
+      heads.remove(hostId, sessionKey);
+      bump(hostId);
+      trimCache(key);
+      return { events: [], watermark: journal.publisher?.watermark ?? 0, cursor: journal.cursor, hasHead: false, ...(cleared ? { unserved: true as const } : {}) };
+    }),
 
     async servedSessions(hostId) {
       await loadHost(hostId);

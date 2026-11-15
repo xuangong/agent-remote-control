@@ -459,5 +459,288 @@
       false
     ],
     "reply": null
+  },
+  {
+    "method": "open",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      "controller-1",
+      {
+        "maxIndexItems": 100,
+        "pageItems": 2
+      }
+    ],
+    "reply": {
+      "generation": 1,
+      "watermark": 0,
+      "epoch": "<epoch>",
+      "index": [],
+      "more": false
+    }
+  },
+  {
+    "method": "publish",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      1,
+      [
+        {
+          "sequence": 1,
+          "op": "append",
+          "row": {
+            "itemKey": "m2",
+            "providerId": "codex",
+            "sourceKey": "m2:1",
+            "occurredAt": 1725000000000,
+            "turnId": "turn-1",
+            "resources": [
+              {
+                "locator": "docs/plan.md",
+                "resourceId": "resource-1",
+                "status": "pending"
+              }
+            ],
+            "item": {
+              "type": "assistant_message",
+              "text": "Plan",
+              "messageId": "m2",
+              "background": {
+                "id": "review-1",
+                "kind": "review",
+                "status": "pending"
+              }
+            }
+          }
+        },
+        {
+          "sequence": 2,
+          "op": "rebind",
+          "itemKey": "m2",
+          "previous": {
+            "locator": "docs/plan.md",
+            "resourceId": "resource-1",
+            "status": "pending"
+          },
+          "replacement": {
+            "locator": "docs/plan.md",
+            "resourceId": "resource-2",
+            "status": "available"
+          }
+        },
+        {
+          "sequence": 3,
+          "op": "outcome",
+          "providerId": "codex",
+          "turnId": "turn-1",
+          "background": {
+            "id": "review-1",
+            "kind": "review",
+            "status": "visible"
+          },
+          "occurredAt": 1725000000500
+        },
+        {
+          "sequence": 4,
+          "op": "correct",
+          "row": {
+            "itemKey": "m2",
+            "providerId": "codex",
+            "sourceKey": "m2:1",
+            "occurredAt": 1725000000000,
+            "turnId": "turn-1",
+            "resources": [
+              {
+                "locator": "docs/plan.md",
+                "resourceId": "resource-1",
+                "status": "pending"
+              }
+            ],
+            "item": {
+              "type": "assistant_message",
+              "text": "Plan, in full",
+              "messageId": "m2",
+              "background": {
+                "id": "review-1",
+                "kind": "review",
+                "status": "pending"
+              }
+            }
+          },
+          "expectedRevision": 1
+        },
+        {
+          "sequence": 5,
+          "op": "head",
+          "head": {
+            "snapshot": {
+              "id": "session-1",
+              "providerId": "codex",
+              "createdAt": "2026-11-15T00:00:00.000Z",
+              "updatedAt": "2026-11-15T00:00:01.000Z",
+              "status": "idle",
+              "activeTurn": null,
+              "capabilities": {
+                "history": true,
+                "sendMessage": true,
+                "steer": true,
+                "cancel": true,
+                "readResource": true,
+                "interactions": {
+                  "question": true,
+                  "planApproval": true,
+                  "toolApproval": true
+                }
+              },
+              "pendingInteractions": [],
+              "runtimeInfo": {
+                "providerId": "codex",
+                "sessionId": "session-1",
+                "status": "idle"
+              }
+            },
+            "observedAt": 5,
+            "attentionItemKey": "m2"
+          }
+        }
+      ]
+    ],
+    "reply": {
+      "events": [
+        {
+          "kind": "row",
+          "row": {
+            "epoch": "<epoch>",
+            "seq": 1,
+            "itemKey": "m2",
+            "providerId": "codex",
+            "sourceKey": "m2:1",
+            "occurredAt": 1725000000000,
+            "timestamp": "2024-08-30T06:40:00.000Z",
+            "turnId": "turn-1",
+            "item": {
+              "type": "assistant_message",
+              "text": "Plan",
+              "messageId": "m2",
+              "background": {
+                "id": "review-1",
+                "kind": "review",
+                "status": "pending"
+              }
+            },
+            "resources": [
+              {
+                "locator": "docs/plan.md",
+                "resourceId": "resource-1",
+                "status": "pending"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "rebound",
+          "epoch": "<epoch>",
+          "seq": 1,
+          "previous": {
+            "locator": "docs/plan.md",
+            "resourceId": "resource-1",
+            "status": "pending"
+          },
+          "replacement": {
+            "locator": "docs/plan.md",
+            "resourceId": "resource-2",
+            "status": "available"
+          }
+        },
+        {
+          "kind": "outcome",
+          "providerId": "codex",
+          "turnId": "turn-1",
+          "background": {
+            "id": "review-1",
+            "kind": "review",
+            "status": "visible"
+          },
+          "occurredAt": 1725000000500
+        },
+        {
+          "kind": "head",
+          "head": {
+            "snapshot": {
+              "id": "session-1",
+              "providerId": "codex",
+              "createdAt": "2026-11-15T00:00:00.000Z",
+              "updatedAt": "2026-11-15T00:00:01.000Z",
+              "status": "idle",
+              "activeTurn": null,
+              "capabilities": {
+                "history": true,
+                "sendMessage": true,
+                "steer": true,
+                "cancel": true,
+                "readResource": true,
+                "interactions": {
+                  "question": true,
+                  "planApproval": true,
+                  "toolApproval": true
+                }
+              },
+              "pendingInteractions": [],
+              "runtimeInfo": {
+                "providerId": "codex",
+                "sessionId": "session-1",
+                "status": "idle"
+              }
+            },
+            "observedAt": 5
+          }
+        }
+      ],
+      "watermark": 5,
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 2
+      },
+      "hasHead": true
+    }
+  },
+  {
+    "method": "unserveHead",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      1
+    ],
+    "reply": {
+      "events": [],
+      "watermark": 5,
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 2
+      },
+      "hasHead": false,
+      "unserved": true
+    }
+  },
+  {
+    "method": "open",
+    "args": [
+      "host-1",
+      "codex:thread-2",
+      "controller-1",
+      {
+        "maxIndexItems": 100,
+        "pageItems": 2,
+        "reset": true
+      }
+    ],
+    "reply": {
+      "generation": 1,
+      "watermark": 0,
+      "epoch": "<epoch>",
+      "index": [],
+      "more": false
+    }
   }
 ]

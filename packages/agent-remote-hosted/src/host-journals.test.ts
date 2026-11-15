@@ -91,25 +91,6 @@ describe('createHostJournals', () => {
     expect(await refusal(complete(9, 'm1'))).toEqual({ sequence: 9, reason: 'sequence_gap' });
   });
 
-  it('refuses entries that need a later journal grant and keeps the journal as it was', async () => {
-    const { journals } = fixture();
-    await openSession(journals, HOST, SESSION, 'controller-1');
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), complete(2, 'm1')]);
-    const binding = { locator: 'docs/plan.md', resourceId: 'resource-1', status: 'pending' as const };
-    const needsGrantTwo: JournalPublishEntry[] = [
-      { sequence: 3, op: 'rebind', itemKey: 'm1', previous: binding, replacement: { ...binding, status: 'available' } },
-      { sequence: 3, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 },
-      { sequence: 3, op: 'correct', row: row('m1', 'Hello!'), expectedRevision: 2 },
-      { sequence: 3, op: 'replace', items: [{ row: row('m1', 'Hello!') }] },
-      { sequence: 3, op: 'head', head: { snapshot, observedAt: 1, attentionItemKey: 'm1' } },
-    ];
-    for (const entry of needsGrantTwo) {
-      const published = await journals.publish(HOST, SESSION, 1, [entry]);
-      expect(published.refusal).toEqual({ sequence: 3, reason: 'invalid' });
-      expect(published.watermark).toBe(2);
-    }
-  });
-
   it('refuses an operation it does not know instead of skipping it, and the watermark stays before it', async () => {
     const { journals } = fixture();
     await openSession(journals, HOST, SESSION, 'controller-1');

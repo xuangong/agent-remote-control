@@ -203,3 +203,14 @@ test('reports its capabilities through Durable Object RPC', async () => {
   const f = await fixture({ journals: {} });
   expect(await call(f, 'host-1', 'capabilities', 'host-1')).toEqual({ journal: 2 });
 }, 60_000);
+
+test('takes a session out of serving at the Controller\'s word, in the object that holds its journal', async () => {
+  const f = await fixture({ journals: {} });
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
+  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
+  expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 7)).toBeNull();
+  expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 1)).toMatchObject({ unserved: true, hasHead: false, watermark: 2 });
+  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { ...LIMITS, reset: true })).toMatchObject({ generation: 2, index: [], more: false });
+}, 60_000);

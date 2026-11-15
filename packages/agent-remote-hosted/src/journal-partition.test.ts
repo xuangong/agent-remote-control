@@ -29,7 +29,7 @@ const head = (sequence: number): JournalPublishEntry => ({ sequence, op: 'head',
 function overRpc(api: JournalPartitionApi): JournalPartitionApi {
   const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
   return {
-    open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status),
+    open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status), unserveHead: wrap(api.unserveHead),
     servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost), capabilities: wrap(api.capabilities),
   };
 }
@@ -216,6 +216,23 @@ describe('the journals of primary over journal partitions', () => {
     expect(journals.served(HOST, SESSION)).toBe(false);
   });
 
+  it('takes the session out of serving at the Controller\'s word and when a reset open clears its head', async () => {
+    const { journals } = cluster();
+    await journals.servedSessions(HOST);
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(await journals.unserveHead(HOST, SESSION, 7)).toBeUndefined();
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(await journals.unserveHead(HOST, SESSION, 1)).toMatchObject({ unserved: true, hasHead: false });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    await journals.publish(HOST, SESSION, 1, [head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    const reset = await journals.open(HOST, SESSION, 'controller-1', { ...LIMITS, reset: true }) as JournalOpened;
+    expect(reset).toMatchObject({ generation: 2, index: [], more: false, unserved: true });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+  });
+
   it('fills bodies and reads the page in one step, asking olderBeyondJournal in the Host queue and sending only plain data', async () => {
     const { journals } = cluster({ retention: { turns: 1, minItems: 1 } });
     await journals.open(HOST, SESSION, 'controller-1', LIMITS);
@@ -322,7 +339,7 @@ describe('the partition contract across a rollout', () => {
   it('answers every recorded call with the recorded reply shape, so a change to an argument or a result fails here', async () => {
     const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 })));
     const methods = new Set(steps.map(step => step.method));
-    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'indexPage', 'open', 'page', 'publish', 'servedSessions', 'status']);
+    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'indexPage', 'open', 'page', 'publish', 'servedSessions', 'status', 'unserveHead']);
     let epoch = '';
     for (const step of steps) {
       const args = step.args.map(arg => (arg === '<epoch>' ? epoch : arg === null ? undefined : arg));

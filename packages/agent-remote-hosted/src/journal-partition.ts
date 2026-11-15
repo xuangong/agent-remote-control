@@ -27,13 +27,15 @@ export interface JournalPartitionRead {
  * such method is a version-1 partition. `journal-partition.contract.json` records the calls and replies of every method.
  */
 export interface JournalPartitionApi {
-  open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
+  open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number; reset?: true }): Promise<JournalOpened | JournalOpenRefusal>;
   indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
   publish(hostId: string, sessionKey: string, generation: number, entries: JournalPublishEntry[]): Promise<JournalPublished>;
   /** Fills bodies. With `read`, the page comes back in the same reply and was read in the same step as the fill. */
   fill(hostId: string, sessionKey: string, items: CompleteItemInput[], read?: JournalPartitionRead): Promise<JournalFilled>;
   page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
   status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
+  /** The Controller of `generation` can no longer keep the session's journal current: clears its head. A partition that reports `journal: 2` has this method. */
+  unserveHead(hostId: string, sessionKey: string, generation: number): Promise<JournalPublished | undefined>;
   /** The Host's sessions that have a head. */
   servedSessions(hostId: string): Promise<string[]>;
   deleteHost(hostId: string): Promise<void>;
@@ -92,6 +94,7 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
       }
     },
     status: (hostId, sessionKey) => journals.status(hostId, sessionKey),
+    unserveHead: (hostId, sessionKey, generation) => journals.unserveHead(hostId, sessionKey, generation),
     servedSessions: hostId => journals.servedSessions(hostId),
     deleteHost: hostId => journals.deleteHost(hostId),
     capabilities: hostId => journals.capabilities(hostId),
@@ -160,10 +163,10 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   }
 
   return {
-    open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
+    open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems, reset }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       if (allowed && !allowed()) return { refused: 'unavailable' };
-      const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems });
-      if ('refused' in opened && opened.unserved) {
+      const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems, ...(reset ? { reset: true as const } : {}) });
+      if (opened.unserved) {
         heads.remove(hostId, sessionKey);
         bump(hostId);
       }
@@ -194,6 +197,15 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     page: (hostId, sessionKey, request, olderBeyondJournal) => serialized(hostId, () => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal)),
 
     status: (hostId, sessionKey) => serialized(hostId, () => partition(hostId).status(hostId, sessionKey)),
+
+    unserveHead: (hostId, sessionKey, generation) => serialized<JournalPublished | undefined>(hostId, async () => {
+      const result = await partition(hostId).unserveHead(hostId, sessionKey, generation);
+      if (result) {
+        heads.remove(hostId, sessionKey);
+        bump(hostId);
+      }
+      return result;
+    }),
 
     async capabilities(hostId) {
       const known = capabilitiesOf.get(hostId);

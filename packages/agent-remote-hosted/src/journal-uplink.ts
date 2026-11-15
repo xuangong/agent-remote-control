@@ -14,14 +14,32 @@ export const JOURNAL_REQUEST_LIMIT = 32;
 export const JOURNAL_REQUEST_TIMEOUT_MS = 15_000;
 
 /** The journal messages a Host sends to its Relay. */
-export type JournalHostMessage = Extract<RemoteHostUplinkMessage, { type: 'journal_open' | 'journal_index_request' | 'journal_publish' | 'journal_fill' | 'journal_older_done' }>;
+export type JournalHostMessage = Extract<RemoteHostUplinkMessage,
+  { type: 'journal_open' | 'journal_index_request' | 'journal_publish' | 'journal_fill' | 'journal_older_done' | 'journal_unserve' | 'journal_request_refused' }>;
 
 export function isJournalHostMessage(message: RemoteHostUplinkMessage): message is JournalHostMessage {
-  return message.type === 'journal_open' || message.type === 'journal_index_request' || message.type === 'journal_publish' || message.type === 'journal_fill' || message.type === 'journal_older_done';
+  return message.type === 'journal_open' || message.type === 'journal_index_request' || message.type === 'journal_publish' || message.type === 'journal_fill' || message.type === 'journal_older_done'
+    || message.type === 'journal_unserve' || message.type === 'journal_request_refused';
+}
+
+/**
+ * Whether a message of a Controller needs the journal grant 2: unserving, request refusals, a reset open, amendments, open
+ * items and corrections (no digest), and a head that names an attention item. A Controller granted 1 never sends one.
+ */
+export function needsJournalGrantTwo(message: JournalHostMessage): boolean {
+  switch (message.type) {
+    case 'journal_unserve': case 'journal_request_refused': return true;
+    case 'journal_open': return message.reset === true;
+    case 'journal_publish': return message.entries.some(entry => entry.op === 'rebind' || entry.op === 'outcome'
+      || (entry.op === 'correct' && entry.digest === undefined)
+      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
+      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined));
+    default: return false;
+  }
 }
 
 export class JournalRequestError extends Error {
-  constructor(readonly code: 'invalid' | 'unavailable' | 'busy' | 'in_flight' | 'timeout' | 'closed', message: string) {
+  constructor(readonly code: 'invalid' | 'unavailable' | 'busy' | 'in_flight' | 'timeout' | 'closed' | 'refused', message: string) {
     super(message);
     this.name = 'JournalRequestError';
   }
@@ -40,8 +58,9 @@ export interface JournalConnectionOptions {
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
-   * fenced publication. It is also called, with no events, for an open the journal refused after taking the session out of
-   * serving (`unserved`), so the broker stops the session's journal-served streams for both. It must be synchronous: the connection does not wait for it. A failure is reported through
+   * fenced publication. It is also called, with no events, for an open that took the session out of serving (`unserved`: a
+   * refusal for an index that is too large, or a reset) and for an unserve the Controller asked for, so the broker stops the
+   * session's journal-served streams for all of them. It must be synchronous: the connection does not wait for it. A failure is reported through
    * `diagnostic` and changes nothing.
    */
   published?(sessionKey: string, result: JournalPublished): void;
@@ -130,9 +149,9 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
         case 'journal_open': {
           const { sessionKey, requestId } = message;
           const result = await journals.open(hostId, sessionKey, message.publisherId,
-            { maxIndexItems: JOURNAL_INDEX_MAX_ITEMS, pageItems: JOURNAL_INDEX_PAGE_MAX_ITEMS, allowed: () => options.current() });
-          if ('refused' in result && result.unserved) {
-            // The refusal took the session out of serving, as a quota refusal of a publication does: the broker is told the same way.
+            { maxIndexItems: JOURNAL_INDEX_MAX_ITEMS, pageItems: JOURNAL_INDEX_PAGE_MAX_ITEMS, allowed: () => options.current(), ...(message.reset ? { reset: true } : {}) });
+          if (result.unserved) {
+            // The open took the session out of serving, as a quota refusal of a publication does: the broker is told the same way.
             try { options.published?.(sessionKey, { events: [], watermark: 0, unserved: true }); }
             catch { options.diagnostic?.('journal_fanout_failed'); }
           }
@@ -215,6 +234,22 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           if (!found) return;
           settle(message.requestId, found);
           found.resolve({ olderAvailable: message.olderAvailable });
+          return;
+        }
+        case 'journal_unserve': {
+          const { sessionKey, generation } = message;
+          if (opened.get(sessionKey) !== generation) return;
+          const result = await journals.unserveHead(hostId, sessionKey, generation);
+          if (!result) return;
+          try { options.published?.(sessionKey, result); }
+          catch { options.diagnostic?.('journal_fanout_failed'); }
+          return;
+        }
+        case 'journal_request_refused': {
+          const found = pending.get(message.requestId);
+          if (!found || found.sessionKey !== message.sessionKey) return;
+          settle(message.requestId, found);
+          found.reject(new JournalRequestError('refused', `The Controller refused the journal ${found.kind} request: ${message.reason}.`));
           return;
         }
       }

@@ -39,7 +39,7 @@ import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, 
 import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FEATURE_BYTES } from './succession-capacity.js';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { createHostJournals, type HostJournals, type JournalReadRequest } from './host-journals.js';
-import { createJournalConnection, isJournalHostMessage, type JournalConnection } from './journal-uplink.js';
+import { createJournalConnection, isJournalHostMessage, needsJournalGrantTwo, type JournalConnection } from './journal-uplink.js';
 import { createHostStreamOpener, type HostStreamEntry } from './journal-host-stream.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
 
@@ -64,6 +64,8 @@ type Host = {
   smartReading?: string[];
   /** The Controller publishes session journals on this connection; set when the Relay acknowledges it, never persisted. */
   journal?: JournalConnection;
+  /** The journal level acknowledged to this Controller: 2 includes amendments, open items, unserving and request refusals. */
+  journalGrant?: 1 | 2;
   teamManagement?: true;
   teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
@@ -819,7 +821,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,wasClean,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false; host.sessionStates = undefined;
-    host.journal?.close(); host.journal = undefined;
+    host.journal?.close(); host.journal = undefined; host.journalGrant = undefined;
     notifySessionStates();
     for (const [requestId, pending] of host.pending) {
       clearTimeout(pending.timer);
@@ -836,7 +838,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested = false) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested: 0 | 1 | 2 = 0) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -872,6 +874,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { closeConnection(1012, 'Host heartbeat delivery failed'); }
     }
     let pendingDeletionHandled = false;
+    /** The journal level this connection is granted: 2 only for a Controller that asked for it of a service that supports it. Undefined until the service has said what it supports. */
+    let journalLevel: 0 | 1 | 2 | undefined = journals && journalRequested ? (journalRequested === 2 ? undefined : 1) : 0;
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       if (!pendingDeletionHandled && journals && journalRequested && journalDeletions.includes(host.id)) {
@@ -885,14 +889,20 @@ export function createHostBroker(options: HostBrokerOptions) {
         void deleteJournals(ownId).then(resume);
         return;
       }
+      if (journalLevel === undefined) {
+        const ownHost = host.id;
+        void journals!.capabilities(ownHost).then(capabilities => capabilities.journal, () => 1 as const).then(level => { journalLevel = level >= 2 ? 2 : 1; registered(); });
+        return;
+      }
       host.tunnelToken ??= randomBytes(32).toString('base64url');
       const journalHost = host;
-      host.journal ??= journalRequested && journals && !journalDeletions.includes(host.id)
+      if (!host.journal && journalLevel && journals && !journalDeletions.includes(host.id)) host.journalGrant = journalLevel;
+      host.journal ??= journalLevel && journals && !journalDeletions.includes(host.id)
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
           send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }),
           published: (sessionKey, result) => journalSessions?.published(journalHost.id, sessionKey, result) })
         : undefined;
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(host.journal ? { journal: 1 as const } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(host.journal ? { journal: host.journalGrant ?? 1 } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
       journalSessions?.hostReturned(host.id);
@@ -1077,6 +1087,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         notifySessionStates();
       } else if (isJournalHostMessage(message)) {
         if (!host.journal) return closeConnection(1008, 'Journals were not acknowledged');
+        if (host.journalGrant !== 2 && needsJournalGrantTwo(message)) return closeConnection(1008, 'Journal grant 2 was not acknowledged');
         try { await host.journal.receive(message); }
         catch (error) { if (!(error instanceof BrokerError)) diagnostic(host, { event: 'journal_store_failed' }); throw error; }
       } else closeConnection(1008, 'Unexpected uplink message');
@@ -2233,7 +2244,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === '1');
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === '2' ? 2 : url.searchParams.get('journal') === '1' ? 1 : 0);
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

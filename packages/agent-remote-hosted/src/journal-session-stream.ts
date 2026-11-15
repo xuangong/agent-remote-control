@@ -1,7 +1,7 @@
 import type { JournalHead, JournalPageRequest, JournalPageResult, JournalRow } from '@orchardworks/agent-remote-journal';
 import {
   decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE,
-  type AgentSnapshotPayload, type AgentStatus, type ClientMessage, type HistoryPage, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
+  type AgentSnapshotPayload, type AgentStatus, type BackgroundActivity, type ClientMessage, type HistoryPage, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublished, JournalStatus } from './host-journals.js';
@@ -18,6 +18,11 @@ const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
 const CLOSE_REASON_MAX_BYTES = 123;
 const ACTIVITY_COALESCE_MS = 500;
+/** How long an interaction frame of the Controller waits for the head to agree with it. */
+const INTERACTION_HOLD_MS = 2000;
+/** How many interaction frames wait at once; past it the oldest is sent without waiting. */
+const INTERACTION_PARKED_MAX = 64;
+const INTERACTION_FRAMES = new Set(['interaction_requested', 'interaction_resolved', 'interaction_invalidated']);
 const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
 /** Frames of the Controller session that the journal answers instead; they never reach the browser. */
@@ -126,6 +131,10 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   let waitingForHost = false;
   /** The control revision of the Controller session, once it has reported one. */
   let controlRevision: string | undefined;
+  /** The head the browser was last sent: the pending interactions it shows are what the browser's reducer takes from it. */
+  let servedHead: JournalHead | undefined;
+  /** Interaction frames of the Controller that wait for the served head to agree, in the order they arrived. */
+  const parkedInteractions: Array<{ raw: string; requestId: string; present: boolean; expired: boolean; timer: unknown }> = [];
   /** Messages for the Controller stream that wait for it to open. */
   const held: Array<{ raw: string; bytes: number; requestId?: string }> = [];
   /** Requests to acquire control that name the pending revision and wait for the Controller's own. */
@@ -183,6 +192,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     held.length = 0;
     heldControl.length = 0;
     queued.length = 0;
+    for (const item of parkedInteractions.splice(0)) scheduler.clearTimeout(item.timer);
     if (code !== undefined) closeClient(code, reason);
   }
 
@@ -197,6 +207,49 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   const snapshotMessage = (type: 'agent_snapshot' | 'agent_update', head: JournalHead): ServerMessage => type === 'agent_snapshot'
     ? { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: snapshotPayload(head) }
     : { protocolVersion: PROTOCOL_VERSION, type: 'agent_update', payload: snapshotPayload(head) };
+
+  /** Sends the head and then the interaction frames that were waiting for it. */
+  function sendHead(type: 'agent_snapshot' | 'agent_update', head: JournalHead): void {
+    sendServer(snapshotMessage(type, head));
+    servedHead = head;
+    releaseInteractionFrames();
+  }
+
+  const headAgrees = (item: { requestId: string; present: boolean }): boolean =>
+    servedHead === undefined || servedHead.snapshot.pendingInteractions.some(({ requestId }) => requestId === item.requestId) === item.present;
+
+  /** Sends the waiting frames from the front while the head agrees with them or they waited long enough. */
+  function releaseInteractionFrames(): void {
+    while (parkedInteractions.length > 0) {
+      const next = parkedInteractions[0]!;
+      if (!next.expired && !headAgrees(next)) return;
+      parkedInteractions.shift();
+      scheduler.clearTimeout(next.timer);
+      sendRaw(next.raw);
+    }
+  }
+
+  /** A frame that says a question was asked waits for a head that lists it; one that says it ended waits for a head that does not. */
+  function holdInteractionFrame(raw: string, type: string, payload: { requestId?: unknown; request?: { requestId?: unknown } } | undefined): void {
+    const requestId = type === 'interaction_requested' ? payload?.request?.requestId : payload?.requestId;
+    if (typeof requestId !== 'string') { sendRaw(raw); return; }
+    const item = { raw, requestId, present: type === 'interaction_requested', expired: false, timer: undefined as unknown };
+    if (parkedInteractions.length === 0 && headAgrees(item)) { sendRaw(raw); return; }
+    if (parkedInteractions.length >= INTERACTION_PARKED_MAX) {
+      const oldest = parkedInteractions.shift()!;
+      scheduler.clearTimeout(oldest.timer);
+      sendRaw(oldest.raw);
+    }
+    item.timer = scheduler.setTimeout(() => { item.expired = true; releaseInteractionFrames(); }, INTERACTION_HOLD_MS);
+    parkedInteractions.push(item);
+  }
+
+  /** The frame the session wire sends for a background outcome: an `agent_stream` event with no place in the timeline. */
+  const outcomeFrame = (outcome: { providerId: string; turnId?: string; background: BackgroundActivity; occurredAt: number }): ServerMessage => ({
+    protocolVersion: PROTOCOL_VERSION, type: 'agent_stream',
+    payload: { agentId: publicAgentId, timestamp: new Date(outcome.occurredAt).toISOString(),
+      event: { type: 'background_activity_updated', providerId: outcome.providerId, ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }), background: outcome.background } },
+  });
 
   const streamFrame = (row: JournalRow): ServerMessage => ({
     protocolVersion: PROTOCOL_VERSION, type: 'agent_stream',
@@ -252,7 +305,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (isPhase('closed')) return;
     if (!status?.head) { reads.noHead?.(); shutdown(1012, 'Session journal unavailable'); return; }
     if (activityOnly) observe(status.head.snapshot, status.cursor);
-    else sendServer(snapshotMessage('agent_update', status.head));
+    else sendHead('agent_update', status.head);
   }
 
   function readFailure(): void {
@@ -268,7 +321,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (activityOnly) {
       observe(status.head.snapshot, status.cursor);
     } else {
-      sendServer(snapshotMessage('agent_snapshot', status.head));
+      sendHead('agent_snapshot', status.head);
       sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false } });
     }
     if (!isPhase('negotiating')) return;
@@ -346,10 +399,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
 
   /** A frame from the Controller session: the read path belongs to the journal, the rest goes to the browser. */
   function hostFrame(raw: string): void {
-    let parsed: { type?: unknown; payload?: { revision?: unknown } } | undefined;
+    let parsed: { type?: unknown; payload?: { revision?: unknown; requestId?: unknown; request?: { requestId?: unknown } } } | undefined;
     try { parsed = JSON.parse(raw); } catch { return; }
     const type = parsed?.type;
     if (typeof type !== 'string' || READ_PATH_FRAMES.has(type)) return;
+    if (INTERACTION_FRAMES.has(type)) { holdInteractionFrame(raw, type, parsed?.payload); return; }
     sendRaw(raw);
     if (type === 'session_control' && typeof parsed?.payload?.revision === 'string') {
       controlRevision = parsed.payload.revision;
@@ -483,10 +537,26 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       return;
     }
     for (const event of result.events) {
-      if (event.kind === 'head') { sendServer(snapshotMessage('agent_update', event.head)); continue; }
-      if (!subscribed) continue;
-      sendServer(event.kind === 'row' ? streamFrame(event.row)
-        : { protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: publicAgentId, epoch: event.epoch } });
+      switch (event.kind) {
+        case 'head':
+          sendHead('agent_update', event.head);
+          break;
+        case 'row':
+          if (subscribed) sendServer(streamFrame(event.row));
+          break;
+        case 'replaced':
+          if (subscribed) sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: publicAgentId, epoch: event.epoch } });
+          break;
+        case 'rebound':
+          if (subscribed) {
+            sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_resource_binding_replaced',
+              payload: { agentId: publicAgentId, epoch: event.epoch, seq: event.seq, previous: event.previous, replacement: event.replacement } });
+          }
+          break;
+        case 'outcome':
+          sendServer(outcomeFrame(event));
+          break;
+      }
     }
   }
 

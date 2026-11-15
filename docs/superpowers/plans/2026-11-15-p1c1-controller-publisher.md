@@ -523,8 +523,7 @@ git commit -m "feat(protocol): publish amendments and open items through the jou
 import type { AgentSnapshotPayload, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { expectNoChange, openJournal, PUBLISHER, text } from './journal.test-fixture.js';
-import { JournalFencedError } from './types.js';
+import { openJournal, text } from './journal.test-fixture.js';
 
 const DIGEST = 'a'.repeat(64);
 const pending: ResourceBinding = { locator: 'docs/plan.md', resourceId: 'resource-1', status: 'pending' };
@@ -1107,7 +1106,7 @@ import { mergeBackgroundActivity, type AgentTimelineItem, type BackgroundActivit
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal exec vitest run src/journal-amendments.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-journal run test` then `pnpm --filter @orchardworks/agent-remote-journal run typecheck` then `pnpm --filter @orchardworks/agent-remote-journal run build`
-Expected: PASS for all. Rebuild the package so `agent-remote-hosted` and `agent-host` see the new methods.
+Expected: PASS for all (the package has 195 tests). Rebuild the package so `agent-remote-hosted` and `agent-host` see the new methods.
 
 - [ ] **Step 5: Commit.**
 
@@ -1130,7 +1129,11 @@ Jobs in `agent-remote-hosted`:
 - Modify: `packages/agent-remote-hosted/src/journal-uplink.ts`
 - Modify: `packages/agent-remote-hosted/src/journal-session-stream.ts`
 - Modify: `packages/agent-remote-hosted/src/broker.ts`
+- Modify: `packages/agent-remote-hosted/src/journal-partition.ts`, `journal-partition.contract.json` and `journal-partition.test.ts` (the partition carries `reset` and `unserveHead`; the recorded contract only gains steps)
+- Modify: `packages/agent-remote-hosted/src/host-journals.test.ts` (the test of the removed grant-1 guard goes)
+- Modify: `packages/agent-remote-cloudflare/src/journal-partition.ts` and `test/journal-partition.test.ts` (the Durable Object exposes `unserveHead`)
 - Create: `packages/agent-remote-hosted/src/host-journals-amendments.test.ts`
+- Create: `packages/agent-remote-hosted/src/host-journals-reset-open.test.ts`
 - Create: `packages/agent-remote-hosted/src/journal-uplink-controller-messages.test.ts`
 - Create: `packages/agent-remote-hosted/src/journal-session-stream-amendments.test.ts`
 - Create: `packages/agent-remote-hosted/src/broker-journal-grant.test.ts`
@@ -1394,10 +1397,12 @@ Expected: FAIL (the service ignores the new operations, `unserveHead` does not e
   /** A head that was not already applied. */
   | { kind: 'head'; head: JournalHead }
   /** A resource binding was replaced in place; clients find the item by its epoch and sequence. */
-  | { kind: 'rebound'; epoch: string; seq: number; previous: import('@orchardworks/agent-remote-protocol').ResourceBinding; replacement: import('@orchardworks/agent-remote-protocol').ResourceBinding }
+  | { kind: 'rebound'; epoch: string; seq: number; previous: ResourceBinding; replacement: ResourceBinding }
   /** A background outcome was applied in place to the items of that background. */
-  | { kind: 'outcome'; providerId: string; turnId?: string; background: import('@orchardworks/agent-remote-protocol').BackgroundActivity; occurredAt: number };
+  | { kind: 'outcome'; providerId: string; turnId?: string; background: BackgroundActivity; occurredAt: number };
 ```
+
+with the types imported next to the other protocol types (`BackgroundActivity`, `ResourceBinding`).
 
 and apply the entries:
 
@@ -1633,7 +1638,9 @@ type GrantOneEntry = Exclude<JournalPublishEntry, { op: 'rebind' | 'outcome' }> 
             if (fresh) admit(entry);
 ```
 
-`admission` and `apply` take `JournalPublishEntry` again, and `CompleteItemInput` is imported only if the fill path still uses it. The grant is enforced per connection in the broker (Step 11), where a violation closes the connection instead of refusing entries one by one.
+`admission` and `apply` take `JournalPublishEntry` again (`CompleteItemInput` stays imported for the fill path). The grant is enforced per connection in the broker (Step 11), where a violation closes the connection instead of refusing entries one by one. The landed `host-journals.test.ts` has a test of the removed guard ("refuses entries that need a later journal grant"); delete it, since the broker test below covers the same entries at the connection.
+
+The journal partition is the other implementation of `HostJournals`, so it carries the two new service calls. In `packages/agent-remote-hosted/src/journal-partition.ts`, `JournalPartitionApi.open` takes `options: { maxIndexItems: number; pageItems: number; reset?: true }`, the interface gains `unserveHead(hostId, sessionKey, generation): Promise<JournalPublished | undefined>`, `serveJournalPartition` forwards it, and `createPartitionJournals` passes `reset` when it is set, forgets the session in its head index for any open that reports `unserved` (a reset included) and for an `unserveHead` that found a journal. `packages/agent-remote-cloudflare/src/journal-partition.ts` exposes `unserveHead` on the Durable Object. The recorded contract `journal-partition.contract.json` is only extended: new steps at its end open a session, publish `append`, `rebind`, `outcome`, an open `correct` and a `head` with `attentionItemKey`, call `unserveHead`, and open a second session with `reset: true`; `journal-partition.test.ts` lists `unserveHead` among the contract's methods and gains a test of the proxy, and the Cloudflare test calls `unserveHead` and a reset open through Durable Object RPC. A partitions Worker deployed before this change reports `journal: 2` without these calls, so it must be redeployed before any Relay that is allowed to grant 2 serves a Controller that asks for it.
 
 - [ ] **Step 4: Run the service test and see it pass.**
 
@@ -1730,6 +1737,20 @@ describe('the Controller\'s unserve and request refusals', () => {
     sent.length = 0;
     await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: opened.watermark + 1, op: 'head', head: { snapshot, observedAt: 6 } }] }));
     expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_refused', reason: 'incomplete' }));
+  });
+
+  it('accepts the entry that follows a refused one under the refused number, and does not take it for a duplicate', async () => {
+    const { connection, sent, open } = fixture();
+    const generation = await open();
+    const row = (itemKey: string) => ({ itemKey, providerId: 'codex', sourceKey: `${itemKey}:1`, occurredAt: 1, item: { type: 'assistant_message', text: itemKey, messageId: itemKey } });
+    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [
+      { sequence: 1, op: 'append', row: row('a') }, { sequence: 2, op: 'correct', row: row('ghost'), expectedRevision: 1 }, { sequence: 3, op: 'append', row: row('b') },
+    ] }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_ack', watermark: 1 }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_refused', sequence: 2, reason: 'unknown_item', itemKey: 'ghost' }));
+    sent.length = 0;
+    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [{ sequence: 2, op: 'append', row: row('b') }] }));
+    expect(sent).toEqual([expect.objectContaining({ type: 'journal_ack', watermark: 2, cursor: expect.objectContaining({ seq: 2 }) })]);
   });
 
   it('ignores a refusal that names no pending request of that session', async () => {
@@ -1892,12 +1913,37 @@ describe('the journal grant', () => {
     const open = { uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' };
     const entries = [{ sequence: 1, op: 'append', row }, { sequence: 2, op: 'rebind', itemKey: 'a', previous: { locator: 'x', resourceId: 'r1', status: 'pending' }, replacement: { locator: 'x', resourceId: 'r2', status: 'available' } }];
     for (const [query, closed] of [['?journal=1', 1008], ['?journal=2', undefined]] as const) {
-      const { pair, inbox } = await connected(query);
+      const { pair, inbox } = await connected(query, new MemoryJournalStore());
       pair.native.send(JSON.stringify(open));
       const opened = await inbox.take(message => message.type === 'journal_opened', 'journal_opened');
       pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'journal_publish', sessionKey: 'codex:thread-1', generation: opened.generation, entries }));
       if (closed) await until(() => pair.native.closeCode === closed || undefined, 'the connection to close');
       else { await inbox.take(message => message.type === 'journal_ack', 'journal_ack'); expect(pair.native.closeCode).toBeUndefined(); }
+    }
+  });
+
+  it('closes, with 1008, a connection granted 1 for each message that needs 2', async () => {
+    const row = { itemKey: 'a', providerId: 'codex', sourceKey: 'a:1', occurredAt: 1, item: { type: 'assistant_message', text: 'Hi', messageId: 'a' } };
+    const snapshot = { id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null,
+      capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+      pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' } };
+    const sessionKey = 'codex:thread-1';
+    const needsTwo: Array<(generation: number) => Record<string, unknown>> = [
+      generation => ({ type: 'journal_unserve', sessionKey, generation }),
+      () => ({ type: 'journal_request_refused', requestId: 'request-1', sessionKey, reason: 'not_followed' }),
+      () => ({ type: 'journal_open', requestId: 'open-2', sessionKey, publisherId: 'controller-1', reset: true }),
+      generation => ({ type: 'journal_publish', sessionKey, generation, entries: [{ sequence: 1, op: 'correct', row, expectedRevision: 1 }] }),
+      generation => ({ type: 'journal_publish', sessionKey, generation, entries: [{ sequence: 1, op: 'replace', items: [{ row }] }] }),
+      generation => ({ type: 'journal_publish', sessionKey, generation, entries: [{ sequence: 1, op: 'prepend', items: [{ row }] }] }),
+      generation => ({ type: 'journal_publish', sessionKey, generation, entries: [{ sequence: 1, op: 'head', head: { snapshot, observedAt: 1, attentionItemKey: 'a' } }] }),
+      generation => ({ type: 'journal_publish', sessionKey, generation, entries: [{ sequence: 1, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 }] }),
+    ];
+    for (const message of needsTwo) {
+      const { pair, inbox } = await connected('?journal=1', new MemoryJournalStore());
+      pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey, publisherId: 'controller-1' }));
+      const opened = await inbox.take(candidate => candidate.type === 'journal_opened', 'journal_opened');
+      pair.native.send(JSON.stringify({ uplinkVersion: 2, ...message(opened.generation) }));
+      await until(() => pair.native.closeCode === 1008 || undefined, `the connection to close for ${String(message(1).type)}`);
     }
   });
 
@@ -2002,7 +2048,23 @@ A connection granted 1 never sends grant-2 entries or messages. When one does, i
         if (host.journalGrant !== 2 && needsJournalGrantTwo(message)) return closeConnection(1008, 'Journal grant 2 was not acknowledged');
 ```
 
-`needsJournalGrantTwo` is a pure function in `journal-uplink.ts` (exported with `isJournalHostMessage`): true for `journal_unserve`, `journal_request_refused`, a `journal_open` with `reset`, and a `journal_publish` with a `rebind` or `outcome` entry, a `correct` without a digest, a `replace` or `prepend` item without a digest, or a head with `attentionItemKey`. `JournalHostMessage` gains `journal_unserve` and `journal_request_refused`.
+`needsJournalGrantTwo` is a pure function in `journal-uplink.ts`, exported with `isJournalHostMessage`; `JournalHostMessage` gains `journal_unserve` and `journal_request_refused`:
+
+```ts
+export function needsJournalGrantTwo(message: JournalHostMessage): boolean {
+  switch (message.type) {
+    case 'journal_unserve': case 'journal_request_refused': return true;
+    case 'journal_open': return message.reset === true;
+    case 'journal_publish': return message.entries.some(entry => entry.op === 'rebind' || entry.op === 'outcome'
+      || (entry.op === 'correct' && entry.digest === undefined)
+      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
+      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined));
+    default: return false;
+  }
+}
+```
+
+The broker imports it next to `isJournalHostMessage`.
 
 <!-- edit: packages/agent-remote-hosted/src/broker.ts -->
 <!-- old -->
@@ -2395,12 +2457,12 @@ Deliver every kind of event:
 - [ ] **Step 16: Run the package and see it pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-session-stream-amendments.test.ts src/host-journals-amendments.test.ts src/journal-uplink-controller-messages.test.ts src/broker-journal-grant.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-hosted run test` then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all. Rebuild the package: the Controller's tests use its journal service and its connection adapter from `dist`. The landed suites of `journal-session-stream.test.ts` and `broker-journal-sessions.test.ts` must stay green; none of them sends an interaction frame through a stream whose head disagrees.
+Expected: PASS for all (980 tests of the package, with the partition tests). Rebuild the package: the Controller's tests use its journal service and its connection adapter from `dist`. Run the Cloudflare suite in two halves (22 and 15 test files); it covers the partition's Durable Object. The compatibility digest changes with this task: `git add` the new files, run `pnpm compatibility:update`, and commit `packages/agent-remote-lab/compatibility.json` with it. The landed suites of `journal-session-stream.test.ts` and `broker-journal-sessions.test.ts` must stay green; none of them sends an interaction frame through a stream whose head disagrees.
 
 - [ ] **Step 17: Commit.**
 
 ```bash
-git add packages/agent-remote-hosted/src
+git add packages/agent-remote-hosted/src packages/agent-remote-cloudflare packages/agent-remote-lab/compatibility.json
 git commit -m "feat(hosted): grant journals at level 2, fan out amendments, take a session out of serving at the Controller's word, refuse requests at once and hold interaction frames until the served head agrees" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

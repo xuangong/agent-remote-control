@@ -1,7 +1,7 @@
 import {
   bodyFromRow, JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError,
   JournalUnknownItemError, JournalInvalidRowError, JournalInvalidPublicationError, SessionJournal,
-  type JournalIndexEntry, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
+  type JournalHead, type JournalIndexEntry, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry, JournalRefusalReason, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
@@ -28,9 +28,26 @@ export interface JournalRefusal {
   itemKey?: string;
 }
 
+/** What a subscriber of the session sees of a publication, in the order its entries were applied. */
+export type JournalLiveEvent =
+  /** An appended row; it is delivered live with its epoch and sequence. Corrections and prepended rows are never events. */
+  | { kind: 'row'; row: JournalRow }
+  /** A replacement started a new epoch. */
+  | { kind: 'replaced'; epoch: string }
+  /** A head that was not already applied. */
+  | { kind: 'head'; head: JournalHead };
+
+/** The journal's cursor, and its head once the Controller has published one. */
+export interface JournalStatus {
+  cursor: TimelineCursor;
+  head?: JournalHead;
+}
+
 export interface JournalPublished {
   /** The rows the journal stamped, in order, for the subscribers that read this session. */
   rows: JournalRow[];
+  /** What live subscribers see of the publication, in order. */
+  events: JournalLiveEvent[];
   /** The last publication applied; everything up to it is stored. */
   watermark: number;
   /** The journal's cursor after the publication; absent when the session has no journal. */
@@ -63,6 +80,8 @@ export interface HostJournals {
   fill(hostId: string, sessionKey: string, items: readonly CompleteItemInput[]): Promise<JournalFilled>;
   /** A page of the session's journal, or undefined when it has none. */
   page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
+  /** The cursor and head of the session's journal, or undefined when it has none. */
+  status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
   /** Drops what is cached for a Host; the store keeps the journals. */
   forget(hostId: string): Promise<void>;
 }
@@ -106,7 +125,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
 
   function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
     switch (entry.op) {
-      case 'append': { const row = journal.append(publication, entry.row); if (row) published.rows.push(row); break; }
+      case 'append': { const row = journal.append(publication, entry.row); if (row) { published.rows.push(row); published.events.push({ kind: 'row', row }); } break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
       case 'seal': journal.seal(publication, entry.itemKey); break;
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
@@ -114,11 +133,17 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       case 'replace': {
         const before = journal.epoch;
         const epoch = journal.replace(publication, entry.items, now());
-        if (epoch !== before) published.replacedEpoch = epoch;
+        if (epoch !== before) { published.replacedEpoch = epoch; published.events.push({ kind: 'replaced', epoch }); }
         break;
       }
       case 'prepend': published.rows.push(...journal.prepend(publication, entry.items)); break;
-      case 'head': journal.setHead(publication, entry.head); break;
+      case 'head': {
+        const fresh = (journal.publisher?.watermark ?? 0) < entry.sequence;
+        journal.setHead(publication, entry.head);
+        const head = journal.head;
+        if (fresh && head) published.events.push({ kind: 'head', head });
+        break;
+      }
     }
   }
 
@@ -147,10 +172,10 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     }),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
-      const fenced = (): JournalPublished => ({ rows: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
+      const fenced = (): JournalPublished => ({ rows: [], events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
       const key = storeKey(hostId, sessionKey);
       if (needsReopen.has(key)) return fenced();
-      const published: JournalPublished = { rows: [], watermark: 0 };
+      const published: JournalPublished = { rows: [], events: [], watermark: 0 };
       let journal: SessionJournal | undefined;
       try {
         journal = await load(hostId, sessionKey, false);
@@ -187,6 +212,13 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
 
     page: (hostId, sessionKey, request, olderBeyondJournal) => serialized<JournalPageResult | undefined>(hostId, async () =>
       (await load(hostId, sessionKey, false))?.page(request, { olderBeyondJournal })),
+
+    status: (hostId, sessionKey) => serialized<JournalStatus | undefined>(hostId, async () => {
+      const journal = await load(hostId, sessionKey, false);
+      if (!journal) return undefined;
+      const head = journal.head;
+      return { cursor: journal.cursor, ...(head ? { head } : {}) };
+    }),
 
     forget: hostId => serialized<void>(hostId, async () => { cache.delete(hostId); }),
   };

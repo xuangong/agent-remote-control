@@ -751,6 +751,11 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!host.ready || host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
     return host;
   };
+  const requireJournal = (hostId: string) => {
+    const connection = requireHost(hostId).journal;
+    if (!connection) throw new BrokerError(501, 'journal_unavailable', 'The Controller on this Host does not publish journals.');
+    return connection;
+  };
   function send(host: Host, message: RemoteHostUplinkMessage) {
     assertHostCurrent(host);
     if (host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
@@ -2175,6 +2180,14 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!host?.ready || host.outbox !== 1 || host.socket?.readyState !== RELAY_SOCKET_OPEN) return;
       try { send(host, { uplinkVersion: 2, type: 'outbox_ready' }); } catch { /* The Controller polls again on its own. */ }
     },
+    /**
+     * Asks a connected Host's Controller to read item bodies again from native history. Resolves with what the journal
+     * accepted; rejects with a JournalRequestError (timeout, in_flight, busy, closed) or a BrokerError for an offline Host.
+     * The caller authorizes the read this serves.
+     */
+    async requestFill(hostId: string, sessionKey: string, itemKeys: string[]) { return requireJournal(hostId).requestFill(sessionKey, itemKeys); },
+    /** Asks a connected Host's Controller to read older history and publish it as prepended items. */
+    async requestOlder(hostId: string, sessionKey: string, limit: number) { return requireJournal(hostId).requestOlder(sessionKey, limit); },
     tunnelHost: (token: string) => [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token)?.id,
     acceptTunnel(token: string, socket: TunnelSocket) {
       const host = [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token);

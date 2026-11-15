@@ -1,4 +1,4 @@
-import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
+import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { afterEach, expect, it } from 'vitest';
 import { createHostBroker, type RelaySocket } from './index.js';
@@ -160,6 +160,77 @@ it('keeps the journals of two Hosts apart even for the same session', async () =
   await first.take('journal_ack');
   expect((await second.open()).index).toEqual([]);
 });
+it('asks the Controller for bodies and resolves with what the journal took', async () => {
+  const { broker, host, open, send, take, store, storeKey } = await connectedHost();
+  const seeded = SessionJournal.create(storeKey);
+  const { generation } = seeded.claim('controller-1');
+  seeded.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
+  seeded.complete({ publisherId: 'controller-1', generation, sequence: 2 }, 'm1', DIGEST);
+  seeded.evict(0);
+  await store.apply(seeded.takeChanges()!);
+  await open();
+  const wrong = broker.requestFill(host.hostId, SESSION, ['m1']);
+  const first = await take('journal_fill_request');
+  expect(first).toMatchObject({ uplinkVersion: 2, sessionKey: SESSION, itemKeys: ['m1'] });
+  send({ type: 'journal_fill', requestId: first.requestId, sessionKey: SESSION, items: [{ row: row('m1', 'Rewritten'), digest: 'b'.repeat(64) }] });
+  await expect(wrong).resolves.toEqual({ filled: [], mismatched: ['m1'], unknown: [] });
+  const filled = broker.requestFill(host.hostId, SESSION, ['m1']);
+  const second = await take('journal_fill_request');
+  send({ type: 'journal_fill', requestId: second.requestId, sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] });
+  await expect(filled).resolves.toEqual({ filled: ['m1'], mismatched: [], unknown: [] });
+  expect((await store.load(storeKey))?.items[0]?.body).not.toBeNull();
+});
+
+it('asks the Controller for older history, which it publishes as prepended items before it says it is done', async () => {
+  const { broker, host, open, send, take, store, storeKey } = await connectedHost();
+  await open();
+  send({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [{ sequence: 1, op: 'append', row: row('m2', 'Now') }] });
+  await take('journal_ack');
+  const older = broker.requestOlder(host.hostId, SESSION, 20);
+  const request = await take('journal_older_request');
+  expect(request).toMatchObject({ sessionKey: SESSION, limit: 20 });
+  send({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [{ sequence: 2, op: 'prepend', items: [{ row: row('m1', 'Before'), digest: DIGEST }] }] });
+  expect(await take('journal_ack')).toMatchObject({ watermark: 2 });
+  send({ type: 'journal_older_done', requestId: request.requestId, sessionKey: SESSION, olderAvailable: false });
+  await expect(older).resolves.toEqual({ olderAvailable: false });
+  expect((await store.load(storeKey))?.items.map(({ itemKey, seqStart }) => [itemKey, seqStart])).toEqual([['m1', 0], ['m2', 1]]);
+});
+
+it('rejects an unanswered request after the deadline and allows the next one', async () => {
+  const { broker, host, take } = await connectedHost({ requestTimeoutMs: 50 });
+  const silent = broker.requestOlder(host.hostId, SESSION, 5);
+  await take('journal_older_request');
+  await expect(silent).rejects.toMatchObject({ code: 'timeout' });
+  const next = broker.requestOlder(host.hostId, SESSION, 5);
+  await take('journal_older_request');
+  await expect(next).rejects.toMatchObject({ code: 'timeout' });
+});
+
+it('allows one request of a kind per session at a time', async () => {
+  const { broker, host, take } = await connectedHost({ requestTimeoutMs: 100 });
+  const first = broker.requestOlder(host.hostId, SESSION, 5);
+  await take('journal_older_request');
+  await expect(broker.requestOlder(host.hostId, SESSION, 5)).rejects.toMatchObject({ code: 'in_flight' });
+  await expect(first).rejects.toMatchObject({ code: 'timeout' });
+});
+
+it('fails pending requests when the Controller disconnects', async () => {
+  const { broker, host, pair, take, settle } = await connectedHost({ requestTimeoutMs: 1000 });
+  const pending = broker.requestFill(host.hostId, SESSION, ['m1']);
+  await take('journal_fill_request');
+  pair.native.close(1000);
+  await expect(pending).rejects.toMatchObject({ code: 'closed' });
+  await settle();
+  await expect(broker.requestFill(host.hostId, SESSION, ['m1'])).rejects.toMatchObject({ status: 503, code: 'host_offline' });
+});
+
+it('refuses requests for a Host that cannot publish journals or does not exist', async () => {
+  const plain = await connectedHost({ query: '' });
+  await expect(plain.broker.requestFill(plain.host.hostId, SESSION, ['m1'])).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
+  await expect(plain.broker.requestOlder(plain.host.hostId, SESSION, 5)).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
+  await expect(plain.broker.requestOlder('no-such-host', SESSION, 5)).rejects.toMatchObject({ status: 404, code: 'host_not_found' });
+});
+
 it('records a diagnostic when a journal message cannot be encoded and sends nothing', async () => {
   const seeded = new MemoryJournalStore();
   let saved: RelayDiagnostic[] = [];

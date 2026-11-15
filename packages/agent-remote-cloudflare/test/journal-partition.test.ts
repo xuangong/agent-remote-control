@@ -105,3 +105,28 @@ test('fills bodies and reads the page in one call, and serves a page of several 
   expect(filled.page.page.payload.entries.map((entry: { item: { text: string } }) => entry.item.text.length)).toEqual([1_000_000, 1_000_000, 1_000_000]);
 }, 120_000);
 
+
+test('holds the Durable Object bounds by default: two journals, 20 MiB of cache and 12 MiB per session', async () => {
+  const f = await fixture({ journals: {} });
+  expect(await call(f, 'host-1', 'effectiveTuning')).toEqual({
+    cache: { maxJournals: 2, maxBytes: 20 * 1024 * 1024 }, limits: { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } });
+  const text = 'x'.repeat(7 * 1024 * 1024);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', text, 1) }])).refusal).toBeUndefined();
+  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', text, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+}, 120_000);
+
+test('rolls back every statement of a transaction that fails', async () => {
+  const f = await fixture({ journals: {} });
+  expect(await call(f, 'host-1', 'transactionProbe')).toEqual([{ n: 0 }]);
+}, 60_000);
+
+test('keeps two journals in memory by default and reads a third one that was dropped from the store again', async () => {
+  const f = await fixture({ journals: {} });
+  for (const key of ['codex:a', 'codex:b', 'codex:c']) await call(f, 'host-1', 'open', 'host-1', key, 'controller-1', LIMITS);
+  const before = await call(f, 'host-1', 'journalLoads');
+  await call(f, 'host-1', 'status', 'host-1', 'codex:c');
+  expect(await call(f, 'host-1', 'journalLoads')).toBe(before);
+  await call(f, 'host-1', 'status', 'host-1', 'codex:a');
+  expect(await call(f, 'host-1', 'journalLoads')).toBe(before + 1);
+}, 60_000);

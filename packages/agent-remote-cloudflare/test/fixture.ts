@@ -28,13 +28,12 @@ export const send = (socket: WebSocket, data: object) => socket.send(JSON.string
 export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object } } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
-    const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject, JournalPartition } from './src/worker.ts';` : `
+    const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
       import { SqliteRelayStore } from './src/storage.ts';
       import { createHostedRelay } from '@orchardworks/agent-remote-hosted';
       import { WorkerRelaySocket } from './src/socket.ts';
-      import { JournalPartition } from './src/journal-partition.ts';
       export class TestRelayObject extends RelayObject {
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
           this.completeCodec = ${options.completeCodec === true};
@@ -91,16 +90,38 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
           return super.fetch(request);
         }
       }
-      export class TestJournalPartition extends JournalPartition {
-        tuning() { const raw = this.env.JOURNAL_TUNING; return raw ? JSON.parse(raw) : super.tuning(); }
-        async inspect(sql) { return this.ctx.storage.sql.exec(sql).toArray(); }
-      }
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
       conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
         '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
         '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
+  // The partitions run in a Worker of their own, as in a deployment, so they never share an isolate with `primary`.
+  const journalsResult = await build({ stdin: { contents: options.actualEntry ? `export { JournalPartition, default } from './src/journal-worker.ts';` : `
+      import { JournalPartition } from './src/journal-partition.ts';
+      export class TestJournalPartition extends JournalPartition {
+        tuning() { const raw = this.env.JOURNAL_TUNING; return raw ? JSON.parse(raw) : super.tuning(); }
+        async effectiveTuning() { return this.tuning(); }
+        loads = 0;
+        database(storage) {
+          const database = super.database(storage);
+          return { ...database, all: (sql, ...params) => { if (sql.startsWith('SELECT meta_chunks FROM journal_sessions WHERE session_key')) this.loads++; return database.all(sql, ...params); } };
+        }
+        async journalLoads() { return this.loads; }
+        async inspect(sql) { return this.ctx.storage.sql.exec(sql).toArray(); }
+        async transactionProbe() {
+          const database = durableObjectJournalDatabase(this.ctx.storage);
+          database.run('CREATE TABLE IF NOT EXISTS probe (id INTEGER PRIMARY KEY)');
+          try { database.transaction(() => { database.run('INSERT INTO probe VALUES (1)'); database.run('INSERT INTO probe VALUES (1)'); }); } catch { /* The second insert fails on purpose. */ }
+          return database.all('SELECT count(*) AS n FROM probe');
+        }
+      }
+      import { durableObjectJournalDatabase } from './src/journal-sql-database.ts';
+      export default { fetch() { return new Response(null, { status: 404 }); } };
+    `, resolveDir: process.cwd(), sourcefile: 'journals-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
+    conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
+      '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+  const journalsScript = journalsResult.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   let ownerFailures = 0;
   let renewalDelayMs = 0, activeRenewals = 0, peakRenewals = 0;
@@ -113,9 +134,9 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const googleKeys = options.authProvider === 'google' ? generateKeyPairSync('rsa', { modulusLength: 2048 }) : undefined;
   const googleCodes = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   async function start() {
-    mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+    mf = new Miniflare({ durableObjectsPersist: join(directory, 'state'), workers: [{ name: 'relay', modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } },
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'
@@ -163,7 +184,9 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
         const value = JSON.parse(body); const subject = value.subject ?? value.continuation;
         return Response.json({ active: true, subject, authenticatedAt, expiresAt: Date.now() + 3_600_000, validUntil: Date.now() + leaseMs });
       },
-    });
+    }, { name: 'journals', modules: true, script: journalsScript, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
+      durableObjects: { JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } },
+      bindings: options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {} }] });
     await mf.ready;
   }
   await start();

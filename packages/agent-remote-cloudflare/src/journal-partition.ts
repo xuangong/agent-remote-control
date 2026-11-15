@@ -3,7 +3,7 @@ import {
   createHostJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition,
   type HostJournalsOptions, type JournalPartitionApi,
 } from '@orchardworks/agent-remote-hosted';
-import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
+import { SqlJournalStore, type JournalSqlDatabase } from '@orchardworks/agent-remote-journal-sqlite';
 
 import { durableObjectJournalDatabase } from './journal-sql-database.js';
 
@@ -23,10 +23,15 @@ export class JournalPartition extends DurableObject<unknown> implements JournalP
     super(context, env);
     const tuning = this.tuning();
     const journals = createHostJournals({
-      store: new SqlJournalStore(durableObjectJournalDatabase(context.storage)), now: Date.now,
+      store: new SqlJournalStore(this.database(context.storage)), now: Date.now,
       cache: tuning.cache, limits: tuning.limits, retention: tuning.retention,
     });
     this.api = serveJournalPartition(journals, tuning.replyMaxBytes === undefined ? {} : { replyMaxBytes: tuning.replyMaxBytes });
+  }
+
+  /** The SQL port of the store. */
+  protected database(storage: DurableObjectStorage): JournalSqlDatabase {
+    return durableObjectJournalDatabase(storage);
   }
 
   /** The bounds of this object; a Durable Object has 128 MB of memory. */

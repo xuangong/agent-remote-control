@@ -1,10 +1,13 @@
 import './window-workspaces.css';
 import { useEffect, useRef, useState } from 'react';
-import { createWindowView, hasBotAppearance, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, hasBotAppearance, isBotView, type WindowBotDetails, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useWindowActions, windowCatalog } from '../hooks/useWindowActions.js';
 import { AgentControl } from './AgentControl.js';
-import { activityLabel, windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
+import { windowActivity, type SessionActivityStatus } from '../session-activity-status.js';
+import { botActivityLabel, botRole, type BotRow } from '../bot-roster.js';
+import { windowSummary } from '../window-summary.js';
+import { botDisplayName } from './BotRoster.js';
 import { windowOutline } from '../window-outline.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
@@ -19,14 +22,29 @@ export function viewTitle(view: WindowView): string {
 function windowStatus(window: WorkspaceWindow, sessionStatus: (session: WindowSessionBinding) => SessionActivityStatus) {
   return windowActivity(window.views.flatMap(view => view.binding ? [sessionStatus(view.binding)] : []));
 }
-function statusPrefix(status?: SessionActivityStatus): string {
-  return status && status !== 'unknown' ? `${activityLabel(status)} · ` : '';
+/** A status that asks for something, worded and colored as in Bot mode; Idle says nothing. */
+function StatusWord({ status }: { status: BotRow['status'] }) {
+  return <span className="lab-bot-status" data-attention={status === 'Needs you' || undefined} data-failed={status === 'Failed' || undefined} data-working={status === 'Working' || undefined}>{status}</span>;
 }
-function viewRole(view: WindowView): string {
-  return view.attachedTo ? 'Attached' : view.placement === 'primary' ? 'Top-level' : view.placement === 'float' ? 'Floating' : 'Dock';
+/**
+ * How a view reads in In this Window. A bot reads as in Bot mode: its name, its role and label as tags, and where it stands
+ * (Open, Folded or Asleep) with Working, Needs you or Failed. An asleep bot is quiet except when it needs the owner. An Ask
+ * is one line under its bot; other views keep their title.
+ */
+function viewLine(view: WindowView, details: WindowBotDetails | undefined, status: SessionActivityStatus | undefined, supportTeam?: (teamId: string) => boolean) {
+  const live = botActivityLabel(status);
+  if (isBotView(view)) {
+    const role = botRole(view, supportTeam), place = details?.asleep ? 'Asleep' : view.collapsed ? 'Folded' : 'Open';
+    const shown = details?.asleep && live !== 'Needs you' ? undefined : live;
+    return { name: botDisplayName(view.binding), tags: [role && <span key="role" className="lab-bot-role">{role}</span>, details?.label && <span key="label" className="lab-bot-label">{details.label}</span>],
+      detail: <>{place}{shown ? <> · <StatusWord status={shown} /></> : null}</> };
+  }
+  if (view.feature?.kind === 'ask') return { name: view.binding?.title || 'Ask', tags: [<span key="role" className="lab-bot-role">Ask</span>] };
+  const kind = view.binding?.sessionIntent === 'history' ? 'Earlier session' : view.binding?.parentNativeSessionId ? 'Subagent' : undefined;
+  return { name: viewTitle(view), tags: [], detail: kind || live ? <>{kind}{kind && live ? ' · ' : null}{live ? <StatusWord status={live} /> : null}</> : undefined };
 }
 
-export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, onOverview, onNavigate, onChooseView, onRemoveView, placement = 'panel', actions: sharedActions }: {
+export function WindowWorkspaces({ workspace, current, active = true, sessionStatus, supportTeam, onOverview, onNavigate, onChooseView, onRemoveView, placement = 'panel', actions: sharedActions }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; active?: boolean;
   /**
    * Window actions shared with another surface (the Window toolbar), so both see one busy state and one notice. Their
@@ -35,6 +53,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
   actions?: ReturnType<typeof useWindowActions>;
   /** Each session's status, as Track shows it; without it rows show no status. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
+  /** Whether a Team is a Support roster, whose leader then shows the Support role, as in Bot mode. */
+  supportTeam?(teamId: string): boolean;
   /** Shows all Windows; with it the sidebar's Windows heading offers a "Show all Windows" button (the floating panel's WindowMenu has its own). */
   onOverview?(): void;
   /** Called after a Window is opened or a view is chosen, so a page shown instead of the Window can return to it. */
@@ -149,7 +169,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       </form> : <>
       <button type="button" className="lab-window-open" data-window-id={window.id}
       aria-current={window.id === workspace.window?.id || undefined} aria-busy={openingId === window.id || undefined} onClick={() => void openWindow(window.id)}>
-      <span><strong className="agent-session-title" data-session-status={status}>{window.title}</strong><small className="agent-session-title" data-session-status={status}>{openingId === window.id ? 'Opening…' : `${statusPrefix(status)}${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`}</small></span>
+      <span><strong>{window.title}</strong><small>{openingId === window.id ? 'Opening…' : <>{botActivityLabel(status) ? <><StatusWord status={botActivityLabel(status)} /> · </> : null}{windowSummary(window.views, viewId => !!workspace.readGroup?.(window.id)?.bots?.members[viewId]?.asleep)}</>}</small></span>
       {window.id === workspace.window?.id && !sidebar ? <span className="lab-window-selected" aria-label="Current Window">✓</span> : null}
       </button>
       {sidebar ? <>
@@ -174,12 +194,17 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       {sidebar ? <div className="lab-window-section-heading"><h2 className="lab-sidebar-section-title">In this Window</h2>
         <IconButton icon="plus" label="New session view" disabled={busy || workspace.unavailable} onClick={createView} /></div>
         : <div className="lab-window-section-heading"><span>In this Window</span><button type="button" disabled={busy || workspace.unavailable} onClick={createView}>New session view</button></div>}
-      <nav className="lab-window-list lab-window-views" aria-label="Session views">{windowOutline(workspace.window.views).map(({ view, depth }) => { const status = view.binding && sessionStatus?.(view.binding); const shown = status !== 'unknown' ? status : undefined; return <div key={view.id} className="lab-window-row" data-window-view-row={view.id}
-        data-depth={depth || undefined} data-collapsed={view.collapsed || undefined}>
+      <nav className="lab-window-list lab-window-views" aria-label="Session views">{windowOutline(workspace.window.views).map(({ view, depth }) => {
+        const details = workspace.group?.bots?.members[view.id];
+        const line = viewLine(view, details, view.binding && sessionStatus?.(view.binding), supportTeam);
+        // Relationships are metadata, not levels: a Side is a bot beside its source; only an Ask nests under its bot.
+        const nested = view.feature?.kind === 'ask' && depth === 1;
+        return <div key={view.id} className="lab-window-row" data-window-view-row={view.id}
+        data-depth={nested ? 1 : undefined} data-collapsed={view.collapsed || undefined} data-asleep={details?.asleep || undefined} data-ask={view.feature?.kind === 'ask' || undefined}>
         <button type="button" className="lab-window-open" data-window-view-id={view.id} disabled={busy || workspace.unavailable}
         aria-current={view.id === workspace.window!.selectedViewId || undefined}
         onClick={() => chooseView(view)}>
-        <span><strong className="agent-session-title" data-session-status={shown}>{viewTitle(view)}</strong><small className="agent-session-title" data-session-status={shown}>{statusPrefix(status)}{viewRole(view)}</small></span>
+        <span><span className="lab-window-view-line"><strong>{line.name}</strong>{line.tags}</span>{line.detail ? <small>{line.detail}</small> : null}</span>
         {view.id === workspace.window!.selectedViewId && !sidebar ? <span className="lab-window-selected" aria-label="Selected view">✓</span> : null}
         </button>
         {sidebar ? <IconButton icon="close" label={`Close session view: ${viewTitle(view)}`} className="lab-window-view-close" data-window-view-close={view.id}

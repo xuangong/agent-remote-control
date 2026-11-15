@@ -393,7 +393,8 @@ test('account actions belong to the Header and View follows the visible owning t
   await expect(signOut).toBeHidden();
   if (!isMobile) {
     await setChromePanel(page, 'Sidebar', true);
-    await expectBeforeTitle(globalView, page.locator('#lab-context .lab-rail-heading').getByText('Window', { exact: true }));
+    // Without a Window toolbar, View sits at the top of the sidebar; the row no longer carries a "Window" eyebrow.
+    await expect(page.locator('#lab-context .lab-rail-heading').getByRole('button', { name: 'View options', exact: true })).toBeVisible();
     await setChromePanel(page, 'Sidebar', false);
   }
   const heading = isMobile ? page.locator('.lab-mobile-navigation') : sourceView(primary).locator('.lab-workbench-heading');

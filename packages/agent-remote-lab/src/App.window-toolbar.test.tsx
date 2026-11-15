@@ -57,7 +57,7 @@ it('puts the toolbar first in the desktop workbench, showing the Window, and lea
     await until(() => expect(toolbar(app.container)).not.toBeNull());
     expect(app.container.querySelector('#lab-workbench')!.firstElementChild).toBe(toolbar(app.container));
     expect(toolbar(app.container)!.querySelector('h2')?.textContent).toBe('A');
-    expect(toolbar(app.container)!.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('2 session views');
+    expect(toolbar(app.container)!.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('2 bots');
     // The old shared-Window View options slot above the views is gone.
     expect(app.container.querySelector('.lab-window-controls')).toBeNull();
   } finally { await app.close(); }
@@ -161,14 +161,15 @@ it('hides and shows the docks, remembering the choice, without dropping focus fr
   } finally { await app.close(); }
 });
 
-it('moves View options into the toolbar when the sidebar is hidden', async () => {
-  const scope = 'http://localhost/window-toolbar-view-options/'; seedGroup(scope, windowGroup('A'));
+it('keeps View options at the toolbar\'s start when the sidebar is hidden', async () => {
+  const scope = 'http://localhost/window-toolbar-view-options-hidden/'; seedGroup(scope, windowGroup('A'));
   history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope);
   const apple = /Mac|iPhone|iPad/.test(navigator.platform);
   try {
     await until(() => expect(toolbar(app.container)).not.toBeNull());
-    expect(toolbar(app.container)!.querySelector('button[aria-label="View options"]')).toBeNull();
+    const shown = toolbar(app.container)!.querySelector<HTMLButtonElement>('.ui-toolbar-leading button[aria-label="View options"]');
+    expect(shown).not.toBeNull();
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', code: 'Backslash', metaKey: apple, ctrlKey: !apple, bubbles: true, cancelable: true })); });
     expect(app.container.querySelector<HTMLElement>('#lab-context')!.hidden).toBe(true);
     const trigger = toolbar(app.container)!.querySelector<HTMLButtonElement>('.ui-toolbar-leading button[aria-label="View options"]');
@@ -373,5 +374,20 @@ it.each([
     expect(app.container.querySelector<HTMLElement>('#lab-context')!.hidden).toBe(true);
     await until(() => expect(app.button('View options')?.closest('header.lab-window-toolbar')).toBe(toolbar(app.container)));
     expect(app.container.querySelectorAll('button[aria-label="View options"]')).toHaveLength(1);
+  } finally { await app.close(); }
+});
+
+it('keeps View options at the start of the Window toolbar while the sidebar shows, with no heading row above the Windows', async () => {
+  const scope = 'http://localhost/window-toolbar-view-options/'; seedGroup(scope, windowGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const app = await mountBotApp(scope);
+  try {
+    await until(() => expect(toolbar(app.container)).not.toBeNull());
+    await until(() => expect(app.container.querySelector('#lab-context nav[aria-label="Windows"]')).not.toBeNull());
+    // One place for View options in a desktop Window, as Bot mode's toolbar keeps its sidebar control at its start.
+    expect(app.button('View options').closest('header.lab-window-toolbar .ui-toolbar-leading')).not.toBeNull();
+    // The sidebar starts with the mode switch, then its Windows: the old View and "Window" row is gone.
+    expect(app.container.querySelector('#lab-context .lab-rail-heading')).toBeNull();
+    expect(app.container.querySelector('#lab-context .lab-eyebrow')).toBeNull();
   } finally { await app.close(); }
 });

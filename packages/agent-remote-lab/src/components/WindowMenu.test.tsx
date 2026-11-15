@@ -38,23 +38,24 @@ async function menu(statuses: Record<string, SessionActivityStatus>) {
   return { container, windowRow, viewRow };
 }
 
-it('marks each session view and summarizes each Window as pending, failed, working, then idle', async () => {
+it('marks each bot\'s place and status, and leads each Window with what most needs the owner', async () => {
   const { windowRow, viewRow } = await menu({ a: 'running', b: 'starting', c: 'failed', d: 'running', e: 'idle' });
-  expect(viewRow('current-0').querySelector('strong')!.dataset.sessionStatus).toBe('running');
-  expect(viewRow('current-0').querySelector('small')!.textContent).toBe('Working · Top-level');
-  expect(viewRow('current-1').querySelector('small')!.textContent).toBe('Pending · Dock');
-  expect(windowRow('current').querySelector('small')!.textContent).toBe('Pending · 2 session views');
-  expect(windowRow('busy').querySelector('strong')!.dataset.sessionStatus).toBe('failed');
-  expect(windowRow('busy').querySelector('small')!.textContent).toBe('Failed · 2 session views');
-  expect(windowRow('quiet').querySelector('small')!.textContent).toBe('Idle · 1 session view');
+  // Worded as in Bot mode: Working, Needs you and Failed; Idle says nothing.
+  expect(viewRow('current-0').querySelector('small')!.textContent).toBe('Open · Working');
+  expect(viewRow('current-1').querySelector('small')!.textContent).toBe('Open · Needs you');
+  expect(viewRow('current-1').querySelector('.lab-bot-status')!.hasAttribute('data-attention')).toBe(true);
+  expect(windowRow('current').querySelector('small')!.textContent).toBe('Needs you · 2 bots');
+  expect(windowRow('busy').querySelector('small')!.textContent).toBe('Failed · 2 bots');
+  expect(windowRow('busy').querySelector('.lab-bot-status')!.hasAttribute('data-failed')).toBe(true);
+  expect(windowRow('quiet').querySelector('small')!.textContent).toBe('1 bot');
 });
 
-it('keeps a session view quiet while its status is unknown', async () => {
+it('keeps a bot quiet while its status is unknown', async () => {
   const { windowRow, viewRow } = await menu({ a: 'idle' });
-  expect(viewRow('current-1').querySelector('strong')!.dataset.sessionStatus).toBeUndefined();
-  expect(viewRow('current-1').querySelector('small')!.textContent).toBe('Dock');
-  expect(windowRow('current').querySelector('small')!.textContent).toBe('Idle · 2 session views');
-  expect(windowRow('busy').querySelector('small')!.textContent).toBe('2 session views');
+  expect(viewRow('current-1').querySelector('.lab-bot-status')).toBeNull();
+  expect(viewRow('current-1').querySelector('small')!.textContent).toBe('Open');
+  expect(windowRow('current').querySelector('small')!.textContent).toBe('2 bots');
+  expect(windowRow('busy').querySelector('small')!.textContent).toBe('2 bots');
 });
 
 it('reminds of sessions waiting in another Window, not in the current one', async () => {

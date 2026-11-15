@@ -9,6 +9,7 @@ import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
 import { useOtherSessions, type OtherSessionSource } from './hooks/useOtherSessions.js';
 import { botActivityLabel, botRole, projectBotRoster, type BotSessionRef } from './bot-roster.js';
+import { windowSummary } from './window-summary.js';
 import { sharedReminders } from './bot-attention.js';
 import { SharedDraftsContext, useSharedDrafts } from './hooks/useSharedDraft.js';
 import { SessionOutboxMessages } from './components/OutboxMessages.js';
@@ -2076,9 +2077,9 @@ function AppContent({
   const searchCatalog = useMemo(() => searchOpen ? windowCatalog(windowWorkspace) : [],
     [searchOpen, windowWorkspace.windows, windowWorkspace.window, windowWorkspace.readGroup]);
   const windowItems = useMemo(() => byRecentUse(baseUrl, searchCatalog).map((window): CommandItem => ({ id: `window:${window.id}`, kind: 'window', title: window.title,
-    subtitle: `${window.views.length} ${window.views.length === 1 ? 'session view' : 'session views'}`,
+    subtitle: windowSummary(window.views, viewId => !!windowWorkspace.readGroup(window.id)?.bots?.members[viewId]?.asleep),
     run: () => { const runs = searchRuns.current; runs.switchMode('window'); runs.inMode('window', () => void searchRuns.current.openWindowFromSearch(window.id)); } })),
-  [baseUrl, searchCatalog]);
+  [baseUrl, searchCatalog, windowWorkspace.readGroup]);
   const sessionItems = useMemo(() => !searchOpen ? [] : commandSessions(sessionEntries, favorites.stars, searchCatalog.flatMap(window => window.views.flatMap(view => view.binding ? [view.binding] : [])))
     .map((session): CommandItem => { const subtitle = sessionSubtitle(session, remoteHosts, providers);
       return { id: `session:${sessionKey(session)}`, kind: 'session', title: session.title, ...(subtitle ? { subtitle } : {}),
@@ -3015,9 +3016,9 @@ function AppContent({
         {quoteView ? <QuoteAttachments scope={baseUrl} viewId={quoteView} /> : null}</>,
       composerNotice: outdatedOffline ? <p className="agent-composer-note lab-outbox-hint" role="status">Update the Controller on {host!.name} to send while it is offline.</p>
         : botPresentation ? undefined : <ForkEntries forks={sourceForks} openSides={openSideKeys(source.viewId)} onOpen={record => void openFork({ ...record, navigationSource: source })} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} />,
-      sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <button type="button" data-pane-selection-ignore aria-label={`Close primary group: ${source.title}`}
+      sessionManager: botPresentation ? undefined : <>{context.controls}{isPrimary ? <IconButton icon="close" data-pane-selection-ignore label={`Close primary group: ${source.title}`}
         title={foldsOnClose(view) ? 'Fold. It stays in this group.' : 'Close this session view. Agent sessions keep running.'}
-        onClick={() => closeView(view.id)}>×</button> : null}
+        onClick={() => closeView(view.id)} /> : null}
         {!compactLayout ? <StarButton session={source} favorites={favorites} /> : null}
         <SessionHeadingActions sessionKey={sessionKey(source)} alwaysCollapsed={!!context.menuActions}>
           {context.menuActions}
@@ -3243,7 +3244,7 @@ function AppContent({
     {windowMode && scanOpen ? <SessionTransferDialog onOpen={openScannedSession} onClose={() => setScanOpen(false)} /> : null}
     <WindowMenu workspace={windowWorkspace} current={menuCurrentBinding}
       visible={windowMode && windowView.visible && !sidebarShortcuts} inert={supportingRailOpen} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} sessionStatus={windowSessionStatus}
-      onRemoveView={confirmBotRemoval} />
+      supportTeam={teamId => supportTeams.has(teamId)} onRemoveView={confirmBotRemoval} />
     <WindowOverview workspace={windowWorkspace} scope={baseUrl} enabled={windowOverviewAvailable} open={windowMode && windowOverviewOpen} sessionStatus={windowSessionStatus} onOpenChange={setWindowOverviewOpen} />
     <div ref={shortcutFloatingSlot} className="lab-movable-slot" />
     <div className="lab-ask-workspaces" {...backgroundInert}>
@@ -3282,8 +3283,11 @@ function AppContent({
     <ViewOptions modeControls={<WorkbenchModeSwitch mode={navigation.mode} onChange={navigation.setMode} />} attentionControls={<>
       {askView.controls}
       {windowView.controls}{userScoped ? attention.controls : null}{tpmView.controls}{teamView.controls}
-    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget : desktopContextVisible ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget
-      // A desktop Window keeps View options in one place, its toolbar, rather than in the first pane heading.
+    </>} target={!headerHidden ? headerViewTarget : compactLayout ? mobileViewTarget
+      // A desktop Window keeps View options in one place, the start of its toolbar (as Bot mode's toolbar keeps its sidebar
+      // control), whether or not the sidebar shows, rather than in the sidebar or the first pane heading.
+      : windowToolbarShown && !pageOpen && activeView === 'workbench' ? windowToolbarViewTarget
+      : desktopContextVisible && sidebarViewTarget ? sidebarViewTarget : pageOpen ? pageViewTarget : activeView === 'trace' ? traceViewTarget
       : windowToolbarShown ? windowToolbarViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={!windowMode || supportingRailOpen}
@@ -3355,10 +3359,10 @@ function AppContent({
         { label: 'New session', onSelect: openNewSessionPanel },
         { label: 'New Window', disabled: creatingWindow, onSelect: createWindowFromMenu },
       ]} />} /> : null}
-      <div className="lab-rail-heading">
-        {!compactLayout ? <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" /> : null}
-        <p className="lab-eyebrow" title={baseUrl}>Window</p>
-      </div>
+      {/* View options has a place in the sidebar only while no Window toolbar shows (a desktop Window keeps it at its toolbar's start). */}
+      {!compactLayout && !windowToolbarShown ? <div className="lab-rail-heading">
+        <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
+      </div> : null}
       {compactLayout ? <nav className="lab-session-panel-actions" aria-label="Sidebar sections">
         <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
         {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
@@ -3369,7 +3373,7 @@ function AppContent({
         <div className="lab-sidebar-scroll">
           <section className="lab-sidebar-section">
             <WindowWorkspaces workspace={windowWorkspace} actions={windowActions} current={menuCurrentBinding} active={desktopContextVisible} sessionStatus={windowSessionStatus} onChooseView={showDockOf} onRemoveView={confirmBotRemoval}
-              onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
+              supportTeam={teamId => supportTeams.has(teamId)} onOverview={windowOverviewAvailable ? () => setWindowOverviewOpen(true) : undefined} onNavigate={closePage} placement="sidebar" />
           </section>
           <nav className="lab-sidebar-section lab-sidebar-shortcuts" aria-label="Shortcuts">
             <h2 className="lab-sidebar-section-title">Shortcuts</h2>
@@ -3414,7 +3418,7 @@ function AppContent({
         tabIndex={-1}
         hidden={activeView !== 'workbench' || pageOpen}
       >
-        {windowToolbarShown && sharedWindow ? <WindowToolbar windowId={sharedWindow.id} title={sharedWindow.title} viewCount={sharedWindow.views.length}
+        {windowToolbarShown && sharedWindow ? <WindowToolbar windowId={sharedWindow.id} title={sharedWindow.title} summary={windowSummary(sharedWindow.views, viewId => asleepBot({ id: viewId }))}
           leading={<div ref={setWindowToolbarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />}
           // The title is not disabled while another Window action runs: renaming does not wait for them, and focus returns to the title after a rename.
           readOnly={windowWorkspace.provisional} deleteDisabled={windowActions.busy}
@@ -3488,8 +3492,8 @@ function AppContent({
                 : <div className="lab-empty-session-view" role="status" data-view-id={view.id} aria-current={view.id === presentedViewId || undefined}>
                   <header className="lab-empty-session-heading">
                     <strong>Select session</strong>
-                    <button type="button" data-pane-selection-ignore aria-label="Close primary group: Select session" title="Close session view"
-                      onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })}>×</button>
+                    <IconButton icon="close" data-pane-selection-ignore label="Close primary group: Select session" title="Close session view"
+                      onClick={() => windowWorkspace.authority?.operate({ type: 'view.close', viewId: view.id })} />
                   </header><div className="lab-empty-session-body">
                     {view.binding ? <MissingSessionNote title={view.binding.title} host={remoteHosts.find(host => host.id === view.binding!.hostId)?.name ?? view.binding.hostId} /> : <p>This session view is empty.</p>}
                     <div className="lab-empty-session-actions">

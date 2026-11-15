@@ -7,7 +7,7 @@ type Props = ComponentProps<typeof WindowToolbar>;
 
 async function toolbar(overrides: Partial<Props> = {}) {
   const props: Props = {
-    windowId: 'research', title: 'Research', viewCount: 3, onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
+    windowId: 'research', title: 'Research', summary: '3 bots · 1 open', onRename: vi.fn(), onNewView: vi.fn(), onOpenSession: vi.fn(),
     hasDocks: true, docksHidden: false, onToggleDocks: vi.fn(), botAppearance: true, onBotAppearance: vi.fn(),
     onCopyLink: vi.fn(), onAgentControl: vi.fn(), onDelete: vi.fn(), ...overrides,
   };
@@ -35,15 +35,15 @@ async function openMenu(bar: HTMLElement, label: string) {
 const items = (menu: HTMLElement) => [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
 const item = (menu: HTMLElement, label: string) => items(menu).find(entry => entry.textContent === label)!;
 
-it('shows the Window name as the heading, with its view count', async () => {
+it('shows the Window name as the heading, with what it holds beside it', async () => {
   const { bar } = await toolbar();
   expect(bar).not.toBeNull();
   const heading = bar.querySelector('h2')!;
   expect(heading.textContent).toBe('Research');
   expect(titleButton(bar).textContent).toBe('Research');
-  expect(bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('3 session views');
-  const single = await toolbar({ viewCount: 1 });
-  expect(single.bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('1 session view');
+  expect(bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('3 bots · 1 open');
+  const single = await toolbar({ summary: '1 bot' });
+  expect(single.bar.querySelector('.ui-toolbar-subtitle')?.textContent).toBe('1 bot');
 });
 
 it('names the title button by the Window name, so the heading reads as it, and describes renaming', async () => {
@@ -199,7 +199,7 @@ it('ends an open rename without saving when another Window takes the toolbar, an
   let show!: (window: { id: string; title: string }) => void;
   function Harness() {
     const [window, setWindow] = useState({ id: 'research', title: 'Research' }); show = setWindow;
-    return <WindowToolbar windowId={window.id} title={window.title} viewCount={1} onRename={onRename} onNewView={vi.fn()} onOpenSession={vi.fn()}
+    return <WindowToolbar windowId={window.id} title={window.title} summary="1 bot" onRename={onRename} onNewView={vi.fn()} onOpenSession={vi.fn()}
       hasDocks={false} docksHidden={false} onToggleDocks={vi.fn()} botAppearance onBotAppearance={vi.fn()} onCopyLink={vi.fn()} onDelete={vi.fn()} />;
   }
   const container = await render(<Harness />);

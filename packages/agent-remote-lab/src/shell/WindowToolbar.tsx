@@ -5,14 +5,16 @@ import { Menu, type MenuEntry } from '../ui/Menu.js';
 import './shell.css';
 
 /**
- * The toolbar above a desktop Window: its name (renamed in place) and view count, adding views, the dock rail, and
+ * The toolbar above a desktop Window: its name (renamed in place) with what it holds beside it, adding views, the dock rail, and
  * Window actions. The title button is named by its text, so the heading reads as the Window name; renaming is its
  * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
-export function WindowToolbar({ windowId, title, viewCount, leading, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
+export function WindowToolbar({ windowId, title, summary, leading, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession, hasDocks, docksHidden, onToggleDocks,
   botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete }: {
   /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
-  windowId: string; title: string; viewCount: number; leading?: ReactNode; disabled?: boolean;
+  windowId: string; title: string; leading?: ReactNode; disabled?: boolean;
+  /** What the Window holds, as its sidebar row says it (`windowSummary`): "6 bots · 1 open". */
+  summary: string;
   /** The Window is shown before it is confirmed (a cold start): renaming, adding views, hiding in Bot mode and deletion wait. */
   readOnly?: boolean;
   /** Deleting waits, for example while another Window action runs. */
@@ -81,7 +83,7 @@ export function WindowToolbar({ windowId, title, viewCount, leading, disabled, r
           onBlur={() => finish(true)} />
       : <button ref={button} type="button" className="lab-window-toolbar-title" title="Rename this Window" aria-description="Rename this Window"
           disabled={titleDisabled} onClick={start}>{title}</button>}
-    subtitle={`${viewCount} ${viewCount === 1 ? 'session view' : 'session views'}`}
+    subtitle={summary}
     trailing={<>
       <Menu label="Add" icon="plus" items={[
         { label: 'New session view', icon: 'plus', disabled: readOnly, onSelect: onNewView },

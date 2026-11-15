@@ -7,12 +7,14 @@ import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
 
 /** The floating entry manages presentation; hiding it does not change the Window. */
-export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, onRemoveView }: {
+export function WindowMenu({ workspace, current, visible, inert = false, onOverview, sessionStatus, supportTeam, onRemoveView }: {
   workspace: ReturnType<typeof useWindowWorkspace>; current?: WindowSessionBinding; visible: boolean; inert?: boolean;
   /** Shows every Window side by side; offered where the overview is available. */
   onOverview?(): void;
   /** Each session's status, as Track shows it. */
   sessionStatus?(session: WindowSessionBinding): SessionActivityStatus;
+  /** Whether a Team is a Support roster, whose leader then shows the Support role. */
+  supportTeam?(teamId: string): boolean;
   onRemoveView?: ComponentProps<typeof WindowWorkspaces>['onRemoveView'];
 }) {
   // Statuses come from sessionStatus, which reads the shared states: render again when they change.
@@ -50,7 +52,7 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
         {onOverview ? <button type="button" className="lab-window-overview-trigger" aria-label="Show all Windows" title="Show all Windows (Ctrl+Shift+Up)" aria-keyshortcuts="Control+Shift+ArrowUp"
           onClick={() => { close(); onOverview(); }}>All Windows</button> : null}
         <button type="button" aria-label="Close Windows" onClick={close}>×</button></div>
-      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} onRemoveView={onRemoveView} /></div>
+      <div className="lab-window-panel-scroll"><WindowWorkspaces workspace={workspace} current={current} active={expanded} sessionStatus={sessionStatus} supportTeam={supportTeam} onRemoveView={onRemoveView} /></div>
     </section>
     <span className="agent-visually-hidden" role="status">{pendingElsewhere ? 'Another Window has pending sessions.' : ''}</span>
   </div>;

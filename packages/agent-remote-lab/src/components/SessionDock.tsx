@@ -190,6 +190,8 @@ export interface PrimarySessionGroupPane {
   collapsed: boolean; selected: boolean; content: ReactNode;
   fold?: FoldedBot;
 }
+/** How wide a folded bot's slim card stands: room for its picture, its name running down the card and its role tag. */
+export const FOLDED_BOT_WIDTH = 64;
 /** A folded bot: a slim card standing where its pane was; pressing it restores the pane. */
 export function FoldedBotCard({ label, fold: given, controls, onRestore }: { label: string; fold: FoldedBot; controls?: string; onRestore(): void }) {
   const status = useSharedFeed(snapshot => given.statusOf ? given.statusOf(snapshot.states) : given.status);
@@ -281,7 +283,7 @@ function PrimaryGroupPane({ group, compact, minimizedHeader, onSelect, onResize,
   };
   return <section className="lab-primary-group" data-session-family-shell data-primary-group-id={group.id} data-selected={group.selected || undefined}
     data-minimized={minimized || undefined} hidden={compact && !group.selected} aria-label={`Primary group: ${group.title}`}
-    style={compact ? undefined : { width: minimized ? 44 : group.width + (group.additionalWidth ?? 0) }}
+    style={compact ? undefined : { width: minimized ? group.fold ? FOLDED_BOT_WIDTH : 44 : group.width + (group.additionalWidth ?? 0) }}
     onPointerDownCapture={select} onFocusCapture={select}>
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
     {minimized ? minimizedHeader : null}
@@ -303,15 +305,20 @@ function DockPane({ item, order, hidden }: { item: DockItem; order: number; hidd
   const target = useRef<HTMLDivElement>(null);
   const dock = useContext(Context)!;
   const shared = useWindowLayout();
+  // A dock is brought into view as it mounts. In a shared Window only the selected view's is (opening a view beside
+  // selects it), so a Window that mounts all its docks while loading starts at its selection rather than at its last dock.
+  const reveals = useRef(false);
+  reveals.current = !shared || shared.window.selectedViewId === item.id;
   useLayoutEffect(() => {
     const element = target.current!;
     moveSessionHost(item.host, element);
+    if (!reveals.current) return;
     const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     return () => cancelAnimationFrame(frame);
   }, [item.host]);
   // A folded bot stands as a slim card, as a folded primary group does.
   return <section className="lab-session-dock-pane" data-session-family-shell data-dock-id={item.id} aria-label={`Docked ${item.title}`} hidden={hidden} data-folded={item.folded || undefined}
-    style={{ width: item.folded ? 44 : item.width + (item.additionalWidth ?? 0), minWidth: item.folded ? 0 : shared ? 240 : undefined, order }}>
+    style={{ width: item.folded ? FOLDED_BOT_WIDTH : item.width + (item.additionalWidth ?? 0), minWidth: item.folded ? 0 : shared ? 240 : undefined, order }}>
     <div ref={target} className="lab-session-dock-content" />
     {item.folded ? null : <DockResize title={item.title} width={item.width} additionalWidth={item.additionalWidth} onResize={width => dock.resize(item.id, width)} />}
   </section>;

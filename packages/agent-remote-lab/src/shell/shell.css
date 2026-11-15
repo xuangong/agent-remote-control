@@ -63,6 +63,10 @@
    Doubled classes (0,2,0) and their states (0,3,0) win over the global `button` and `input` rules in app.css.
    The heading lets them overhang it (for the hover fill and focus ring); the button truncates a long name itself. */
 .lab-window-toolbar .ui-toolbar-title { overflow: visible; }
+/* The Window's name with what it holds beside it on one line ("Release 2.4  6 bots"): the name gives way first. */
+.lab-window-toolbar .ui-toolbar-heading { display: flex; align-items: baseline; gap: 8px; }
+.lab-window-toolbar .ui-toolbar-heading > .ui-toolbar-title { flex: 0 1 auto; min-width: 0; }
+.lab-window-toolbar .ui-toolbar-heading > .ui-toolbar-subtitle { flex: none; font-size: var(--ui-size-callout); }
 .lab-window-toolbar-title.lab-window-toolbar-title {
   display: block; width: fit-content; max-width: calc(100% + 6px); min-width: 0; min-height: 0; margin: 0 0 0 -6px; padding: 1px 6px; overflow: hidden;
   border: 0; border-radius: var(--ui-radius-control); color: var(--ui-label); background: transparent;

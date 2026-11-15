@@ -45,9 +45,18 @@
 .lab-window-panel .lab-window-overview-trigger { margin-left: auto; min-height: 32px; padding: 4px 8px; border-color: transparent; color: var(--obs-action); font-size: 12px; }
 
 .lab-window-row[data-depth="1"] { padding-left: 16px; }
-.lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }
-/* A folded view reads as set aside; only a status that asks for attention keeps its color. */
-.lab-window-row[data-collapsed] .agent-session-title:is([data-session-status="idle"], [data-session-status="closed"]) { color: inherit; }
+/* Rows read as Bot mode's: a bot's name with its role and label as tags, then where it stands and a status that asks for
+   something, worded and colored as in Bot mode. Folded says so in words; an asleep bot is dimmed and quiet. */
+.lab-window-view-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.lab-window-list .lab-window-view-line > strong { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-window-list .lab-bot-status[data-attention] { color: var(--ui-status-attention); font-weight: 600; }
+.lab-window-list .lab-bot-status[data-failed] { color: var(--ui-status-failure); }
+.lab-window-list .lab-bot-status[data-working] { color: var(--ui-status-working); }
+.lab-window-row[data-asleep] :is(.lab-window-view-line, small) { opacity: .55; }
+.lab-window-row[data-asleep] small:has(.lab-bot-status[data-attention]) { opacity: 1; }
+/* An Ask is one line under its bot. */
+.lab-window-row[data-ask] .lab-window-open { min-height: 36px; }
+.lab-window-row[data-ask] .lab-window-view-line > strong { font-weight: 400; color: var(--ui-label-secondary); }
 
 /* The desktop sidebar: headings, Window rows and view rows follow the sidebar's flat rows (.lab-sidebar-link) and icon buttons.
    Every rule starts with `.lab-window-workspaces[data-placement="sidebar"]` (0,2,0): a row's open button is (0,3,0) and its hover
@@ -74,8 +83,11 @@
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-open:hover:not(:disabled) { border-color: transparent; color: var(--ui-label); background: transparent; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-open:disabled { cursor: default; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-open:focus-visible { outline-offset: -2px; }
-.lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-collapsed] .lab-window-open { color: var(--ui-label-secondary); }
+/* An Ask's row is one short line under its bot. */
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-row[data-ask] .lab-window-open { min-height: 26px; padding-block: 3px; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-list strong { -webkit-line-clamp: 1; font-size: var(--ui-size-body); font-weight: 400; line-height: 1.3; }
+/* The shown Window's name is the strongest line in the list, as in the walkthrough. */
+.lab-window-workspaces[data-placement="sidebar"] .lab-window-open[data-window-id][aria-current="true"] strong { font-weight: 600; }
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-list small { margin-top: 1px; overflow: hidden; font-size: var(--ui-size-caption); text-overflow: ellipsis; white-space: nowrap; }
 /* Row actions show on hover or keyboard focus; they stay in the DOM and in the tab order. */
 .lab-window-workspaces[data-placement="sidebar"] .lab-window-row > .ui-icon-button { flex: none; width: 24px; height: 24px; min-height: 24px; opacity: 0; }

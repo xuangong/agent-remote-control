@@ -11,6 +11,7 @@ import { SessionFamily } from './SessionFamily.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { AskResize } from './AskResize.js';
+import { IconButton } from '../ui/IconButton.js';
 import { MissingSessionNote } from './SessionConnectionNotice.js';
 import { sessionKey } from '../session-tree.js';
 import { useWindowLayout } from '../window-workspace-context.js';
@@ -67,7 +68,8 @@ function WindowBody({ entry, baseUrl, visible, compact, hostLabel, offline, tran
     onFocus();
   };
   const menuActions = controls || onChangeSession && target ? <>{controls}{onChangeSession && target ? <button type="button" aria-label="Change session" title={compact ? 'Choose a session from the sidebar' : 'Choose a session from All sessions'} onClick={onChangeSession}>↔</button> : null}</> : undefined;
-  const windowControls = <>{actions}<button type="button" aria-label={`Close ${title}`} title={onFold ? 'Fold. It stays in this group.' : 'Close session view'} onClick={onClose}>×</button></>;
+  // Drawn as an icon, as the heading's other controls are.
+  const windowControls = <>{actions}<IconButton icon="close" className="lab-session-window-close" label={`Close ${title}`} title={onFold ? 'Fold. It stays in this group.' : 'Close session view'} onClick={onClose} /></>;
   return <>
     <span ref={anchor} />
     <div className="lab-ask-viewport" hidden={!visible}>

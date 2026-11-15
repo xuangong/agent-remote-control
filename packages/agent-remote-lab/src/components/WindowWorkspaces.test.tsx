@@ -1,6 +1,6 @@
 import { act, useReducer } from 'react';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { applyWindowOperation, createWindowView, type WindowOperation, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
+import { applyWindowOperation, createWindowView, type WindowGroup, type WindowOperation, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
@@ -214,7 +214,7 @@ it('cancels a rename with Escape, keeps an unchanged title without saving, and r
   expect(test.container.querySelector('form')).toBeNull();
 });
 
-it('lists the current Window in layout order and focuses a chosen view', async () => {
+it('lists the current Window in layout order, a Side beside its source, and focuses a chosen view', async () => {
   const navigate = vi.fn();
   // A Side follows its source in the array, as the layout requires.
   const test = await fixture({ onNavigate: navigate, views: [
@@ -224,7 +224,7 @@ it('lists the current Window in layout order and focuses a chosen view', async (
   const views = test.container.querySelector('nav[aria-label="Session views"]')!;
   expect(test.container.textContent).toContain('In this Window');
   expect([...views.querySelectorAll('[data-window-view-row]')].map(row => [row.getAttribute('data-window-view-row'), row.getAttribute('data-depth')]))
-    .toEqual([['main', null], ['side', '1'], ['dock', null], ['float', null]]);
+    .toEqual([['main', null], ['side', null], ['dock', null], ['float', null]]);
   expect(views.querySelector('[data-window-view-row="dock"]')?.hasAttribute('data-collapsed')).toBe(true);
   expect(views.querySelector('[data-window-view-row="float"]')?.hasAttribute('data-collapsed')).toBe(false);
   const pane = document.createElement('div'); pane.dataset.viewId = 'dock'; pane.scrollIntoView = vi.fn(); document.body.append(pane);
@@ -296,10 +296,10 @@ it('shows sidebar headings with icon actions, flat rows without check marks, and
   expect(root.textContent).not.toContain('✓');
   expect(root.querySelector('.lab-window-selected')).toBeNull();
   expect(root.textContent).not.toContain('before deleting');
-  // Current and selected rows keep aria-current, and indented views keep their depth.
+  // Current and selected rows keep aria-current; a Side is a bot beside its source, not a level below it.
   expect(root.querySelector('[data-window-id="window"]')?.getAttribute('aria-current')).toBe('true');
   expect(root.querySelector(`[data-window-view-id="${test.read().selectedViewId}"]`)?.getAttribute('aria-current')).toBe('true');
-  expect(root.querySelector('[data-window-view-row="side"]')?.getAttribute('data-depth')).toBe('1');
+  expect(root.querySelector('[data-window-view-row="side"]')?.hasAttribute('data-depth')).toBe(false);
   // Row actions keep their classes, names, titles and data attributes.
   const rename = root.querySelector<HTMLButtonElement>('.lab-window-rename-trigger[data-window-rename="other"]')!;
   expect([rename.getAttribute('aria-label'), rename.title]).toEqual(['Rename Window: Window', 'Rename this Window']);
@@ -423,4 +423,42 @@ it('keeps Window deletion unavailable until another active Window is open', asyn
   await act(async () => trigger.click());
   expect(test.container.querySelector('dialog')).toBeNull();
   expect(test.remove).not.toHaveBeenCalled();
+});
+
+it('lists the group\'s bots by name, role and place, with Sides beside their source and Asks under their bot', async () => {
+  const binding = (id: string, title: string, extra: Partial<WindowSessionBinding> = {}): WindowSessionBinding => ({ hostId: 'h', providerId: 'codex', nativeSessionId: id, title, ...extra });
+  const views: WindowView[] = [
+    createWindowView('main', binding('a', 'Release check'), 'primary'),
+    { ...createWindowView('side', binding('b', 'Edge cases'), 'attached'), attachedTo: 'main' },
+    { ...createWindowView('ask', binding('q', 'Why the delay?'), 'float'), feature: { kind: 'ask', id: 'q' }, closeWith: 'main' },
+    { ...createWindowView('dock', binding('c', 'Docs writer')), collapsed: true },
+    { ...createWindowView('tpm', binding('d', 'Delivery')), feature: { kind: 'tpm', id: 'work' } },
+    { ...createWindowView('lead', binding('l', 'Reviewer')), feature: { kind: 'team', id: 'support', metadata: { role: 'leader' } } },
+    createWindowView('sleepy', binding('e', 'Backups')),
+    createWindowView('empty'),
+    createWindowView('old', binding('f', 'Earlier run', { sessionIntent: 'history' })),
+  ];
+  const window: WorkspaceWindow = { schemaVersion: 3, id: 'release', title: 'Release', revision: 1, selectedPrimaryViewId: 'main', selectedViewId: 'main', views };
+  const group = { window, bots: { rank: 'm', members: { main: { label: 'Owner' }, sleepy: { asleep: true as const } } } } as unknown as WindowGroup;
+  const workspace = { window, group, windows: [window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false, operate: vi.fn() } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const status = (session: WindowSessionBinding) => session.nativeSessionId === 'c' ? 'running' as const : session.nativeSessionId === 'e' ? 'waiting' as const : 'idle' as const;
+  const container = await render(<WindowWorkspaces workspace={workspace} placement="sidebar" sessionStatus={status} supportTeam={teamId => teamId === 'support'} />);
+  const rows = [...container.querySelectorAll<HTMLElement>('nav[aria-label="Session views"] [data-window-view-row]')];
+  const read = (row: HTMLElement) => ({ id: row.dataset.windowViewRow, depth: row.dataset.depth, name: row.querySelector('strong')?.textContent,
+    tags: [...row.querySelectorAll('.lab-bot-role, .lab-bot-label')].map(tag => tag.textContent), detail: row.querySelector('small')?.textContent ?? null });
+  expect(rows.map(read)).toEqual([
+    { id: 'main', depth: undefined, name: 'Release check', tags: ['Owner'], detail: 'Open' },
+    { id: 'side', depth: undefined, name: 'Edge cases', tags: ['Side'], detail: 'Open' },
+    // The Ask belongs to its bot: one line under it.
+    { id: 'ask', depth: '1', name: 'Why the delay?', tags: ['Ask'], detail: null },
+    { id: 'dock', depth: undefined, name: 'Docs writer', tags: [], detail: 'Folded · Working' },
+    { id: 'tpm', depth: undefined, name: 'Delivery', tags: ['TPM'], detail: 'Open' },
+    { id: 'lead', depth: undefined, name: 'Reviewer', tags: ['Support'], detail: 'Open' },
+    // A sleeping bot is quiet, except for what asks for the owner.
+    { id: 'sleepy', depth: undefined, name: 'Backups', tags: [], detail: 'Asleep · Needs you' },
+    { id: 'empty', depth: undefined, name: 'Empty view', tags: [], detail: null },
+    { id: 'old', depth: undefined, name: 'Earlier run', tags: [], detail: 'Earlier session' },
+  ]);
+  // The Window row counts its bots, and leads with what most needs the owner.
+  expect(container.querySelector('[data-window-id="release"] small')?.textContent).toBe('Needs you · 6 bots · 4 open');
 });

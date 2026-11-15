@@ -13,6 +13,7 @@ import { windowSessionBinding } from '../window-workspace.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 import { SessionConversation, type SessionConversationProps } from './SessionConversation.js';
 import { allowsWindowPaneSelection, SessionConversationMount } from './SessionConversationSurfaces.js';
+import { IconButton } from '../ui/IconButton.js';
 import './session-family.css';
 export type { FamilySessionPresentationContext } from './SessionConversation.js';
 
@@ -215,7 +216,8 @@ export function SessionFamily(props: Props) {
       const selected = !!paneView && paneView.id === presentedViewId;
       const childSlot = index > 0 && attached[index - 1] ? sessionBridge?.slotForView(attached[index - 1]!.id) : undefined;
       const parent = index > 0 ? parentIndex(index) : 0;
-      const controls = index === 0 ? props.controls : <button type="button" aria-label={compact ? `Back to ${path[parent]!.title}` : 'Close subagent'} title={compact ? 'Back to parent session' : 'Close subagent view'} onClick={() => compact ? show(parent) : close(index)}>{compact ? '←' : '×'}</button>;
+      const controls = index === 0 ? props.controls : compact ? <button type="button" aria-label={`Back to ${path[parent]!.title}`} title="Back to parent session" onClick={() => show(parent)}>←</button>
+        : <IconButton icon="close" label="Close subagent" title="Close subagent view" onClick={() => close(index)} />;
       return <section key={index === 0 ? "root" : `${paneView?.id ?? ''}:${sessionKey(item)}`} className={`lab-session-family-pane lab-session-pane-selection lab-session-composition${shared && rootView?.placement === 'primary' ? index === 0 ? ' lab-primary-conversation' : ' lab-side-conversation' : ''}`} aria-label={item.title} hidden={compact && focus !== index || index > 0 && attached[index - 1]?.collapsed}
         data-view-id={paneView?.id} data-selected={selected || undefined} aria-current={selected ? 'true' : undefined}
         style={compact ? undefined : index === 0 ? rootView ? { width: rootView.placement === 'float' ? '100%' : rootView.width, minWidth: rootView.placement === 'float' ? 0 : 240,

@@ -6,6 +6,8 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';
 import { activityLabel, type SessionActivityStatus } from '../session-activity-status.js';
+import { botActivityLabel } from '../bot-roster.js';
+import { windowSummary } from '../window-summary.js';
 import { viewTitle } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
 
@@ -36,20 +38,21 @@ export function windowThumbnail(window: WorkspaceWindow): { panes: WindowThumbna
   return { panes, floating: window.views.filter(view => view.placement === 'float').length };
 }
 
-/** The states worth showing on a pane, labelled as Track labels them; idle, closed and unknown sessions stay quiet. */
+/** The states worth showing on a pane, worded as Bot mode words them (a Host that left as Track says it); idle, closed and unknown sessions stay quiet. */
 const LABELLED: readonly SessionActivityStatus[] = ['waiting', 'starting', 'failed', 'running', 'offline'];
+const paneLabel = (state: SessionActivityStatus) => botActivityLabel(state) ?? activityLabel(state);
 
-/** A Window's sessions that need attention or are working, most urgent first. */
+/** A Window's sessions that need the owner, failed or are working, most urgent first. */
 function stateSummary(states: SessionActivityStatus[]): string | undefined {
   const count = (...matches: SessionActivityStatus[]) => states.filter(value => matches.includes(value)).length;
-  const parts = [[count('waiting', 'starting'), 'pending'], [count('failed'), 'failed'], [count('running'), 'working']] as const;
+  const needs = count('waiting', 'starting');
+  const parts = [[needs, needs === 1 ? 'needs you' : 'need you'], [count('failed'), 'failed'], [count('running'), 'working']] as const;
   const text = parts.filter(([n]) => n > 0).map(([n, label]) => `${n} ${label}`).join(' · ');
   return text || undefined;
 }
 
-function WindowCard({ window, current, opening, sessionStatus, onOpen }: { window: WorkspaceWindow; current: boolean; opening: boolean; sessionStatus?(session: SessionStateRef): SessionActivityStatus; onOpen(): void }) {
-  const { panes, floating } = windowThumbnail(window);
-  const count = window.views.length;
+function WindowCard({ window, current, opening, asleep, sessionStatus, onOpen }: { window: WorkspaceWindow; current: boolean; opening: boolean; asleep(viewId: string): boolean; sessionStatus?(session: SessionStateRef): SessionActivityStatus; onOpen(): void }) {
+  const { panes } = windowThumbnail(window);
   const paneStates = panes.map(pane => pane.session && sessionStatus ? sessionStatus(pane.session) : undefined);
   const summary = stateSummary(paneStates.filter((state): state is SessionActivityStatus => !!state));
   const attention = paneStates.includes('waiting');
@@ -59,14 +62,14 @@ function WindowCard({ window, current, opening, sessionStatus, onOpen }: { windo
       {panes.length ? panes.map((pane, index) => <span key={pane.id} className="lab-window-card-pane" style={{ flexGrow: pane.width }}
         data-selected={pane.selected || undefined} data-collapsed={pane.collapsed || undefined} data-attached={pane.attached || undefined} data-state={paneStates[index]}>
         {pane.collapsed ? null : <>
-          {paneStates[index] && LABELLED.includes(paneStates[index]!) ? <span className="lab-window-card-state">{activityLabel(paneStates[index]!)}</span> : null}
+          {paneStates[index] && LABELLED.includes(paneStates[index]!) ? <span className="lab-window-card-state">{paneLabel(paneStates[index]!)}</span> : null}
           <span className="lab-window-card-pane-title">{pane.title}</span>{pane.providerId ? <span className="lab-window-card-provider">{pane.providerId}</span> : null}
         </>}
       </span>) : <span className="lab-window-card-empty">No session views</span>}
     </span>
     <span className="lab-window-card-caption">
       <strong>{window.title}</strong>
-      <small>{opening ? 'Opening…' : `${count} ${count === 1 ? 'session view' : 'session views'}${floating ? `, ${floating} floating` : ''}`}
+      <small>{opening ? 'Opening…' : windowSummary(window.views, asleep)}
         {summary && !opening ? <span className="lab-window-card-summary"> · {summary}</span> : null}</small>
       {current ? <span className="lab-window-card-current">Current</span> : null}
     </span>
@@ -159,7 +162,7 @@ export function WindowOverview({ workspace, scope, enabled, open, sessionStatus,
       {notice ? <p className="lab-window-overview-notice" role="alert">{notice}</p> : null}
       <div ref={grid} className="lab-window-overview-grid" role="group" aria-label="Windows, most recently used first" onKeyDown={move}>
         {windows.map(window => <WindowCard key={window.id} window={window} current={window.id === workspace.window?.id} opening={openingId === window.id}
-          sessionStatus={sessionStatus} onOpen={() => void choose(window.id)} />)}
+          asleep={viewId => !!workspace.readGroup?.(window.id)?.bots?.members[viewId]?.asleep} sessionStatus={sessionStatus} onOpen={() => void choose(window.id)} />)}
       </div>
       {!windows.length ? <p className="lab-window-overview-notice">No Windows yet.</p> : null}
     </div>

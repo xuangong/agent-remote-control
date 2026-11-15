@@ -911,8 +911,9 @@ test('Windows show session states, from shared states for sessions this page doe
     const currentWindow = panel.locator('[data-window-id][aria-current="true"]');
     const windowId = (await currentWindow.getAttribute('data-window-id'))!;
     const row = panel.locator(`[data-window-row="${windowId}"]`);
-    await expect(row.locator('small')).toHaveText('Idle · 1 session view');
-    await expect(panel.locator('[data-window-view-row] small').first()).toHaveText('Idle · Top-level');
+    // Worded as in Bot mode: an idle bot says only where it stands.
+    await expect(row.locator('small')).toHaveText('1 bot');
+    await expect(panel.locator('[data-window-view-row] small').first()).toHaveText('Open');
     await panel.getByRole('button', { name: 'New Window', exact: true }).click();
     await expect(currentWindow).not.toHaveAttribute('data-window-id', windowId);
     // A new Window starts with a copy of the current layout; close it so only the first Window holds the session.
@@ -922,16 +923,16 @@ test('Windows show session states, from shared states for sessions this page doe
     const floating = page.locator('.lab-window-floating');
     await expect(floating).not.toHaveAttribute('data-attention', 'true');
     fixture.holdSessionState(nativeSessionId!, 'waiting');
-    await expect(row.locator('small')).toHaveText('Pending · 1 session view');
-    await expect(row.locator('strong')).toHaveAttribute('data-session-status', 'waiting');
+    await expect(row.locator('small')).toHaveText('Needs you · 1 bot');
+    await expect(row.locator('.lab-bot-status[data-attention]')).toHaveText('Needs you');
     await expect(floating).toHaveAttribute('data-attention', 'true');
     await page.screenshot({ path: test.info().outputPath('window-list-states.png') });
     await panel.getByRole('button', { name: 'Show all Windows', exact: true }).click();
     const card = page.getByRole('dialog', { name: 'All Windows' }).locator(`[data-window-card="${windowId}"]`);
     const pane = card.locator('.lab-window-card-pane').first();
-    await expect(pane.locator('.lab-window-card-state')).toHaveText('Pending');
+    await expect(pane.locator('.lab-window-card-state')).toHaveText('Needs you');
     await expect(card).toHaveAttribute('data-attention', 'true');
-    await expect(card.locator('.lab-window-card-summary')).toHaveText(' · 1 pending');
+    await expect(card.locator('.lab-window-card-summary')).toHaveText(' · 1 needs you');
     await page.screenshot({ path: test.info().outputPath('window-overview-states.png') });
     fixture.holdSessionState(nativeSessionId!, 'running');
     await expect(pane.locator('.lab-window-card-state')).toHaveText('Working');

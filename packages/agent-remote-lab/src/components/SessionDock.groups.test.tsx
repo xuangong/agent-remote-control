@@ -113,3 +113,38 @@ it('dims the folded card of a sleeping bot and says Asleep unless it needs the o
   expect(card().getAttribute('data-asleep')).toBe('true');
   expect(card().getAttribute('aria-description')).toBe('Asleep');
 });
+
+it('stands a folded bot as a slim card, wider than a minimized view, with its picture, name and role', async () => {
+  const view = await render(<SessionDockProvider enabled><SessionDockRail primaryGroups={[
+    { id: 'bot', title: 'Release check', width: 400, collapsed: true, selected: false, content: <div />, fold: { name: 'Release check', role: 'Side' } },
+    { id: 'plain', title: 'Notes', width: 400, collapsed: true, selected: false, content: <div /> }]}
+    onCollapsePrimaryGroup={vi.fn()} onClosePrimaryGroup={vi.fn()} onRemovePrimaryGroup={vi.fn()} /></SessionDockProvider>);
+  const pane = (id: string) => view.querySelector<HTMLElement>(`[data-primary-group-id="${id}"]`)!;
+  // The walkthrough's slim card: room for the picture, the name running down it and the role tag.
+  expect(pane('bot').style.width).toBe('64px');
+  expect(pane('bot').querySelector('.lab-folded-bot-name')?.textContent).toBe('Release check');
+  expect(pane('bot').querySelector('.lab-folded-bot-role')?.textContent).toBe('Side');
+  expect(pane('plain').style.width).toBe('44px');
+});
+
+it('in a shared Window, brings only the selected view\'s dock into view when docks mount, so a loaded Window starts at its selection', async () => {
+  const { WindowLayoutContext } = await import('../window-workspace-context.js');
+  const { createWindowView } = await import('@orchardworks/agent-remote-protocol');
+  const { SessionViewPlacement } = await import('./SessionDock.js');
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
+  vi.stubGlobal('cancelAnimationFrame', () => {});
+  const revealed: string[] = [];
+  const scroll = vi.fn(function (this: Element) { revealed.push(this.closest('[data-dock-id]')?.getAttribute('data-dock-id') ?? ''); });
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: scroll });
+  try {
+    const views = ['main', 'one', 'two'].map(id => createWindowView(id, undefined, id === 'main' ? 'primary' : 'dock'));
+    await render(<WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, selectedPrimaryViewId: 'main', selectedViewId: 'two', views }, operate() {} }}>
+      <SessionDockProvider enabled><SessionDockRail primaryGroups={[{ id: 'main', title: 'Main', width: 400, collapsed: false, selected: false, content: <div /> }]} />
+        {['one', 'two'].map(id => <SessionViewPlacement key={id} id={id} title={id} visible dockRequest="open">{() => <p>{id}</p>}</SessionViewPlacement>)}
+      </SessionDockProvider>
+    </WindowLayoutContext.Provider>);
+    // Every dock mounting used to reveal itself, so the last one won and a loaded Window opened scrolled away from its selection.
+    expect(revealed).toEqual(['two']);
+  } finally { delete (Element.prototype as Partial<Element>).scrollIntoView; vi.unstubAllGlobals(); }
+});

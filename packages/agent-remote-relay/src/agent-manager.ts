@@ -55,6 +55,8 @@ export interface AgentManagerAttachOptions {
   inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
+  /** See `ResourceIngestorOptions.resourceIdKey`. */
+  resourceIdKey?: string;
 }
 
 export interface AgentManagerCreateOptions {
@@ -67,6 +69,8 @@ export interface AgentManagerCreateOptions {
   inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
+  /** See `ResourceIngestorOptions.resourceIdKey`. */
+  resourceIdKey?: string;
 }
 
 export interface AgentManagerResumeOptions {
@@ -79,6 +83,8 @@ export interface AgentManagerResumeOptions {
   inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
   settingIntent?: OperationLifecycle['settingIntent'];
+  /** See `ResourceIngestorOptions.resourceIdKey`. */
+  resourceIdKey?: string;
 }
 
 export type AgentManagerListener = (event: AgentManagerEvent) => void;
@@ -234,7 +240,7 @@ export class AgentManager {
       (options.clock ?? (() => new Date()))().toISOString(),
       runtimeInfo,
       options.clock ?? (() => new Date()),
-      new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore() }),
+      new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore(), ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }) }),
       options.inputImageStore,
       options.settingIntent,
       options.inputResourceStore,
@@ -274,6 +280,7 @@ export class AgentManager {
         ...(options.inputResourceStore === undefined ? {} : { inputResourceStore: options.inputResourceStore }),
         ...(options.inputImageStore === undefined ? {} : { inputImageStore: options.inputImageStore }),
         ...(options.settingIntent === undefined ? {} : { settingIntent: options.settingIntent }),
+        ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }),
       });
       await manager.ready;
       return manager;

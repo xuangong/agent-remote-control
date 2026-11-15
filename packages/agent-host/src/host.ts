@@ -42,6 +42,7 @@ import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
 import { SessionOutbox } from './session-outbox.js';
+import { loadResourceIdKey } from './resource-id-key.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
 import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
 import { withReferenceNotes } from './session-reference-notes.js';
@@ -146,6 +147,8 @@ export interface AgentHostRuntimeOptions {
   inputResources?: InputResourceStoreOptions;
   /** Where each session's latest reply is kept across restarts; without it, replies are known only while this process runs. */
   sessionRepliesFile?: string;
+  /** Where the secret of stable resource ids is kept; without it resource ids are random per process. */
+  resourceIdKeyFile?: string;
   /** Delivers messages that waited on the Relay for this Host; receipts of claimed messages are kept in file. */
   outbox?: { file: string; request(call: OutboxHostCall): Promise<unknown> };
   /** Credentials through which sessions' shell commands reach this Controller as themselves. */
@@ -247,6 +250,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     ...(options.inputImages ? {} : stateDirectory ? { inputImages: { directory: join(stateDirectory, 'input-images') } } : {}),
     ...(options.inputResources ? {} : stateDirectory ? { inputResources: { directory: join(stateDirectory, 'input-resources') } } : {}),
     ...(options.sessionRepliesFile || !stateDirectory ? {} : { sessionRepliesFile: join(stateDirectory, 'session-replies.json') }),
+    ...(options.resourceIdKeyFile || !stateDirectory ? {} : { resourceIdKeyFile: join(stateDirectory, 'resource-id.key') }),
     ...(stateDirectory ? { outbox: { file: join(stateDirectory, 'outbox-receipts.json'), request: (call: OutboxHostCall) => connection.client.outboxRequest(call) } } : {}) });
   options.providerDiscovery?.onRegistration(runtime.addRegistration);
   runtime.setRelayConnected(false);
@@ -523,7 +527,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return role ? { roleId: role.id, roleRevision: role.revision } : undefined;
     }, operationCache, assertHandoffState, target => succession.coordinator.assertReservation(target), target => !!originalCreation(target), async operationId => { await successionService?.reconcileFirstInput(operationId); }) : undefined;
   succession?.coordinator.setAdmission(successionBoundary!);
-  const relay = createAgentRemoteRelay({ providers: relayAdapters, operationCache, operationLifecycle: {
+  const relay = createAgentRemoteRelay({ providers: relayAdapters, ...(options.resourceIdKeyFile ? { resourceIdKey: loadResourceIdKey(options.resourceIdKeyFile) } : {}), operationCache, operationLifecycle: {
     settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(bindingFor(agent)), accept) : accept(),
     target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
     admit: () => { if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },

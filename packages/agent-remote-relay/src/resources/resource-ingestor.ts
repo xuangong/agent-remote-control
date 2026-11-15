@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 
 import type { AgentResourceReadResult } from '@orchardworks/agent-provider-sdk';
 import {
@@ -28,6 +28,16 @@ export interface ResourceIngestorOptions {
   maxAttempts?: number;
   retryAfterMs?: number;
   createResourceId?: () => string;
+  /**
+   * A secret the owner keeps with the Controller's state. With it, a resource that settles as available gets an id that is
+   * the same for the same agent, locator and bytes in every process, and that nobody can derive. Without it ids are random.
+   */
+  resourceIdKey?: string;
+}
+
+/** The id of an available resource: a keyed hash of its agent, normalized locator and content. */
+export function stableResourceId(key: string, agentId: string, normalizedLocator: string, sha256: string): string {
+  return `rid_${createHmac('sha256', key).update(JSON.stringify([agentId, normalizedLocator, sha256])).digest('base64url').slice(0, 32)}`;
 }
 
 interface SettledResource {
@@ -174,10 +184,18 @@ export class ResourceIngestor {
           return { resourceId: existing.resourceId, state: existing.state };
         }
         const imageDimensions = readImageDimensions(result.bytes, detectedMediaType);
-        return this.finish(agentId, resourceId, {
+        const available: StoredResourceState = {
           ...(imageDimensions ? { imageDimensions } : {}),
           status: 'available', mediaType: detectedMediaType, byteLength: result.bytes.byteLength, sha256,
-        });
+        };
+        const key = this.options.resourceIdKey;
+        if (key === undefined) return this.finish(agentId, resourceId, available);
+        // The record the acquisition began with has a random id; the settled resource takes the stable one.
+        const stableId = stableResourceId(key, agentId, normalizedLocator, sha256);
+        const provisional = this.options.store.getRecord(agentId, resourceId);
+        this.options.store.createRecord({ resourceId: stableId, agentId, locator: provisional?.locator ?? normalizedLocator, normalizedLocator, state: available });
+        this.options.store.deleteRecord(agentId, resourceId);
+        return { resourceId: stableId, state: available };
       } catch {
         if (attempt === this.maxAttempts) {
           return this.finish(agentId, resourceId, {

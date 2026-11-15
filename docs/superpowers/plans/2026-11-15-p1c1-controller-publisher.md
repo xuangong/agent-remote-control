@@ -67,11 +67,11 @@ Also decided here: taps are not viewers (the publisher follows the manager throu
 | `packages/agent-remote-journal/src/session-journal.ts`, `journal-amendments.test.ts`, `journal-late-rows.test.ts` | Modify and create: `rebind`, `outcome`, open corrections and items, late rows to evicted tools and todo lists, the served attention cursor. |
 | `packages/agent-remote-hosted/src/host-journals.ts`, `journal-uplink.ts`, `journal-session-stream.ts`, `broker.ts` and five new tests (`host-journals-amendments`, `host-journals-reset-open`, `journal-uplink-controller-messages`, `journal-session-stream-amendments`, `broker-journal-grant`) | Modify and create: apply and fan out the new entries, unserve, request refusals, the reset open, the grant level, the held interaction frames. |
 | `packages/agent-remote-relay/src/timeline-store.ts`, `timeline-projector.ts`, `agent-manager-events.ts`, `agent-manager.ts`, `session-wire.test.ts`, `agent-manager-journal.test.ts` | Modify and create: row identity, item index, the journal tap, older-history reading for the journal, the attention item. |
-| `packages/agent-remote-relay/src/resources/resource-ingestor.ts`, `relay.ts`, `stable-resource-ids.test.ts` | Modify and create: stable resource ids. |
+| `packages/agent-remote-relay/src/resources/resource-ingestor.ts`, `agent-manager.ts`, `relay.ts`, `stable-resource-ids.test.ts` | Modify and create: stable resource ids; the relay passes the adapter's `journal` declaration to its managers. |
 | `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts`, `remote-host-uplink-journal.test.ts` | Modify and create: the journal grant and message hand-over. |
 | `packages/agent-host/src/journal-items.ts`, `journal-reconcile.ts` and tests | Create: items from rows, wire measurement, chunking, the reconcile plan. |
 | `packages/agent-host/src/journal-publication.ts`, `journal-publisher.ts` and tests | Create: the state machine of one session and the connection-level publisher. |
-| `packages/agent-host/src/resource-id-key.ts` and its test | Create: the secret behind stable resource ids. |
+| `packages/agent-host/src/resource-id-key.ts`, `host-resource-ids.test.ts` and their tests | Create: the secret behind stable resource ids and the Controller restart test. |
 | `packages/agent-host/src/test-utils/journal-scripted-session.ts`, `journal-relay-loopback.ts`, `journal-continuity.ts` | Create: the fake provider session, the real Relay journal logic wired to a publisher, and the continuity fixture for adapters. |
 | `packages/agent-host/src/host.ts`, `cli.ts`, `package.json`, `host-journal.test.ts` and edits to `host.test.ts`, `relay-diagnostics.test.ts` | Modify and create: wiring, diagnostic delivery 4, the real-transport tests. |
 | `docs/blueprint/agent-remote-observation.md`, `docs/current/agent-remote/protocol.md`, `provider-onboarding.md` | Modify: contract and protocol documentation. |
@@ -2632,7 +2632,7 @@ The Controller's timeline lives in `AgentManager`, which already turns every pro
 
 <!-- write: packages/agent-remote-relay/src/agent-manager-journal.test.ts -->
 ```ts
-import type { AgentCapabilities, AgentResourceReadResult, AgentRuntimeInfo, AgentSession, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import type { AgentCapabilities, AgentProviderAdapter, AgentResourceReadResult, AgentRuntimeInfo, AgentSession, AgentSessionConfig, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
@@ -2772,7 +2772,7 @@ describe('the journal tap of an agent manager', () => {
   });
 
   it('tells the tap once when a journal-capable provider emits an observation without identity, or a key of the Controller\'s own prefix', async () => {
-    for (const breach of [{ itemIdentity: undefined }, { itemIdentity: { key: 'controller:m1' } }, { delivery: 'history' as const, itemIdentity: undefined }]) {
+    for (const breach of [{ itemIdentity: undefined }, { itemIdentity: { key: 'controller:m1' } }]) {
       const stream = new Stream();
       stream.push({ type: 'history_boundary' });
       const manager = await attach(stream, { journalContract: true });
@@ -2785,6 +2785,19 @@ describe('the journal tap of an agent manager', () => {
       expect(told).toBe(1);
       await manager.close();
     }
+  });
+
+  it('tells a tap that subscribes later about a breach in history', async () => {
+    const stream = new Stream();
+    stream.push({ ...observation('history:1', 'Old', 'm1', { delivery: 'history' }), itemIdentity: undefined });
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream, { journalContract: true });
+    await manager.ready;
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    await flush();
+    expect(told).toBe(1);
+    await manager.close();
   });
 
   it('tells a tap that an interaction was resolved without identity, and accepts one that carries it', async () => {
@@ -2815,6 +2828,22 @@ describe('the journal tap of an agent manager', () => {
     stream.push({ ...observation('stream:1', 'Hi', 'm1'), itemIdentity: undefined });
     await flush();
     expect(told).toBe(0);
+    await manager.close();
+  });
+
+  it('takes the journal contract from the adapter that creates the session', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary' });
+    const adapter = {
+      descriptor: { providerId: 'fake', displayName: 'Fake' }, journal: { itemIdentity: 1 as const },
+      createSession: async () => session(stream), resumeSession: async () => session(stream),
+    } as unknown as AgentProviderAdapter;
+    const manager = await AgentManager.create({ agentId: 'agent-1', adapter, config: { cwd: '/tmp' } as AgentSessionConfig, epoch: 'epoch-1' });
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    stream.push({ ...observation('stream:1', 'Hi', 'm1'), itemIdentity: undefined });
+    await flush();
+    expect(told).toBe(1);
     await manager.close();
   });
 
@@ -3383,7 +3412,9 @@ Taps hear every event and are told when the manager closes:
 - [ ] **Step 5: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/agent-manager-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all. Rebuild the package so `agent-remote-journal`, `agent-remote-hosted` and `agent-host` see `rowItemKey` and `subscribeJournal`.
+Expected: PASS for all (the relay package has 418 tests after Task 6; 12 of them are in `agent-manager-journal.test.ts`). Rebuild the package so `agent-remote-journal`, `agent-remote-hosted` and `agent-host` see `rowItemKey` and `subscribeJournal`.
+
+Two details differ from what an earlier draft said. The manager reads `journalContract` in its constructor (`private readonly journalContract = false`, passed by `attach` as `options.journalContract === true`), and `checkIdentity(observation)` runs right after `isDuplicate`. A breach in a history observation is told to a tap that subscribes later through the microtask in `subscribeJournal`; history cannot be delivered after the boundary, so the test for it pushes the observation before the boundary.
 
 - [ ] **Step 6: Commit.**
 
@@ -3398,11 +3429,12 @@ A journal row carries the resource bindings its text produced, and a binding nam
 
 The id is a keyed hash (HMAC-SHA-256) of the agent id, the normalized locator and the SHA-256 of the bytes, under a secret the Controller keeps with its state. It is assigned when a resource settles as available: the pending binding a row first carries keeps its random id and is replaced by the settled one through the existing `timeline_resource_binding_replaced` event, which the publisher turns into a `rebind`. Because the hash includes the bytes, a file overwritten with new content still gets a new id, as today. Failed and unavailable resources keep their random ids.
 
-Access stays as it is: every read checks that the record belongs to the asking agent, and the agent id is part of the hash, so two agents never share an id even for the same file.
+Access stays as it is: every read checks that the record belongs to the asking agent, and the agent id is part of the hash, so two agents never share an id even for the same file. An input image's normalized locator already names its session scope, so the same bytes in two scopes get two ids and the manager's per-scope check on `imageResourceScopes` still separates them.
 
 **Files:**
 - Modify: `packages/agent-remote-relay/src/resources/resource-ingestor.ts`
 - Modify: `packages/agent-remote-relay/src/agent-manager.ts`, `relay.ts`
+- Create: `packages/agent-host/src/host-resource-ids.test.ts`
 - Create: `packages/agent-remote-relay/src/resources/stable-resource-ids.test.ts`
 - Create: `packages/agent-host/src/resource-id-key.ts`, `resource-id-key.test.ts`
 - Modify: `packages/agent-host/src/host.ts`
@@ -3411,8 +3443,10 @@ Access stays as it is: every read checks that the record belongs to the asking a
 
 <!-- write: packages/agent-remote-relay/src/resources/stable-resource-ids.test.ts -->
 ```ts
+import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
+import { createAgentRemoteRelay } from '../relay.js';
 import { ResourceIngestor } from './resource-ingestor.js';
 import { InMemoryResourceStore } from './resource-store.js';
 
@@ -3482,6 +3516,82 @@ describe('resource ids without a key', () => {
     const b = await settle(second, 'agent-1', 'shot.png', png);
     expect(a.settled.resourceId).toBe(a.provisional);
     expect(a.settled.resourceId).not.toBe(b.settled.resourceId);
+  });
+});
+
+const flush = () => new Promise<void>(resolve => setTimeout(resolve, 10));
+
+function imageProvider(journal: boolean, items: ProviderStreamItem[] = []): AgentProviderAdapter {
+  const session = (): AgentSession => ({
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+    async *observe() {
+      yield { type: 'observation', sourceKey: 'history:1', occurredAt: 1_725_000_000_000, delivery: 'history',
+        event: { type: 'timeline', provider: 'fake', item: { type: 'assistant_message', text: 'See [shot](shot.png).', messageId: 'm1' } },
+        ...(journal ? { itemIdentity: { key: 'm1', completes: true } } : {}) };
+      yield { type: 'history_boundary' };
+      yield* items;
+    },
+    async sendMessage() {}, async respondToInteraction() {},
+    async readResource() { return { status: 'available', mediaType: 'image/png', bytes: png }; },
+    async runtimeInfo() { return { providerId: 'fake', sessionId: 'session-1', status: 'idle', persistence: { providerId: 'fake', sessionId: 'session-1', opaque: 'resume-1' } }; },
+    async dispose() {},
+  });
+  return { descriptor: { providerId: 'fake', displayName: 'Fake' }, ...(journal ? { journal: { itemIdentity: 1 as const } } : {}), createSession: async () => session(), resumeSession: async () => session() };
+}
+
+async function imageIdAfterStart(key: string | undefined, agentId: string): Promise<{ resourceId: string; read: string }> {
+  const relay = createAgentRemoteRelay({ providers: [imageProvider(false)], ...(key === undefined ? {} : { resourceIdKey: key }) });
+  await relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: { requestId: 'r', operationId: '00000000-0000-4000-8000-000000000001', agentId, providerId: 'fake', config: { sessionId: 'session-1' } } });
+  const manager = relay.requireAgent(agentId);
+  await flush();
+  const page = manager.fetchTimeline({ requestId: 'h', agentId, direction: 'tail', limit: 10 });
+  const resource = page.payload.entries[0]?.resources?.[0];
+  const response = await manager.readResource('read', resource!.resourceId);
+  await relay.close();
+  return { resourceId: resource!.resourceId, read: response.payload.state.status };
+}
+
+describe('resource ids across a Controller restart', () => {
+  it('give the image of a restored session the id it had, and the new Controller can read it', async () => {
+    const before = await imageIdAfterStart('secret-one', 'agent-1');
+    const after = await imageIdAfterStart('secret-one', 'agent-1');
+    expect(before.resourceId).toMatch(/^rid_/);
+    expect(after).toEqual(before);
+    expect(after.read).toBe('available');
+  });
+
+  it('give another id under another secret or for another agent, and a random one without a secret', async () => {
+    const base = await imageIdAfterStart('secret-one', 'agent-1');
+    expect((await imageIdAfterStart('secret-two', 'agent-1')).resourceId).not.toBe(base.resourceId);
+    expect((await imageIdAfterStart('secret-one', 'agent-2')).resourceId).not.toBe(base.resourceId);
+    const first = await imageIdAfterStart(undefined, 'agent-1');
+    expect(first.resourceId).not.toMatch(/^rid_/);
+    expect((await imageIdAfterStart(undefined, 'agent-1')).resourceId).not.toBe(first.resourceId);
+  });
+
+  it('does not let one agent of a relay read the image of another, even though both know its id', async () => {
+    const relay = createAgentRemoteRelay({ providers: [imageProvider(false)], resourceIdKey: 'secret-one' });
+    const create = (agentId: string, n: number) => relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: { requestId: agentId, operationId: `00000000-0000-4000-8000-00000000000${n}`, agentId, providerId: 'fake', config: { sessionId: 'session-1' } } });
+    await create('agent-1', 1);
+    await create('agent-2', 2);
+    await flush();
+    const id = relay.requireAgent('agent-1').fetchTimeline({ requestId: 'h', agentId: 'agent-1', direction: 'tail', limit: 10 }).payload.entries[0]?.resources?.[0]?.resourceId;
+    expect((await relay.requireAgent('agent-1').readResource('a', id!)).payload.state.status).toBe('available');
+    expect((await relay.requireAgent('agent-2').readResource('b', id!)).payload.state.status).toBe('unavailable');
+    await relay.close();
+  });
+});
+
+describe('the journal contract of a provider that a relay owns', () => {
+  it('reaches the agent manager, so a session that omits item identity is told to its taps', async () => {
+    const relay = createAgentRemoteRelay({ providers: [imageProvider(true, [{ type: 'observation', sourceKey: 'stream:2', occurredAt: 1_725_000_000_001, delivery: 'live',
+      event: { type: 'timeline', provider: 'fake', item: { type: 'assistant_message', text: 'No identity', messageId: 'm2' } } }])] });
+    await relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: { requestId: 'r', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent-1', providerId: 'fake', config: { sessionId: 'session-1' } } });
+    let told = 0;
+    relay.requireAgent('agent-1').subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    await flush();
+    expect(told).toBe(1);
+    await relay.close();
   });
 });
 ```
@@ -3693,6 +3803,21 @@ export class AgentAlreadyExistsError
         ...(this.resourceIdKey === undefined ? {} : { resourceIdKey: this.resourceIdKey }),
 ```
 
+The relay's adapter wrapper (`ownAdapter`) names only `descriptor`, `createSession` and `resumeSession`, so a manager made through the relay would never see the adapter's `journal` declaration and `supportsJournal` would be false for it. The wrapper carries the declaration:
+
+<!-- edit: packages/agent-remote-relay/src/relay.ts -->
+<!-- old -->
+```ts
+      descriptor: adapter.descriptor,
+      createSession: config => own
+```
+<!-- new -->
+```ts
+      descriptor: adapter.descriptor,
+      ...(adapter.journal === undefined ? {} : { journal: adapter.journal }),
+      createSession: config => own
+```
+
 <!-- edit: packages/agent-remote-relay/src/relay.ts -->
 <!-- old -->
 ```ts
@@ -3711,15 +3836,15 @@ export class AgentAlreadyExistsError
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/resources/stable-resource-ids.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all. Without a key nothing changes, so the existing resource and manager tests are unaffected.
+Expected: PASS for all (418 tests). Without a key nothing changes, so the existing resource and manager tests are unaffected. `stable-resource-ids.test.ts` also holds the relay-level restart test (a second relay with the same key gives the restored session's image the same id and can read it), the cross-agent read refusal, and the test that the journal contract reaches a manager the relay creates.
 
 - [ ] **Step 5: Write the failing test of the key file.** Create `packages/agent-host/src/resource-id-key.test.ts`:
 
 <!-- write: packages/agent-host/src/resource-id-key.test.ts -->
 ```ts
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 
 import { loadResourceIdKey } from './resource-id-key.js';
@@ -3748,6 +3873,22 @@ it('makes a new key, and keeps nothing of the old content, when the file holds s
 it('gives different Controllers different keys', async () => {
   expect(loadResourceIdKey(await location())).not.toBe(loadResourceIdKey(await location()));
 });
+
+it('tightens the permissions of a key file that is readable by others, without changing the key', async () => {
+  const file = await location();
+  const key = loadResourceIdKey(file);
+  if (process.platform === 'win32') return;
+  await chmod(file, 0o644);
+  expect(loadResourceIdKey(file)).toBe(key);
+  expect((await stat(file)).mode & 0o777).toBe(0o600);
+});
+
+it('creates the directory and leaves no staging file behind', async () => {
+  const file = join(dirname(await location()), 'nested', 'resource-id.key');
+  const key = loadResourceIdKey(file);
+  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
+  expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+});
 ```
 
 - [ ] **Step 6: Run it and see it fail.**
@@ -3760,20 +3901,31 @@ Expected: FAIL (`./resource-id-key.js` does not exist).
 <!-- write: packages/agent-host/src/resource-id-key.ts -->
 ```ts
 import { randomBytes } from 'node:crypto';
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
- * The secret behind stable resource ids, kept in the Controller's state directory so ids survive a restart. A missing or
- * damaged file is replaced by a new key; ids made under the old key are then replaced as the resources settle again.
+ * The secret behind stable resource ids, kept in the Controller's state directory so ids survive a restart. It is 32 random
+ * bytes readable only by the Controller's user. A missing or damaged file is replaced by a new key; ids made under the old
+ * key are then replaced as the resources settle again.
  */
 export function loadResourceIdKey(file: string): string {
   try {
     const saved = readFileSync(file, 'utf8').trim();
-    if (/^[0-9a-f]{64}$/.test(saved)) return saved;
+    if (KEY_PATTERN.test(saved)) {
+      chmodSync(file, 0o600);
+      return saved;
+    }
   } catch { /* No key yet. */ }
   const key = randomBytes(32).toString('hex');
-  writeFileSync(file, `${key}\n`, { mode: 0o600 });
-  chmodSync(file, 0o600);
+  mkdirSync(dirname(file), { recursive: true });
+  // The key never exists at its final path with other content or looser permissions.
+  const staging = `${file}.${process.pid}.tmp`;
+  writeFileSync(staging, `${key}\n`, { mode: 0o600 });
+  chmodSync(staging, 0o600);
+  renameSync(staging, file);
   return key;
 }
 ```
@@ -3827,12 +3979,13 @@ import { loadResourceIdKey } from './resource-id-key.js';
 - [ ] **Step 8: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/resource-id-key.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
-Expected: PASS. The restart test with an image whose id survives is in Task 9, where a journal is under it.
+Expected: PASS (5 tests). The Controller-level restart test, `host-resource-ids.test.ts`, attaches a session through `createAgentHostRuntime` twice with the same `resourceIdKeyFile` and expects the same image id; the restart test with a journal under it is in Task 9.
 
 - [ ] **Step 9: Commit.**
 
 ```bash
 git add packages/agent-remote-relay/src packages/agent-host/src
+pnpm compatibility:update && pnpm compatibility:check
 git commit -m "feat(relay): give a settled resource an id that is stable for its agent, locator and bytes, under a secret the Controller keeps" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

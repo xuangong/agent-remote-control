@@ -39,6 +39,8 @@ export interface AgentRemoteRelayOptions {
   resourceStore?: ResourceStore;
   inputResourceStore?: InputResourceStore;
   inputImageStore?: InputImageStore;
+  /** See `ResourceIngestorOptions.resourceIdKey`; the Controller passes a secret it keeps with its state. */
+  resourceIdKey?: string;
 }
 
 export class AgentAlreadyExistsError extends AgentOperationRejectedError {
@@ -82,6 +84,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     private readonly operationCache: OperationCache = createOperationCache(),
     private readonly operationLifecycle?: OperationLifecycle,
     private readonly inputResourceStore?: InputResourceStore,
+    private readonly resourceIdKey?: string,
   ) {
     this.providers = new ProviderRegistry(providers);
   }
@@ -132,6 +135,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         config: request.payload.config,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        ...(this.resourceIdKey === undefined ? {} : { resourceIdKey: this.resourceIdKey }),
         settingIntent: this.operationLifecycle?.settingIntent,
         ...(this.inputResourceStore ? { inputResourceStore: this.inputResourceStore } : {}),
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
@@ -194,6 +198,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
     };
     return {
       descriptor: adapter.descriptor,
+      ...(adapter.journal === undefined ? {} : { journal: adapter.journal }),
       createSession: config => own(adapter.createSession(config)),
       resumeSession: handle => own(adapter.resumeSession(handle)),
     };
@@ -219,6 +224,7 @@ class AgentRemoteRelayImplementation implements AgentRemoteRelay {
         handle: request.payload.persistence,
         epoch: this.createEpoch(),
         resourceStore: this.resourceStore,
+        ...(this.resourceIdKey === undefined ? {} : { resourceIdKey: this.resourceIdKey }),
         settingIntent: this.operationLifecycle?.settingIntent,
         ...(this.inputResourceStore ? { inputResourceStore: this.inputResourceStore } : {}),
         ...(this.inputImageStore ? { inputImageStore: this.inputImageStore } : {}),
@@ -284,6 +290,7 @@ export function createAgentRemoteRelay(options: AgentRemoteRelayOptions): AgentR
     options.operationCache,
     options.operationLifecycle,
     options.inputResourceStore,
+    options.resourceIdKey,
   );
 }
 

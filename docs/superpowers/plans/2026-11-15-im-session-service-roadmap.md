@@ -32,4 +32,5 @@ Every plan follows the repository rules in `AGENTS.md`:
   - Delete journals when a Host or a binding is revoked.
   - Page the index in `journal_opened` once it no longer fits in one 8 MiB uplink message. Long item keys reach that point well before 30,000 items.
 - **P1-C: chunk large rereads.** A single `replace` or `prepend` message is capped at 8 MiB, so the Controller chunks large rereads.
+- **P1-C: advertise diagnostic delivery version 4.** Journal diagnostics (`journal_message_unencodable`, `journal_store_failed`) reach only Controllers that advertise version 4. Every Controller advertises 3 today (`packages/agent-host/src/host.ts`), and it already decodes these events through the shared module.
 - **P1-C: validate rows before batching.** The wire limits for a row are stricter than the journal's own types (`turnId` and `providerId` at most 512 characters, at most 256 `resources`, `sourceKey` at most 4096 characters, an integer `occurredAt` that is not negative). The Controller validates each row before it adds the row to a publication, because one invalid row makes the whole message unencodable.

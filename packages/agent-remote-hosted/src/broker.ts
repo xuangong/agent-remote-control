@@ -2100,11 +2100,6 @@ export function createHostBroker(options: HostBrokerOptions) {
     };
   }
   /**
-   * A browser stream whose session is read from its journal. Reads never touch the Controller; the Controller stream for
-   * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
-   * disconnects apply to it like to any other stream.
-   */
-  /**
    * Makes the Controller know the session before a stream opens. A Host whose uplink was replaced while the attach was in
    * flight rejects the attach as offline although it is connected again; that is retryable, not a wait for the Host.
    */
@@ -2118,6 +2113,11 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw error;
     }
   }
+  /**
+   * A browser stream whose session is read from its journal. Reads never touch the Controller; the Controller stream for
+   * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
+   * disconnects apply to it like to any other stream.
+   */
   function acceptJournalServed(host: Host, binding: Binding, context: BrokerRequestContext) {
     const subject = principal(context);
     return { accept(client: RelaySocket) {

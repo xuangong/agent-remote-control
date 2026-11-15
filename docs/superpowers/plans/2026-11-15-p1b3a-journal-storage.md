@@ -4274,38 +4274,52 @@ and in the same function change the condition that grants the journal connection
 
 ```ts
   /** The deletion of each Host's journals in flight; a second ask for the same Host shares it, so a Host's journals are never deleted twice. */
-  const deletionRuns = new Map<string, Promise<void>>();
-  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
-  function deleteJournals(hostId: string): Promise<void> {
+  const deletionRuns = new Map<string, Promise<boolean>>();
+  /** How many Hosts' journals one round deletes at the same time. */
+  const JOURNAL_DELETION_CONCURRENCY = 4;
+  /** Deletes one revoked Host's journals from the store. Resolves true once the store confirms, false when it fails. Never rejects. */
+  function eraseJournals(hostId: string): Promise<boolean> {
     const service = journals;
-    if (!service) return Promise.resolve();
+    if (!service) return Promise.resolve(false);
     let run = deletionRuns.get(hostId);
     if (!run) {
-      run = (async () => {
-        try {
-          await service.deleteHost(hostId);
-          await commit(draft => {
-            const rest = (draft.journalDeletions ?? []).filter(id => id !== hostId);
-            if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-            return { value: undefined, publish() { journalDeletions = rest; } };
-          });
-        } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
-      })().finally(() => { deletionRuns.delete(hostId); });
+      run = service.deleteHost(hostId).then(() => true, () => { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; })
+        .finally(() => { deletionRuns.delete(hostId); });
       deletionRuns.set(hostId, run);
     }
     return run;
   }
+  /** Removes the ids whose journals the store confirmed deleted from the pending list, in one commit. Never rejects. */
+  async function confirmDeletions(hostIds: string[]): Promise<void> {
+    try {
+      await commit(draft => {
+        const confirmed = new Set(hostIds);
+        const pending = draft.journalDeletions ?? [];
+        if (!pending.some(id => confirmed.has(id))) return { value: undefined, unchanged: true, publish() {} };
+        const rest = pending.filter(id => !confirmed.has(id));
+        if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+        return { value: undefined, publish() { journalDeletions = rest; } };
+      });
+    } catch { for (const hostId of hostIds) options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
+  }
+  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
+  async function deleteJournals(hostId: string): Promise<void> {
+    if (await eraseJournals(hostId)) await confirmDeletions([hostId]);
+  }
   /**
    * Deletes the journals of every revoked Host the state still lists, until none is left that this round has not tried, so
-   * a Host revoked while a round is going is not left for the next start. Never rejects.
+   * a Host revoked while a round is going is not left for the next start. Hosts are deleted a few at a time, and the ids a
+   * group's store calls confirm are removed from the state together, so a long list costs a few commits, not one per Host. Never rejects.
    */
   async function finishJournalDeletions(): Promise<void> {
     const tried = new Set<string>();
     for (;;) {
-      const ids = journalDeletions.filter(id => !tried.has(id));
-      if (ids.length === 0) return;
-      for (const id of ids) tried.add(id);
-      await Promise.all(ids.map(deleteJournals));
+      const batch = journalDeletions.filter(id => !tried.has(id)).slice(0, JOURNAL_DELETION_CONCURRENCY);
+      if (batch.length === 0) return;
+      for (const id of batch) tried.add(id);
+      const results = await Promise.all(batch.map(async id => (await eraseJournals(id)) ? id : undefined));
+      const confirmed = results.filter((id): id is string => id !== undefined);
+      if (confirmed.length > 0) await confirmDeletions(confirmed);
     }
   }
 ```
@@ -4416,7 +4430,7 @@ Expected: PASS. The landed `broker-journal-sessions.test.ts` runs against a Host
 - [ ] **Step 9: Run the whole hosted package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new).
+Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new). A follow-up review change (`fix(hosted): delete pending journals four at a time and confirm each batch in one commit`) raised the count to 906: deletions run four at a time and the ids a group confirms leave `journalDeletions` in one commit; the fixture's `connectController` takes `journal: false`.
 
 - [ ] **Step 10: Run the Cloudflare codec test.**
 
@@ -4433,6 +4447,8 @@ git commit -m "feat(hosted): gate journal reads on a persisted per-provider swit
 ---
 
 ### Task 7: One journal service for the whole hosted Relay, on durable state
+
+> **Landed (`d4cf9e87`):** as written; the three new tests failed first (no `loadJournalIndex`, journals accepted without storage).
 
 **Files:**
 - Modify: `packages/agent-remote-hosted/src/gateway.ts`
@@ -4512,7 +4528,7 @@ In the returned object, after `    refresh,` add
     async loadJournalIndex() { await journalService?.loadAllServed(); },
 ```
 
-- [ ] **Step 4: Run the tests and see them pass, then the package.**
+- [x] **Step 4 (landed: 12 tests in `gateway.test.ts`, 909 in the package, `dist` rebuilt): Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/gateway.test.ts src/broker-journals.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
 Expected: PASS for all three.
@@ -4527,6 +4543,8 @@ git commit -m "feat(hosted): one journal service for every account of a Relay, o
 ---
 
 ### Task 8: Enable journals on the Node hosts
+
+> **Landed (`5cf72c5c`):** as written, plus a runner test (`scripts/local/runner.test.mjs`: `ARC_LOCAL_JOURNALS=1` passes `journals: true` to the server factory, otherwise nothing), and `packages/agent-remote-lab/compatibility.json` is committed with this task because the Lab suite's live-launcher and Codex tests read the manifest and fail while it is stale. The Lab suite: 2795 tests pass on Node 22; `pnpm test:cloudflare`: 219.
 
 **Files:**
 - Modify: `packages/agent-remote-lab/src/server/gateway-relay.ts`
@@ -4737,6 +4755,8 @@ git commit -m "feat(lab): store Host journals in SQLite on the Node hosts when c
 ---
 
 ### Task 9: Document the configuration
+
+> **Landed (`df667708`):** as written; `pnpm lint:docs` passes and the manifest digest is unchanged by the documents.
 
 **Files:**
 - Modify: `docs/self-hosted-deployment.md`

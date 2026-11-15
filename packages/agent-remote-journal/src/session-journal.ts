@@ -1,12 +1,15 @@
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { entryFromRow, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
-import { canonicalRow, entryBody, itemEntry, stampRow } from './journal-items.js';
+import { canonicalRow, entryBody, itemEntry, mergeResources, stampRow } from './journal-items.js';
 import {
-  JournalBodyMissingError, JournalFencedError, JournalItemTypeChangedError, JournalUnknownItemError,
-  type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
+  JournalBodyMissingError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
+  type CompleteItemInput, type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
+
+/** How long a retired epoch is remembered, for diagnostics only. */
+export const RETIRED_EPOCH_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * The journal of one session: epochs and dense sequences assigned here, one record per item, and the one publisher
@@ -107,6 +110,67 @@ export class SessionJournal {
     if (item.body?.item.type === 'user_message') item.body.item.clientMessageId = clientMessageId;
     item.revision += 1;
     this.dirty.add(itemKey);
+  }
+
+  /** Replaces an item's content after a reread found it different, unless the item moved since the index was read. */
+  correct(publication: JournalPublication, input: JournalRowInput, digest: string, expectedRevision: number): JournalRow | undefined {
+    if (this.duplicate(publication)) return undefined;
+    const item = this.require(input.itemKey);
+    if (item.revision !== expectedRevision) throw new JournalStaleRevisionError(item.itemKey, item.revision);
+    this.advance(publication);
+    const row = stampRow(this.meta.epoch, this.meta.nextSeq++, input);
+    item.body = {
+      item: structuredClone(row.item), timestamp: row.timestamp,
+      collapsed: item.body?.collapsed ?? [], resources: mergeResources(item.body?.resources ?? [], row.resources),
+    };
+    item.seqEnd = row.seq;
+    item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
+    item.state = 'complete';
+    item.digest = digest;
+    item.revision += 1;
+    this.dirty.add(item.itemKey);
+    return row;
+  }
+
+  /** Starts a new epoch from a reread of native history: one sequence per item, oldest first. */
+  replace(publication: JournalPublication, items: readonly CompleteItemInput[], now: number): string {
+    if (this.duplicate(publication)) return this.meta.epoch;
+    this.advance(publication);
+    this.meta.retiredEpochs = [
+      ...this.meta.retiredEpochs.filter(({ retiredAt }) => now - retiredAt < RETIRED_EPOCH_MS),
+      { epoch: this.meta.epoch, retiredAt: now },
+    ];
+    this.meta.epoch = crypto.randomUUID();
+    this.meta.nextSeq = 1;
+    this.meta.minSeq = 1;
+    this.items.length = 0;
+    this.byKey.clear();
+    this.dirty.clear();
+    this.replaced = true;
+    for (const complete of items) this.insertLast(this.completeItem(complete, this.meta.nextSeq++));
+    return this.meta.epoch;
+  }
+
+  /** Adds older items below the lowest sequence as one batch, oldest first. Items already known are skipped. */
+  prepend(publication: JournalPublication, older: readonly CompleteItemInput[]): JournalRow[] {
+    if (this.duplicate(publication)) return [];
+    this.advance(publication);
+    const fresh = older.filter(({ row }) => !this.byKey.has(row.itemKey));
+    const lowest = Math.min(this.meta.minSeq, this.items[0]?.seqStart ?? this.meta.nextSeq);
+    const first = lowest - fresh.length;
+    if (!Number.isSafeInteger(first)) throw new Error('Journal history position exhausted.');
+    const created = fresh.map((complete, offset) => this.completeItem(complete, first + offset));
+    this.items.unshift(...created);
+    for (const item of created) {
+      this.byKey.set(item.itemKey, item);
+      this.dirty.add(item.itemKey);
+    }
+    this.meta.minSeq = first;
+    return fresh.map((complete, offset) => stampRow(this.meta.epoch, first + offset, complete.row));
+  }
+
+  protected completeItem(complete: CompleteItemInput, seq: number): JournalItem {
+    return { ...this.openItem(stampRow(this.meta.epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
   }
 
   index(): JournalIndexEntry[] {

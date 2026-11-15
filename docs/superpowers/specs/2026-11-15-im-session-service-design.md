@@ -187,12 +187,19 @@ Each step is additive and reversible. A Host without smart mode keeps today's pa
 
 A journal belongs to one public session, that is, one binding of Host, provider and native session. It holds:
 
-- **Rows.** Rows live under a journal epoch, with dense sequences assigned by the Host partition. A row is today's timeline row (source key, native revision, normalized event, occurrence time) plus an **item key** (below).
+- **Rows.** Rows live under a journal epoch, with dense sequences assigned by the Host partition. A row is today's timeline row (source key, native revision, normalized event, occurrence time) plus an **item key** (below). A row's body may be evicted; its place in the sequence and its item stay (see Retention).
 - **Head.**
   - The latest Snapshot the Controller published, with the time it was observed.
   - Presence, computed by the Relay: whether the Host is online, whether a runtime is resident, and who owns the native session.
 - **Amendments.** Resource-binding replacements and background outcomes are applied in place and replayed to subscribers, as today.
-- **Item index.** For each item: its key, whether it is `open` or `complete`, its content digest, whether it is live-only, the `clientMessageId` alias of an echo, and its revision in the journal.
+- **Item index.** It covers every item the journal has seen, including items whose bodies were evicted. For each item it records:
+  - its key and sequence range;
+  - whether it is `open` or `complete`, and its content digest;
+  - whether it is live-only;
+  - the `clientMessageId` alias of an echo;
+  - its revision in the journal.
+
+  The index is the journal's skeleton.
 - **Retired epochs.** They are kept for seven days after a replacement, for diagnostics only. Clients never read them; a cursor on a retired epoch is reset.
 
 Pages come from the existing projector and store. `packages/agent-remote-relay/src/timeline-projector.ts` and `timeline-store.ts` use no Node APIs and can run in a Worker, so live rows and pages keep the same granularity.
@@ -264,7 +271,7 @@ Catalog confirmations reveal it. They arrive about once a minute (`packages/agen
 
 A journal begins with the history the Controller read the first time it published that session. For Claude and Copilot that is all of the history; for Codex and OpenCode it is the latest page.
 
-A `before` page that reaches the journal's oldest row is answered from the journal with `hasOlder: true`. When the Host is online, the Host partition also asks the Controller to read further. The Controller publishes the result as prepended rows with negative sequences, as `TimelineStore.prepend` does today. The client shows the older region as loading inline, and nothing else waits.
+A `before` page that reaches evicted bodies is filled from the Host (see Retention). A `before` page that reaches beyond anything the journal has seen is answered with `hasOlder: true`. When the Host is online, the Host partition also asks the Controller to read further. The Controller publishes the result as prepended rows with negative sequences, as `TimelineStore.prepend` does today. The client shows the older region as loading inline, and nothing else waits.
 
 - One older-history read is in flight per journal at a time.
 - The Host partition stamps its rows as one atomic batch below the current oldest sequence, and the item index makes a repeated read add nothing.
@@ -278,13 +285,32 @@ A row reaches clients only after it is durable in the journal. A Controller's pu
 - **Cloudflare.** A Durable Object's output gate holds its outgoing messages and RPC replies until its writes are durable. An object that receives rows forwards only what it received.
 - **Node.** Node stores the row before sending it.
 
-### Retention and size
+### Retention: a working set filled from the ground truth
 
-- **Budget.** Each session journal keeps its most recent content within a size budget. Evicted rows stay recoverable from the Host as older history.
-- **Large bodies.** Row bodies above an inline threshold go to the blob store by digest, and the row references them.
-- **Live-only items** are exempt from row eviction for the life of the session, up to a per-session count cap. Beyond the cap the oldest are dropped and a diagnostic records the loss, because nothing can rebuild them.
-- **Quotas** apply per Host and per account. The P1 plan sets the defaults from P0 measurements.
-- **Deletion.** Removing a session's binding, or an account, deletes its journals and blobs.
+The native session on the Host is the ground truth, so a journal is a working set, not an archive. It keeps what reading and continuity need, and the scheduler fills in the rest from the Host when someone needs it. Retention is decided by use, not by a size quota; the owner decided this on 2026-11-15.
+
+- **Always kept.**
+  - The skeleton: the item index for all history the journal has seen. It is small, and it keeps sequences stable when bodies come and go.
+  - The head and presence.
+  - Live-only items. Nothing can rebuild them, so they are kept for the life of the session, up to a per-session count cap. Beyond the cap the oldest are dropped, and a diagnostic records the loss.
+  - Operation records and echo aliases, for their retention period.
+- **Resident bodies.** The latest turns of each session, sized by demand.
+  - A session in use keeps a larger window (proposed: the latest 50 turns).
+  - A session nobody has used for a while shrinks to what previews and a first screen need (proposed: the latest 5 turns).
+  - P0 measures how far back people actually read before these numbers are set.
+- **Filled on demand.** A reader can reach a turn whose body is not resident.
+  1. The Host partition asks the Controller for the missing bodies.
+  2. The Controller reads them from native history, preferring the read-only history capability over opening a runtime.
+  3. The filled rows return to the same sequences, and their digests are checked against the index. A mismatch is a rewrite and is handled as one.
+  4. Filled bodies stay while they are being read, then are evicted again.
+
+  One fill is in flight per journal at a time. A fill is scheduled like a wake, so a person scrolling back is served before backfill.
+- **Large outputs.** A tool output above an inline threshold keeps only a preview in the journal.
+  - Its full body is filled from the Host when the person expands it.
+  - A client without the flag receives pages whose large bodies were filled before the answer, so it never meets a truncated item.
+- **While the Host is offline.** Resident content and the device store stay readable. Older content shows as available when the computer is back. This is a fact the reader sees, not a wait.
+- **Safety bounds.** A byte cap per session and quotas per Host and account stop runaway growth. They are not the retention policy.
+- **Deletion.** Removing a session's binding, or an account, deletes its journal and blobs.
 
 ### Access
 
@@ -527,7 +553,11 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 
 ## Measurement and testing
 
-- **P0 baselines.** Measure T1 to T6 as they are today, on `pnpm local` and on production pages. Also measure each provider's wake time, journal size per session, and row rates while streaming.
+- **P0 baselines.** Measure T1 to T6 as they are today, on `pnpm local` and on production pages. Also measure:
+  - each provider's wake time and native history read time;
+  - turn and tool-output sizes;
+  - how far back people scroll;
+  - row rates while streaming.
 - **Budgets, not clocks.** Deterministic tests guard budgets: request counts, journal row counts, render counts. They never use wall-clock thresholds. This follows the stage 6 convention.
 - **Provider continuity.** Fixtures prove that live rows and reread rows of the same native session produce the same item keys. A reconcile adds nothing to an unchanged session, and replaces only on a genuine rewrite.
 - **Exactly once.** Tests interrupt the Controller after the claim, during a wake, after the `sending` receipt, and after the native send. The first two must return the operation to `queued` with no native call made. The last two must end `unknown`, with no resend.
@@ -569,7 +599,8 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 |---|---|
 | An adapter cannot produce the same item keys live and on reread | Its sessions stay crude, or replace on every reopen, which is today's behaviour; continuity fixtures gate each provider. |
 | Sessions driven from a terminal are not observed | Journals are marked behind; catalog confirmations detect activity and trigger a reconcile when there is demand. Tailing native transcripts is an open question. |
-| Storage grows without limit | Per-session budgets, blob offload, quotas per Host and account, and deletion with the binding; P0 measures real sizes first. |
+| Storage grows without limit | The journal is a working set. Bodies outside the resident window are evicted and filled again from the Host; safety caps and quotas stop runaway growth; P0 measures real sizes first. |
+| Older content is unreadable while the Host is offline | The resident window and the device store cover normal reading. P0 sizes the window from how far back people read, and the reader sees the Host being offline as a fact. |
 | Two server modes double the test matrix | One client suite runs against both; crude mode is retired after a support window. |
 | Old clients act on stale state | They see conservative runtime state, and their subscription wakes the runtime as it does today. |
 | Authorization drifts between partitions (P4) | The control plane pushes a revocation to the partitions before acknowledging it. Partitions check grants again on every subscription and every submission. |
@@ -592,10 +623,9 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 
 ### Open questions for the owner
 
-1. **Retention.** How much does a session's journal keep on the Relay? Proposal: the latest 30 days or 20 MB per session, whichever is smaller, with older history read from the Host.
-2. **Terminal sessions.** Should adapters tail native transcripts (Claude JSONL, Codex rollout files) so journals stay current while a native CLI has control?
-3. **Support window.** How long does crude mode stay available for old Controllers and old clients?
-4. **Requester display.** Should each message show who sent it: the person, which agent, which automation?
+1. **Terminal sessions.** Should adapters tail native transcripts (Claude JSONL, Codex rollout files) so journals stay current while a native CLI has control?
+2. **Support window.** How long does crude mode stay available for old Controllers and old clients?
+3. **Requester display.** Should each message show who sent it: the person, which agent, which automation?
 
 ## Documents to update during implementation
 

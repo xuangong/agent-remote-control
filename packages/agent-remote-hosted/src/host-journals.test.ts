@@ -219,8 +219,8 @@ describe('createHostJournals', () => {
     const store = new MemoryJournalStore();
     const seeded = SessionJournal.create(KEY);
     seeded.claim('controller-1');
-    (seeded as unknown as { meta: { minSeq: number } }).meta.minSeq = Number.MIN_SAFE_INTEGER + 1;
-    await store.apply(seeded.takeChanges()!);
+    const changes = seeded.takeChanges()!;
+    await store.apply({ ...changes, meta: { ...changes.meta, minSeq: Number.MIN_SAFE_INTEGER + 1 } });
     const { journals } = fixture(store);
     const opened = await openSession(journals, HOST, SESSION, 'controller-1');
     expect(opened).toMatchObject({ generation: 2, watermark: 0 });

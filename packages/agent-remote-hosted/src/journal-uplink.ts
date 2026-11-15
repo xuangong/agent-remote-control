@@ -10,7 +10,7 @@ import type { HostJournals, JournalFilled } from './host-journals.js';
 
 /** The most requests one connection has open to its Host at a time. */
 export const JOURNAL_REQUEST_LIMIT = 32;
-/** How long the Host has to answer a request. */
+/** How long the Host has to answer a request, including the time the journal needs to store the answer. */
 export const JOURNAL_REQUEST_TIMEOUT_MS = 15_000;
 
 /** The journal messages a Host sends to its Relay. */

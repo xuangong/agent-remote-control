@@ -5,12 +5,11 @@ import type { JournalPublication, JournalRowInput } from './types.js';
 
 export const PUBLISHER = 'controller-1';
 
-/** A journal claimed by one publisher, with a function that numbers its publications. */
+/** A journal claimed by one publisher, with a function that numbers its publications: each is the one after the journal's watermark, as a publisher that retries a refused entry numbers it. */
 export function openJournal() {
   const journal = SessionJournal.create('host-1:codex:session-1', 'epoch-1');
   const { generation } = journal.claim(PUBLISHER);
-  let sequence = 0;
-  const publish = (): JournalPublication => ({ publisherId: PUBLISHER, generation, sequence: ++sequence });
+  const publish = (): JournalPublication => ({ publisherId: PUBLISHER, generation, sequence: (journal.publisher?.watermark ?? 0) + 1 });
   return { journal, publish };
 }
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { expectNoChange, openJournal, PUBLISHER, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import {
-  JournalDuplicateItemError, JournalFencedError, JournalInvalidRowError, JournalItemTypeChangedError, JournalStaleRevisionError,
+  JournalDuplicateItemError, JournalFencedError, JournalInvalidRowError, JournalItemTypeChangedError, JournalSequenceGapError, JournalStaleRevisionError,
   type JournalRowInput,
 } from './types.js';
 
@@ -161,7 +161,7 @@ describe('SessionJournal', () => {
       state.meta.minSeq = Number.MIN_SAFE_INTEGER + 1;
       state.items[0]!.seqStart = Number.MIN_SAFE_INTEGER + 1;
       const exhausted = new SessionJournal(state);
-      const publication = { publisherId: PUBLISHER, generation: 1, sequence: 99 };
+      const publication = { publisherId: PUBLISHER, generation: 1, sequence: 2 };
       expectNoChange(exhausted, () => exhausted.prepend(publication, ['a', 'b', 'c'].map(key => ({ row: text(key, key, key), digest: key }))), /exhausted/);
     });
   });
@@ -299,5 +299,28 @@ describe('SessionJournal', () => {
     expect(items).toHaveLength(200_001);
     expect(items[0]?.seqStart).toBe(1 - 200_000);
     expect(items.every((item, at) => at === 0 || item.seqStart === (items[at - 1] as typeof item).seqEnd + 1)).toBe(true);
+  });
+});
+
+describe('publication sequences', () => {
+  const at = (sequence: number) => ({ publisherId: PUBLISHER, generation: 1, sequence });
+
+  it('refuses a publication that skips ahead of the watermark and changes nothing', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'one'));
+    expectNoChange(journal, () => journal.append(at(3), text('m2', 'd2', 'two')), JournalSequenceGapError);
+    expectNoChange(journal, () => journal.complete(at(5), 'm1', 'digest-1'), JournalSequenceGapError);
+    expect(journal.publisher?.watermark).toBe(1);
+    expect(journal.append(at(2), text('m2', 'd2', 'two'))?.seq).toBe(2);
+  });
+
+  it('skips a duplicate of an applied publication and refuses every later one after a failed entry, also after the journal is stored and loaded again', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'one'));
+    expect(journal.append(at(1), text('m1', 'd9', 'again'))).toBeUndefined();
+    expect(() => journal.complete(at(2), 'unknown', 'digest')).toThrow();
+    const reloaded = new SessionJournal(journal.state());
+    expect(() => reloaded.append(at(3), text('m2', 'd2', 'two'))).toThrow(JournalSequenceGapError);
+    expect(reloaded.index().map(entry => entry.itemKey)).toEqual(['m1']);
   });
 });

@@ -172,7 +172,7 @@ describe('one revision counter', () => {
     const state = journal.state();
     delete (state.meta as { lastRevision?: number }).lastRevision;
     const restored = new SessionJournal(state);
-    restored.alias({ publisherId: 'controller-1', generation: 1, sequence: 99 }, 'm1', 'client-1');
+    restored.alias({ publisherId: 'controller-1', generation: 1, sequence: 3 }, 'm1', 'client-1');
     expect(restored.index()[0]!.revision).toBe(journal.index()[0]!.revision + 1);
   });
 });

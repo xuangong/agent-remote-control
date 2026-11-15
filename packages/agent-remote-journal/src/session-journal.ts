@@ -9,7 +9,7 @@ import { evictable, retainedFrom } from './retention.js';
 import { replacementOrder } from './replacement.js';
 import { utf8ByteLength } from './utf8-size.js';
 import {
-  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError,
+  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError, JournalSequenceGapError,
   JournalStaleRevisionError, JournalUnknownItemError,
   type CompleteItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
@@ -476,6 +476,7 @@ export class SessionJournal {
       throw new JournalFencedError(this.meta.sessionKey);
     }
     if (!Number.isSafeInteger(publication.sequence) || publication.sequence < 1) throw new JournalInvalidPublicationError(publication.sequence);
+    if (publication.sequence > publisher.watermark + 1) throw new JournalSequenceGapError(publication.sequence, publisher.watermark);
     return publication.sequence <= publisher.watermark;
   }
 

@@ -118,6 +118,14 @@ export class JournalFencedError extends Error {
   }
 }
 
+/** A publication skipped ahead of the journal's watermark: entries before it were lost, so the publisher must open the journal again. */
+export class JournalSequenceGapError extends Error {
+  constructor(readonly sequence: number, readonly watermark: number) {
+    super(`Publication ${sequence} skips ahead of the watermark ${watermark}.`);
+    this.name = 'JournalSequenceGapError';
+  }
+}
+
 export class JournalStaleRevisionError extends Error {
   constructor(readonly itemKey: string, readonly revision: number) {
     super(`Journal item ${itemKey} moved to revision ${revision}.`);

@@ -42,6 +42,14 @@ Every plan follows the repository rules in `AGENTS.md`:
     - no "Opening session" frame on an open or a return;
     - no re-keyed rows after a Controller restart.
 - **P3: preemption skips streams that hold no Controller stream.** Stream preemption (`packages/agent-remote-hosted/src/stream-preemption.ts`) can pick a journal-served view as its victim, although pausing it frees no slot. This applies to views waiting for an offline Host, views refused for a reason retrying cannot change, and activity observers. An activity observer that opens also makes room (`gateway.ts` ~1040) although it never needs a slot. Preemption should count and pause only streams that hold a Controller stream; P3's retirement of the live budget for journal-served sessions supersedes it.
+- **P1-C: paged index, quota and evicted bodies (from P1-B3a).** The publisher reads `journal_opened.indexAfter` and pulls pages with `journal_index_request` until a page has no `indexAfter`; only then is the journal open for it. On a `quota_exceeded` refusal, the Relay has already taken the session out of serving. The publisher reopens the journal and replaces it with a window that fits: fewer turns, still carrying its live-only items. If that also fails, it stops publishing that session. `journal_quota_exceeded` and `journal_live_only_dropped` reach only Controllers that advertise diagnostic version 4. A publication must not rely on bodies the Relay evicted: bodies outside the latest 50 turns are filled on demand.
+- **P3: use-based retention (from P1-B3a).** Today one rule applies at publish time: the latest 50 turns stay resident. With demand leases, P3 adds:
+  - a larger resident window for sessions in use;
+  - a 5-turn window for sessions nobody has used for a while;
+  - a retention sweep for sessions that receive no publications;
+  - retries of pending journal deletions on a timer.
+
+  P0 measurements set the numbers.
 - **P1-B2 and P1-D: no holes in a client's window.** The client loads older history from its first entry's `seqStart` (`packages/agent-remote-web/src/client/remote-session-client.ts:372`). A correction, or any update to an item older than what a subscriber holds, must not leave the client holding an isolated old entry. If it did, the next older page would skip everything in between. Two ways to avoid it:
   - the Relay sends such updates only to subscribers whose window covers the item;
   - the client folds them in without moving its older boundary.

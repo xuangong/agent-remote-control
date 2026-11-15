@@ -21,3 +21,14 @@ Every plan follows the repository rules in `AGENTS.md`:
 - Contract changes update fixtures and compatibility metadata.
 - `pnpm compatibility:update` runs after reviewed changes.
 - Changes to the website, Relay or Controller are verified on `pnpm local`.
+
+## Notes carried to later plans
+
+- **P1-B2 and P1-D: no holes in a client's window.** The client loads older history from its first entry's `seqStart` (`packages/agent-remote-web/src/client/remote-session-client.ts:372`). A correction, or any update to an item older than what a subscriber holds, must not leave the client holding an isolated old entry. If it did, the next older page would skip everything in between. Two ways to avoid it:
+  - the Relay sends such updates only to subscribers whose window covers the item;
+  - the client folds them in without moving its older boundary.
+- **P1-B3: bounds and deletion.**
+  - Bound the Host journal cache.
+  - Delete journals when a Host or a binding is revoked.
+  - Page the index in `journal_opened` once a session passes the plan's 30,000-item ceiling.
+- **P1-C: chunk large rereads.** A single `replace` or `prepend` message is capped at 8 MiB, so the Controller chunks large rereads.

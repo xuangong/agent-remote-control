@@ -3,11 +3,12 @@ import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/
 
 import { canonicalRow, entryBody, itemEntry, mergeResources, stampRow } from './journal-items.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
+import { evictableItems } from './retention.js';
 import { replacementOrder } from './replacement.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
   type CompleteItemInput, type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
-  type JournalRow, type JournalRowInput, type JournalState,
+  type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
 
 /** How long a retired epoch is remembered, for diagnostics only. */
@@ -218,6 +219,28 @@ export class SessionJournal {
   /** A page of the journal; `olderBeyondJournal` says whether the Host still holds history older than the journal. */
   page(request: JournalPageRequest, options: { olderBeyondJournal: boolean }): JournalPageResult {
     return pageJournal({ epoch: this.meta.epoch, items: this.items, nextSeq: this.meta.nextSeq }, request, options);
+  }
+
+  /** Evicts the bodies of complete, non-live-only items outside the latest turns. Returns the evicted item keys. */
+  evict(keepLatestTurns: number): string[] {
+    const keys = evictableItems(this.items, keepLatestTurns);
+    for (const key of keys) {
+      this.require(key).body = null;
+      this.dirty.add(key);
+    }
+    return keys;
+  }
+
+  /** Puts back a body read again from the Host. Its digest must equal the one recorded when the item completed. */
+  fill(itemKey: string, body: JournalBody, digest: string): 'filled' | 'mismatch' | 'unknown' {
+    const item = this.byKey.get(itemKey);
+    if (!item) return 'unknown';
+    if (item.digest !== undefined && item.digest !== digest) return 'mismatch';
+    if (item.body === null) {
+      item.body = structuredClone(body);
+      this.dirty.add(itemKey);
+    }
+    return 'filled';
   }
 
   state(): JournalState {

@@ -91,6 +91,10 @@ export const JournalOlderDone = Type.Object({ requestId, sessionKey, olderAvaila
 /** Relay to Host. */
 export const JournalOpened = Type.Object({ requestId, sessionKey, generation, watermark: SafeNonNegativeInteger, epoch: identity,
   index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS }) }, object);
+export const JOURNAL_OPEN_REFUSAL_REASONS = ['index_too_large', 'invalid'] as const;
+export type JournalOpenRefusalReason = (typeof JOURNAL_OPEN_REFUSAL_REASONS)[number];
+/** The Relay could not open the session's journal: no generation was claimed and the session stays unopened. */
+export const JournalOpenRefused = Type.Object({ requestId, sessionKey, reason: Type.Union(JOURNAL_OPEN_REFUSAL_REASONS.map(reason => Type.Literal(reason))) }, object);
 export const JournalAck = Type.Object({ sessionKey, generation, watermark: SafeNonNegativeInteger, cursor: TimelineCursor }, object);
 export const JournalRefused = Type.Object({ sessionKey, generation, sequence: SafeNonNegativeInteger, reason: JournalRefusalReason, itemKey: Type.Optional(itemKey) }, object);
 export const JournalFillRequest = Type.Object({ requestId, sessionKey, itemKeys: Type.Array(itemKey, { minItems: 1, maxItems: JOURNAL_FILL_MAX_ITEMS }) }, object);

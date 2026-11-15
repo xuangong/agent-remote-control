@@ -4,7 +4,7 @@ export const MAX_RELAY_DIAGNOSTICS = 4096;
 export const MAX_HOST_DIAGNOSTICS = 256;
 export const RELAY_DIAGNOSTIC_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_DIAGNOSTIC_BATCH = 32;
-const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout', 'authority_refresh_started', 'authority_refresh_completed'] as const;
+const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout', 'authority_refresh_started', 'authority_refresh_completed', 'journal_message_unencodable', 'journal_store_failed'] as const;
 const reasons = ['socket_closed', 'heartbeat_timeout', 'heartbeat_delivery_failed', 'transport_error', 'connection_replaced', 'authority_unavailable', 'access_revoked', 'relay_closed', 'relay_state_unavailable', 'credential_expired', 'protocol_error', 'stream_timeout', 'host_backpressure', 'write_failed', 'runtime_rejected', 'authority_active', 'authority_timeout', 'authority_http_error', 'authority_transport_error', 'authority_invalid_response'] as const;
 const operations = ['catalog', 'attach', 'create', 'session_read', 'session_control', 'controller_update', 'preview', 'other'] as const;
 const startReasons = ['runtime_start', 'core_recovery'] as const;
@@ -73,6 +73,7 @@ export function pruneRelayDiagnostics(value: unknown, now = Date.now()): RelayDi
 
 /** Older Controllers reject unknown diagnostic events and fields. */
 export function relayDiagnosticsForVersion(entries: RelayDiagnostic[], version: number): RelayDiagnostic[] {
+  if (version < 4) entries = entries.filter(entry => !entry.event.startsWith('journal_'));
   if (version >= 3) return entries;
   const compatible = entries.map(entry => {
     const { wasClean: _clean, runtimeInstanceId: _runtime, workerVersionId: _version, startReason: _start, ...legacy } = entry;

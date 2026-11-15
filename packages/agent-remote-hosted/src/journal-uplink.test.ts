@@ -21,7 +21,7 @@ function wire(fields: Record<string, unknown>): JournalHostMessage {
 
 type Sent = { type: string; [field: string]: unknown };
 
-function fixture(options: { journals?: HostJournals; diagnostic?(message: string): void } = {}) {
+function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable'): void } = {}) {
   const store = new MemoryJournalStore();
   const journals = options.journals ?? createHostJournals({ store, now: () => 1_000 });
   const sent: Sent[] = [];
@@ -94,7 +94,7 @@ describe('a journal connection', () => {
     const huge: HostJournals = { ...createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }),
       open: async (_hostId, _sessionKey, _publisherId, fits) => fits(index, 'e') ? { generation: 1, watermark: 0, epoch: 'e', index } : { refused: 'index_too_large' } };
     const f = fixture({ journals: huge });
-    expect(await f.open()).toMatchObject({ type: 'journal_refused', sessionKey: SESSION, reason: 'invalid' });
+    expect(await f.open()).toEqual({ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'index_too_large' });
     expect(f.sent).toHaveLength(1);
     await f.publish([{ sequence: 1, op: 'seal', itemKey: 'm1' }]);
     expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
@@ -109,7 +109,7 @@ describe('a journal connection', () => {
     f.sent.length = 0;
     await f.publish([{ sequence: 1, op: 'seal', itemKey: 'm1' }]);
     expect(f.sent).toEqual([]);
-    expect(diagnostics).toEqual([expect.stringContaining('journal_ack')]);
+    expect(diagnostics).toEqual(['journal_message_unencodable']);
   });
 
   it('refuses an open whose reply fits only with small numbers, without claiming', async () => {
@@ -133,7 +133,7 @@ describe('a journal connection', () => {
     const base = createHostJournals({ store, now: () => 1 });
     const probing: HostJournals = { ...base, open: async (hostId, sessionKey, publisherId, fits) => base.open(hostId, sessionKey, publisherId, (_index, epoch) => fits(index as never, epoch)) };
     const f = fixture({ journals: probing });
-    expect(await f.open()).toMatchObject({ type: 'journal_refused', reason: 'invalid' });
+    expect(await f.open()).toMatchObject({ type: 'journal_open_refused', requestId: 'open-1', reason: 'index_too_large' });
     expect(await store.load(`host-1:${SESSION}`)).toBeUndefined();
   });
 
@@ -144,7 +144,7 @@ describe('a journal connection', () => {
     const journals: HostJournals = { ...base, open: (hostId, sessionKey, publisherId, fits) => base.open(hostId, sessionKey, publisherId, ++calls === 1 ? fits : () => false) };
     const f = fixture({ journals });
     await f.open();
-    expect(await f.open()).toMatchObject({ type: 'journal_refused' });
+    expect(await f.open()).toMatchObject({ type: 'journal_open_refused' });
     await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
     expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
     expect((await store.load(`host-1:${SESSION}`))?.items).toEqual([]);

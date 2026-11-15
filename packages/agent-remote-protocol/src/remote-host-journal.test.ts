@@ -32,6 +32,8 @@ const valid: Array<Record<string, unknown>> = [
   message({ type: 'journal_fill', requestId: 'fill-1', sessionKey: SESSION, items: [{ row, digest: DIGEST }] }),
   message({ type: 'journal_older_done', requestId: 'older-1', sessionKey: SESSION, olderAvailable: true }),
   message({ type: 'journal_opened', requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'epoch-1', index: [indexEntry] }),
+  message({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'index_too_large' }),
+  message({ type: 'journal_open_refused', requestId: 'open-2', sessionKey: SESSION, reason: 'invalid' }),
   message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 8, cursor: { epoch: 'epoch-1', seq: 4 } }),
   message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 3, reason: 'stale_revision', itemKey: 'item-1' }),
   message({ type: 'journal_fill_request', requestId: 'fill-1', sessionKey: SESSION, itemKeys: ['item-1', 'item-2'] }),
@@ -73,6 +75,9 @@ describe('journal uplink envelopes', () => {
     ['an index entry whose range is reversed', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [{ ...indexEntry, seqStart: 3, seqEnd: 2 }] })],
     ['an acknowledgement without an epoch', message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 1, cursor: { seq: 1 } })],
     ['a refusal with an unknown reason', message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 1, reason: 'nope' })],
+    ['an open refusal with an unknown reason', message({ type: 'journal_open_refused', requestId: 'o', sessionKey: SESSION, reason: 'nope' })],
+    ['an open refusal without a request id', message({ type: 'journal_open_refused', sessionKey: SESSION, reason: 'invalid' })],
+    ['an open refusal with a generation', message({ type: 'journal_open_refused', requestId: 'o', sessionKey: SESSION, reason: 'invalid', generation: 1 })],
     ['an open without a publisher', message({ type: 'journal_open', requestId: 'o', sessionKey: SESSION })],
   ])('rejects %s', (_name, value) => {
     expect(decodeRemoteHostUplinkMessage(JSON.stringify(value)).status).toBe('rejected');

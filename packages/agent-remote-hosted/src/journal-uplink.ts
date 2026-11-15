@@ -35,8 +35,8 @@ export interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Receives the reason a message was not sent because it does not encode. */
-  diagnostic?(message: string): void;
+  /** Told when a journal message was not sent because it does not encode. */
+  diagnostic?(event: 'journal_message_unencodable'): void;
 }
 
 export interface JournalConnection {
@@ -67,7 +67,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
   /** Whether the message encodes; a message that does not is reported and never sent. */
   function encodes(message: RemoteHostUplinkMessage): boolean {
     if (encodeRemoteHostUplinkMessage(message).status === 'ok') return true;
-    options.diagnostic?.(`The journal message ${message.type} does not encode and was not sent.`);
+    options.diagnostic?.('journal_message_unencodable');
     return false;
   }
   /** Sends a message to a connection that is still current; false when nothing was sent. */
@@ -124,7 +124,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           if (!options.current()) return;
           if ('refused' in result) {
             opened.delete(sessionKey);
-            refuse(sessionKey, 1, 0, 'invalid');
+            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: result.refused });
             return;
           }
           opened.set(sessionKey, result.generation);

@@ -23,6 +23,7 @@ import { authenticationCallback } from './auth-callback.js';
 import { controllerPath, readControllerLocation } from './controller-location.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { createHostBroker, USER_STREAM_LIMIT, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
+import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { createStreamPreemption } from './stream-preemption.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
@@ -59,6 +60,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   previewDomain?: string;
   storage?: RelayStateStore;
   diagnosticStorage?: RelayDiagnosticStore;
+  /** Where Host session journals are kept; absent, no Controller is granted journals. Journals of every account share it, keyed by Host. */
+  journals?: JournalStore;
   teamResources?: (namespace: string) => import('./team-resources.js').TeamResourceStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
@@ -425,6 +428,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
+        journals: options.journals,
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount, ...(stateRoom ? { stateRoom } : {}),
         onSessionStates: () => publishAllStates(),

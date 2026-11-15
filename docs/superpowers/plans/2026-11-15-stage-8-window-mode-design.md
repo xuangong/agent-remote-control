@@ -59,7 +59,7 @@
 - [x] Run the local instance on desktop and phone, in light and dark, against the walkthrough.
 - [x] The Lab e2e specs that cover Windows (window-workspaces, window-pane-lifecycle, session-view-ownership, modernization, bot-mode, cross-host) in chromium-desktop and chromium-mobile.
 - [x] Update the guide's Window section and add roadmap row 8.
-- [ ] `pnpm verify:changed`; merge, push and deploy the Worker (website only); record versions.
+- [x] `pnpm verify:changed` (Lab 2,788 tests); merged and pushed (main b7b68f61); Worker e95b70ab deployed (previous 69cc5571), website only. The Relay reported it five minutes later. The stored format did not change, so rolling back to 69cc5571 is safe.
 
 ## Findings
 

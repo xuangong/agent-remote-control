@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { chmodSync, closeSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { StatementSync } from 'node:sqlite';
@@ -12,6 +13,7 @@ export interface NodeJournalDatabase extends JournalSqlDatabase {
  * Opens, and creates when missing, the journal database file with Node's built-in `node:sqlite` (Node 22.13 or later).
  * The directory is private to its owner and so is the file. Pass `:memory:` for a database that lives as long as the handle.
  * The module is imported here, not at the top of the file, so a Relay that never enables journals never loads it.
+ * The binding is synchronous, and it expects one process per database file: a second writer waits at most 250 ms for the lock and then fails.
  */
 export async function openNodeJournalDatabase(file: string): Promise<NodeJournalDatabase> {
   let sqlite: typeof import('node:sqlite');
@@ -25,7 +27,7 @@ export async function openNodeJournalDatabase(file: string): Promise<NodeJournal
   const database = new sqlite.DatabaseSync(file);
   database.exec('PRAGMA journal_mode = WAL');
   database.exec('PRAGMA synchronous = FULL');
-  database.exec('PRAGMA busy_timeout = 5000');
+  database.exec('PRAGMA busy_timeout = 250');
   const statements = new Map<string, StatementSync>();
   const statement = (sql: string): StatementSync => {
     let prepared = statements.get(sql);

@@ -91,7 +91,10 @@ describe('live-only items', () => {
 
   it('removes the oldest beyond the cap, item and body, and tells the store', () => {
     const { journal, publish } = openJournal();
-    for (const key of ['l1', 'l2', 'l3']) journal.append(publish(), live(key));
+    for (const key of ['l1', 'l2', 'l3']) {
+      journal.append(publish(), live(key));
+      journal.seal(publish(), key);
+    }
     journal.append(publish(), text('m1', 'd1', 'kept'));
     journal.takeChanges();
     expect(journal.dropOldestLiveOnly(1)).toEqual(['l1', 'l2']);

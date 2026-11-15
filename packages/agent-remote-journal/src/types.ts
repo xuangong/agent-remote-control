@@ -91,7 +91,7 @@ export interface JournalChanges {
   upsert: JournalItem[];
   /** True after a replacement: the store drops every item it holds for the session before the upserts. */
   replaced: boolean;
-  /** An estimate of what the journal holds, as `SessionJournal.residentBytes` measures it; the store records it per session. */
+  /** An estimate of what the journal holds, in UTF-8 bytes, as `SessionJournal.residentBytes` measures it; the store records it per session. */
   bytes: number;
 }
 

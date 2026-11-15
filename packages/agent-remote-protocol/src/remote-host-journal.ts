@@ -115,6 +115,12 @@ export const JournalOlderRequest = Type.Object({ requestId, sessionKey, limit: T
 const encoder = new (globalThis as unknown as { TextEncoder: new () => { encode(value: string): Uint8Array } }).TextEncoder();
 const distinct = (keys: readonly string[]) => new Set(keys).size === keys.length;
 
+/** One page of an index: well-ordered ranges, strictly increasing `seqStart`, and a cursor that is the last entry's `seqStart`, which needs an entry. */
+function validIndexPage({ index, indexAfter }: { index: readonly JournalIndexEntry[]; indexAfter?: number }): boolean {
+  if (!index.every((entry, at) => entry.seqStart <= entry.seqEnd && (at === 0 || entry.seqStart > index[at - 1]!.seqStart))) return false;
+  return indexAfter === undefined || (index.length > 0 && indexAfter === index[index.length - 1]!.seqStart);
+}
+
 /** The rules the schemas cannot state: size, strictly increasing entries, distinct items and well-ordered ranges. */
 export function validJournalMessage(message: { type: string }): boolean {
   if (encoder.encode(JSON.stringify(message)).length > JOURNAL_MESSAGE_MAX_BYTES) return false;
@@ -125,8 +131,8 @@ export function validJournalMessage(message: { type: string }): boolean {
     }
     case 'journal_fill': return distinct((message as unknown as Static<typeof JournalFill>).items.map(({ row }) => row.itemKey));
     case 'journal_fill_request': return distinct((message as unknown as Static<typeof JournalFillRequest>).itemKeys);
-    case 'journal_opened': return (message as unknown as Static<typeof JournalOpened>).index.every(entry => entry.seqStart <= entry.seqEnd);
-    case 'journal_index_page': return (message as unknown as Static<typeof JournalIndexPage>).index.every(entry => entry.seqStart <= entry.seqEnd);
+    case 'journal_opened': return validIndexPage(message as unknown as Static<typeof JournalOpened>);
+    case 'journal_index_page': return validIndexPage(message as unknown as Static<typeof JournalIndexPage>);
     default: return true;
   }
 }

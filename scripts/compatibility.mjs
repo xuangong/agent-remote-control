@@ -32,7 +32,7 @@ function collect(target) {
   const identity = lstatSync(target);
   if (identity.isSymbolicLink()) throw new Error(`Compatibility scope contains a symbolic link: ${target}`);
   if (identity.isDirectory()) {
-    for (const name of readdirSync(target).sort()) collect(resolve(target, name));
+    for (const name of readdirSync(target).sort()) if (name !== 'node_modules') collect(resolve(target, name));
   } else if (identity.isFile()) files.set(relative(root, target).split(sep).join('/'), target);
   else throw new Error(`Compatibility scope contains a non-file: ${target}`);
 }

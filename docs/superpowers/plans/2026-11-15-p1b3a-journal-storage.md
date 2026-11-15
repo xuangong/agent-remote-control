@@ -18,11 +18,11 @@
 2. **The store is written against a SQL port**, so P1-B3b reuses it. Values are chunked at 256 KiB on both bindings.
 3. **Store keys stay `${hostId}:${sessionKey}`.** Host ids are UUIDs the Relay generates and contain no `:`. Prefix operations use a key range (`>= prefix AND < next prefix`), not `substr` or `LIKE`.
 4. **`JournalStore` keeps its three methods.** The catalog (`list(prefix)`, `deletePrefix(prefix)`) is an optional `catalog` property, so test stores written as `{ load, apply, delete }` still type-check. Without a catalog the head index starts empty and learns from publications.
-5. **Sizes are incremental.** `SessionJournal.residentBytes()` is the length of the meta and item records as JSON. It keeps a running total and measures only the items that changed since the last call, so a publication costs in proportion to what it changed, not to the journal. `JournalChanges.bytes` carries it to the store, which records it per session for the catalog. The unit is JSON characters; heap use is up to twice that (two-byte strings), and the defaults below allow for it.
+5. **Sizes are incremental.** `SessionJournal.residentBytes()` is the size of the meta and item records as JSON, in UTF-8 bytes. It keeps a running total and measures only the items that changed since the last call, so a publication costs in proportion to what it changed, not to the journal. `JournalChanges.bytes` carries it to the store, which records it per session for the catalog. The unit is UTF-8 bytes, so quotas match disk use (a Chinese character is 3 bytes); heap use is up to twice that (two-byte strings), and the defaults below allow for it.
 6. **The switch is a field of the Host record.** `smartReading?: string[]` (provider ids, sorted, 1 to 64) is saved with the Host, kept in memory in the broker, and changed with `PUT /v1/remote/hosts/:id/smart-reading` by the account owner (`requireOwner`), inside `commit`. **The default is off for every provider**: reads go to the Controller as today, while journals may be written in shadow. A Host revoked and paired again is a new Host record without the field. The switch is checked before the head index. Turning a provider off closes that Host's and provider's journal-served browser streams with 1012, so their clients reconnect in crude mode.
 7. **Gating is in memory.** The service keeps `served(hostId, sessionKey)`, a synchronous answer from an index of sessions that have a head; `undefined` means the Host was never loaded. Node loads every Host from SQLite at startup (`loadAllServed`). A Host not yet loaded (one that registers later) is loaded by `servedSessions(hostId)`. That load runs **outside the Host's journal queue**, once per Host however many opens ask (the sessions object shares the in-flight promise), and the gate waits for it at most 2 s on the broker's scheduler, then serves crude. A load reads at most three times: the Host's epoch is raised by every change of its head index (publications, `unserve`) and by its deletion, and a listing read across a change is discarded. A journal-served stream that finds no head although the index said it had one calls `unserve` before it closes with 1012, so the client's reconnect goes crude instead of looping.
 8. **The cache is bounded by count and size.** Defaults: 64 journals and 128 MiB (estimated) for the whole Relay. After each call the least recently used journals are dropped until the cache is within its bounds, never the one the call used. Every call stores its changes before it returns, so dropping loses nothing.
-9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. Serving resumes when a later publication that fits sets a head. Beyond 2,000 live-only items the oldest are removed (item and body) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
+9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. Serving resumes when a later publication that fits sets a head. Beyond 2,000 live-only items the oldest complete ones are removed (item and body; an item still open is never removed, so the count can stay above the cap while open items exceed it) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
 10. **Retention is one rule: the latest N turns.** After each publication, inside the Host's queue, bodies outside the latest 50 turns (`retention.turns`) are evicted with the core's `evict`; live-only and digest-less items are never evicted. Use-based windows are deferred (see "Notes for the roadmap").
 11. **Fills respect the limits.** A fill puts back only the bodies that fit the session limit, the Host quota and the cache bound; the rest stay missing (`skipped`), and the reader's existing handling of a body that cannot be filled applies.
 12. **Deletion is durable.** Revoking a Host records its id in `journalDeletions` of the broker state in the same commit as the revoke. The deletion then runs in the Host's journal queue (so it is ordered against a concurrent publish), and when the store confirms, a second commit removes the id. Pending deletions are retried at broker start and whenever a Host registers. `open` re-checks inside the queue that its connection is still current, so a revoked Host cannot recreate a journal. A Host restored through the recovery flow keeps its old id: its own pending deletion runs, and is waited for, before the Relay sends `registered`, and a Host whose deletion failed gets no journal grant until a later run confirms it, so a retry can never delete journals it created. There is no separate binding-removal path in the broker today (only revoke), so no per-session deletion is built. A Controller can open a journal for a session that has no binding; the per-Host quota bounds it. Journals require durable Relay state: `createHostedRelay` refuses `journals` or `journalService` without `storage`, so an ephemeral account cannot orphan journals.
@@ -42,7 +42,7 @@
 |---|---|
 | `packages/agent-remote-protocol/src/remote-host-journal.ts`, `remote-host-uplink.ts`, `remote-host-journal.test.ts` | Modify: index limits, `indexAfter`, `journal_index_request`, `journal_index_page`, refusal reason `quota_exceeded`. |
 | `packages/agent-remote-journal/src/types.ts`, `journal-store.ts`, `session-journal.ts` | Modify: incremental size, removed items, live-only count and drop, head clearing, catalog. |
-| `packages/agent-remote-journal/src/journal-bytes.test.ts`, `journal-store.test.ts` | New and modify: tests of the above. |
+| `packages/agent-remote-journal/src/journal-bytes.test.ts`, `journal-size-invariant.test.ts`, `journal-store.test.ts` | New and modify: tests of the above. |
 | `packages/agent-remote-journal-sqlite/` | New package: `src/sql-journal-store.ts`, `src/node-sqlite.ts`, `src/index.ts`, tests. |
 | `packages/agent-remote-hosted/src/journal-head-index.ts` | New: the in-memory set of sessions that have a head. |
 | `packages/agent-remote-hosted/src/journal-index-pages.ts` (+ test) | New: packing index entries into one message. |
@@ -84,6 +84,7 @@ In the `valid` array, after the existing `journal_opened` line, add:
   message({ type: 'journal_open_refused', requestId: 'index-1', sessionKey: SESSION, reason: 'stale_epoch' }),
   message({ type: 'journal_index_page', requestId: 'index-1', sessionKey: SESSION, index: [indexEntry], indexAfter: -2 }),
   message({ type: 'journal_index_page', requestId: 'index-2', sessionKey: SESSION, index: [] }),
+  message({ type: 'journal_index_page', requestId: 'index-3', sessionKey: SESSION, index: [indexEntry, { ...indexEntry, itemKey: 'item-2', seqStart: 4, seqEnd: 4 }], indexAfter: 4 }),
   message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 4, reason: 'quota_exceeded', itemKey: 'item-1' }),
 ```
 
@@ -99,6 +100,13 @@ In the invalid list (`it.each<[string, Record<string, unknown>]>`), add before `
       index: Array.from({ length: JOURNAL_INDEX_PAGE_MAX_ITEMS + 1 }, (_, at) => ({ ...indexEntry, itemKey: `i${at}`, seqStart: at, seqEnd: at })) })],
     ['an index page whose range is reversed', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [{ ...indexEntry, seqStart: 3, seqEnd: 2 }] })],
     ['an index page without a request id', message({ type: 'journal_index_page', sessionKey: SESSION, index: [indexEntry] })],
+    ['an index page whose entries repeat a position', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [indexEntry, { ...indexEntry, itemKey: 'item-2' }] })],
+    ['an index page whose positions go backwards', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [{ ...indexEntry, seqStart: 5, seqEnd: 5 }, indexEntry] })],
+    ['a first page whose positions go backwards', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [{ ...indexEntry, seqStart: 5, seqEnd: 5 }, indexEntry] })],
+    ['an index page whose cursor is not its last position', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [indexEntry], indexAfter: -1 })],
+    ['an index page with a cursor and no entries', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [], indexAfter: -2 })],
+    ['a first page with a cursor and no entries', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [], indexAfter: 0 })],
+    ['a first page whose cursor is not its last position', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [indexEntry], indexAfter: 7 })],
 ```
 
 - [ ] **Step 2: Run the tests and see them fail.**
@@ -154,11 +162,17 @@ export const JournalIndexPage = Type.Object({ requestId, sessionKey,
 
 Also add `'stale_epoch'` to `JOURNAL_OPEN_REFUSAL_REASONS`, so that it reads `['index_too_large', 'invalid', 'stale_epoch']`: it answers an index request for an epoch that is no longer current.
 
-In `validJournalMessage`, after the `journal_opened` case add
+Add before `validJournalMessage`
 
 ```ts
-    case 'journal_index_page': return (message as unknown as Static<typeof JournalIndexPage>).index.every(entry => entry.seqStart <= entry.seqEnd);
+/** One page of an index: well-ordered ranges, strictly increasing `seqStart`, and a cursor that is the last entry's `seqStart`, which needs an entry. */
+function validIndexPage({ index, indexAfter }: { index: readonly JournalIndexEntry[]; indexAfter?: number }): boolean {
+  if (!index.every((entry, at) => entry.seqStart <= entry.seqEnd && (at === 0 || entry.seqStart > index[at - 1]!.seqStart))) return false;
+  return indexAfter === undefined || (index.length > 0 && indexAfter === index[index.length - 1]!.seqStart);
+}
 ```
+
+and in `validJournalMessage` make the `journal_opened` case `return validIndexPage(message as unknown as Static<typeof JournalOpened>);` and add `case 'journal_index_page': return validIndexPage(message as unknown as Static<typeof JournalIndexPage>);`.
 
 In `packages/agent-remote-protocol/src/remote-host-uplink.ts`, change the import on line 11 to
 
@@ -183,7 +197,7 @@ Add `'journal_index_page'` to the `RemoteHostUplinkBrokerMessage` extract, after
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol exec vitest run src/remote-host-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run typecheck` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS for all (50 tests in `remote-host-journal.test.ts`, 403 in the package; the hosted suite still passes, 790 tests, against the rebuilt `dist`). Then run `pnpm compatibility:update` and `pnpm compatibility:check`, and commit `packages/agent-remote-lab/compatibility.json` with the schema change. If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
+Expected: PASS for all (58 tests in `remote-host-journal.test.ts`, 411 in the package; the hosted suite still passes, 790 tests, against the rebuilt `dist`). Then run `pnpm compatibility:update` and `pnpm compatibility:check`, and commit `packages/agent-remote-lab/compatibility.json` with the schema change. (`scripts/compatibility.mjs` skips `node_modules` at any depth, so a Vitest cache written by a run from a subdirectory cannot enter the digest.) If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
 
 - [ ] **Step 5: Commit.**
 
@@ -201,6 +215,7 @@ git commit -m "feat(protocol): pull the journal index page by page and refuse a 
 - Modify: `packages/agent-remote-journal/src/journal-store.ts`
 - Modify: `packages/agent-remote-journal/src/session-journal.ts`
 - Create: `packages/agent-remote-journal/src/journal-bytes.test.ts`
+- Create: `packages/agent-remote-journal/src/journal-size-invariant.test.ts`
 - Modify: `packages/agent-remote-journal/src/journal-store.test.ts`
 
 - [ ] **Step 1: Write the failing tests.** Create `packages/agent-remote-journal/src/journal-bytes.test.ts`:
@@ -299,7 +314,10 @@ describe('live-only items', () => {
 
   it('removes the oldest beyond the cap, item and body, and tells the store', () => {
     const { journal, publish } = openJournal();
-    for (const key of ['l1', 'l2', 'l3']) journal.append(publish(), live(key));
+    for (const key of ['l1', 'l2', 'l3']) {
+      journal.append(publish(), live(key));
+      journal.seal(publish(), key);
+    }
     journal.append(publish(), text('m1', 'd1', 'kept'));
     journal.takeChanges();
     expect(journal.dropOldestLiveOnly(1)).toEqual(['l1', 'l2']);
@@ -308,6 +326,141 @@ describe('live-only items', () => {
     const changes = journal.takeChanges()!;
     expect(changes.removed).toEqual(['l1', 'l2']);
     expect(journal.dropOldestLiveOnly(5)).toEqual([]);
+  });
+});
+```
+
+Create `packages/agent-remote-journal/src/journal-size-invariant.test.ts`. It checks, after every kind of operation, after a seeded random run of them and after a reload, that `residentBytes()` and `takeChanges().bytes` equal a full recomputation, and that `dropOldestLiveOnly` never removes an open item. Deliberately breaking `unmeasured.add` in the constructor or in `dropOldestLiveOnly`, `sizes.clear()` or `sizedTotal = 0` in `replace`, or turning `touch` into `dirty.add` in `alias`, `seal`, `complete`, `correct`, `prepend`, `fill` or `evict` makes it fail:
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+import { bodyFromRow } from './journal-items.js';
+import { openJournal, text } from './journal.test-fixture.js';
+import { SessionJournal } from './session-journal.js';
+import type { JournalRowInput } from './types.js';
+
+const encoder = new TextEncoder();
+const utf8 = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
+
+/** The size of a journal measured from scratch: its meta and every item record, in UTF-8 bytes of JSON. */
+function recomputed(journal: SessionJournal): number {
+  const { meta, items } = journal.state();
+  return utf8(meta) + items.reduce((total, item) => total + utf8(item), 0);
+}
+
+/** What the journal reports, what it hands to a store, and what a journal rebuilt from its state reports must all be the recomputed size. */
+function expectSizeToHold(journal: SessionJournal, label: string): void {
+  const expected = recomputed(journal);
+  expect(journal.residentBytes(), `${label}: residentBytes`).toBe(expected);
+  expect(journal.takeChanges()?.bytes ?? expected, `${label}: changes.bytes`).toBe(expected);
+  expect(new SessionJournal(journal.state()).residentBytes(), `${label}: after a reload`).toBe(expected);
+}
+
+const snapshot = {
+  id: 's', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle' as const, activeTurn: null,
+  capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+  pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 's', status: 'idle' as const },
+};
+
+describe('the running size of a journal', () => {
+  it('equals a full recomputation after every kind of operation and after a reload', () => {
+    const { journal, publish } = openJournal();
+    const row = (key: string, chunk: string, turn: string): JournalRowInput => text(key, `d-${key}-${chunk.length}`, chunk, turn);
+    expectSizeToHold(journal, 'a new journal');
+    journal.append(publish(), row('m1', 'one', 't1'));
+    expectSizeToHold(journal, 'append');
+    journal.append(publish(), row('m1', 'one more', 't1'));
+    expectSizeToHold(journal, 'extending append');
+    journal.complete(publish(), 'm1', 'digest-m1');
+    expectSizeToHold(journal, 'complete');
+    journal.append(publish(), { ...row('l1', 'live', 't2'), liveOnly: true });
+    journal.seal(publish(), 'l1');
+    expectSizeToHold(journal, 'seal');
+    journal.alias(publish(), 'm1', 'operation-1');
+    expectSizeToHold(journal, 'alias');
+    journal.correct(publish(), row('m1', 'corrected text', 't1'), 'digest-m1b', journal.state().items.find(item => item.itemKey === 'm1')!.revision);
+    expectSizeToHold(journal, 'correct');
+    journal.prepend(publish(), [{ row: row('m0', 'older', 't0'), digest: 'digest-m0' }]);
+    expectSizeToHold(journal, 'prepend');
+    journal.setHead(publish(), { snapshot, observedAt: 1 });
+    expectSizeToHold(journal, 'head');
+    journal.evict(0);
+    expectSizeToHold(journal, 'evict');
+    journal.fill('m1', bodyFromRow(row('m1', 'corrected text', 't1')), 'digest-m1b');
+    expectSizeToHold(journal, 'fill');
+    journal.append(publish(), { ...row('l2', 'live two', 't3'), liveOnly: true });
+    journal.seal(publish(), 'l2');
+    expect(journal.dropOldestLiveOnly(1)).toEqual(['l1']);
+    expectSizeToHold(journal, 'dropOldestLiveOnly');
+    journal.clearHead();
+    expectSizeToHold(journal, 'clearHead');
+    journal.replace(publish(), [{ row: row('n1', 'fresh', 't9'), digest: 'digest-n1' }], 0);
+    expectSizeToHold(journal, 'replace');
+    journal.append(publish(), row('n2', 'after the replacement', 't9'));
+    expectSizeToHold(journal, 'append after replace');
+  });
+
+  it('counts UTF-8 bytes, three for a Chinese character and four for an emoji', () => {
+    const ascii = openJournal();
+    ascii.journal.append(ascii.publish(), text('m1', 'd1', 'a'.repeat(300)));
+    const chinese = openJournal();
+    chinese.journal.append(chinese.publish(), text('m1', 'd1', '字'.repeat(300)));
+    const emoji = openJournal();
+    emoji.journal.append(emoji.publish(), text('m1', 'd1', '😀'.repeat(300)));
+    expect(chinese.journal.residentBytes() - ascii.journal.residentBytes()).toBe(600);
+    expect(emoji.journal.residentBytes() - ascii.journal.residentBytes()).toBe(900);
+    expectSizeToHold(chinese.journal, 'chinese');
+    expectSizeToHold(emoji.journal, 'emoji');
+  });
+
+  it.each([1, 2, 3, 4, 5, 6])('equals a full recomputation through a random run of operations (seed %i)', seed => {
+    let state = seed * 2_654_435_761;
+    const random = (limit: number) => { state = (Math.imul(state ^ (state >>> 15), 2_246_822_519) + 1_013_904_223) >>> 0; return state % limit; };
+    const { journal, publish } = openJournal();
+    let counter = 0;
+    const words = ['plain', '字符很多的文本', '😀 emoji', 'x'.repeat(400)];
+    const key = () => `k${random(12)}`;
+    const row = (itemKey: string): JournalRowInput => ({ ...text(itemKey, `d${++counter}`, words[random(words.length)]!, `turn-${random(5)}`), ...(random(4) === 0 ? { liveOnly: true } : {}) });
+    const known = () => journal.state().items;
+    for (let step = 0; step < 150; step++) {
+      const items = known();
+      const pick = items.length === 0 ? undefined : items[random(items.length)]!;
+      try {
+        switch (random(12)) {
+          case 0: case 1: journal.append(publish(), row(pick && random(2) ? pick.itemKey : key())); break;
+          case 2: if (pick) journal.complete(publish(), pick.itemKey, `digest-${pick.itemKey}`); break;
+          case 3: if (pick) journal.seal(publish(), pick.itemKey); break;
+          case 4: if (pick) journal.alias(publish(), pick.itemKey, `operation-${++counter}`); break;
+          case 5: if (pick) journal.correct(publish(), { ...row(pick.itemKey), liveOnly: false }, `digest-${++counter}`, pick.revision); break;
+          case 6: journal.prepend(publish(), [{ row: { ...row(`p${++counter}`), liveOnly: false }, digest: `digest-p${counter}` }]); break;
+          case 7: journal.evict(random(3)); break;
+          case 8: if (pick?.digest !== undefined) journal.fill(pick.itemKey, bodyFromRow({ ...row(pick.itemKey), liveOnly: false }), pick.digest); break;
+          case 9: journal.dropOldestLiveOnly(random(3)); break;
+          case 10: random(2) ? journal.clearHead() : journal.setHead(publish(), { snapshot, observedAt: step }); break;
+          default: if (random(6) === 0) journal.replace(publish(), [{ row: { ...row(`r${++counter}`), liveOnly: false }, digest: `digest-r${counter}` }], step); break;
+        }
+      } catch { /* an operation the journal refuses changes nothing */ }
+      expectSizeToHold(journal, `seed ${seed} step ${step}`);
+    }
+  });
+});
+
+describe('dropping live-only items', () => {
+  it('never drops one that is still open, and keeps the open one growing in place', () => {
+    const { journal, publish } = openJournal();
+    const live = (key: string, chunk: string): JournalRowInput => ({ ...text(key, `s-${key}-${chunk}`, chunk), liveOnly: true });
+    journal.append(publish(), live('open', 'first '));
+    journal.append(publish(), live('sealed-1', 'a'));
+    journal.seal(publish(), 'sealed-1');
+    journal.append(publish(), live('sealed-2', 'b'));
+    journal.seal(publish(), 'sealed-2');
+    expect(journal.liveOnlyCount).toBe(3);
+    expect(journal.dropOldestLiveOnly(0)).toEqual(['sealed-1', 'sealed-2']);
+    expect(journal.has('open')).toBe(true);
+    journal.append(publish(), live('open', 'second'));
+    expect(journal.state().items.find(item => item.itemKey === 'open')?.body?.item).toMatchObject({ text: 'first second' });
+    expectSizeToHold(journal, 'after dropping around an open item');
   });
 });
 ```
@@ -329,6 +482,7 @@ and, inside the `describe('MemoryJournalStore', ...)` block before its closing `
     const store = new MemoryJournalStore();
     const { journal, publish } = openJournal();
     journal.append(publish(), { ...text('l1', 's1', 'live'), liveOnly: true });
+    journal.seal(publish(), 'l1');
     journal.append(publish(), text('m1', 'd1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);
@@ -438,6 +592,23 @@ export class MemoryJournalStore implements JournalStore {
 
 - [ ] **Step 4: Implement the journal changes.** In `packages/agent-remote-journal/src/session-journal.ts`:
 
+(a0) Add this helper before the class (and its doc comment):
+
+```ts
+/** The UTF-8 size of a string, counted without encoding it. */
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let at = 0; at < text.length; at++) {
+    const code = text.charCodeAt(at);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && at + 1 < text.length && (text.charCodeAt(at + 1) & 0xfc00) === 0xdc00) { bytes += 4; at += 1; }
+    else bytes += 3;
+  }
+  return bytes;
+}
+```
+
 (a) Add fields after `protected replaced = false;`:
 
 ```ts
@@ -518,19 +689,19 @@ export class MemoryJournalStore implements JournalStore {
   }
 
   /**
-   * An estimate of what the journal holds: the length of its meta and of each item record as stored, in JSON characters.
+   * An estimate of what the journal holds: the size of its meta and of each item record as stored, in UTF-8 bytes of JSON.
    * Only items that changed since the last call are measured, so the cost follows the change, not the journal.
    */
   residentBytes(): number {
     for (const key of this.unmeasured) {
       const item = this.byKey.get(key);
       const before = this.sizes.get(key) ?? 0;
-      const size = item ? JSON.stringify(item).length : 0;
+      const size = item ? utf8Length(JSON.stringify(item)) : 0;
       if (item) this.sizes.set(key, size); else this.sizes.delete(key);
       this.sizedTotal += size - before;
     }
     this.unmeasured.clear();
-    return this.sizedTotal + JSON.stringify(this.meta).length;
+    return this.sizedTotal + utf8Length(JSON.stringify(this.meta));
   }
 
   /** The estimated size of the live-only items, which a replacement carries over. */
@@ -542,12 +713,13 @@ export class MemoryJournalStore implements JournalStore {
   }
 
   /**
-   * Removes the oldest live-only items beyond `keep`, skeleton and body: nothing can rebuild them, so their place in the
-   * sequence goes with them. Returns their keys.
+   * Removes the oldest complete live-only items until at most `keep` live-only items remain, skeleton and body: nothing can
+   * rebuild them, so their place in the sequence goes with them. An open item is never removed: the next append would
+   * recreate it with only the new text. Returns the keys removed.
    */
   dropOldestLiveOnly(keep: number): string[] {
-    const live = this.items.filter(item => item.liveOnly);
-    const doomed = new Set(live.slice(0, Math.max(0, live.length - keep)).map(item => item.itemKey));
+    const excess = this.liveOnlyCount - Math.max(0, keep);
+    const doomed = new Set(this.items.filter(item => item.liveOnly && item.state === 'complete').slice(0, Math.max(0, excess)).map(item => item.itemKey));
     if (doomed.size === 0) return [];
     const remaining = this.items.filter(item => !doomed.has(item.itemKey));
     this.items.length = 0;
@@ -565,7 +737,7 @@ export class MemoryJournalStore implements JournalStore {
 - [ ] **Step 5: Run the tests and see them pass, then typecheck and rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal run test` then `pnpm --filter @orchardworks/agent-remote-journal run typecheck` then `pnpm --filter @orchardworks/agent-remote-journal run build`
-Expected: PASS for all three (151 tests in 12 files). Then run the hosted suite against the rebuilt `dist` (`pnpm --filter @orchardworks/agent-remote-hosted exec vitest run --testTimeout=20000`, 790 tests), and `pnpm compatibility:update` then `pnpm compatibility:check`: the digest covers the journal sources, so commit `packages/agent-remote-lab/compatibility.json` with this task.
+Expected: PASS for all three (160 tests in 13 files). Then run the hosted suite against the rebuilt `dist` (`pnpm --filter @orchardworks/agent-remote-hosted exec vitest run --testTimeout=20000`, 790 tests), and `pnpm compatibility:update` then `pnpm compatibility:check`: the digest covers the journal sources, so commit `packages/agent-remote-lab/compatibility.json` with this task.
 
 - [ ] **Step 6: Commit.**
 
@@ -580,6 +752,7 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
 **Files:**
 - Create: `packages/agent-remote-journal-sqlite/package.json`
 - Create: `packages/agent-remote-journal-sqlite/tsconfig.json`
+- Create: `packages/agent-remote-journal-sqlite/tsconfig.store.json`
 - Create: `packages/agent-remote-journal-sqlite/src/index.ts`
 - Create: `packages/agent-remote-journal-sqlite/src/sql-journal-store.ts`
 - Create: `packages/agent-remote-journal-sqlite/src/node-sqlite.ts`
@@ -594,7 +767,9 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
   "private": true,
   "type": "module",
   "description": "SQLite storage for Relay session journals: one store over a small SQL port, and its Node binding.",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -606,10 +781,12 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.store.json",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
@@ -631,8 +808,11 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
     "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022",
+      "WebWorker"
+    ],
+    "types": [],
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
@@ -642,8 +822,27 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts"
+  ]
+}
+```
+
+`packages/agent-remote-journal-sqlite/tsconfig.store.json` compiles the store files alone with the same Worker-safe settings, so `Buffer`, `process` and `node:` modules cannot creep into the store that a Durable Object runs; `pnpm run typecheck` checks both:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/sql-journal-store.ts"
+  ]
 }
 ```
 
@@ -761,6 +960,7 @@ describe.each(stores)('%s', (_name, create) => {
     const store = await create();
     const { journal, at } = openJournal();
     journal.append(at(), { ...row('l1', 'live'), liveOnly: true });
+    journal.seal(at(), 'l1');
     journal.append(at(), row('m1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);
@@ -849,6 +1049,16 @@ describe('the SQLite store over its file', () => {
     const second = await openNodeJournalDatabase(file);
     cleanups.push(() => second.close());
     expect((await new SqlJournalStore(second).load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+  });
+
+  it('opens a file database in write-ahead logging with full synchronous writes and a short lock wait', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'arc-journal-store-'));
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    const database = await openNodeJournalDatabase(join(directory, 'journals.sqlite'));
+    cleanups.push(() => database.close());
+    expect(database.all<{ journal_mode: string }>('PRAGMA journal_mode')[0]?.journal_mode).toBe('wal');
+    expect(database.all<{ synchronous: number }>('PRAGMA synchronous')[0]?.synchronous).toBe(2);
+    expect(database.all<{ timeout: number }>('PRAGMA busy_timeout')[0]?.timeout).toBe(250);
   });
 
   it('refuses a database written by a newer format', async () => {
@@ -1036,6 +1246,7 @@ export class SqlJournalStore implements JournalStore {
 `packages/agent-remote-journal-sqlite/src/node-sqlite.ts`:
 
 ```ts
+/// <reference types="node" />
 import { chmodSync, closeSync, mkdirSync, openSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { StatementSync } from 'node:sqlite';
@@ -1050,6 +1261,7 @@ export interface NodeJournalDatabase extends JournalSqlDatabase {
  * Opens, and creates when missing, the journal database file with Node's built-in `node:sqlite` (Node 22.13 or later).
  * The directory is private to its owner and so is the file. Pass `:memory:` for a database that lives as long as the handle.
  * The module is imported here, not at the top of the file, so a Relay that never enables journals never loads it.
+ * The binding is synchronous, and it expects one process per database file: a second writer waits at most 250 ms for the lock and then fails.
  */
 export async function openNodeJournalDatabase(file: string): Promise<NodeJournalDatabase> {
   let sqlite: typeof import('node:sqlite');
@@ -1063,7 +1275,7 @@ export async function openNodeJournalDatabase(file: string): Promise<NodeJournal
   const database = new sqlite.DatabaseSync(file);
   database.exec('PRAGMA journal_mode = WAL');
   database.exec('PRAGMA synchronous = FULL');
-  database.exec('PRAGMA busy_timeout = 5000');
+  database.exec('PRAGMA busy_timeout = 250');
   const statements = new Map<string, StatementSync>();
   const statement = (sql: string): StatementSync => {
     let prepared = statements.get(sql);
@@ -1092,7 +1304,7 @@ export async function openNodeJournalDatabase(file: string): Promise<NodeJournal
 - [ ] **Step 6: Run the tests.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
-Expected: PASS on the default Node (29 tests). Then run the same with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
+Expected: PASS on the default Node (30 tests). Then run the same with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
 Expected: PASS (an `ExperimentalWarning: SQLite is an experimental feature` line is printed once).
 
 - [ ] **Step 7: Typecheck and build.**
@@ -3901,7 +4113,7 @@ Run: `pnpm local down` when nobody needs the instance (it belongs to this worktr
 ## Open risks
 
 - `node:sqlite` is synchronous: loading a very large journal stalls the Relay's event loop for the read and parse (the benchmark bounds it). A worker-thread database is the follow-up if P0 shows larger journals.
-- The size estimate counts JSON characters; heap use is up to twice that. The defaults (128 MiB cache, 64 MiB session) assume a Node host; the Durable Object bounds in P1-B3b are lower.
+- The size estimate counts UTF-8 bytes of JSON; heap use is up to twice that. The defaults (128 MiB cache, 64 MiB session) assume a Node host; the Durable Object bounds in P1-B3b are lower.
 - A Controller can open a journal for a session that has no binding; only the per-Host quota bounds it.
 - Removing live-only items beyond the cap loses them for good; the cap (2,000) is a guess that P0 should confirm.
 - The pending-deletion list is retried at start and on Host registration only; a Relay that never restarts and sees no Host register keeps the journals until one of those happens.

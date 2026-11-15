@@ -60,6 +60,7 @@ describe('MemoryJournalStore', () => {
     const store = new MemoryJournalStore();
     const { journal, publish } = openJournal();
     journal.append(publish(), { ...text('l1', 's1', 'live'), liveOnly: true });
+    journal.seal(publish(), 'l1');
     journal.append(publish(), text('m1', 'd1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);

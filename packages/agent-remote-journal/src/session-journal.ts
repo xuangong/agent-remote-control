@@ -17,6 +17,19 @@ import {
 /** How long a retired epoch is remembered, for diagnostics only. */
 export const RETIRED_EPOCH_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** The UTF-8 size of a string, counted without encoding it. */
+function utf8Length(text: string): number {
+  let bytes = 0;
+  for (let at = 0; at < text.length; at++) {
+    const code = text.charCodeAt(at);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff && at + 1 < text.length && (text.charCodeAt(at + 1) & 0xfc00) === 0xdc00) { bytes += 4; at += 1; }
+    else bytes += 3;
+  }
+  return bytes;
+}
+
 /**
  * The journal of one session: epochs and dense sequences assigned here, one record per item, and the one publisher
  * allowed to write. It changes only through its methods and hands out what changed to its store.
@@ -83,19 +96,19 @@ export class SessionJournal {
   }
 
   /**
-   * An estimate of what the journal holds: the length of its meta and of each item record as stored, in JSON characters.
+   * An estimate of what the journal holds: the size of its meta and of each item record as stored, in UTF-8 bytes of JSON.
    * Only items that changed since the last call are measured, so the cost follows the change, not the journal.
    */
   residentBytes(): number {
     for (const key of this.unmeasured) {
       const item = this.byKey.get(key);
       const before = this.sizes.get(key) ?? 0;
-      const size = item ? JSON.stringify(item).length : 0;
+      const size = item ? utf8Length(JSON.stringify(item)) : 0;
       if (item) this.sizes.set(key, size); else this.sizes.delete(key);
       this.sizedTotal += size - before;
     }
     this.unmeasured.clear();
-    return this.sizedTotal + JSON.stringify(this.meta).length;
+    return this.sizedTotal + utf8Length(JSON.stringify(this.meta));
   }
 
   /** The estimated size of the live-only items, which a replacement carries over. */
@@ -107,12 +120,13 @@ export class SessionJournal {
   }
 
   /**
-   * Removes the oldest live-only items beyond `keep`, skeleton and body: nothing can rebuild them, so their place in the
-   * sequence goes with them. Returns their keys.
+   * Removes the oldest complete live-only items until at most `keep` live-only items remain, skeleton and body: nothing can
+   * rebuild them, so their place in the sequence goes with them. An open item is never removed: the next append would
+   * recreate it with only the new text. Returns the keys removed.
    */
   dropOldestLiveOnly(keep: number): string[] {
-    const live = this.items.filter(item => item.liveOnly);
-    const doomed = new Set(live.slice(0, Math.max(0, live.length - keep)).map(item => item.itemKey));
+    const excess = this.liveOnlyCount - Math.max(0, keep);
+    const doomed = new Set(this.items.filter(item => item.liveOnly && item.state === 'complete').slice(0, Math.max(0, excess)).map(item => item.itemKey));
     if (doomed.size === 0) return [];
     const remaining = this.items.filter(item => !doomed.has(item.itemKey));
     this.items.length = 0;

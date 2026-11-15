@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.store.json",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {

@@ -86,6 +86,7 @@
         "packages/agent-remote-journal-sqlite/package.json",
         "packages/agent-remote-journal-sqlite/src",
         "packages/agent-remote-journal-sqlite/tsconfig.json",
+        "packages/agent-remote-journal-sqlite/tsconfig.store.json",
         "packages/agent-remote-lab/README.md",
         "packages/agent-remote-lab/bundle-budget.ts",
         "packages/agent-remote-lab/e2e",
@@ -135,7 +136,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:73726f329a1334a5b9806ff750652182a3ffa23fea1fa3e3db17a6cdc72f5ef3"
+      "digest": "sha256:f1ae773f271ef8b020f0ad13f67206530bf9df190c0763379bd8441c6951f95c"
     }
   },
   "providers": [

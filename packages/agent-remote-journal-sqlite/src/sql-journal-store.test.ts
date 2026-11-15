@@ -96,6 +96,7 @@ describe.each(stores)('%s', (_name, create) => {
     const store = await create();
     const { journal, at } = openJournal();
     journal.append(at(), { ...row('l1', 'live'), liveOnly: true });
+    journal.seal(at(), 'l1');
     journal.append(at(), row('m1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);
@@ -184,6 +185,16 @@ describe('the SQLite store over its file', () => {
     const second = await openNodeJournalDatabase(file);
     cleanups.push(() => second.close());
     expect((await new SqlJournalStore(second).load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+  });
+
+  it('opens a file database in write-ahead logging with full synchronous writes and a short lock wait', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'arc-journal-store-'));
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    const database = await openNodeJournalDatabase(join(directory, 'journals.sqlite'));
+    cleanups.push(() => database.close());
+    expect(database.all<{ journal_mode: string }>('PRAGMA journal_mode')[0]?.journal_mode).toBe('wal');
+    expect(database.all<{ synchronous: number }>('PRAGMA synchronous')[0]?.synchronous).toBe(2);
+    expect(database.all<{ timeout: number }>('PRAGMA busy_timeout')[0]?.timeout).toBe(250);
   });
 
   it('refuses a database written by a newer format', async () => {

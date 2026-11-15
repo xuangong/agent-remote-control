@@ -35,7 +35,7 @@ export interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Told when a journal message was not sent because it does not encode. */
+  /** Told about journal failures: a message that does not encode, a store that fails, and a fan-out that throws. */
   diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed'): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this

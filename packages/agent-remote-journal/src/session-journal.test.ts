@@ -253,4 +253,14 @@ describe('SessionJournal', () => {
       expect(journal.index().map(({ itemKey, seqStart }) => [itemKey, seqStart])).toEqual([['ask', 1], ['m2', 2]]);
     });
   });
+  it('keeps the background outcome when a correction carries none', () => {
+    const { journal, publish } = openJournal();
+    const background = { id: 'review-1', kind: 'review' as const, status: 'visible' as const };
+    const call = (extra: object) => ({ itemKey: 'c1', providerId: 'codex', sourceKey: 'c1', occurredAt: 0, item: { type: 'tool_call' as const, callId: 'c1', name: 'shell', status: 'completed' as const, error: null, detail: { type: 'shell' as const, command: 'ls' }, ...extra } });
+    journal.append(publish(), call({ background }));
+    journal.complete(publish(), 'c1', 'digest-1');
+    const revision = journal.index()[0]?.revision as number;
+    journal.correct(publish(), call({}), 'digest-2', revision);
+    expect(journal.state().items[0]?.body?.item).toMatchObject({ background });
+  });
 });

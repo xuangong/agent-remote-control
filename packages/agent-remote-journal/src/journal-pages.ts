@@ -46,7 +46,8 @@ export function pageJournal(view: JournalPageView, request: JournalPageRequest, 
 
 function page(view: JournalPageView, request: JournalPageRequest, selected: readonly JournalItem[], flags: PageFlags, options: { olderBeyondJournal: boolean }): JournalPageResult {
   const first = selected[0];
-  const endSeq = selected.length > 0 ? Math.max(...selected.map(({ seqEnd }) => seqEnd)) : undefined;
+  let endSeq: number | undefined;
+  for (const { seqEnd } of selected) if (endSeq === undefined || seqEnd > endSeq) endSeq = seqEnd;
   const servedOlder = options.olderBeyondJournal && flags.error === null;
   return {
     kind: 'page',

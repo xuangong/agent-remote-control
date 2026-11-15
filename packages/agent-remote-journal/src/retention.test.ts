@@ -105,4 +105,21 @@ describe('retention', () => {
     expect(filledUser?.body?.item).toMatchObject({ clientMessageId: 'client-1' });
     expect(filledCall?.body?.item).toMatchObject({ background });
   });
+  it('clears a kept background when the evicted body has none, so a fill restores none', () => {
+    const { journal, publish } = openJournal();
+    const background = { id: 'review-1', kind: 'review' as const, status: 'visible' as const };
+    const call = (extra: object) => ({ itemKey: 'c1', providerId: 'codex', sourceKey: 'c1', occurredAt: 0, turnId: 'turn-1', item: { type: 'tool_call' as const, callId: 'c1', name: 'shell', status: 'completed' as const, error: null, detail: { type: 'shell' as const, command: 'ls' }, ...extra } });
+    journal.append(publish(), call({ background }));
+    journal.complete(publish(), 'c1', 'digest-c1');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    expect(journal.evict(1)).toEqual(['c1']);
+    journal.fill('c1', bodyFromRow(call({ background })), 'digest-c1');
+    journal.append(publish(), call({}));
+    expect(journal.state().items[0]?.body?.item).not.toHaveProperty('background');
+    journal.complete(publish(), 'c1', 'digest-c1b');
+    expect(journal.evict(1)).toEqual(['c1']);
+    expect(journal.state().items[0]?.background).toBeUndefined();
+    journal.fill('c1', bodyFromRow(call({})), 'digest-c1b');
+    expect(journal.state().items[0]?.body?.item).not.toHaveProperty('background');
+  });
 });

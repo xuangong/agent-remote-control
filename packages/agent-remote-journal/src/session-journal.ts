@@ -129,8 +129,9 @@ export class SessionJournal {
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     this.advance(publication);
     this.meta.nextSeq += 1;
+    const keptBackground = row.item.background === undefined ? item.body?.item.background : undefined;
     item.body = {
-      item: structuredClone(row.item), timestamp: row.timestamp,
+      item: { ...structuredClone(row.item), ...(keptBackground ? { background: structuredClone(keptBackground) } : {}) }, timestamp: row.timestamp,
       collapsed: item.body?.collapsed ?? [], resources: mergeResources(item.body?.resources ?? [], row.resources),
     };
     item.seqEnd = row.seq;
@@ -230,6 +231,7 @@ export class SessionJournal {
     for (const key of keys) {
       const item = this.require(key);
       if (item.body?.item.background) item.background = structuredClone(item.body.item.background);
+      else delete item.background;
       item.body = null;
       this.dirty.add(key);
     }

@@ -226,7 +226,7 @@ Finalized items are stable, however: record and message ids, call ids, native it
   - When the native id is not known at send time, the Controller records the alias the first time it observes the echo, and the index keeps it.
   - A reread therefore matches the echo by its native key and adds nothing.
 - **Items without a native identity**, such as Controller-made errors, get a key that the Controller assigns and the journal keeps.
-- **Live-only items.** Adapters mark the provider's live-only items (interaction records); the Controller marks its own (Controller errors). A reread cannot reproduce them, so the journal holds their only copy.
+- **Live-only items.** Adapters mark the provider's live-only items (interaction records); the Controller marks its own (Controller errors). A reread cannot reproduce them, so the journal holds their only copy. Sealing an item makes it live-only too.
 
 ### Continuing a journal across reopens
 
@@ -237,12 +237,12 @@ After every open, the Controller reconciles the history it read with the journal
 3. **Keep history before live.** The adapter already delivers the reread before its single history boundary and holds live output until after it (blueprint, Provider Contract).
    - The Controller publishes live rows only after its reconcile is committed.
    - A correction names the item revision it was computed against. The Host partition rejects it if the item has moved, and the Controller reads that item again.
-4. **Compare only inside the reread's window.** A reread covers all history for Claude and Copilot, but only the latest page for Codex and OpenCode. Its oldest item is the anchor. Journal items older than the anchor are outside the window and stay as they are.
+4. **Compare only inside the reread's window.** A reread covers all history for Claude and Copilot, but only the latest page for Codex and OpenCode. Its oldest item is the anchor. Journal items older than the anchor are outside the window and stay as they are. A reread can also reach further back than the journal: when its leading items are unknown and end right before the journal's oldest item, they are older history and are prepended.
 5. **Walk the window.**
    - An unknown item is appended.
    - An `open` item, or a `complete` item whose digest differs, gets a correction.
    - An identical item is skipped.
-   - Live-only items are left out of the comparison.
+   - A live-only item, sealed ones included, is never counted as missing. A reread that does contain one adopts the native copy through a correction.
 6. **Replace only on a genuine rewrite.** An item known inside the window but missing from the reread, or a change of order inside the window, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. Live-only items carry over into the new epoch, each placed after the item that preceded it, because nothing else can rebuild them. In every other case the epoch continues.
 7. **Close a gap.** If the anchor is not in the journal, more than one page of activity went unobserved. The Controller reads further back through native history until it reaches a known item, within a bound. Past the bound it publishes a replacement.
 

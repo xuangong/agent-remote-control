@@ -1,0 +1,37 @@
+{
+  "name": "@orchardworks/agent-remote-journal-sqlite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SQLite storage for Relay session journals: one store over a small SQL port, and its Node binding.",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node-sqlite.d.ts",
+      "import": "./dist/node-sqlite.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000"
+  },
+  "dependencies": {
+    "@orchardworks/agent-remote-journal": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
+  }
+}

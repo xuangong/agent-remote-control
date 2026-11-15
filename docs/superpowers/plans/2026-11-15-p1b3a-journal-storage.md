@@ -610,14 +610,13 @@ git commit -m "feat(journal): measure size incrementally, drop live-only items, 
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=10000",
-    "benchmark": "node scripts/benchmark.mjs"
+    "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
     "@orchardworks/agent-remote-journal": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
+    "@types/node": "24.13.3",
     "typescript": "^5.7.0",
     "vitest": "4.1.11"
   }
@@ -658,8 +657,8 @@ The Node binding is deliberately not exported here: `src/node-sqlite.ts` is reac
 
 - [ ] **Step 2: Link the package.**
 
-Run: `pnpm install --offline`
-Expected: it links `packages/agent-remote-journal-sqlite` into the workspace and adds its importer to `pnpm-lock.yaml`. If `--offline` cannot resolve everything from the local store, run `pnpm install`.
+Run: `pnpm install --prefer-offline` (`--offline` lacks metadata for vitest's dependencies)
+Expected: it links `packages/agent-remote-journal-sqlite` into the workspace and adds its importer to `pnpm-lock.yaml`. It also rewrites unrelated `resolution:` lines; restore the lockfile from git and keep only the new `packages/agent-remote-journal-sqlite:` importer block (placed before `packages/agent-remote-lab:`), then check `pnpm install --frozen-lockfile --prefer-offline`.
 
 - [ ] **Step 3: Write the failing tests.** `packages/agent-remote-journal-sqlite/src/sql-journal-store.test.ts`:
 
@@ -1093,7 +1092,7 @@ export async function openNodeJournalDatabase(file: string): Promise<NodeJournal
 - [ ] **Step 6: Run the tests.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
-Expected: PASS on the default Node. Then run the same with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
+Expected: PASS on the default Node (29 tests). Then run the same with Node 22: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-journal-sqlite exec vitest run --testTimeout=10000`
 Expected: PASS (an `ExperimentalWarning: SQLite is an experimental feature` line is printed once).
 
 - [ ] **Step 7: Typecheck and build.**
@@ -1102,12 +1101,12 @@ Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite run typecheck` the
 Expected: PASS. `dist/index.js` must not mention `node:sqlite`:
 
 Run: `grep -c "node:sqlite" packages/agent-remote-journal-sqlite/dist/index.js packages/agent-remote-journal-sqlite/dist/sql-journal-store.js`
-Expected: `0` for both files.
+Expected: `0` for both files. Then run `pnpm compatibility:update` and `pnpm compatibility:check`: the digest lists the new package, so commit `packages/agent-remote-lab/compatibility.json` too.
 
 - [ ] **Step 8: Commit.**
 
 ```bash
-git add packages/agent-remote-journal-sqlite pnpm-lock.yaml
+git add packages/agent-remote-journal-sqlite pnpm-lock.yaml packages/agent-remote-lab/compatibility.json
 git commit -m "feat(journal-sqlite): store journals in SQLite behind a small SQL port" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

@@ -221,25 +221,35 @@ export class SessionJournal {
     return pageJournal({ epoch: this.meta.epoch, items: this.items, nextSeq: this.meta.nextSeq }, request, options);
   }
 
-  /** Evicts the bodies of complete, non-live-only items outside the latest turns. Returns the evicted item keys. */
+  /**
+   * Evicts the bodies of complete, non-live-only items that carry a digest, outside the latest turns. Returns the
+   * evicted item keys. A background outcome stays on the item.
+   */
   evict(keepLatestTurns: number): string[] {
     const keys = evictableItems(this.items, keepLatestTurns);
     for (const key of keys) {
-      this.require(key).body = null;
+      const item = this.require(key);
+      if (item.body?.item.background) item.background = structuredClone(item.body.item.background);
+      item.body = null;
       this.dirty.add(key);
     }
     return keys;
   }
 
-  /** Puts back a body read again from the Host. Its digest must equal the one recorded when the item completed. */
+  /**
+   * Puts back a body read again from the Host, with the item's alias and background outcome. An already resident body
+   * stays as it is; otherwise the digest must equal the one recorded when the item completed.
+   */
   fill(itemKey: string, body: JournalBody, digest: string): 'filled' | 'mismatch' | 'unknown' {
     const item = this.byKey.get(itemKey);
     if (!item) return 'unknown';
+    if (item.body !== null) return 'filled';
     if (item.digest !== undefined && item.digest !== digest) return 'mismatch';
-    if (item.body === null) {
-      item.body = structuredClone(body);
-      this.dirty.add(itemKey);
-    }
+    const filled = structuredClone(body);
+    if (item.background) filled.item.background = structuredClone(item.background);
+    if (item.clientMessageId !== undefined && filled.item.type === 'user_message') filled.item.clientMessageId = item.clientMessageId;
+    item.body = filled;
+    this.dirty.add(itemKey);
     return 'filled';
   }
 

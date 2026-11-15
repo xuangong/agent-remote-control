@@ -1,4 +1,4 @@
-import type { AgentTimelineItem, ResourceBinding, TimelineCollapse, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
+import type { AgentTimelineItem, BackgroundActivity, ResourceBinding, TimelineCollapse, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
 
 /** One row a Controller publishes: a timeline row (`TimelineRowInput` in agent-remote-relay) plus the native identity of the item it belongs to. */
 export interface JournalRowInput {
@@ -49,6 +49,8 @@ export interface JournalItem {
   digest?: string;
   liveOnly: boolean;
   clientMessageId?: string;
+  /** The background outcome of the item, kept while its body is evicted. */
+  background?: BackgroundActivity;
   revision: number;
   body: JournalBody | null;
 }

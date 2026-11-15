@@ -35,7 +35,10 @@ export function pageJournal(view: JournalPageView, request: JournalPageRequest, 
   }
   const selected = request.direction === 'tail' ? view.items.slice(-request.limit)
     : request.direction === 'before' ? view.items.filter(({ seqStart }) => seqStart < (cursor as TimelineHistoryCursor).seq).slice(-request.limit)
-      : view.items.filter(({ seqEnd }) => seqEnd > (cursor as TimelineHistoryCursor).seq).slice(0, request.limit);
+      : view.items.filter(({ seqEnd }) => seqEnd > (cursor as TimelineHistoryCursor).seq)
+        .sort((left, right) => left.seqEnd - right.seqEnd || left.seqStart - right.seqStart)
+        .slice(0, request.limit)
+        .sort((left, right) => left.seqStart - right.seqStart);
   const missing = selected.filter(({ body }) => body === null).map(({ itemKey }) => itemKey);
   if (missing.length > 0) return { kind: 'missing', itemKeys: missing };
   return page(view, request, selected, SERVED, options);
@@ -43,7 +46,7 @@ export function pageJournal(view: JournalPageView, request: JournalPageRequest, 
 
 function page(view: JournalPageView, request: JournalPageRequest, selected: readonly JournalItem[], flags: PageFlags, options: { olderBeyondJournal: boolean }): JournalPageResult {
   const first = selected[0];
-  const last = selected.at(-1);
+  const endSeq = selected.length > 0 ? Math.max(...selected.map(({ seqEnd }) => seqEnd)) : undefined;
   const servedOlder = options.olderBeyondJournal && flags.error === null;
   return {
     kind: 'page',
@@ -58,11 +61,11 @@ function page(view: JournalPageView, request: JournalPageRequest, selected: read
         ...flags,
         window: { minSeq: view.items[0]?.seqStart ?? 0, maxSeq: view.nextSeq - 1, nextSeq: view.nextSeq },
         startCursor: first ? { epoch: view.epoch, seq: first.seqStart } : null,
-        endCursor: last ? { epoch: view.epoch, seq: last.seqEnd } : null,
+        endCursor: endSeq === undefined ? null : { epoch: view.epoch, seq: endSeq },
         hasOlder: first
           ? view.items.some(({ seqStart }) => seqStart < first.seqStart) || (servedOlder && first === view.items[0])
           : servedOlder,
-        hasNewer: last ? view.items.some(({ seqEnd }) => seqEnd > last.seqEnd) : false,
+        hasNewer: endSeq === undefined ? false : view.items.some(({ seqEnd }) => seqEnd > endSeq),
         entries: selected.map(itemEntry),
       },
     },

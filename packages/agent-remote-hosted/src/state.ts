@@ -98,9 +98,11 @@ function unique<T>(values: T[], key: (value: T) => string) { return new Set(valu
 function validSmartReading(value: unknown): value is string[] {
   return Array.isArray(value) && value.length >= 1 && value.length <= 64 && value.every(item => string(item)) && unique(value, item => item);
 }
-/** Hosts whose journals still await deletion: a nonempty list of at most 128 distinct Host ids. */
+/** The most Hosts whose journal deletion may be pending at once. */
+export const JOURNAL_DELETION_LIMIT = 1024;
+/** Hosts whose journals still await deletion: a nonempty list of at most `JOURNAL_DELETION_LIMIT` distinct Host ids. */
 function validJournalDeletions(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length >= 1 && value.length <= 128 && value.every(item => string(item)) && unique(value, item => item);
+  return Array.isArray(value) && value.length >= 1 && value.length <= JOURNAL_DELETION_LIMIT && value.every(item => string(item)) && unique(value, item => item);
 }
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||

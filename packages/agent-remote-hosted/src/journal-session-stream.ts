@@ -47,6 +47,8 @@ export interface JournalReads {
   olderBeyondJournal(): boolean;
   /** The journal has no head although the index said it had one; the index forgets the session before the stream closes. */
   noHead?(): void;
+  /** Reading the journal failed; the session leaves the in-memory head index (nothing is deleted), so the client's reconnect is read through the Controller. */
+  readFailed?(): void;
 }
 
 export interface JournalSessionStreamOptions {
@@ -253,6 +255,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     else sendServer(snapshotMessage('agent_update', status.head));
   }
 
+  function readFailure(): void {
+    reads.readFailed?.();
+    shutdown(1011, 'Session journal could not be read');
+  }
+
   async function negotiate(): Promise<void> {
     const status = await reads.status();
     if (!isPhase('negotiating')) return;
@@ -266,7 +273,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     }
     if (!isPhase('negotiating')) return;
     phase = 'live';
-    if (stale) { stale = false; refreshHead().catch(() => shutdown(1011, 'Session journal could not be read')); }
+    if (stale) { stale = false; refreshHead().catch(readFailure); }
     if (!activityOnly) ensureHost();
     for (const item of queued.splice(0)) receive(item.raw);
   }
@@ -328,7 +335,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
 
   function hostIsReady(): void {
     hostReady = true;
-    if (!activityOnly) refreshHead().catch(() => shutdown(1011, 'Session journal could not be read'));
+    if (!activityOnly) refreshHead().catch(readFailure);
   }
 
   function hostEnded(code: number, reason: string): void {
@@ -429,7 +436,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       }
       phase = 'negotiating';
       activityOnly = message.observation === 'activity';
-      negotiate().catch(() => shutdown(1011, 'Session journal could not be read'));
+      negotiate().catch(readFailure);
       return;
     }
     if (message.type === 'negotiate') {

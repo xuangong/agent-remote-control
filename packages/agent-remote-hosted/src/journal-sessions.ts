@@ -33,6 +33,7 @@ export interface JournalSessionsOptions {
 
 export interface JournalSessionAttachment {
   hostId: string;
+  providerId: string;
   sessionKey: string;
   publicAgentId: string;
   client: Pick<RelaySocket, 'readyState' | 'bufferedAmount' | 'send' | 'close'>;
@@ -59,6 +60,7 @@ export interface JournalSessions {
 /** What the streams of one session share. */
 interface SharedSession {
   hostId: string;
+  providerId: string;
   sessionKey: string;
   /** The browser sockets of the session's streams, to close them when the session stops being served. */
   clients: Map<JournalSessionStream, Pick<RelaySocket, 'close'>>;
@@ -104,19 +106,20 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
       const known = options.gate.served(hostId, sessionKey);
       if (known !== undefined) return known;
       await waitFor(loadServed(hostId), JOURNAL_GATE_LOAD_WAIT_MS, options.scheduler);
-      return options.gate.served(hostId, sessionKey) === true;
+      // The switch may have been turned off while the Host loaded.
+      return options.gate.readingEnabled(hostId, providerId) && options.gate.served(hostId, sessionKey) === true;
     },
 
     stopReading(hostId, providerId) {
       for (const shared of [...sessions.values()]) {
-        if (shared.hostId === hostId && shared.sessionKey.startsWith(`${providerId}:`)) closeClients(shared, 'Smart reading turned off');
+        if (shared.hostId === hostId && shared.providerId === providerId) closeClients(shared, 'Smart reading turned off');
       }
     },
 
     attach(attachment) {
-      const { hostId, sessionKey } = attachment;
+      const { hostId, providerId, sessionKey } = attachment;
       const key = keyOf(hostId, sessionKey);
-      const shared: SharedSession = sessions.get(key) ?? { hostId, sessionKey, clients: new Map(), streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
+      const shared: SharedSession = sessions.get(key) ?? { hostId, providerId, sessionKey, clients: new Map(), streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
       sessions.set(key, shared);
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
@@ -140,6 +143,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         },
         olderBeyondJournal: () => !shared.olderExhausted,
         noHead: () => options.journals.unserve(hostId, sessionKey),
+        readFailed: () => options.journals.unserve(hostId, sessionKey),
       };
       const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, scheduler: options.scheduler });
       shared.streams.add(stream);

@@ -34,6 +34,7 @@ describe('the smart reading switch in saved state', () => {
 describe('the pending journal deletions in saved state', () => {
   it('accepts none and a list of distinct Host ids', () => {
     expect(() => validateRelayState(state({}, { journalDeletions: ['gone-1', 'gone-2'] }), auth)).not.toThrow();
+    expect(() => validateRelayState(state({}, { journalDeletions: Array.from({ length: 1024 }, (_, at) => `gone-${at}`) }), auth)).not.toThrow();
   });
 
   it.each([
@@ -41,7 +42,7 @@ describe('the pending journal deletions in saved state', () => {
     ['a repeated id', ['gone', 'gone']],
     ['an id that is not a string', [1]],
     ['something that is not a list', 'gone'],
-    ['more than 128 ids', Array.from({ length: 129 }, (_, at) => `gone-${at}`)],
+    ['more than 1024 ids', Array.from({ length: 1025 }, (_, at) => `gone-${at}`)],
   ])('rejects %s', (_name, value) => {
     expect(() => validateRelayState(state({}, { journalDeletions: value }), auth)).toThrow();
   });

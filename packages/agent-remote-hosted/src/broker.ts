@@ -3,6 +3,7 @@ import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCom
   validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { compactTeamDeliveries, TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { committedBrokerState } from './broker-state.js';
+import { JOURNAL_DELETION_LIMIT } from './state.js';
 import { committed, detached } from './drafts.js';
 import { freeze } from 'immer';
 import type { TeamResourceStore } from './team-resources.js';
@@ -112,6 +113,8 @@ export interface HostBrokerOptions {
   journals?: JournalStore;
   /** How long a Controller has to answer a journal request. Defaults to 15 seconds. */
   journalRequestTimeoutMs?: number;
+  /** How long a Host that returns with the id of a revoked Host waits for its journals' deletion before it is registered without journals. Default 5000. */
+  journalDeletionWaitMs?: number;
   /** A journal service built elsewhere, such as one shared by every account or one that reaches journal partitions; used instead of `journals`. */
   journalService?: HostJournals;
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
@@ -871,9 +874,15 @@ export function createHostBroker(options: HostBrokerOptions) {
     let pendingDeletionHandled = false;
     function registered() {
       if (retired || !host || host.socket !== socket) return;
-      if (!pendingDeletionHandled && journals && journalDeletions.includes(host.id)) {
+      if (!pendingDeletionHandled && journals && journalRequested && journalDeletions.includes(host.id)) {
+        // A Host that returns with the id of a revoked Host waits for that id's deletion only, and only for a while: after the
+        // deadline it is registered without journals and the id stays pending.
         pendingDeletionHandled = true;
-        void finishJournalDeletions(host.id).then(registered);
+        const ownId = host.id;
+        let resumed = false;
+        const resume = () => { if (resumed) return; resumed = true; clearTimeout(timer); registered(); };
+        const timer = setTimeout(resume, options.journalDeletionWaitMs ?? 5000);
+        void deleteJournals(ownId).then(resume);
         return;
       }
       host.tunnelToken ??= randomBytes(32).toString('base64url');
@@ -1582,7 +1591,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   async function handle(request: Request, context: BrokerRequestContext, url: URL) {
     assertAvailable();
     if (!await permitted(context)) throw new BrokerError(403, 'forbidden', 'This endpoint is available only to the local application.');
-    if (request.method === 'POST') {
+    if (request.method === 'POST' || (request.method === 'PUT' && /^\/v1\/remote\/hosts\/[^/]+\/smart-reading$/.test(url.pathname))) {
       const access = context.validateMutation?.();
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
@@ -1935,12 +1944,16 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
       if (request.method === 'GET') return json(200, { providers: host.smartReading ?? [] });
       if (request.method !== 'PUT') return json(405, { error: 'Method is not allowed.' });
+      if (!journals) throw new BrokerError(409, 'journals_unavailable', 'This Relay does not keep session journals.');
       const body = await readBody(request);
       if (Object.keys(body).some(key => key !== 'providerId' && key !== 'enabled') || typeof body.enabled !== 'boolean') {
         throw new BrokerError(400, 'invalid_request', 'Name a provider and whether smart reading is on for it.');
       }
       const providerId = required(body.providerId, 'providerId');
       const enabled = body.enabled;
+      if (enabled && !host.smartReading?.includes(providerId) && (host.smartReading?.length ?? 0) >= 64) {
+        throw new BrokerError(400, 'invalid_request', 'Smart reading names at most 64 providers per Host.');
+      }
       const providers = await commit(draft => {
         assertHostCurrent(host);
         const saved = draft.hosts.find(value => value.id === host.id);
@@ -1963,7 +1976,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       await readBody(request);
       const host = hosts.get(revoking[1]!);
       if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+      let droppedDeletion: string | undefined;
       await commit(draft => {
+        droppedDeletion = undefined;
         assertHostCurrent(host);
         if (retainedIdentities().get(host.id) === host.installationId) {
           const marker: RevokedHost = { hostId: host.id, installationId: host.installationId, revocationId: randomUUID(), revokedAt: now() };
@@ -1975,7 +1990,12 @@ export function createHostBroker(options: HostBrokerOptions) {
         draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
         draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
         draft.hosts = draft.hosts.filter(value => value.id !== host.id);
-        if (journals) draft.journalDeletions = [...(draft.journalDeletions ?? []).filter(id => id !== host.id), host.id];
+        if (journals) {
+          const pending = (draft.journalDeletions ?? []).filter(id => id !== host.id);
+          // A revoke always succeeds: when the list is full, the oldest pending deletion is dropped.
+          if (pending.length >= JOURNAL_DELETION_LIMIT) droppedDeletion = pending.shift();
+          draft.journalDeletions = [...pending, host.id];
+        }
         draft.previews = (draft.previews ?? []).filter(value => value.hostId !== host.id);
         return { value: undefined, publish() {
           revokedHosts = draft.revokedHosts;
@@ -1991,7 +2011,11 @@ export function createHostBroker(options: HostBrokerOptions) {
           for (const key of attachmentRequests.keys()) if (JSON.parse(JSON.parse(key)[0])[0] === host.id) attachmentRequests.delete(key);
           hosts.delete(host.id);
           previews.forget(host.id);
-          if (journals) { journalDeletions = draft.journalDeletions ?? []; void finishJournalDeletions(); }
+          if (journals) {
+            journalDeletions = draft.journalDeletions ?? [];
+            if (droppedDeletion !== undefined) options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' });
+            void finishJournalDeletions();
+          }
           if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
         } };
       });
@@ -2173,6 +2197,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     const subject = principal(context);
     return { accept(client: RelaySocket) {
       if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
+      // The switch may have been turned off after the upgrade was prepared.
+      if (hosts.get(host.id)?.smartReading?.includes(binding.providerId) !== true) { client.close(1012, 'Smart reading turned off'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
@@ -2181,7 +2207,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const admit = admitClientMessages(client, context, subject, expiry);
       const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
       const stream = journalSessions!.attach({
-        hostId: host.id, sessionKey: journalSessionKey(binding.providerId, binding.nativeSessionId), publicAgentId: binding.agentId, client,
+        hostId: host.id, providerId: binding.providerId, sessionKey: journalSessionKey(binding.providerId, binding.nativeSessionId), publicAgentId: binding.agentId, client,
         hostStreams: createHostStreamOpener({
           streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
           authorized: () => { const end = expiry(); return end === undefined || end > now(); },
@@ -2264,21 +2290,15 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { client.close(1012, 'Remote Host disconnected'); }
     } };
   }
-  /**
-   * Deletes the journals of revoked Hosts the state still lists, one at a time, until none is left that this run has not
-   * tried, so a Host revoked while a run is going is not left for the next start. `first` is deleted before the others. Each
-   * id leaves the state once the store confirms; an id that failed stays. Runs queue one after another and never reject.
-   */
-  let deletionTail: Promise<void> = Promise.resolve();
-  function finishJournalDeletions(first?: string): Promise<void> {
+  /** The deletion of each Host's journals in flight; a second ask for the same Host shares it, so a Host's journals are never deleted twice. */
+  const deletionRuns = new Map<string, Promise<void>>();
+  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
+  function deleteJournals(hostId: string): Promise<void> {
     const service = journals;
     if (!service) return Promise.resolve();
-    const run = deletionTail.then(async () => {
-      const tried = new Set<string>();
-      for (;;) {
-        const hostId = first !== undefined && !tried.has(first) && journalDeletions.includes(first) ? first : journalDeletions.find(id => !tried.has(id));
-        if (hostId === undefined) return;
-        tried.add(hostId);
+    let run = deletionRuns.get(hostId);
+    if (!run) {
+      run = (async () => {
         try {
           await service.deleteHost(hostId);
           await commit(draft => {
@@ -2287,10 +2307,23 @@ export function createHostBroker(options: HostBrokerOptions) {
             return { value: undefined, publish() { journalDeletions = rest; } };
           });
         } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
-      }
-    });
-    deletionTail = run;
+      })().finally(() => { deletionRuns.delete(hostId); });
+      deletionRuns.set(hostId, run);
+    }
     return run;
+  }
+  /**
+   * Deletes the journals of every revoked Host the state still lists, until none is left that this round has not tried, so
+   * a Host revoked while a round is going is not left for the next start. Never rejects.
+   */
+  async function finishJournalDeletions(): Promise<void> {
+    const tried = new Set<string>();
+    for (;;) {
+      const ids = journalDeletions.filter(id => !tried.has(id));
+      if (ids.length === 0) return;
+      for (const id of ids) tried.add(id);
+      await Promise.all(ids.map(deleteJournals));
+    }
   }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);

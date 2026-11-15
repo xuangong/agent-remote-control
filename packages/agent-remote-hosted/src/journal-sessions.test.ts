@@ -31,7 +31,7 @@ describe('the journal sessions of a Relay', () => {
     const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
     const attach = (hostId: string, sessionKey: string) => {
       const { client, closed } = socket();
-      const stream = sessions.attach({ hostId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
+      const stream = sessions.attach({ hostId, providerId: sessionKey.split(":")[0]!, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
       stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
       return { stream, closed };
     };
@@ -73,7 +73,7 @@ describe('the journal sessions of a Relay', () => {
     });
     const open = async (limit: number, direction: 'tail' | 'before' = 'tail') => {
       const { client, closed, sent } = socket();
-      const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:thread-1', publicAgentId: 'agent', client, hostStreams: { open: () => new Promise<HostStream>(() => undefined) } });
+      const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:thread-1', publicAgentId: 'agent', client, hostStreams: { open: () => new Promise<HostStream>(() => undefined) } });
       stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
       await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(3));
       stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: { requestId: `page-${limit}-${sent.length}`, agentId: 'agent', direction, limit, ...(direction === 'before' ? { cursor: { epoch: journal.epoch, seq: 1 } } : {}) } }));
@@ -179,6 +179,18 @@ describe('whether a session is read from its journal', () => {
     expect(await answer).toBe(false);
   });
 
+  it('serves crude when the switch is turned off while the Host loads', async () => {
+    let enabled = true;
+    let finish!: () => void;
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    let loaded = false;
+    const { sessions } = build({ readingEnabled: () => enabled, served: () => (loaded ? true : undefined), loadServed: async () => { await held; loaded = true; } });
+    const answer = sessions.serves('host-1', 'codex', 'codex:a');
+    enabled = false;
+    finish();
+    expect(await answer).toBe(false);
+  });
+
   it('serves crude when the load fails', async () => {
     const { sessions } = build({ served: () => undefined, loadServed: async () => { throw new Error('store unavailable'); } });
     expect(await sessions.serves('host-1', 'codex', 'codex:a')).toBe(false);
@@ -195,9 +207,9 @@ describe('stopping journal-served streams', () => {
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
     });
     const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
-    const attach = (hostId: string, sessionKey: string) => {
+    const attach = (hostId: string, sessionKey: string, providerId = sessionKey.split(':')[0]!) => {
       const { client, closed } = socket();
-      sessions.attach({ hostId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
+      sessions.attach({ hostId, providerId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
       return closed;
     };
     return { sessions, attach };
@@ -212,6 +224,15 @@ describe('stopping journal-served streams', () => {
     expect(codex).toEqual([[1012, 'Smart reading turned off']]);
     expect(claude).toEqual([]);
     expect(other).toEqual([]);
+  });
+
+  it('matches the provider exactly, because provider ids can contain a colon', () => {
+    const { sessions, attach } = attached();
+    const plain = attach('host-1', 'codex:a', 'codex');
+    const beta = attach('host-1', 'codex:beta:a', 'codex:beta');
+    sessions.stopReading('host-1', 'codex');
+    expect(plain).toEqual([[1012, 'Smart reading turned off']]);
+    expect(beta).toEqual([]);
   });
 
   it('closes the streams of a session that a quota took out of serving', () => {
@@ -236,10 +257,54 @@ describe('a journal that has no head although the index said it had one', () => 
     });
     const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
     const { client, closed } = socket();
-    const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams: offline });
+    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams: offline });
     stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(unserved).toEqual(['host-1/codex:a']);
     expect(closed).toEqual([[1012, 'Session journal unavailable']]);
+  });
+});
+
+describe('a journal that cannot be read', () => {
+  const head = { snapshot: headSnapshot, observedAt: 1 };
+  const status = { cursor: { epoch: 'e', seq: 0 }, head } as never;
+  function build(statuses: Array<() => Promise<unknown>>) {
+    const unserved: string[] = [];
+    let at = 0;
+    const sessions = createJournalSessions({
+      journals: { status: () => (statuses[Math.min(at++, statuses.length - 1)]!() as never), page: async () => undefined, unserve: (hostId, sessionKey) => { unserved.push(`${hostId}/${sessionKey}`); } },
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+    });
+    let ready!: () => void;
+    const hostStreams: HostStreamOpener = { open: async sink => { ready = () => sink.ready(); return { send: () => undefined, close: () => undefined }; } };
+    const { client, closed } = socket();
+    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams });
+    stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+    return { unserved, closed, ready: () => ready(), opened: () => { if (ready === undefined) throw new Error('not opened'); } };
+  }
+
+  it('leaves the head index, so the reconnect is read through the Controller, when negotiating fails', async () => {
+    const f = build([() => Promise.reject(new Error('store unavailable'))]);
+    await vi.waitFor(() => expect(f.closed).toEqual([[1011, 'Session journal could not be read']]));
+    expect(f.unserved).toEqual(['host-1/codex:a']);
+  });
+
+  it('leaves the head index when refreshing the head fails', async () => {
+    const f = build([async () => status, () => Promise.reject(new Error('store unavailable'))]);
+    await vi.waitFor(f.opened);
+    f.ready();
+    await vi.waitFor(() => expect(f.closed).toEqual([[1011, 'Session journal could not be read']]));
+    expect(f.unserved).toEqual(['host-1/codex:a']);
+  });
+
+  it('leaves the head index when the head is gone at a refresh', async () => {
+    const f = build([async () => status, async () => undefined]);
+    await vi.waitFor(f.opened);
+    f.ready();
+    await vi.waitFor(() => expect(f.closed).toEqual([[1012, 'Session journal unavailable']]));
+    expect(f.unserved).toEqual(['host-1/codex:a']);
   });
 });

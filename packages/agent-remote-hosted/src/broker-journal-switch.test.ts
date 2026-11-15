@@ -2,7 +2,7 @@ import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardw
 import { afterEach, expect, it } from 'vitest';
 
 import { createHostBroker, type RemoteHostBrokerState } from './index.js';
-import { DIGEST, HOST_ID, PUBLIC_ID, row, SESSION_KEY, seedJournal, sleep, snapshot, startRelay, STORE_KEY, type Wire } from './test-utils/journal-session-fixture.js';
+import { DIGEST, HOST_ID, PUBLIC_ID, row, SESSION_KEY, seedJournal, sleep, snapshot, socketPair, startRelay, STORE_KEY, type Wire } from './test-utils/journal-session-fixture.js';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
 afterEach(async () => { for (const relay of started.splice(0)) await relay.dispose(); });
@@ -19,8 +19,8 @@ const withSwitch = (smartReading: string[]) => (saved: RemoteHostBrokerState): R
   ({ ...saved, hosts: saved.hosts.map(host => ({ ...host, smartReading })) });
 const REJECTED = 'Session stream rejected: 503';
 
-const route = (r: Pick<Relay, 'broker'>, method: string, body?: Wire) => r.broker.handleRequest(
-  new Request(`https://relay.example/v1/remote/hosts/${HOST_ID}/smart-reading`, { method, headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, ...(body ? { body: JSON.stringify(body) } : {}) }), {});
+const route = (r: Pick<Relay, 'broker'>, method: string, body?: Wire, context: Parameters<Relay['broker']['handleRequest']>[1] = {}) => r.broker.handleRequest(
+  new Request(`https://relay.example/v1/remote/hosts/${HOST_ID}/smart-reading`, { method, headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, ...(body ? { body: JSON.stringify(body) } : {}) }), context);
 
 it('reads from the journal only while the owner has smart reading on for the provider, and closes the streams when it is turned off', async () => {
   const r = await relay({ state: withoutSwitch, seed: store => seedJournal(store) });
@@ -206,4 +206,194 @@ it('deletes the pending journals of a Host before it is told it is registered, s
   expect(opened).toMatchObject({ watermark: 0, index: [] });
   await sleep(30);
   expect((await r.store.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual([STORE_KEY]);
+});
+
+/** A store whose deletion by prefix is decided by the test: it answers, fails, or never answers per Host prefix. */
+function storeDeleting(memory: MemoryJournalStore, decide: (prefix: string) => 'delete' | 'fail' | 'hang'): JournalStore {
+  return { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+    catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => {
+      const decision = decide(prefix);
+      if (decision === 'hang') return new Promise<void>(() => undefined);
+      if (decision === 'fail') throw new Error('disk unavailable');
+      await memory.catalog.deletePrefix(prefix);
+    } } };
+}
+async function goneJournal(store: MemoryJournalStore, hostId: string) {
+  const journal = SessionJournal.create(`${hostId}:codex:native-session`);
+  const { generation } = journal.claim('controller-1');
+  journal.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
+  await store.apply(journal.takeChanges()!);
+}
+const registeredOf = (controller: { inbox: { all: Wire[] } }) => controller.inbox.all.find(message => message.type === 'registered')!;
+
+it('does not serve a stream whose switch was turned off while the Host was loading', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const r = await relay({ seed: store => seedJournal(store),
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: async prefix => { await gate; return memory.catalog.list(prefix); }, deletePrefix: prefix => memory.catalog.deletePrefix(prefix) } }) });
+  const opening = r.openBrowser().then(() => 'opened', () => 'rejected');
+  await sleep(30);
+  expect((await route(r, 'PUT', { providerId: 'codex', enabled: false }))!.status).toBe(200);
+  release();
+  expect(await opening).toBe('rejected');
+});
+
+it('closes a stream with 1012 when the switch is turned off between preparing the upgrade and accepting it', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const prepared = await r.broker.prepareUpgrade(new Request(`https://relay.example/v1/sessions/${PUBLIC_ID}/events`, { headers: { origin: 'https://relay.example' } }), {});
+  if (!prepared || prepared instanceof Response) throw new Error('rejected');
+  expect((await route(r, 'PUT', { providerId: 'codex', enabled: false }))!.status).toBe(200);
+  const pair = socketPair(r.closers);
+  prepared.accept(pair.server);
+  expect(pair.native.closeCode).toBe(1012);
+  expect(pair.native.closeReason).toBe('Smart reading turned off');
+});
+
+it('refuses a 65th provider before anything is written, and keeps the bound under concurrent changes', async () => {
+  const names = (count: number) => Array.from({ length: count }, (_, at) => `provider-${String(at).padStart(2, '0')}`);
+  const full: RemoteHostBrokerState[] = [];
+  const a = await relay({ state: withSwitch(names(64)), broker: { onStateChange: async state => { full.push(structuredClone(state)); } } });
+  const refused = (await route(a, 'PUT', { providerId: 'provider-new', enabled: true }))!;
+  expect(refused.status).toBe(400);
+  expect(full).toEqual([]);
+  expect((await route(a, 'PUT', { providerId: 'provider-00', enabled: true }))!.status).toBe(200);
+  const saved: RemoteHostBrokerState[] = [];
+  const b = await relay({ state: withSwitch(names(63)), broker: { onStateChange: async state => { saved.push(structuredClone(state)); } } });
+  const answers = await Promise.all([route(b, 'PUT', { providerId: 'x', enabled: true }), route(b, 'PUT', { providerId: 'y', enabled: true })]);
+  expect(answers.map(answer => answer!.status).sort()).toEqual([200, 400]);
+  expect(saved.every(state => state.hosts[0]!.smartReading!.length <= 64)).toBe(true);
+});
+
+it('refuses a change of the switch that the mutation policy rejects, and writes nothing', async () => {
+  const saved: RemoteHostBrokerState[] = [];
+  const r = await relay({ state: withoutSwitch, broker: { onStateChange: async state => { saved.push(structuredClone(state)); } } });
+  const rejected = (await route(r, 'PUT', { providerId: 'codex', enabled: true }, { validateMutation: () => ({ status: 'rejected', httpStatus: 403, code: 'csrf', message: 'No.' }) as never }))!;
+  expect(rejected.status).toBe(403);
+  expect(saved).toEqual([]);
+});
+
+it('refuses a change of the switch when the Relay keeps no journals', async () => {
+  const broker = createHostBroker({ origin: 'https://relay.example', now: () => 10_000, initialState: { keys: [], creations: [], bindings: [],
+    hosts: [{ id: HOST_ID, installationId: 'machine', name: 'Machine', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }] } });
+  try {
+    const answer = (await route({ broker }, 'PUT', { providerId: 'codex', enabled: true }))!;
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toMatchObject({ code: 'journals_unavailable' });
+  } finally { broker.close(); }
+});
+
+it('refuses a change of the switch of a Host revoked while it waited, as revoked', async () => {
+  const states: RemoteHostBrokerState[] = [];
+  const broker = revocation(new MemoryJournalStore(), states);
+  try {
+    const revoking = revoke(broker);
+    const changing = route({ broker }, 'PUT', { providerId: 'codex', enabled: true });
+    expect((await revoking)!.status).toBe(200);
+    expect((await changing)!.status).toBe(401);
+  } finally { broker.close(); }
+});
+
+it('makes room for a revoke when the list of pending deletions is full: it drops the oldest, tells the diagnostics, and the revoke succeeds', async () => {
+  const pending = Array.from({ length: 1024 }, (_, at) => `old-${at}`);
+  const states: RemoteHostBrokerState[] = [];
+  const events: string[] = [];
+  const memory = new MemoryJournalStore();
+  const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: storeDeleting(memory, () => 'hang'), now: () => 10_000,
+    diagnostics: { record: (_hostId: string, details: { event: string }) => { events.push(details.event); } } as never,
+    onStateChange: async state => { states.push(structuredClone(state)); },
+    initialState: { keys: [], creations: [], journalDeletions: pending,
+      hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+      bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] } });
+  try {
+    expect((await revoke(broker))!.status).toBe(200);
+    const list = states[0]!.journalDeletions!;
+    expect(list).toHaveLength(1024);
+    expect(list).not.toContain('old-0');
+    expect(list.slice(-2)).toEqual(['old-1023', HOST_ID]);
+    expect(events).toContain('journal_deletion_dropped');
+  } finally { broker.close(); }
+});
+
+it('deletes every pending Host of a round, not only the first', async () => {
+  const memory = new MemoryJournalStore();
+  await goneJournal(memory, 'gone-1');
+  await goneJournal(memory, 'gone-2');
+  await goneJournal(memory, 'gone-3');
+  const states: RemoteHostBrokerState[] = [];
+  const broker = revocation(memory, states, { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ['gone-1', 'gone-2', 'gone-3'] });
+  try {
+    await sleep(50);
+    expect(await memory.catalog.list('')).toEqual([]);
+    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
+  } finally { broker.close(); }
+});
+
+it('retries a pending deletion that failed at start when a Host registers', async () => {
+  let calls = 0;
+  const saved: RemoteHostBrokerState[] = [];
+  const r = await relay({ state: state => ({ ...state, journalDeletions: ['gone'] }), seed: store => goneJournal(store, 'gone'),
+    broker: { onStateChange: async state => { saved.push(structuredClone(state)); } },
+    journalStore: store => storeDeleting(store, () => (calls++ === 0 ? 'fail' : 'delete')) });
+  await sleep(30);
+  expect(await r.store.catalog.list('gone:')).toHaveLength(1);
+  await r.connectController();
+  await sleep(50);
+  expect(await r.store.catalog.list('gone:')).toEqual([]);
+  expect(saved.at(-1)).not.toHaveProperty('journalDeletions');
+});
+
+it('registers a returning Host without journals while its own deletion has not been confirmed, and grants them once it has', async () => {
+  const failing = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    journalStore: memory => storeDeleting(memory, () => 'fail') });
+  const refused = await failing.connectController();
+  expect(registeredOf(refused)).not.toHaveProperty('journal');
+  const confirmed = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store) });
+  expect(registeredOf(await confirmed.connectController())).toMatchObject({ journal: 1 });
+});
+
+it('waits only for its own deletion before registering a returning Host, not for the other pending Hosts', async () => {
+  let release!: () => void;
+  const own = new Promise<void>(resolve => { release = resolve; });
+  const r = await relay({ state: state => ({ ...state, journalDeletions: ['other', HOST_ID] }), seed: async store => { await seedJournal(store); await goneJournal(store, 'other'); },
+    broker: { journalDeletionWaitMs: 3000 },
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => {
+        if (prefix.startsWith('other:')) return new Promise<void>(() => undefined);
+        await own;
+        await memory.catalog.deletePrefix(prefix);
+      } } }) });
+  let registered = false;
+  const connecting = r.connectController().then(controller => { registered = true; return controller; });
+  await sleep(100);
+  expect(registered).toBe(false);
+  release();
+  await sleep(300);
+  expect(registered).toBe(true);
+  expect(registeredOf(await connecting)).toMatchObject({ journal: 1 });
+});
+
+it('tells a returning Host it is registered once, even when its deletion finishes after the deadline', async () => {
+  let release!: () => void;
+  const late = new Promise<void>(resolve => { release = resolve; });
+  const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    broker: { journalDeletionWaitMs: 50 },
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => { await late; await memory.catalog.deletePrefix(prefix); } } }) });
+  const controller = await r.connectController();
+  release();
+  await sleep(100);
+  expect(controller.inbox.all.filter(message => message.type === 'registered')).toHaveLength(1);
+});
+
+it('registers a returning Host without journals after the deadline when the store never answers, and keeps the deletion pending', async () => {
+  const saved: RemoteHostBrokerState[] = [];
+  const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    broker: { journalDeletionWaitMs: 100, onStateChange: async state => { saved.push(structuredClone(state)); } },
+    journalStore: memory => storeDeleting(memory, () => 'hang') });
+  const started = Date.now();
+  const controller = await r.connectController();
+  expect(Date.now() - started).toBeGreaterThanOrEqual(90);
+  expect(registeredOf(controller)).not.toHaveProperty('journal');
+  expect(saved.at(-1)?.journalDeletions ?? [HOST_ID]).toEqual([HOST_ID]);
 });

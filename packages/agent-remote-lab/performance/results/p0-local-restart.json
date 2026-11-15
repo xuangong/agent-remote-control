@@ -1,0 +1,468 @@
+{
+  "startedAt": "2026-11-15T13:36:55.843Z",
+  "origin": "http://localhost:57728",
+  "options": {
+    "reps": 3,
+    "throttle": 1,
+    "hiddenShortMs": 30000,
+    "hiddenLongMs": 300000,
+    "scenarios": [
+      "restart-continuity"
+    ]
+  },
+  "sessions": [
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/fc9b731d-7ba4-4b43-a091-d71f207c01e3",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/403fd221-412b-479a-982e-f0bbd44c6875",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+      "provider": "codex"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+      "provider": "codex"
+    }
+  ],
+  "environment": {
+    "machine": "Apple M4 x10, 16 GiB, darwin 27.2.0 arm64",
+    "chromium": "151.0.7922.34",
+    "node": "v26.8.1",
+    "build": {
+      "instance": "p0-baselines-a617dcb9",
+      "directory": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9",
+      "origin": "http://localhost:57728",
+      "source": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines",
+      "state": "running",
+      "build": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": false,
+        "startedAt": "2026-11-15T12:55:31.180Z"
+      },
+      "checkout": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true
+      },
+      "controller": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines/packages/agent-host/dist/cli.js",
+      "sessionCommands": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9/bin"
+    }
+  },
+  "scenarios": {
+    "restart-continuity": {
+      "ranMs": 19477,
+      "method": "Open the conversation, mark its first entry node, run `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready.",
+      "samples": [
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+          "provider": "claude",
+          "restartCommandMs": 1658,
+          "readyAgainMs": 2483,
+          "markedEntryStillInDocument": false,
+          "minMessagesAfterRestart": 34,
+          "blankMoments": 0,
+          "states": {
+            "label: Reconnecting": {
+              "firstMs": 278,
+              "totalMs": 1422
+            },
+            "composer: enabled": {
+              "firstMs": 278,
+              "totalMs": 2206
+            },
+            "label: Opening session": {
+              "firstMs": 413,
+              "totalMs": 760
+            },
+            "label: Checking access": {
+              "firstMs": 2460,
+              "totalMs": 24
+            },
+            "label: Ready": {
+              "firstMs": 2484,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 9,
+            "httpAssets": 0,
+            "httpApi": 9,
+            "httpByEndpoint": {
+              "POST /u/:user/v1/windows/:id/operations": 1,
+              "GET /u/:user/v1/remote/hosts": 3,
+              "GET /u/:user/v1/windows/:id/changes": 1,
+              "GET /u/:user/v1/windows/:id": 1,
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel",
+                "startMs": 1453,
+                "ms": 460
+              },
+              {
+                "endpoint": "GET /u/:user/v1/windows/:id/changes",
+                "startMs": 75,
+                "ms": 265
+              },
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 581,
+                "ms": 38
+              },
+              {
+                "endpoint": "POST /u/:user/v1/windows/:id/operations",
+                "startMs": 60,
+                "ms": 10
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 277,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 3,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 3
+            },
+            "framesIn": 17,
+            "framesOut": 8,
+            "bytesIn": 39736,
+            "bytesOut": 1649,
+            "framesInByKind": {
+              "session_states": 3,
+              "closed": 2,
+              "ready": 2,
+              "session_reads": 1,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 2
+            },
+            "framesOutByKind": {
+              "unsubscribe": 2,
+              "subscribe:negotiate": 2,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 2
+            }
+          },
+          "stateLog": [
+            {
+              "t": 278,
+              "labels": [
+                "Reconnecting"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 413,
+              "labels": [
+                "Opening session"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 427,
+              "labels": [
+                "Reconnecting"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 847,
+              "labels": [
+                "Opening session"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 866,
+              "labels": [
+                "Reconnecting"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 1733,
+              "labels": [
+                "Opening session"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 2460,
+              "labels": [
+                "Checking access"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            },
+            {
+              "t": 2484,
+              "labels": [
+                "Ready"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 34,
+              "assistant": 17,
+              "entries": 36,
+              "delivery": []
+            }
+          ]
+        },
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "restartCommandMs": 3753,
+          "readyAgainMs": 3754,
+          "markedEntryStillInDocument": false,
+          "minMessagesAfterRestart": 20,
+          "blankMoments": 0,
+          "states": {
+            "label: Reconnecting": {
+              "firstMs": 292,
+              "totalMs": 3176
+            },
+            "composer: enabled": {
+              "firstMs": 292,
+              "totalMs": 3318
+            },
+            "label: Opening session": {
+              "firstMs": 495,
+              "totalMs": 120
+            },
+            "label: Checking access": {
+              "firstMs": 3588,
+              "totalMs": 10
+            },
+            "label: Synchronizing": {
+              "firstMs": 3598,
+              "totalMs": 12
+            },
+            "label: Ready": {
+              "firstMs": 3610,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 7,
+            "httpAssets": 0,
+            "httpApi": 7,
+            "httpByEndpoint": {
+              "GET /u/:user/v1/remote/hosts": 3,
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/windows/:id": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel",
+                "startMs": 3485,
+                "ms": 142
+              },
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 472,
+                "ms": 28
+              },
+              {
+                "endpoint": "GET /u/:user/v1/windows/:id",
+                "startMs": 2681,
+                "ms": 28
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/tpm",
+                "startMs": 3485,
+                "ms": 1
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 3610,
+                "ms": 1
+              }
+            ],
+            "webSocketsCreated": 2,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 2
+            },
+            "framesIn": 19,
+            "framesOut": 12,
+            "bytesIn": 17309,
+            "bytesOut": 2124,
+            "framesInByKind": {
+              "session_states": 2,
+              "closed": 4,
+              "session_reads": 2,
+              "ready": 2,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 2
+            },
+            "framesOutByKind": {
+              "unsubscribe": 4,
+              "subscribe:negotiate": 4,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 2
+            }
+          },
+          "stateLog": [
+            {
+              "t": 292,
+              "labels": [
+                "Reconnecting"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 495,
+              "labels": [
+                "Opening session"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 504,
+              "labels": [
+                "Reconnecting"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 3477,
+              "labels": [
+                "Opening session"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 3588,
+              "labels": [
+                "Checking access"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 3598,
+              "labels": [
+                "Synchronizing"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            },
+            {
+              "t": 3610,
+              "labels": [
+                "Ready"
+              ],
+              "loading": [],
+              "control": [],
+              "composer": "enabled",
+              "messages": 20,
+              "assistant": 10,
+              "entries": 21,
+              "delivery": []
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "finishedAt": "2026-11-15T13:37:18.459Z"
+}

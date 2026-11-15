@@ -1,0 +1,247 @@
+{
+  "startedAt": "2026-11-15T13:37:21.566Z",
+  "origin": "http://localhost:57728",
+  "options": {
+    "reps": 2,
+    "throttle": 1,
+    "hiddenShortMs": 30000,
+    "hiddenLongMs": 300000,
+    "scenarios": [
+      "hidden-long"
+    ]
+  },
+  "sessions": [
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+      "provider": "codex"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/403fd221-412b-479a-982e-f0bbd44c6875",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/fc9b731d-7ba4-4b43-a091-d71f207c01e3",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+      "provider": "codex"
+    }
+  ],
+  "environment": {
+    "machine": "Apple M4 x10, 16 GiB, darwin 27.2.0 arm64",
+    "chromium": "151.0.7922.34",
+    "node": "v26.8.1",
+    "build": {
+      "instance": "p0-baselines-a617dcb9",
+      "directory": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9",
+      "origin": "http://localhost:57728",
+      "source": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines",
+      "state": "running",
+      "build": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true,
+        "startedAt": "2026-11-15T13:37:07.928Z"
+      },
+      "checkout": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true
+      },
+      "controller": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines/packages/agent-host/dist/cli.js",
+      "sessionCommands": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9/bin"
+    }
+  },
+  "scenarios": {
+    "hidden-long": {
+      "ranMs": 604190,
+      "method": "The page's visibility is set to hidden and its lifecycle frozen for 300000 ms; a turn is sent from the command line meanwhile; \"return\" starts when it is shown again. currentMs: new assistant message in the page; readyMs: label Ready and composer enabled.",
+      "summary": {
+        "n": 2,
+        "currentMs": {
+          "n": 2,
+          "p50": 20,
+          "p95": 21,
+          "max": 21
+        },
+        "readyMs": {
+          "n": 2,
+          "p50": 20,
+          "p95": 21,
+          "max": 21
+        },
+        "httpApi": {
+          "n": 2,
+          "p50": 13,
+          "p95": 13,
+          "max": 13
+        },
+        "webSockets": {
+          "n": 2,
+          "p50": 0,
+          "p95": 0,
+          "max": 0
+        }
+      },
+      "samples": [
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+          "provider": "claude",
+          "hiddenMs": 300000,
+          "frozen": true,
+          "alreadyCurrentOnReturn": true,
+          "currentMs": 20,
+          "readyMs": 20,
+          "blockingStates": {
+            "label: Opening session": {
+              "firstMs": 13,
+              "totalMs": 7
+            }
+          },
+          "requests": {
+            "httpTotal": 13,
+            "httpAssets": 0,
+            "httpApi": 13,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /": 1,
+              "GET /u/:user/v1/remote/controller-release": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/remote/hosts": 1,
+              "GET /u/:user/v1/session-successions": 1,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/session-relations": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "GET /auth/status",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/teams",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/controller-release",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/previews",
+                "startMs": 9,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 2,
+            "framesOut": 3,
+            "bytesIn": 82,
+            "bytesOut": 161,
+            "framesInByKind": {
+              "pong": 2
+            },
+            "framesOutByKind": {
+              "ping": 2,
+              "intent": 1
+            }
+          },
+          "consoleErrors": []
+        },
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "hiddenMs": 300000,
+          "frozen": true,
+          "alreadyCurrentOnReturn": true,
+          "currentMs": 21,
+          "readyMs": 21,
+          "blockingStates": {
+            "label: Opening session": {
+              "firstMs": 13,
+              "totalMs": 8
+            }
+          },
+          "requests": {
+            "httpTotal": 13,
+            "httpAssets": 0,
+            "httpApi": 13,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/session-successions": 1,
+              "GET /": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/remote/hosts": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/session-relations": 1,
+              "POST /u/:user/v1/session-reads": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 518,
+                "ms": 18
+              },
+              {
+                "endpoint": "GET /auth/status",
+                "startMs": 8,
+                "ms": 6
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/teams",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /u/:user/v1/favorites",
+                "startMs": 9,
+                "ms": 5
+              },
+              {
+                "endpoint": "GET /u/:user/v1/session-successions",
+                "startMs": 9,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 3,
+            "framesOut": 3,
+            "bytesIn": 315,
+            "bytesOut": 161,
+            "framesInByKind": {
+              "pong": 2,
+              "session_reads": 1
+            },
+            "framesOutByKind": {
+              "ping": 2,
+              "intent": 1
+            }
+          },
+          "consoleErrors": []
+        }
+      ]
+    }
+  },
+  "finishedAt": "2026-11-15T13:47:28.894Z"
+}

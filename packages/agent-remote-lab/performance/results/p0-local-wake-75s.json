@@ -1,0 +1,1285 @@
+{
+  "startedAt": "2026-11-15T13:47:31.424Z",
+  "origin": "http://localhost:57728",
+  "options": {
+    "reps": 2,
+    "throttle": 1,
+    "hiddenShortMs": 30000,
+    "hiddenLongMs": 300000,
+    "scenarios": [
+      "open-released",
+      "send-released",
+      "provider-latency"
+    ]
+  },
+  "sessions": [
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+      "provider": "codex"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/403fd221-412b-479a-982e-f0bbd44c6875",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/fc9b731d-7ba4-4b43-a091-d71f207c01e3",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+      "provider": "codex"
+    }
+  ],
+  "environment": {
+    "machine": "Apple M4 x10, 16 GiB, darwin 27.2.0 arm64",
+    "chromium": "151.0.7922.34",
+    "node": "v26.8.1",
+    "build": {
+      "instance": "p0-baselines-a617dcb9",
+      "directory": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9",
+      "origin": "http://localhost:57728",
+      "source": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines",
+      "state": "running",
+      "build": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true,
+        "startedAt": "2026-11-15T13:37:07.928Z"
+      },
+      "checkout": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true
+      },
+      "controller": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines/packages/agent-host/dist/cli.js",
+      "sessionCommands": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9/bin"
+    }
+  },
+  "scenarios": {
+    "open-released": {
+      "ranMs": 333148,
+      "method": "Codex: one tiny turn, session release, wait 75000 ms, goto the session URL in the same context. released says whether the Controller had a runtime to release (always false for Claude Code).",
+      "summary": {
+        "n": 4,
+        "contentMs": {
+          "n": 4,
+          "p50": 71,
+          "p95": 227,
+          "max": 227
+        },
+        "readyMs": {
+          "n": 4,
+          "p50": 127,
+          "p95": 227,
+          "max": 227
+        },
+        "httpApi": {
+          "n": 4,
+          "p50": 22,
+          "p95": 30,
+          "max": 30
+        },
+        "webSockets": {
+          "n": 4,
+          "p50": 2,
+          "p95": 2,
+          "max": 2
+        },
+        "framesIn": {
+          "n": 4,
+          "p50": 12,
+          "p95": 13,
+          "max": 13
+        },
+        "framesOut": {
+          "n": 4,
+          "p50": 4,
+          "p95": 4,
+          "max": 4
+        },
+        "bytesIn": {
+          "n": 4,
+          "p50": 16254,
+          "p95": 17165,
+          "max": 17165
+        },
+        "stateDurations": {
+          "composer: absent": {
+            "seenIn": "4/4",
+            "firstMs": {
+              "n": 4,
+              "p50": 12,
+              "p95": 19,
+              "max": 19
+            },
+            "totalMs": {
+              "n": 4,
+              "p50": 57,
+              "p95": 126,
+              "max": 126
+            }
+          },
+          "composer: enabled": {
+            "seenIn": "4/4",
+            "firstMs": {
+              "n": 4,
+              "p50": 71,
+              "p95": 138,
+              "max": 138
+            },
+            "totalMs": {
+              "n": 4,
+              "p50": 61,
+              "p95": 89,
+              "max": 89
+            }
+          },
+          "label: Awaiting Agent": {
+            "seenIn": "2/4",
+            "firstMs": {
+              "n": 2,
+              "p50": 73,
+              "p95": 138,
+              "max": 138
+            },
+            "totalMs": {
+              "n": 2,
+              "p50": 27,
+              "p95": 40,
+              "max": 40
+            }
+          },
+          "label: Opening session": {
+            "seenIn": "4/4",
+            "firstMs": {
+              "n": 4,
+              "p50": 71,
+              "p95": 178,
+              "max": 178
+            },
+            "totalMs": {
+              "n": 4,
+              "p50": 56,
+              "p95": 61,
+              "max": 61
+            }
+          },
+          "label: Ready": {
+            "seenIn": "4/4",
+            "firstMs": {
+              "n": 4,
+              "p50": 127,
+              "p95": 227,
+              "max": 227
+            },
+            "totalMs": {
+              "n": 4,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            }
+          },
+          "no messages in view": {
+            "seenIn": "4/4",
+            "firstMs": {
+              "n": 4,
+              "p50": 12,
+              "p95": 19,
+              "max": 19
+            },
+            "totalMs": {
+              "n": 4,
+              "p50": 58,
+              "p95": 215,
+              "max": 215
+            }
+          },
+          "placeholder: Opening session": {
+            "seenIn": "2/4",
+            "firstMs": {
+              "n": 2,
+              "p50": 100,
+              "p95": 178,
+              "max": 178
+            },
+            "totalMs": {
+              "n": 2,
+              "p50": 49,
+              "p95": 59,
+              "max": 59
+            }
+          },
+          "placeholder: Start with a Provider": {
+            "seenIn": "2/4",
+            "firstMs": {
+              "n": 2,
+              "p50": 73,
+              "p95": 138,
+              "max": 138
+            },
+            "totalMs": {
+              "n": 2,
+              "p50": 27,
+              "p95": 40,
+              "max": 40
+            }
+          }
+        },
+        "byProvider": {
+          "codex": {
+            "n": 4,
+            "contentMs": {
+              "n": 4,
+              "p50": 71,
+              "p95": 227,
+              "max": 227
+            },
+            "readyMs": {
+              "n": 4,
+              "p50": 127,
+              "p95": 227,
+              "max": 227
+            }
+          }
+        }
+      },
+      "samples": [
+        {
+          "released": true,
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "contentMs": 227,
+          "readyMs": 227,
+          "blockedUntilMs": 178,
+          "states": {
+            "composer: absent": {
+              "firstMs": 12,
+              "totalMs": 126
+            },
+            "no messages in view": {
+              "firstMs": 12,
+              "totalMs": 215
+            },
+            "label: Awaiting Agent": {
+              "firstMs": 138,
+              "totalMs": 40
+            },
+            "placeholder: Start with a Provider": {
+              "firstMs": 138,
+              "totalMs": 40
+            },
+            "composer: enabled": {
+              "firstMs": 138,
+              "totalMs": 89
+            },
+            "label: Opening session": {
+              "firstMs": 178,
+              "totalMs": 49
+            },
+            "placeholder: Opening session": {
+              "firstMs": 178,
+              "totalMs": 49
+            },
+            "label: Ready": {
+              "firstMs": 227,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 28,
+            "httpAssets": 5,
+            "httpApi": 23,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /u/:user/v1/remote/controller-release": 1,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/session-successions": 1,
+              "GET /u/:user/v1/remote/hosts": 2,
+              "GET /u/:user/v1/providers": 1,
+              "GET /u/:user/v1/session-relations": 2,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/windows": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/windows/:id": 2,
+              "GET /u/:user/v1/remote/hosts/:id/workspaces": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/listing": 1,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1,
+              "POST /u/:user/v1/remote/hosts/:id/attach": 1,
+              "POST /u/:user/v1/remote/hosts/:id/session/call": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/attach",
+                "startMs": 145,
+                "ms": 46
+              },
+              {
+                "endpoint": "GET /auth/status",
+                "startMs": 29,
+                "ms": 42
+              },
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/session/call",
+                "startMs": 208,
+                "ms": 24
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 208,
+                "ms": 19
+              },
+              {
+                "endpoint": "GET /u/:user/v1/session-relations",
+                "startMs": 208,
+                "ms": 19
+              }
+            ],
+            "webSocketsCreated": 2,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 2
+            },
+            "framesIn": 13,
+            "framesOut": 4,
+            "bytesIn": 15861,
+            "bytesOut": 976,
+            "framesInByKind": {
+              "ready": 2,
+              "session_states": 2,
+              "session_reads": 1,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 1
+            },
+            "framesOutByKind": {
+              "subscribe:negotiate": 1,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 1
+            }
+          },
+          "timelineReads": [
+            {
+              "requestedAt": 200,
+              "ms": 4,
+              "bytes": 7633,
+              "rows": {
+                "rows": 21,
+                "byType": {
+                  "user_message": {
+                    "rows": 10,
+                    "bytes": 3376,
+                    "maxBytes": 358
+                  },
+                  "assistant_message": {
+                    "rows": 10,
+                    "bytes": 3116,
+                    "maxBytes": 318
+                  },
+                  "error": {
+                    "rows": 1,
+                    "bytes": 550,
+                    "maxBytes": 550
+                  }
+                }
+              }
+            }
+          ],
+          "consoleErrors": []
+        },
+        {
+          "released": false,
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "contentMs": 71,
+          "readyMs": 127,
+          "blockedUntilMs": 71,
+          "states": {
+            "composer: absent": {
+              "firstMs": 14,
+              "totalMs": 57
+            },
+            "no messages in view": {
+              "firstMs": 14,
+              "totalMs": 57
+            },
+            "label: Opening session": {
+              "firstMs": 71,
+              "totalMs": 56
+            },
+            "composer: enabled": {
+              "firstMs": 71,
+              "totalMs": 56
+            },
+            "label: Ready": {
+              "firstMs": 127,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 27,
+            "httpAssets": 5,
+            "httpApi": 22,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /u/:user/v1/remote/controller-release": 1,
+              "GET /u/:user/v1/remote/hosts": 2,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/providers": 1,
+              "GET /u/:user/v1/session-successions": 1,
+              "GET /u/:user/v1/session-relations": 2,
+              "GET /u/:user/v1/windows": 1,
+              "POST /u/:user/v1/remote/hosts/:id/attach": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/remote/hosts/:id/workspaces": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/listing": 1,
+              "GET /u/:user/v1/windows/:id": 2,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "GET /u/:user/v1/windows",
+                "startMs": 73,
+                "ms": 10
+              },
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/attach",
+                "startMs": 73,
+                "ms": 10
+              },
+              {
+                "endpoint": "GET /u/:user/v1/windows/:id",
+                "startMs": 85,
+                "ms": 7
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 120,
+                "ms": 7
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/session/refs",
+                "startMs": 108,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 2,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 2
+            },
+            "framesIn": 12,
+            "framesOut": 4,
+            "bytesIn": 16945,
+            "bytesOut": 976,
+            "framesInByKind": {
+              "ready": 2,
+              "session_states": 1,
+              "session_reads": 1,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 1
+            },
+            "framesOutByKind": {
+              "subscribe:negotiate": 1,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 1
+            }
+          },
+          "timelineReads": [
+            {
+              "requestedAt": 112,
+              "ms": 6,
+              "bytes": 8755,
+              "rows": {
+                "rows": 24,
+                "byType": {
+                  "user_message": {
+                    "rows": 11,
+                    "bytes": 3711,
+                    "maxBytes": 358
+                  },
+                  "assistant_message": {
+                    "rows": 11,
+                    "bytes": 3428,
+                    "maxBytes": 318
+                  },
+                  "error": {
+                    "rows": 2,
+                    "bytes": 1022,
+                    "maxBytes": 550
+                  }
+                }
+              }
+            }
+          ],
+          "consoleErrors": []
+        },
+        {
+          "released": true,
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+          "provider": "codex",
+          "contentMs": 159,
+          "readyMs": 159,
+          "blockedUntilMs": 100,
+          "states": {
+            "composer: absent": {
+              "firstMs": 19,
+              "totalMs": 54
+            },
+            "no messages in view": {
+              "firstMs": 19,
+              "totalMs": 140
+            },
+            "label: Awaiting Agent": {
+              "firstMs": 73,
+              "totalMs": 27
+            },
+            "placeholder: Start with a Provider": {
+              "firstMs": 73,
+              "totalMs": 27
+            },
+            "composer: enabled": {
+              "firstMs": 73,
+              "totalMs": 86
+            },
+            "label: Opening session": {
+              "firstMs": 100,
+              "totalMs": 59
+            },
+            "placeholder: Opening session": {
+              "firstMs": 100,
+              "totalMs": 59
+            },
+            "label: Ready": {
+              "firstMs": 159,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 35,
+            "httpAssets": 5,
+            "httpApi": 30,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /u/:user/v1/remote/controller-release": 1,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/session-successions": 2,
+              "GET /u/:user/v1/remote/hosts": 2,
+              "GET /u/:user/v1/providers": 1,
+              "GET /u/:user/v1/session-relations": 2,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/windows": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/workspaces": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog": 1,
+              "GET /u/:user/v1/windows/:id": 2,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/listing": 1,
+              "POST /u/:user/v1/remote/hosts/:id/attach": 2,
+              "POST /u/:user/v1/windows/:id/operations": 2,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1,
+              "POST /u/:user/v1/remote/hosts/:id/session/call": 1,
+              "GET /u/:user/v1/windows/:id/changes": 2,
+              "POST /u/:user/v1/session-reads": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/attach",
+                "startMs": 104,
+                "ms": 30
+              },
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/attach",
+                "startMs": 76,
+                "ms": 21
+              },
+              {
+                "endpoint": "POST /u/:user/v1/windows/:id/operations",
+                "startMs": 85,
+                "ms": 16
+              },
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 673,
+                "ms": 15
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 146,
+                "ms": 14
+              }
+            ],
+            "webSocketsCreated": 2,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 2
+            },
+            "framesIn": 13,
+            "framesOut": 4,
+            "bytesIn": 16254,
+            "bytesOut": 976,
+            "framesInByKind": {
+              "ready": 2,
+              "session_states": 1,
+              "session_reads": 2,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 1
+            },
+            "framesOutByKind": {
+              "subscribe:negotiate": 1,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 1
+            }
+          },
+          "timelineReads": [
+            {
+              "requestedAt": 140,
+              "ms": 3,
+              "bytes": 7629,
+              "rows": {
+                "rows": 21,
+                "byType": {
+                  "user_message": {
+                    "rows": 10,
+                    "bytes": 3374,
+                    "maxBytes": 358
+                  },
+                  "assistant_message": {
+                    "rows": 10,
+                    "bytes": 3114,
+                    "maxBytes": 318
+                  },
+                  "error": {
+                    "rows": 1,
+                    "bytes": 550,
+                    "maxBytes": 550
+                  }
+                }
+              }
+            }
+          ],
+          "consoleErrors": []
+        },
+        {
+          "released": false,
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+          "provider": "codex",
+          "contentMs": 63,
+          "readyMs": 124,
+          "blockedUntilMs": 63,
+          "states": {
+            "composer: absent": {
+              "firstMs": 5,
+              "totalMs": 58
+            },
+            "no messages in view": {
+              "firstMs": 5,
+              "totalMs": 58
+            },
+            "label: Opening session": {
+              "firstMs": 63,
+              "totalMs": 61
+            },
+            "composer: enabled": {
+              "firstMs": 63,
+              "totalMs": 61
+            },
+            "label: Ready": {
+              "firstMs": 124,
+              "totalMs": 0
+            }
+          },
+          "requests": {
+            "httpTotal": 26,
+            "httpAssets": 5,
+            "httpApi": 21,
+            "httpByEndpoint": {
+              "GET /auth/status": 1,
+              "GET /u/:user/v1/remote/teams": 1,
+              "GET /u/:user/v1/favorites": 1,
+              "GET /u/:user/v1/session-successions": 1,
+              "GET /u/:user/v1/remote/hosts": 2,
+              "GET /u/:user/v1/session-migrations": 1,
+              "GET /u/:user/v1/providers": 1,
+              "GET /u/:user/v1/session-relations": 2,
+              "GET /u/:user/v1/windows": 1,
+              "POST /u/:user/v1/remote/hosts/:id/attach": 1,
+              "GET /u/:user/v1/remote/hosts/:id/previews": 1,
+              "GET /u/:user/v1/remote/hosts/:id/vscode-tunnel": 1,
+              "GET /u/:user/v1/remote/hosts/:id/workspaces": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog": 1,
+              "GET /u/:user/v1/remote/hosts/:id/tpm": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/listing": 1,
+              "GET /u/:user/v1/windows/:id": 2,
+              "GET /u/:user/v1/remote/hosts/:id/session/refs": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "GET /u/:user/v1/windows",
+                "startMs": 66,
+                "ms": 12
+              },
+              {
+                "endpoint": "POST /u/:user/v1/remote/hosts/:id/attach",
+                "startMs": 67,
+                "ms": 11
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts",
+                "startMs": 117,
+                "ms": 7
+              },
+              {
+                "endpoint": "GET /u/:user/v1/windows/:id",
+                "startMs": 79,
+                "ms": 6
+              },
+              {
+                "endpoint": "GET /u/:user/v1/windows/:id",
+                "startMs": 103,
+                "ms": 6
+              }
+            ],
+            "webSocketsCreated": 2,
+            "webSocketPaths": {
+              "/u/:user/v1/session-channel": 2
+            },
+            "framesIn": 12,
+            "framesOut": 4,
+            "bytesIn": 17165,
+            "bytesOut": 976,
+            "framesInByKind": {
+              "ready": 2,
+              "session_states": 1,
+              "session_reads": 1,
+              "session_drafts": 1,
+              "session_outbox": 1,
+              "message:negotiated": 1,
+              "message:agent_snapshot": 1,
+              "message:session_control": 2,
+              "message:timeline_subscribed": 1,
+              "message:timeline_page": 1
+            },
+            "framesOutByKind": {
+              "subscribe:negotiate": 1,
+              "message:timeline_subscription": 1,
+              "message:session_control_request": 1,
+              "message:timeline_request": 1
+            }
+          },
+          "timelineReads": [
+            {
+              "requestedAt": 109,
+              "ms": 6,
+              "bytes": 8751,
+              "rows": {
+                "rows": 24,
+                "byType": {
+                  "user_message": {
+                    "rows": 11,
+                    "bytes": 3709,
+                    "maxBytes": 358
+                  },
+                  "assistant_message": {
+                    "rows": 11,
+                    "bytes": 3426,
+                    "maxBytes": 318
+                  },
+                  "error": {
+                    "rows": 2,
+                    "bytes": 1022,
+                    "maxBytes": 550
+                  }
+                }
+              }
+            }
+          ],
+          "consoleErrors": []
+        }
+      ]
+    },
+    "send-released": {
+      "ranMs": 362838,
+      "method": "Type a tiny prompt, press Enter. start = Enter. sendingShownMs: first delivery state or new message in the page; acceptedMs: the new message with no pending delivery state; turnFinishedMs: assistant reply and Ready. The runtime is released 75000 ms before the page opens (Codex only; Claude Code has none to release).",
+      "summary": {
+        "n": 4,
+        "sendingShownMs": {
+          "n": 4,
+          "p50": 36,
+          "p95": 38,
+          "max": 38
+        },
+        "acceptedMs": {
+          "n": 4,
+          "p50": 56,
+          "p95": 79,
+          "max": 79
+        },
+        "turnFinishedMs": {
+          "n": 4,
+          "p50": 5955,
+          "p95": 6256,
+          "max": 6256
+        },
+        "byProvider": {
+          "codex": {
+            "n": 4,
+            "acceptedMs": {
+              "n": 4,
+              "p50": 56,
+              "p95": 79,
+              "max": 79
+            }
+          }
+        }
+      },
+      "samples": [
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "released": true,
+          "composerBeforeEnter": "enabled",
+          "sendingShownMs": 36,
+          "acceptedMs": 56,
+          "workingLabelMs": 50,
+          "turnFinishedMs": 5592,
+          "composerDisabledStates": 2,
+          "deliveryStatesSeen": [
+            "pending"
+          ],
+          "states": {
+            "label: Ready": {
+              "firstMs": 23,
+              "totalMs": 40
+            },
+            "composer: disabled": {
+              "firstMs": 23,
+              "totalMs": 27
+            },
+            "label: Working": {
+              "firstMs": 50,
+              "totalMs": 5529
+            },
+            "composer: enabled": {
+              "firstMs": 50,
+              "totalMs": 5542
+            }
+          },
+          "requests": {
+            "httpTotal": 2,
+            "httpAssets": 0,
+            "httpApi": 2,
+            "httpByEndpoint": {
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/revision": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 344,
+                "ms": 12
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/catalog/revision",
+                "startMs": 4772,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 25,
+            "framesOut": 1,
+            "bytesIn": 60039,
+            "bytesOut": 381,
+            "framesInByKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "framesOutByKind": {
+              "message:send_message": 1
+            }
+          },
+          "streamingFrames": {
+            "seconds": 5.6,
+            "framesIn": 25,
+            "framesInPerSecond": 4.5,
+            "byKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "bytesIn": 60039
+          },
+          "taskMsDuringTurn": 268,
+          "consoleErrors": []
+        },
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+          "provider": "codex",
+          "released": true,
+          "composerBeforeEnter": "enabled",
+          "sendingShownMs": 35,
+          "acceptedMs": 56,
+          "workingLabelMs": 47,
+          "turnFinishedMs": 6256,
+          "composerDisabledStates": 2,
+          "deliveryStatesSeen": [
+            "pending"
+          ],
+          "states": {
+            "label: Ready": {
+              "firstMs": 20,
+              "totalMs": 38
+            },
+            "composer: disabled": {
+              "firstMs": 20,
+              "totalMs": 27
+            },
+            "label: Working": {
+              "firstMs": 47,
+              "totalMs": 6198
+            },
+            "composer: enabled": {
+              "firstMs": 47,
+              "totalMs": 6209
+            }
+          },
+          "requests": {
+            "httpTotal": 2,
+            "httpAssets": 0,
+            "httpApi": 2,
+            "httpByEndpoint": {
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/revision": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 2161,
+                "ms": 11
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/catalog/revision",
+                "startMs": 4836,
+                "ms": 4
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 25,
+            "framesOut": 1,
+            "bytesIn": 60013,
+            "bytesOut": 381,
+            "framesInByKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "framesOutByKind": {
+              "message:send_message": 1
+            }
+          },
+          "streamingFrames": {
+            "seconds": 6.3,
+            "framesIn": 25,
+            "framesInPerSecond": 4,
+            "byKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "bytesIn": 60013
+          },
+          "taskMsDuringTurn": 240,
+          "consoleErrors": []
+        },
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+          "provider": "codex",
+          "released": true,
+          "composerBeforeEnter": "enabled",
+          "sendingShownMs": 37,
+          "acceptedMs": 79,
+          "workingLabelMs": 53,
+          "turnFinishedMs": 6196,
+          "composerDisabledStates": 2,
+          "deliveryStatesSeen": [
+            "pending"
+          ],
+          "states": {
+            "label: Ready": {
+              "firstMs": 25,
+              "totalMs": 41
+            },
+            "composer: disabled": {
+              "firstMs": 25,
+              "totalMs": 28
+            },
+            "label: Working": {
+              "firstMs": 53,
+              "totalMs": 6130
+            },
+            "composer: enabled": {
+              "firstMs": 53,
+              "totalMs": 6143
+            }
+          },
+          "requests": {
+            "httpTotal": 2,
+            "httpAssets": 0,
+            "httpApi": 2,
+            "httpByEndpoint": {
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/revision": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 803,
+                "ms": 15
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/catalog/revision",
+                "startMs": 4772,
+                "ms": 5
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 25,
+            "framesOut": 1,
+            "bytesIn": 60013,
+            "bytesOut": 381,
+            "framesInByKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "framesOutByKind": {
+              "message:send_message": 1
+            }
+          },
+          "streamingFrames": {
+            "seconds": 6.2,
+            "framesIn": 25,
+            "framesInPerSecond": 4,
+            "byKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 1,
+              "session_reads": 1
+            },
+            "bytesIn": 60013
+          },
+          "taskMsDuringTurn": 233,
+          "consoleErrors": []
+        },
+        {
+          "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+          "provider": "codex",
+          "released": true,
+          "composerBeforeEnter": "enabled",
+          "sendingShownMs": 38,
+          "acceptedMs": 56,
+          "workingLabelMs": 50,
+          "turnFinishedMs": 5955,
+          "composerDisabledStates": 2,
+          "deliveryStatesSeen": [
+            "pending"
+          ],
+          "states": {
+            "label: Ready": {
+              "firstMs": 23,
+              "totalMs": 40
+            },
+            "composer: disabled": {
+              "firstMs": 23,
+              "totalMs": 27
+            },
+            "label: Working": {
+              "firstMs": 50,
+              "totalMs": 5892
+            },
+            "composer: enabled": {
+              "firstMs": 50,
+              "totalMs": 5905
+            }
+          },
+          "requests": {
+            "httpTotal": 2,
+            "httpAssets": 0,
+            "httpApi": 2,
+            "httpByEndpoint": {
+              "POST /u/:user/v1/session-reads": 1,
+              "GET /u/:user/v1/remote/hosts/:id/catalog/revision": 1
+            },
+            "httpSlowest": [
+              {
+                "endpoint": "POST /u/:user/v1/session-reads",
+                "startMs": 1950,
+                "ms": 16
+              },
+              {
+                "endpoint": "GET /u/:user/v1/remote/hosts/:id/catalog/revision",
+                "startMs": 4797,
+                "ms": 4
+              }
+            ],
+            "webSocketsCreated": 0,
+            "webSocketPaths": {},
+            "framesIn": 26,
+            "framesOut": 1,
+            "bytesIn": 60387,
+            "bytesOut": 381,
+            "framesInByKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 2,
+              "session_reads": 1
+            },
+            "framesOutByKind": {
+              "message:send_message": 1
+            }
+          },
+          "streamingFrames": {
+            "seconds": 6,
+            "framesIn": 26,
+            "framesInPerSecond": 4.4,
+            "byKind": {
+              "message:agent_update": 8,
+              "message:agent_stream": 14,
+              "message:command_acknowledged": 1,
+              "session_states": 2,
+              "session_reads": 1
+            },
+            "bytesIn": 60387
+          },
+          "taskMsDuringTurn": 243,
+          "consoleErrors": []
+        }
+      ]
+    },
+    "provider-latency": {
+      "ranMs": 197980,
+      "method": "Wall time of one agent-remote-controller-dev process (includes about 250 to 370 ms of process start; floorListMs is that floor). A send returns when the Controller accepted it. After a release the run waits 75000 ms; the first send after it is the wake.",
+      "providers": {
+        "codex": {
+          "floorListMs": {
+            "values": [
+              386,
+              338
+            ],
+            "n": 2,
+            "p50": 338,
+            "p95": 386,
+            "max": 386
+          },
+          "readLimit0Ms": {
+            "values": [
+              228,
+              226
+            ],
+            "n": 2,
+            "p50": 226,
+            "p95": 228,
+            "max": 228
+          },
+          "readLimit10Ms": {
+            "values": [
+              233,
+              240
+            ],
+            "n": 2,
+            "p50": 233,
+            "p95": 240,
+            "max": 240
+          },
+          "readAfterReleaseMs": {
+            "values": [
+              267,
+              269
+            ],
+            "n": 2,
+            "p50": 267,
+            "p95": 269,
+            "max": 269
+          },
+          "sendResidentMs": {
+            "values": [
+              244,
+              253
+            ],
+            "n": 2,
+            "p50": 244,
+            "p95": 253,
+            "max": 253
+          },
+          "sendAfterReleaseMs": {
+            "values": [
+              274,
+              277
+            ],
+            "n": 2,
+            "p50": 274,
+            "p95": 277,
+            "max": 277
+          },
+          "releaseMs": {
+            "values": [
+              229,
+              228
+            ],
+            "n": 2,
+            "p50": 228,
+            "p95": 229,
+            "max": 229
+          },
+          "released": [
+            true,
+            true
+          ]
+        }
+      }
+    }
+  },
+  "finishedAt": "2026-11-15T14:02:34.564Z"
+}

@@ -218,3 +218,8 @@ The local instance run (six bots with real sessions, 20 minutes, Chromium 1440 x
 - The page held at most two WebSockets.
 - It made 45-76 requests a minute (mean 62).
 - There were no console errors and no failed requests.
+
+
+## Browser baselines on the local instance
+
+`local-baselines.mjs` measures the browser experience of `pnpm local` (open to content, return after hidden, send, release and restart continuity, request counts, provider latencies) and writes JSON; its header lists the options and the definitions of start, content and ready. Results and the method are in `docs/superpowers/plans/2026-11-15-p0-baselines.md`, raw data in `results/p0-*.json`. The sessions it uses must exist in the instance workspace.

@@ -1,0 +1,247 @@
+{
+  "startedAt": "2026-11-15T14:04:05.426Z",
+  "origin": "http://localhost:57728",
+  "options": {
+    "reps": 3,
+    "throttle": 1,
+    "hiddenShortMs": 30000,
+    "hiddenLongMs": 300000,
+    "scenarios": [
+      "switch"
+    ]
+  },
+  "sessions": [
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70d0b0941f7b",
+      "provider": "codex"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/codex/01a1df47-3bda-72d1-aa29-70e3539431a6",
+      "provider": "codex"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/3072e19b-29c9-4fcc-aa8a-ed0895b02ed5",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/403fd221-412b-479a-982e-f0bbd44c6875",
+      "provider": "claude"
+    },
+    {
+      "address": "740516dc-d1d9-41f6-8efe-44cf1aa89b24/claude/fc9b731d-7ba4-4b43-a091-d71f207c01e3",
+      "provider": "claude"
+    }
+  ],
+  "environment": {
+    "machine": "Apple M4 x10, 16 GiB, darwin 27.2.0 arm64",
+    "chromium": "151.0.7922.34",
+    "node": "v26.8.1",
+    "build": {
+      "instance": "p0-baselines-a617dcb9",
+      "directory": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9",
+      "origin": "http://localhost:57728",
+      "source": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines",
+      "state": "running",
+      "build": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true,
+        "startedAt": "2026-11-15T13:37:07.928Z"
+      },
+      "checkout": {
+        "revision": "0aaefda99cd83472cc9ceb878f0b4deae3ca393a",
+        "dirty": true
+      },
+      "controller": "/Users/xian/projects/agent-remote-control/.worktrees/p0-baselines/packages/agent-host/dist/cli.js",
+      "sessionCommands": "/Users/xian/.agent-remote-control-dev/instances/p0-baselines-a617dcb9/bin"
+    }
+  },
+  "scenarios": {
+    "switch": {
+      "ranMs": 63221,
+      "method": "local-switch.mjs: Bot mode, click a bot row until its conversation shows entries; each bot twice (cold, then warm).",
+      "normal": {
+        "label": "baseline-1x",
+        "bots": 5,
+        "rosterMs": 215,
+        "idle10s": {
+          "taskMs": 4,
+          "scriptMs": 2
+        },
+        "cold": {
+          "shownMs": 67,
+          "taskMs": 57,
+          "scriptMs": 29
+        },
+        "warm": {
+          "shownMs": 100,
+          "taskMs": 62,
+          "scriptMs": 32
+        },
+        "results": [
+          {
+            "index": 0,
+            "warm": false,
+            "shownMs": 92,
+            "taskMs": 86,
+            "scriptMs": 52
+          },
+          {
+            "index": 1,
+            "warm": false,
+            "shownMs": 67,
+            "taskMs": 57,
+            "scriptMs": 29
+          },
+          {
+            "index": 2,
+            "warm": false,
+            "shownMs": 77,
+            "taskMs": 63,
+            "scriptMs": 37
+          },
+          {
+            "index": 3,
+            "warm": false,
+            "shownMs": 63,
+            "taskMs": 47,
+            "scriptMs": 25
+          },
+          {
+            "index": 4,
+            "warm": false,
+            "shownMs": 56,
+            "taskMs": 46,
+            "scriptMs": 23
+          },
+          {
+            "index": 5,
+            "warm": true,
+            "shownMs": 83,
+            "taskMs": 47,
+            "scriptMs": 29
+          },
+          {
+            "index": 6,
+            "warm": true,
+            "shownMs": 102,
+            "taskMs": 62,
+            "scriptMs": 32
+          },
+          {
+            "index": 7,
+            "warm": true,
+            "shownMs": 101,
+            "taskMs": 72,
+            "scriptMs": 42
+          },
+          {
+            "index": 8,
+            "warm": true,
+            "shownMs": 89,
+            "taskMs": 58,
+            "scriptMs": 32
+          },
+          {
+            "index": 9,
+            "warm": true,
+            "shownMs": 100,
+            "taskMs": 75,
+            "scriptMs": 40
+          }
+        ]
+      },
+      "throttled4x": {
+        "label": "baseline-4x",
+        "bots": 5,
+        "rosterMs": 203,
+        "idle10s": {
+          "taskMs": 2,
+          "scriptMs": 1
+        },
+        "cold": {
+          "shownMs": 88,
+          "taskMs": 104,
+          "scriptMs": 59
+        },
+        "warm": {
+          "shownMs": 110,
+          "taskMs": 111,
+          "scriptMs": 62
+        },
+        "results": [
+          {
+            "index": 0,
+            "warm": false,
+            "shownMs": 120,
+            "taskMs": 169,
+            "scriptMs": 111
+          },
+          {
+            "index": 1,
+            "warm": false,
+            "shownMs": 98,
+            "taskMs": 135,
+            "scriptMs": 74
+          },
+          {
+            "index": 2,
+            "warm": false,
+            "shownMs": 78,
+            "taskMs": 104,
+            "scriptMs": 59
+          },
+          {
+            "index": 3,
+            "warm": false,
+            "shownMs": 88,
+            "taskMs": 102,
+            "scriptMs": 47
+          },
+          {
+            "index": 4,
+            "warm": false,
+            "shownMs": 63,
+            "taskMs": 93,
+            "scriptMs": 57
+          },
+          {
+            "index": 5,
+            "warm": true,
+            "shownMs": 91,
+            "taskMs": 103,
+            "scriptMs": 54
+          },
+          {
+            "index": 6,
+            "warm": true,
+            "shownMs": 110,
+            "taskMs": 120,
+            "scriptMs": 62
+          },
+          {
+            "index": 7,
+            "warm": true,
+            "shownMs": 110,
+            "taskMs": 111,
+            "scriptMs": 62
+          },
+          {
+            "index": 8,
+            "warm": true,
+            "shownMs": 93,
+            "taskMs": 87,
+            "scriptMs": 54
+          },
+          {
+            "index": 9,
+            "warm": true,
+            "shownMs": 113,
+            "taskMs": 113,
+            "scriptMs": 65
+          }
+        ]
+      }
+    }
+  },
+  "finishedAt": "2026-11-15T14:05:11.790Z"
+}

@@ -19,6 +19,9 @@ try {
   await page.goto(origin + '/?mode=bot', { waitUntil: 'domcontentloaded' });
   await page.locator('nav[aria-label="Bots"] .lab-bot-row').first().waitFor();
   const rosterMs = Date.now() - started;
+  // Sessions without a bot binding sit in the collapsed "Other sessions" section.
+  await page.evaluate(() => document.querySelectorAll('details.lab-bot-other').forEach(section => { section.open = true; }));
+  await page.waitForTimeout(1000);
   const cdp = await context.newCDPSession(page);
   await cdp.send('Performance.enable');
   if (process.env.THROTTLE) await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.THROTTLE) });
@@ -32,7 +35,7 @@ try {
   const order = [...names, ...names]; // the second pass switches to conversations opened before (warm)
   for (const [index, name] of order.entries()) {
     const before = await metrics(), clickAt = Date.now();
-    await page.locator('nav[aria-label="Bots"] .lab-bot-row', { hasText: name }).first().click();
+    await page.locator('nav[aria-label="Bots"] .lab-bot-row[aria-label=' + JSON.stringify(name) + ']').first().click();
     // Shown: the selected row is current and the conversation shows entries or its empty state.
     await page.waitForFunction(expected => {
       const current = document.querySelector('nav[aria-label="Bots"] .lab-bot-row[aria-current="true"]');

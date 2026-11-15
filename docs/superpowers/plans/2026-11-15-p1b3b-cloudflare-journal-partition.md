@@ -966,7 +966,7 @@ git commit -m "feat(cloudflare): a journal partition Durable Object over the SQL
 - Modify: `scripts/relay-workers-local.mjs`
 - Modify: `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md`, `packages/agent-remote-cloudflare/README.md`
 
-- [ ] **Step 1: Write the failing test of the whole path.** Append to `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, and change its second import line from `import { fixture } from './fixture.js';` to `import { fixture, send } from './fixture.js';`:
+- [x] **Step 1: Write the failing test of the whole path.** Append to `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, and change its second import line from `import { fixture } from './fixture.js';` to `import { fixture, send } from './fixture.js';`:
 
 ```ts
 /** A Controller connected for journals: it registers (rotating its pairing key into a device credential on the first connection) and keeps what the Relay sends. */
@@ -1028,12 +1028,12 @@ test('grants no journals when the Worker has the binding but the variable is not
 }, 60_000);
 ```
 
-- [ ] **Step 2: Run the tests and see them fail.**
+- [x] **Step 2: Run the tests and see them fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts -t "grants" --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
 Expected: the first test FAILS (`registered.journal` is absent: `primary` builds no journal service yet); the second passes.
 
-- [ ] **Step 3: Wire `primary`.** In `packages/agent-remote-cloudflare/src/relay-object.ts`:
+- [x] **Step 3: Wire `primary`.** In `packages/agent-remote-cloudflare/src/relay-object.ts`:
 
 Change the import on line 1 to
 
@@ -1059,17 +1059,17 @@ In `initialize`, immediately before `    this.core = createHostedRelay({ ...auth
 
 and change `    this.core = createHostedRelay({ ...auth, ` to `    this.core = createHostedRelay({ ...auth, ...(journalService ? { journalService } : {}), ` (the rest of that statement stays as it is).
 
-- [ ] **Step 4: Run the tests and see them pass.**
+- [x] **Step 4: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
-Expected: PASS for all tests in the file.
+Expected: PASS for all tests in the file (11). The whole Cloudflare suite then has 230 tests, the hosted suite 943, the journal suite 178, the protocol suite 414.
 
-- [ ] **Step 5: Typecheck and run the whole Cloudflare suite.**
+- [x] **Step 5: Typecheck and run the whole Cloudflare suite.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck` then `pnpm test:cloudflare` (Bash `timeout` 600000)
 Expected: PASS. The added Durable Object binding must not change any existing test.
 
-- [ ] **Step 6: Give the partitions their own Worker and bind it from the Relay.**
+- [x] **Step 6: Give the partitions their own Worker and bind it from the Relay.**
 
 `packages/agent-remote-cloudflare/scripts/build.mjs` bundles two entries into `dist/cloudflare`: `worker: 'src/worker.ts'` and `journals: 'src/journal-worker.ts'` (`entryPoints` as an object, `outdir: '../../dist/cloudflare'`). The package script `deploy:dry-run` runs `wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run`.
 
@@ -1083,7 +1083,7 @@ No configuration sets `AGENT_REMOTE_JOURNALS`, so journals stay off everywhere.
 
 **Deploy order and rollout.** The partitions Worker, with its migration, deploys first, because the Relay's `JOURNALS` binding names it. `JournalPartitionApi` only ever gains methods: existing methods keep their names, argument lists and result shapes, so a newer Relay works with the previous partitions Worker and the reverse during a rollout, and a Relay that calls a new method deploys after a partitions Worker that has it. `journal-partition.test.ts` fixes the method list and arities so that a change must be deliberate. There is no CI workflow or script in the repository that deploys the Relay Worker (the two Controller workflows publish releases); the deploy commands live in `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md` and the package README, and all three now deploy the partitions Worker first. `scripts/gateway-relay-test-runtime.mjs` starts a Workers Relay for tests with journals off and without the binding; it stays as it is.
 
-- [ ] **Step 7: Validate the configurations with dry runs.**
+- [x] **Step 7: Validate the configurations with dry runs.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second), then for each of `wrangler.journals.jsonc`, `wrangler.jsonc`, `../../deploy/self-hosted/wrangler.journals.jsonc`, `../../deploy/self-hosted/wrangler.jsonc`: `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config <file> --outdir /tmp/arc-dry-<n>` (Bash `timeout` 300000; wrangler runs in the package directory, so run the paths as shown). Never deploy.
 Expected: each succeeds. The partitions configurations list `env.JOURNALS (JournalPartition)`; the Relay configurations list `env.RELAY (RelayObject)` and `env.JOURNALS (JournalPartition, defined in <partitions Worker>)`. Then `rm -rf /tmp/arc-dry-*`.
@@ -1093,12 +1093,12 @@ Run `scripts/relay-workers-local.mjs` once with a stub `wrangler` on `PATH` to r
 Run: `node --test --test-timeout=60000 scripts/relay-local.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 8: Document the Workers settings.** `docs/self-hosted-deployment.md`: the Workers commands dry-run and deploy both configurations, partitions first, with a paragraph that explains the two Workers; the `AGENT_REMOTE_JOURNALS=1` row covers Workers; the journals section gains a Workers paragraph (a partition per Host in a Worker of its own, deploy order, the add-only rollout rule, 2 journals and 20 MiB in memory, 12 MiB per session, 1 GiB per Host, revoking empties a partition). `docs/current/agent-remote/deployment.md` and the package README deploy the partitions Worker first. The text is in the files.
+- [x] **Step 8: Document the Workers settings.** `docs/self-hosted-deployment.md`: the Workers commands dry-run and deploy both configurations, partitions first, with a paragraph that explains the two Workers; the `AGENT_REMOTE_JOURNALS=1` row covers Workers; the journals section gains a Workers paragraph (a partition per Host in a Worker of its own, deploy order, the add-only rollout rule, 2 journals and 20 MiB in memory, 12 MiB per session, 1 GiB per Host, revoking empties a partition). `docs/current/agent-remote/deployment.md` and the package README deploy the partitions Worker first. The text is in the files.
 
 Run: `pnpm lint:docs`
 Expected: PASS.
 
-- [ ] **Step 9: Commit.**
+- [x] **Step 9: Commit.**
 
 ```bash
 git add packages/agent-remote-cloudflare packages/agent-remote-hosted/src deploy/self-hosted scripts/relay-workers-local.mjs docs/self-hosted-deployment.md docs/current/agent-remote/deployment.md docs/superpowers/plans/2026-11-15-p1b3b-cloudflare-journal-partition.md
@@ -1112,12 +1112,12 @@ git commit -m "feat(cloudflare): reach the journal partitions from primary, behi
 **Files:**
 - Modify: `packages/agent-remote-lab/compatibility.json` (written by the script)
 
-- [ ] **Step 1: Build every package and typecheck.**
+- [x] **Step 1: Build every package and typecheck.**
 
 Run: `pnpm -r run build` (Bash `timeout` 600000) then `pnpm typecheck` (Bash `timeout` 600000)
 Expected: PASS for both.
 
-- [ ] **Step 2: Run the affected suites.**
+- [x] **Step 2: Run the affected suites.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000)
 Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite run test` (Bash `timeout` 300000)
@@ -1126,19 +1126,19 @@ Run: `pnpm test:conformance` (Bash `timeout` 600000)
 Run: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-lab exec vitest run src/server/devbox.test.ts src/server/hosted-runtime.test.ts src/server/relay-conformance.test.ts --testTimeout=30000` (Bash `timeout` 600000)
 Expected: PASS for each: the Node hosts and crude Hosts are unchanged.
 
-- [ ] **Step 3: Update and check the compatibility digest.**
+- [x] **Step 3: Update and check the compatibility digest.**
 
 Run: `pnpm compatibility:update` then `pnpm compatibility:check`
 Expected: `Compatibility updated: sha256:...` then `Compatibility verified: sha256:...`.
 
-- [ ] **Step 4: Commit the manifest.**
+- [x] **Step 4: Commit the manifest.**
 
 ```bash
 git add packages/agent-remote-lab/compatibility.json
 git commit -m "chore: update the compatibility manifest for the journal partition" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 5: Verify on the local instance.** `pnpm local` runs the Node Relay, which this plan changes only by adding the `journalService` option it does not use, so this step proves the Node Relay and its crude read and send path are unaffected; the Workers path is proved by the Miniflare tests and the dry runs above, and was not run in a Workers runtime on this machine. Follow `.agents/skills/prepare-arc-local/SKILL.md`. Read `references/lifecycle.md#before-restarting-a-running-instance` first; if this checkout's instance runs or waits on a session this task did not start, stop and ask the user before `up`.
+- [x] **Step 5: Verify on the local instance.** `pnpm local` runs the Node Relay, which this plan changes only by adding the `journalService` option it does not use, so this step proves the Node Relay and its crude read and send path are unaffected; the Workers path is proved by the Miniflare tests and the dry runs above, and was not run in a Workers runtime on this machine. Follow `.agents/skills/prepare-arc-local/SKILL.md`. Read `references/lifecycle.md#before-restarting-a-running-instance` first; if this checkout's instance runs or waits on a session this task did not start, stop and ask the user before `up`.
 
 Run from the worktree: `pnpm local up` (Bash `timeout` 600000)
 Expected: it builds, starts the instance, prints the status and exits 0.

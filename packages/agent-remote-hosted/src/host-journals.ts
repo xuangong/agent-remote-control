@@ -71,6 +71,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const { store, now } = options;
   const cache = new Map<string, Map<string, SessionJournal>>();
   const chains = new Map<string, Promise<void>>();
+  /** Sessions whose last publication failed to apply or store: nothing more is accepted until the session is opened again. */
+  const needsReopen = new Set<string>();
   const storeKey = (hostId: string, sessionKey: string) => `${hostId}:${sessionKey}`;
 
   function serialized<T>(hostId: string, work: () => Promise<T>): Promise<T> {
@@ -140,24 +142,34 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       if (!fits(index, journal.epoch)) return { refused: 'index_too_large' };
       const { generation, watermark } = journal.claim(publisherId);
       await persist(hostId, sessionKey, journal);
+      needsReopen.delete(storeKey(hostId, sessionKey));
       return { generation, watermark, epoch: journal.epoch, index };
     }),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
+      const fenced = (): JournalPublished => ({ rows: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
+      const key = storeKey(hostId, sessionKey);
+      if (needsReopen.has(key)) return fenced();
       const journal = await load(hostId, sessionKey, false);
       const publisherId = journal?.publisher?.publisherId;
-      if (!journal || publisherId === undefined) return { rows: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } };
+      if (!journal || publisherId === undefined) return fenced();
       const published: JournalPublished = { rows: [], watermark: 0 };
-      for (const entry of entries) {
-        try { apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published); }
-        catch (error) {
-          const refusal = refusalOf(error, entry.sequence);
-          if (!refusal) { cache.get(hostId)?.delete(sessionKey); throw error; }
-          published.refusal = refusal;
-          break;
+      try {
+        for (const entry of entries) {
+          try { apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published); }
+          catch (error) {
+            const refusal = refusalOf(error, entry.sequence);
+            if (!refusal) throw error;
+            published.refusal = refusal;
+            break;
+          }
         }
+        await persist(hostId, sessionKey, journal);
+      } catch (error) {
+        cache.get(hostId)?.delete(sessionKey);
+        needsReopen.add(key);
+        throw error;
       }
-      await persist(hostId, sessionKey, journal);
       return { ...published, watermark: journal.publisher?.watermark ?? 0, cursor: journal.cursor };
     }),
 

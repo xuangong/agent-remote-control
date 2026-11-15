@@ -58,8 +58,8 @@ async function fixture(options: Partial<HostBrokerOptions> = {}) {
     initialState: { keys: [[createHash('sha256').update('key').digest('hex'), { expires: 1_000_000, installationId: 'machine', kind: 'device' }]],
       hosts: [], bindings: [], creations: [] }, ...options });
   closers.push(() => broker.close());
-  async function connect(register = true, credentialRotation = false) {
-    const upgrade = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', {
+  async function connect(register = true, credentialRotation = false, query = '') {
+    const upgrade = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, {
       headers: { authorization: 'Bearer key' },
     }));
     if (!upgrade || upgrade instanceof Response) throw new Error('Host upgrade rejected');
@@ -192,6 +192,29 @@ it('starts after enrollment is saved and preserves the schedule across device cr
   b.clock.advance(30);
   expect(socket.sent.filter(message => message.type === 'heartbeat')).toHaveLength(2);
   expect((await b.hosts())[0].online).toBe(true);
+  expect(socket.closes).toHaveLength(0);
+}, 10_000);
+
+it('keeps the journals a Controller opened when the same connection is registered again after a credential rotation', async () => {
+  const { MemoryJournalStore } = await import('@orchardworks/agent-remote-journal');
+  const b = await fixture({ durable: true, journals: new MemoryJournalStore(), initialState: {
+    keys: [[createHash('sha256').update('key').digest('hex'), { expires: 1_000_000, requiresRotation: true }]],
+    hosts: [], bindings: [], creations: [],
+  } });
+  const socket = await b.connect(true, true, '?journal=1');
+  await socket.receive({ uplinkVersion: 2, type: 'credential_saved' });
+  const registered = socket.sent.at(-1)!;
+  expect(registered).toMatchObject({ type: 'registered', journal: 1 });
+  await socket.receive({ uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' });
+  expect(socket.sent.at(-1)).toMatchObject({ type: 'journal_opened', generation: 1 });
+  const rotate = await b.broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/${registered.hostId}/rotate`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  }));
+  expect(rotate?.status).toBe(200);
+  await socket.receive({ uplinkVersion: 2, type: 'credential_saved' });
+  expect(socket.sent.at(-1)).toEqual(registered);
+  await socket.receive({ uplinkVersion: 2, type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [{ sequence: 1, op: 'seal', itemKey: 'ghost' }] });
+  expect(socket.sent.filter(message => message.type === 'journal_ack')).toHaveLength(1);
   expect(socket.closes).toHaveLength(0);
 }, 10_000);
 

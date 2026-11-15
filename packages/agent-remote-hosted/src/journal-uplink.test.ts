@@ -21,7 +21,7 @@ function wire(fields: Record<string, unknown>): JournalHostMessage {
 
 type Sent = { type: string; [field: string]: unknown };
 
-function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable'): void } = {}) {
+function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void } = {}) {
   const store = new MemoryJournalStore();
   const journals = options.journals ?? createHostJournals({ store, now: () => 1_000 });
   const sent: Sent[] = [];
@@ -196,6 +196,17 @@ describe('a journal connection', () => {
     await expect(first).rejects.toMatchObject({ code: 'closed' });
     release();
     await applying;
+  });
+
+  it('reports a store failure while taking the bodies of a fill and fails the request', async () => {
+    const events: string[] = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals: HostJournals = { ...base, fill: async () => { throw new Error('disk full'); } };
+    const f = fixture({ journals, diagnostic: event => events.push(event) });
+    const pending = f.connection.requestFill(SESSION, ['m1']);
+    await f.connection.receive(wire({ type: 'journal_fill', requestId: requestIdOf(f.sent, 'journal_fill_request'), sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] }));
+    await expect(pending).rejects.toThrow('disk full');
+    expect(events).toEqual(['journal_store_failed']);
   });
 
   it('sends nothing once the uplink connection is no longer current', async () => {

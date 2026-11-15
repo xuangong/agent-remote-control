@@ -36,7 +36,7 @@ export interface JournalConnectionOptions {
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
   /** Told when a journal message was not sent because it does not encode. */
-  diagnostic?(event: 'journal_message_unencodable'): void;
+  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void;
 }
 
 export interface JournalConnection {
@@ -159,6 +159,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             settle(requestId, found);
             found.resolve(filled);
           } catch (error) {
+            options.diagnostic?.('journal_store_failed');
             if (pending.get(requestId) !== found) return;
             settle(requestId, found);
             found.reject(error instanceof Error ? error : new Error('The journal could not take the bodies.'));

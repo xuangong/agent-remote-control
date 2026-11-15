@@ -41,32 +41,38 @@ const row = (itemKey: string, text: string) => ({
 
 /** A Controller connected over the in-memory transport. `query` is what it asks for when it connects. */
 async function connectedHost(options: { query?: string; journals?: JournalStore | false; requestTimeoutMs?: number; diagnostics?: ReturnType<typeof createDiagnosticJournal> } = {}) {
-  const store = new MemoryJournalStore();
-  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, journalRequestTimeoutMs: options.requestTimeoutMs ?? 50, ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
-    ...(options.journals === false ? {} : { journals: options.journals ?? store }) });
+  const memory = new MemoryJournalStore();
+  const store: JournalStore = options.journals === false || options.journals === undefined ? memory : options.journals;
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000, ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
+    ...(options.journals === false ? {} : { journals: store }) });
   close.push(() => broker.close());
   const pairing = await (await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), {}))!.json();
-  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${options.query ?? '?journal=1'}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
-  if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
-  const pair = transportPair();
-  const inbox: Wire[] = [];
-  pair.native.onMessage(data => { inbox.push(JSON.parse(data)); });
-  prepared.accept(pair.server);
-  pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'native', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-  /** The next message of this type the Relay sent, removed from the inbox. */
-  async function take(type: string): Promise<Wire> {
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const at = inbox.findIndex(message => message.type === type);
-      if (at >= 0) return inbox.splice(at, 1)[0]!;
-      await new Promise(resolve => setTimeout(resolve, 5));
+  /** One uplink connection of the Controller; calling it again replaces the previous connection. */
+  async function attach() {
+    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${options.query ?? '?journal=1'}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
+    if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
+    const pair = transportPair();
+    const inbox: Wire[] = [];
+    pair.native.onMessage(data => { inbox.push(JSON.parse(data)); });
+    prepared.accept(pair.server);
+    pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'native', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+    /** The next message of this type the Relay sent, removed from the inbox. */
+    async function take(type: string): Promise<Wire> {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const at = inbox.findIndex(message => message.type === type);
+        if (at >= 0) return inbox.splice(at, 1)[0]!;
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      throw new Error(`The Relay sent no ${type}.`);
     }
-    throw new Error(`The Relay sent no ${type}.`);
+    const send = (fields: Wire) => pair.native.send(JSON.stringify({ uplinkVersion: 2, ...fields }));
+    const host = await take('registered');
+    const open = async (publisherId = 'controller-1') => { send({ type: 'journal_open', requestId: `open-${Math.random()}`, sessionKey: SESSION, publisherId }); return take('journal_opened'); };
+    return { pair, inbox, take, send, host, open };
   }
-  const send = (fields: Wire) => pair.native.send(JSON.stringify({ uplinkVersion: 2, ...fields }));
-  const host = await take('registered');
-  const open = async (publisherId = 'controller-1') => { send({ type: 'journal_open', requestId: `open-${Math.random()}`, sessionKey: SESSION, publisherId }); return take('journal_opened'); };
+  const first = await attach();
   const settle = () => new Promise(resolve => setTimeout(resolve, 20));
-  return { broker, pair, store, host, inbox, take, send, open, settle, storeKey: `${host.hostId}:${SESSION}` };
+  return { broker, store, attach, settle, ...first, storeKey: `${first.host.hostId}:${SESSION}` };
 }
 
 it('grants journals to a Controller that asked for them when the Relay has a journal store', async () => {
@@ -231,20 +237,27 @@ it('refuses requests for a Host that cannot publish journals or does not exist',
   await expect(plain.broker.requestOlder('no-such-host', SESSION, 5)).rejects.toMatchObject({ status: 404, code: 'host_not_found' });
 });
 
-it('records a diagnostic when a journal message cannot be encoded and sends nothing', async () => {
-  const seeded = new MemoryJournalStore();
+it('refuses to open a journal whose index no message can carry, claims nothing and records a diagnostic', async () => {
+  const memory = new MemoryJournalStore();
   let saved: RelayDiagnostic[] = [];
   const diagnostics = createDiagnosticJournal({ storage: { save: async events => { saved = structuredClone(events); } } });
   close.push(() => diagnostics.close());
-  const probe = await connectedHost({ journals: seeded, diagnostics });
-  await seeded.apply({ meta: { sessionKey: probe.storeKey, epoch: "epoch-1", nextSeq: 0, minSeq: 1, publisher: null, lastRevision: 0, retiredEpochs: [] }, upsert: [], replaced: true });
-  await probe.open();
-  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [{ sequence: 1, op: 'seal', itemKey: 'ghost' }] });
-  await probe.take('journal_refused');
+  const probe = await connectedHost({ journals: memory, diagnostics });
+  const seeded = SessionJournal.create(probe.storeKey);
+  const { generation } = seeded.claim('controller-1');
+  for (let at = 0; at < 2100; at++) {
+    const itemKey = `${at}-`.padEnd(4000, 'k');
+    seeded.append({ publisherId: 'controller-1', generation, sequence: at + 1 }, { ...row(itemKey, 'x'), sourceKey: itemKey });
+  }
+  await memory.apply(seeded.takeChanges()!);
+  probe.send({ type: 'journal_open', requestId: 'open-big', sessionKey: SESSION, publisherId: 'controller-2' });
+  expect(await probe.take('journal_open_refused')).toEqual({ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'open-big', sessionKey: SESSION, reason: 'index_too_large' });
+  expect((await memory.load(probe.storeKey))?.meta.publisher).toEqual({ publisherId: 'controller-1', generation: 1, watermark: 2100 });
   await diagnostics.flush();
   expect(saved).toEqual(expect.arrayContaining([expect.objectContaining({ event: 'journal_message_unencodable', hostId: probe.host.hostId })]));
-  expect(probe.inbox.some(message => message.type === 'journal_ack')).toBe(false);
-});
+  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: 2, entries: [{ sequence: 1, op: 'seal', itemKey: 'x' }] });
+  expect(await probe.take('journal_refused')).toMatchObject({ reason: 'fenced' });
+}, 30_000);
 
 it('records a diagnostic and closes the connection when the journal store fails', async () => {
   const memory = new MemoryJournalStore();
@@ -258,4 +271,34 @@ it('records a diagnostic and closes the connection when the journal store fails'
   await diagnostics.flush();
   expect(pair.server.closeCode).toBe(1011);
   expect(saved).toEqual(expect.arrayContaining([expect.objectContaining({ event: 'journal_store_failed', hostId: host.hostId })]));
+});
+
+/** A store that rejects one write on demand. */
+function flakyStore() {
+  const memory = new MemoryJournalStore();
+  const control = { failNext: false };
+  const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+    apply: async changes => { if (control.failNext) { control.failNext = false; throw new Error('disk full'); } await memory.apply(changes); } };
+  return { store, memory, control };
+}
+
+it('closes the connection and acknowledges nothing when the store fails, then resumes from the stored watermark after reconnecting', async () => {
+  const { store, memory, control } = flakyStore();
+  const probe = await connectedHost({ journals: store });
+  const opened = await probe.open();
+  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: 1, op: 'append', row: row('m1', 'Stored') }] });
+  await probe.take('journal_ack');
+  control.failNext = true;
+  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: 2, op: 'append', row: row('m2', 'Lost') }] });
+  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: 3, op: 'append', row: row('m3', 'Also lost') }] });
+  await probe.settle();
+  expect(probe.pair.server.closeCode).toBe(1011);
+  expect(probe.inbox.filter(message => message.type === 'journal_ack')).toEqual([]);
+  const saved = await memory.load(probe.storeKey);
+  expect(saved?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+  expect(saved?.meta.publisher?.watermark).toBe(1);
+  const again = await probe.attach();
+  expect(await again.open()).toMatchObject({ generation: 2, watermark: 1 });
+  again.send({ type: 'journal_publish', sessionKey: SESSION, generation: 2, entries: [{ sequence: 2, op: 'append', row: row('m2', 'Sent again') }] });
+  expect(await again.take('journal_ack')).toMatchObject({ watermark: 2 });
 });

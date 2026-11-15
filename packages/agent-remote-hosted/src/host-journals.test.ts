@@ -258,4 +258,23 @@ describe('createHostJournals', () => {
     release();
     expect(await blocked).toMatchObject({ generation: 1 });
   });
+
+  it('refuses publications queued behind a failed write until the session is opened again', async () => {
+    const memory = new MemoryJournalStore();
+    let failNext = false;
+    const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+      apply: async changes => { if (failNext) { failNext = false; throw new Error('disk full'); } await memory.apply(changes); } };
+    const { journals } = fixture(store);
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Stored')]);
+    failNext = true;
+    const first = journals.publish(HOST, SESSION, 1, [append(2, 'm2', 'Lost')]);
+    const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'Would skip m2')]);
+    await expect(first).rejects.toThrow('disk full');
+    expect(await second).toEqual({ rows: [], watermark: 0, refusal: { sequence: 3, reason: 'fenced' } });
+    expect((await memory.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+    expect((await memory.load(KEY))?.meta.publisher?.watermark).toBe(1);
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1 });
+    expect(await journals.publish(HOST, SESSION, 2, [append(2, 'm2', 'Again')])).toMatchObject({ watermark: 2 });
+  });
 });

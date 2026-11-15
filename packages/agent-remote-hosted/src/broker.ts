@@ -851,9 +851,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     function registered() {
       if (retired || !host || host.socket !== socket) return;
       host.tunnelToken ??= randomBytes(32).toString('base64url');
-      host.journal?.close();
       const journalHost = host;
-      host.journal = journalRequested && journals
+      host.journal ??= journalRequested && journals
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
           send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }) })
         : undefined;
@@ -1040,7 +1039,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       } else if (isJournalHostMessage(message)) {
         if (!host.journal) return closeConnection(1008, 'Journals were not acknowledged');
         try { await host.journal.receive(message); }
-        catch (error) { diagnostic(host, { event: 'journal_store_failed' }); throw error; }
+        catch (error) { if (!(error instanceof BrokerError)) diagnostic(host, { event: 'journal_store_failed' }); throw error; }
       } else closeConnection(1008, 'Unexpected uplink message');
       } catch (error) {
         const code = error instanceof BrokerError && error.status === 401 ? 1008 : error instanceof BrokerError && error.status === 429 ? 1013 : 1011;

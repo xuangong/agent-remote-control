@@ -8,7 +8,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=30000 --maxWorkers=1",
-    "deploy:dry-run": "wrangler deploy --dry-run"
+    "deploy:dry-run": "wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run"
   },
   "dependencies": {
     "@orchardworks/agent-remote-hosted": "workspace:*",

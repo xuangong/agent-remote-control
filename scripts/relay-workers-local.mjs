@@ -12,13 +12,20 @@ if (Buffer.byteLength(secret) < 32) throw new Error('The signing secret must con
 await writeFile(resolve(directory, '.dev.vars'), `AGENT_REMOTE_SIGNING_SECRET=${JSON.stringify(secret)}\n`, { mode: 0o600 });
 const config = {
   name: 'agent-remote-local', main: './worker.js', compatibility_date: '2026-06-01', compatibility_flags: ['nodejs_compat'],
-  vars: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_ISSUER: issuer, ...(process.env.AGENT_REMOTE_PREVIEW_DOMAIN ? { AGENT_REMOTE_PREVIEW_DOMAIN: process.env.AGENT_REMOTE_PREVIEW_DOMAIN } : {}), ...(process.env.AGENT_REMOTE_PREVIEW_URL ? { AGENT_REMOTE_PREVIEW_URL: process.env.AGENT_REMOTE_PREVIEW_URL } : {}) },
-  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }] },
+  vars: { AGENT_REMOTE_RELAY_URL: origin, AGENT_REMOTE_ISSUER: issuer, ...(process.env.AGENT_REMOTE_PREVIEW_DOMAIN ? { AGENT_REMOTE_PREVIEW_DOMAIN: process.env.AGENT_REMOTE_PREVIEW_DOMAIN } : {}), ...(process.env.AGENT_REMOTE_PREVIEW_URL ? { AGENT_REMOTE_PREVIEW_URL: process.env.AGENT_REMOTE_PREVIEW_URL } : {}), ...(process.env.AGENT_REMOTE_JOURNALS ? { AGENT_REMOTE_JOURNALS: process.env.AGENT_REMOTE_JOURNALS } : {}) },
+  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }, { name: 'JOURNALS', class_name: 'JournalPartition', script_name: 'agent-remote-local-journals' }] },
   migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }],
   assets: { directory: '../web', binding: 'ASSETS', run_worker_first: true },
 };
 await writeFile(resolve(directory, 'wrangler.local.json'), JSON.stringify(config, null, 2), { mode: 0o600 });
-const child = spawn('wrangler', ['dev', '--local', '--config', 'wrangler.local.json', '--ip', '0.0.0.0', '--port', String(port), '--persist-to', '/data/workers'], {
+// The journal partitions run in a Worker of their own, as in a deployment; the Relay reaches them through its JOURNALS binding.
+const partitions = {
+  name: 'agent-remote-local-journals', main: './journals.js', compatibility_date: '2026-06-01', compatibility_flags: ['nodejs_compat'],
+  durable_objects: { bindings: [{ name: 'JOURNALS', class_name: 'JournalPartition' }] },
+  migrations: [{ tag: 'v1', new_sqlite_classes: ['JournalPartition'] }],
+};
+await writeFile(resolve(directory, 'wrangler.journals.local.json'), JSON.stringify(partitions, null, 2), { mode: 0o600 });
+const child = spawn('wrangler', ['dev', '--local', '--config', 'wrangler.local.json', '--config', 'wrangler.journals.local.json', '--ip', '0.0.0.0', '--port', String(port), '--persist-to', '/data/workers'], {
   cwd: directory, stdio: 'inherit', env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => child.kill(signal));

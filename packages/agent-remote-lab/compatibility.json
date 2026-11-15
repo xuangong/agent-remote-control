@@ -61,6 +61,7 @@
         "packages/agent-remote-cloudflare/test",
         "packages/agent-remote-cloudflare/tsconfig.json",
         "packages/agent-remote-cloudflare/vitest.config.ts",
+        "packages/agent-remote-cloudflare/wrangler.journals.jsonc",
         "packages/agent-remote-cloudflare/wrangler.jsonc",
         "packages/agent-remote-debugger/README.md",
         "packages/agent-remote-debugger/docs",
@@ -136,7 +137,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:1bb4f29e0ab2bf4f2793067efeaf654e23369c166d749b453932198bd27c27ec"
+      "digest": "sha256:52519cd16d3f357943e2715395237ecf4914e0ca011034fad3e3902e4e04b179"
     }
   },
   "providers": [

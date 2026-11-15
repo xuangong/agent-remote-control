@@ -1,4 +1,4 @@
-import { createHostedRelay, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
 import { createStateCommitLog } from './state-commit-log.js';
 import { SqliteTeamResourceStorage } from './team-resource-storage.js';
 import { createHmac } from 'node:crypto';
@@ -17,6 +17,10 @@ export interface RelayEnvironment extends HostedAuthEnvironment {
   RELAY: DurableObjectNamespace;
   ASSETS: Fetcher;
   CF_VERSION_METADATA?: { id: string };
+  /** The journal partitions, one Durable Object per Host, in the partitions Worker. */
+  JOURNALS?: DurableObjectNamespace;
+  /** Set to `1` to keep Host session journals in the journal partitions; otherwise no Controller is granted journals. */
+  AGENT_REMOTE_JOURNALS?: string;
 }
 
 const STATE_CACHE_VERIFY_EVERY = 500;
@@ -52,7 +56,9 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    this.core = createHostedRelay({ ...auth, ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+    const partitions = this.env.AGENT_REMOTE_JOURNALS === '1' ? this.env.JOURNALS : undefined;
+    const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
+    this.core = createHostedRelay({ ...auth, ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: hostedRecordEncodingCosts(auth, verification('capacity')), onStateCommit: metrics => log!.commit(metrics),
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });

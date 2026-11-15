@@ -957,10 +957,14 @@ git commit -m "feat(cloudflare): a journal partition Durable Object over the SQL
 **Files:**
 - Modify: `packages/agent-remote-cloudflare/src/relay-object.ts`
 - Modify: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`
+- Modify: `packages/agent-remote-hosted/src/journal-partition.ts`, `journal-partition.test.ts` (the rollout rule and its test)
+- Modify: `packages/agent-remote-cloudflare/scripts/build.mjs`, `package.json` (a second bundle, `deploy:dry-run` for both Workers)
+- Create: `packages/agent-remote-cloudflare/wrangler.journals.jsonc`
 - Modify: `packages/agent-remote-cloudflare/wrangler.jsonc`
+- Create: `deploy/self-hosted/wrangler.journals.jsonc`
 - Modify: `deploy/self-hosted/wrangler.jsonc`
 - Modify: `scripts/relay-workers-local.mjs`
-- Modify: `docs/self-hosted-deployment.md`
+- Modify: `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md`, `packages/agent-remote-cloudflare/README.md`
 
 - [ ] **Step 1: Write the failing test of the whole path.** Append to `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, and change its second import line from `import { fixture } from './fixture.js';` to `import { fixture, send } from './fixture.js';`:
 
@@ -1065,117 +1069,31 @@ Expected: PASS for all tests in the file.
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck` then `pnpm test:cloudflare` (Bash `timeout` 600000)
 Expected: PASS. The added Durable Object binding must not change any existing test.
 
-- [ ] **Step 6: Add the binding and the migration to the three configurations.**
+- [ ] **Step 6: Give the partitions their own Worker and bind it from the Relay.**
 
-`packages/agent-remote-cloudflare/wrangler.jsonc`: replace
+`packages/agent-remote-cloudflare/scripts/build.mjs` bundles two entries into `dist/cloudflare`: `worker: 'src/worker.ts'` and `journals: 'src/journal-worker.ts'` (`entryPoints` as an object, `outdir: '../../dist/cloudflare'`). The package script `deploy:dry-run` runs `wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run`.
 
-```jsonc
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "RELAY",
-        "class_name": "RelayObject"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "RelayObject"
-      ]
-    }
-  ],
-```
+New `packages/agent-remote-cloudflare/wrangler.journals.jsonc` (name `agent-remote-control-journals`, `main` `../../dist/cloudflare/journals.js`, the same compatibility date and flags, `workers_dev` and `preview_urls` off, no routes, no assets, no variables, a `JOURNALS` binding of class `JournalPartition`, migration `v1` with `new_sqlite_classes: ["JournalPartition"]`) and new `deploy/self-hosted/wrangler.journals.jsonc` (the same, name `my-agent-remote-journals`, `main` `../../dist/cloudflare/journals.js`).
 
-with
+In `packages/agent-remote-cloudflare/wrangler.jsonc` and `deploy/self-hosted/wrangler.jsonc` add to `durable_objects.bindings` `{ "name": "JOURNALS", "class_name": "JournalPartition", "script_name": "agent-remote-control-journals" }` (self-hosted: `my-agent-remote-journals`). The Relay configurations get no migration for the class: the partitions Worker owns it.
 
-```jsonc
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "RELAY",
-        "class_name": "RelayObject"
-      },
-      {
-        "name": "JOURNALS",
-        "class_name": "JournalPartition"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "RelayObject"
-      ]
-    },
-    {
-      "tag": "v2",
-      "new_sqlite_classes": [
-        "JournalPartition"
-      ]
-    }
-  ],
-```
-
-`deploy/self-hosted/wrangler.jsonc`: replace the two lines
-
-```jsonc
-  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
-```
-
-with
-
-```jsonc
-  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }, { "name": "JOURNALS", "class_name": "JournalPartition" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }, { "tag": "v2", "new_sqlite_classes": ["JournalPartition"] }],
-```
-
-`scripts/relay-workers-local.mjs`: replace
-
-```js
-  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }] },
-  migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }],
-```
-
-with
-
-```js
-  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }, { name: 'JOURNALS', class_name: 'JournalPartition' }] },
-  migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }, { tag: 'v2', new_sqlite_classes: ['JournalPartition'] }],
-```
+`scripts/relay-workers-local.mjs` writes a second configuration, `wrangler.journals.local.json` (name `agent-remote-local-journals`, `main` `./journals.js`, the binding and migration `v1`), binds `JOURNALS` in the Relay's configuration with `script_name: 'agent-remote-local-journals'`, passes `AGENT_REMOTE_JOURNALS` through when the environment sets it, and starts `wrangler dev --config wrangler.local.json --config wrangler.journals.local.json`. The Docker `workers` image already copies `dist/cloudflare`, which now holds both bundles.
 
 No configuration sets `AGENT_REMOTE_JOURNALS`, so journals stay off everywhere.
 
-- [ ] **Step 7: Validate the configurations with a dry run.**
+**Deploy order and rollout.** The partitions Worker, with its migration, deploys first, because the Relay's `JOURNALS` binding names it. `JournalPartitionApi` only ever gains methods: existing methods keep their names, argument lists and result shapes, so a newer Relay works with the previous partitions Worker and the reverse during a rollout, and a Relay that calls a new method deploys after a partitions Worker that has it. `journal-partition.test.ts` fixes the method list and arities so that a change must be deliberate. There is no CI workflow or script in the repository that deploys the Relay Worker (the two Controller workflows publish releases); the deploy commands live in `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md` and the package README, and all three now deploy the partitions Worker first. `scripts/gateway-relay-test-runtime.mjs` starts a Workers Relay for tests with journals off and without the binding; it stays as it is.
 
-Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second) then `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --outdir /tmp/arc-wrangler-dry` (Bash `timeout` 300000)
-Expected: the dry run succeeds and lists `env.JOURNALS (JournalPartition)  Durable Object` next to `env.RELAY (RelayObject)`.
+- [ ] **Step 7: Validate the configurations with dry runs.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config ../../deploy/self-hosted/wrangler.jsonc --outdir /tmp/arc-wrangler-dry-self`
-Expected: the same two bindings. Then `rm -rf /tmp/arc-wrangler-dry /tmp/arc-wrangler-dry-self`.
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second), then for each of `wrangler.journals.jsonc`, `wrangler.jsonc`, `../../deploy/self-hosted/wrangler.journals.jsonc`, `../../deploy/self-hosted/wrangler.jsonc`: `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config <file> --outdir /tmp/arc-dry-<n>` (Bash `timeout` 300000; wrangler runs in the package directory, so run the paths as shown). Never deploy.
+Expected: each succeeds. The partitions configurations list `env.JOURNALS (JournalPartition)`; the Relay configurations list `env.RELAY (RelayObject)` and `env.JOURNALS (JournalPartition, defined in <partitions Worker>)`. Then `rm -rf /tmp/arc-dry-*`.
+
+Run `scripts/relay-workers-local.mjs` once with a stub `wrangler` on `PATH` to read the configurations and arguments it writes, then start the real `wrangler dev` with both configurations on a free port and `--persist-to` a temporary directory: `/health` answers 200 and the log lists both Workers' bindings.
 
 Run: `node --test --test-timeout=60000 scripts/relay-local.test.mjs`
 Expected: PASS.
 
-- [ ] **Step 8: Document the Workers settings.** In `docs/self-hosted-deployment.md`, in the section `## Session journals (optional, off by default)` added by P1-B3a, change the cell of the `AGENT_REMOTE_JOURNALS=1` row to
-
-```markdown
-Turns journals on. Node / Docker: stores them in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`); needs Node 22.13 or later (the image uses Node 22) and prints one `ExperimentalWarning` for Node's built-in SQLite. Workers: keeps them in the journal partitions (below); set it as a variable. Unset or any other value: no journals.
-```
-
-and append to the end of that section:
-
-```markdown
-On Cloudflare Workers the journals live in one Durable Object per Host (`JournalPartition`, bound as `JOURNALS`), not in
-the main Relay object, so they do not count toward its state bound. The binding and the migration `v2` are in the
-shipped `wrangler.jsonc` files; a deployment that already runs adds both to its own file (keep the `v1` migration as
-it is), deploys, and then sets the variable `AGENT_REMOTE_JOURNALS` to `1`. Without the binding or the variable, no
-Controller is granted journals. A partition keeps at most 2 journals (20 MiB estimated) in memory, refuses growth of a
-session past 16 MiB, and stores at most 1 GiB per Host. Revoking a Host empties its partition.
-```
+- [ ] **Step 8: Document the Workers settings.** `docs/self-hosted-deployment.md`: the Workers commands dry-run and deploy both configurations, partitions first, with a paragraph that explains the two Workers; the `AGENT_REMOTE_JOURNALS=1` row covers Workers; the journals section gains a Workers paragraph (a partition per Host in a Worker of its own, deploy order, the add-only rollout rule, 2 journals and 20 MiB in memory, 12 MiB per session, 1 GiB per Host, revoking empties a partition). `docs/current/agent-remote/deployment.md` and the package README deploy the partitions Worker first. The text is in the files.
 
 Run: `pnpm lint:docs`
 Expected: PASS.
@@ -1183,7 +1101,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add packages/agent-remote-cloudflare deploy/self-hosted/wrangler.jsonc scripts/relay-workers-local.mjs docs/self-hosted-deployment.md
+git add packages/agent-remote-cloudflare packages/agent-remote-hosted/src deploy/self-hosted scripts/relay-workers-local.mjs docs/self-hosted-deployment.md docs/current/agent-remote/deployment.md docs/superpowers/plans/2026-11-15-p1b3b-cloudflare-journal-partition.md
 git commit -m "feat(cloudflare): reach the journal partitions from primary, behind a variable that is off by default" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
@@ -1239,10 +1157,6 @@ Run: `pnpm local down` when nobody needs the instance.
 
 ---
 
-## Task 3 must follow the separate Worker
-
-Task 3 below still binds `JournalPartition` inside the Relay Worker's own configuration. Replace it with: a second wrangler configuration for the partitions Worker (entry `src/journal-worker.ts`, class `JournalPartition`, migration `v1` with `new_sqlite_classes`), and in each Relay configuration a binding `{ "name": "JOURNALS", "class_name": "JournalPartition", "script_name": "<partitions Worker>" }` without a Relay migration for the class. The local development script starts both Workers. Revise the Task 3 steps, the deploy scripts and the document before running them.
-
 ## Self-review
 
 - **Partition class and RPC:** Tasks 1 to 3. One `JournalPartition` per Host through `getByName(hostId)`; the unchanged `createHostJournals` runs in it over `SqlJournalStore`; `primary` forwards through `createPartitionJournals`, keeps every socket and does the fan-out (the broker's `published` hook is unchanged and receives the partition's publication results).
@@ -1250,14 +1164,14 @@ Task 3 below still binds `JournalPartition` inside the Relay Worker's own config
 - **Durable Object limits:** Decision 4 and the tests: chunking (Task 2, first test), memory bounds (Decision 4, `JOURNAL_PARTITION_*`), RPC payload (the reply bound test and the index page test).
 - **Gating from a cached head index:** `createPartitionJournals` loads each Host once through `servedSessions` and stays current from publication results and deletions (Task 1 tests); the broker's gate from P1-B3a waits at most 2 s for the first load.
 - **Switch, retention, deletion over RPC:** the switch lives in `primary`'s Host record (P1-B3a); retention is the publish-time rule of the service running in the partition; `deleteHost` is ordered against publications by the proxy's queue and by the partition's own, and a deletion the partition did not confirm stays in `journalDeletions` until it does.
-- **Wrangler configuration and migration:** Task 3 Steps 6 and 7 (three configurations, dry runs).
+- **Wrangler configuration and migration:** Task 3 Steps 6 and 7 (a partitions Worker and the Relay configurations, dry runs, the deploy order).
 - **Test approach:** Miniflare with a real Worker and real Durable Object RPC, as the package already uses; the proxy logic is tested in Node with structured-clone "RPC".
 - **Local instance verification:** Task 4 Step 5, with its limits stated.
 
 ## Open risks
 
 - **Not run in workerd outside Miniflare.** The Workers runtime of `pnpm local` (Docker, `relay:local --runtime workers`) was not exercised; the dry runs validate the bindings and the migration only.
-- **The size estimate versus a 128 MB isolate.** The estimate counts JSON characters and heap use is up to twice that, plus transient buffers while a journal loads. The partition's bounds (2 journals, 20 MiB cache, 16 MiB per session) are conservative guesses; load a 16 MiB journal in the Miniflare fixture and watch memory before raising them, and revisit with the P0 numbers.
+- **The size estimate versus a 128 MB isolate.** The estimate counts UTF-8 bytes and heap use is up to twice that, plus transient buffers while a journal loads. The partition's bounds (2 journals, 20 MiB cache, 12 MiB per session) are conservative guesses; load a 12 MiB journal in the Miniflare fixture and watch memory before raising them, and revisit with the P0 numbers.
 - **RPC reply bound.** The page loop halves the limit until the estimated clone size fits 24 MiB; a single item above that (an item folded from many deltas) cannot be split and would fail the RPC. A journal message is at most 8 MiB, so one row cannot reach it, but many deltas of one item could.
 - **One extra hop.** Every browser read of a journal-served session costs a Durable Object RPC from `primary` (`status`, `page`), and every publication one more; P4 moves sockets next to the partitions.
 - **Deletion after a restart of `primary`.** The proxy's queue orders calls within one `primary` lifetime. A revoke records the Host in `journalDeletions` (P1-B3a), and the broker retries it at start and on every Host registration, so a deletion the partition did not confirm is not lost.

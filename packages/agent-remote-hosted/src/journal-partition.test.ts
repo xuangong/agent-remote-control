@@ -313,6 +313,15 @@ describe('the journals of primary over journal partitions', () => {
   }, DEADLINE_MS);
 });
 
+describe('the partition contract across a rollout', () => {
+  it('keeps every method and its arity, so a Relay and a partitions Worker of different versions still understand each other', () => {
+    // Adding a method is compatible; changing or removing one below is not: update this list only by adding.
+    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const arities = Object.fromEntries(Object.entries(api).map(([name, method]) => [name, method.length]));
+    expect(arities).toMatchObject({ open: 4, indexPage: 5, publish: 4, fill: 4, page: 4, status: 2, servedSessions: 1, deleteHost: 1 });
+  });
+});
+
 describe('estimateCloneBytes', () => {
   it('covers what V8 serializes for strings, numbers and nesting, and counts a string at two bytes per character', () => {
     const page = { kind: 'page', entries: [{ text: 'x'.repeat(1000), n: 1, ok: true, none: null }, { text: 'é'.repeat(500) }] };

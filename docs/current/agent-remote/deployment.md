@@ -66,6 +66,7 @@ Build from the Agents worktree with Node 22+ and pnpm 10:
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
 pnpm --filter @orchardworks/agent-remote-cloudflare run build
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run
 ```
 
@@ -79,8 +80,15 @@ and deploy using the respective project workflows. For Agents:
 
 ```sh
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put AGENT_REMOTE_SIGNING_SECRET
+# The journal partitions Worker first: the Relay's JOURNALS binding names it.
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --config wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy
 ```
+
+The partitions Worker (`agent-remote-control-journals`, `wrangler.journals.jsonc`) holds the session journals, one
+`JournalPartition` Durable Object per Host. It has no routes and no variables. Journals stay off until the Relay has
+`AGENT_REMOTE_JOURNALS=1`, which no configuration sets. Their calls between the two Workers only gain methods, so a
+newer Relay and an older partitions Worker (or the reverse) work together during a rollout.
 
 Gateway keeps its existing route and resources; set its secret using Wrangler
 from `vnext/apps/platform-cloudflare`. Deploy the reviewed Gateway integration

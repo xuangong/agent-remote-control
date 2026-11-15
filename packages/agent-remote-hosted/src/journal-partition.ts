@@ -20,6 +20,9 @@ export interface JournalPartitionRead {
 /**
  * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
  * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
+ *
+ * The Relay and the partitions Worker deploy separately, so either may be one version ahead of the other during a rollout:
+ * a method is only ever added, never changed or removed, and a Relay that calls a method deploys after the partitions Worker that has it.
  */
 export interface JournalPartitionApi {
   open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;

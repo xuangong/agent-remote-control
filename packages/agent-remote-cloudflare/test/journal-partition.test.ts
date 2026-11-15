@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 
-import { fixture } from './fixture.js';
+import { fixture, send } from './fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const SESSION = 'codex:thread-1';
@@ -129,4 +129,62 @@ test('keeps two journals in memory by default and reads a third one that was dro
   expect(await call(f, 'host-1', 'journalLoads')).toBe(before);
   await call(f, 'host-1', 'status', 'host-1', 'codex:a');
   expect(await call(f, 'host-1', 'journalLoads')).toBe(before + 1);
+}, 60_000);
+
+/** A Controller connected for journals: it registers (rotating its pairing key into a device credential on the first connection) and keeps what the Relay sends. */
+async function journalHost(f: Fixture, key: string) {
+  const socket = await f.upgrade('/ws/remote-host?journal=1', { authorization: `Bearer ${key}` });
+  const inbox: Array<Record<string, any>> = [];
+  socket.addEventListener('message', message => { inbox.push(JSON.parse(String(message.data))); });
+  const take = async (...types: string[]): Promise<Record<string, any>> => {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const at = inbox.findIndex(message => types.includes(message.type));
+      if (at >= 0) return inbox.splice(at, 1)[0]!;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`The Relay sent none of ${types.join(', ')}.`);
+  };
+  send(socket, { type: 'register', credentialRotation: true, installationId: 'journal-host', name: 'Journal Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+  let message = await take('credential_issued', 'registered');
+  let credential = key;
+  if (message.type === 'credential_issued') {
+    credential = message.credential;
+    send(socket, { type: 'credential_saved' });
+    message = await take('registered');
+  }
+  return { socket, take, registered: message, credential };
+}
+
+test('grants journals through the partitions, keeps journal rows out of primary and finds the journal again after a restart', async () => {
+  const f = await fixture({ journals: {} });
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered', journal: 1 });
+  const hostId = host.registered.hostId as string;
+  send(host.socket, { type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' });
+  expect(await host.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  send(host.socket, { type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [
+    { sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'm1', digest: 'digest-m1' }, head(3)] });
+  expect(await host.take('journal_ack')).toMatchObject({ generation: 1, watermark: 3 });
+  expect(await (await f.inspect('journal-tables')).json()).toEqual([]);
+  expect(await call(f, hostId, 'inspect', 'SELECT count(*) AS n FROM journal_sessions')).toEqual([{ n: 1 }]);
+  expect(await call(f, hostId, 'servedSessions', hostId)).toEqual([SESSION]);
+  host.socket.close();
+  await f.restart();
+  const again = await journalHost(f, host.credential);
+  expect(again.registered).toMatchObject({ type: 'registered', journal: 1, hostId });
+  send(again.socket, { type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' });
+  const reopened = await again.take('journal_opened');
+  expect(reopened).toMatchObject({ generation: 2, watermark: 3 });
+  expect(reopened.index.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m1']);
+}, 90_000);
+
+test('grants no journals when the Worker has the binding but the variable is not set', async () => {
+  const f = await fixture();
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered' });
+  expect(host.registered).not.toHaveProperty('journal');
 }, 60_000);

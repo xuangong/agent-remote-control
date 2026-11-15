@@ -146,15 +146,27 @@ pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
 pnpm --filter @orchardworks/agent-remote-cloudflare run build
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+  --config ../../deploy/self-hosted/wrangler.journals.jsonc --dry-run
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc --dry-run
 
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
   AGENT_REMOTE_SIGNING_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
   AGENT_REMOTE_GOOGLE_CLIENT_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
+# The partitions Worker first: the Relay's JOURNALS binding names it.
+pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+  --config ../../deploy/self-hosted/wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc
 ```
+
+There are two Workers: the Relay (`wrangler.jsonc`) and the journal partitions Worker
+(`wrangler.journals.jsonc`, default name `my-agent-remote-journals`). The Relay binds the
+partitions as `JOURNALS` through `script_name`, so deploy the partitions Worker, with its
+migration, before the Relay, and keep both names in step if you rename them. The partitions
+Worker has no routes and no variables and answers no request. Journals stay off until you set
+`AGENT_REMOTE_JOURNALS` (see Session journals).
 
 Wrangler prompts for your own Cloudflare authentication and secret values. The
 Google secret command is needed only in Google mode. Keep secrets out of `vars`.
@@ -239,7 +251,7 @@ installed, and nothing reads from a journal until the owner turns it on for a Ho
 
 | Setting | Meaning |
 | --- | --- |
-| `AGENT_REMOTE_JOURNALS=1` | Node / Docker only. Stores journals in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`). Needs Node 22.13 or later; the image uses Node 22. Node prints one `ExperimentalWarning` for its built-in SQLite. Unset or any other value: no journals. |
+| `AGENT_REMOTE_JOURNALS=1` | Turns journals on. Node / Docker: stores them in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`); needs Node 22.13 or later (the image uses Node 22) and prints one `ExperimentalWarning` for Node's built-in SQLite. Workers: keeps them in the journal partitions (below); set it as a variable. Unset or any other value: no journals. |
 | run `agent-remote-controller login` once, then `agent-remote-controller api PUT /v1/remote/hosts/<host id>/smart-reading --body '{"providerId":"codex","enabled":true}'` | The owner turns reading from journals on or off for one provider of one Host. The command line signs in as the owner and adds the account prefix, session, `Origin` and content type a direct request would need. The default is off. Turning it off closes that provider's journal-served streams so their pages reconnect and read through the Controller. `agent-remote-controller api GET /v1/remote/hosts/<host id>/smart-reading` lists the providers that are on. |
 
 Journals are a working set, not an archive: the native session on the Host is the ground truth. The Relay keeps the
@@ -251,6 +263,16 @@ registers, until the store confirms. The list of pending deletions holds 1,024 H
 oldest id, whose journals are then no longer deleted automatically (there is no supported way to remove them later short
 of deleting the database file while the Relay is stopped), and the Relay records a diagnostic. The journal file is inside
 the state directory, so the backup rules below cover it; copy it only while the Relay is stopped.
+
+On Cloudflare Workers the journals live in one Durable Object per Host (`JournalPartition`, bound as `JOURNALS`), in a
+Worker of its own, not in the main Relay object: they do not count toward its state bound, and a busy partition cannot
+reset the Relay's connections. The partitions Worker and the `JOURNALS` binding are in the shipped configurations; a
+deployment that already runs adds both to its own files, deploys the partitions Worker first and the Relay second, and only
+then sets the variable `AGENT_REMOTE_JOURNALS` to `1`. Without the binding or the variable, no Controller is granted
+journals. The two Workers deploy separately, so during a rollout either may be one version ahead: the calls between them
+only ever gain methods, so a newer Relay works with the previous partitions Worker and the reverse, as long as the
+partitions Worker is deployed first when a release adds a method. A partition keeps at most 2 journals (20 MiB estimated)
+in memory, refuses growth of a session past 12 MiB, and stores at most 1 GiB per Host. Revoking a Host empties its partition.
 
 ## Persistence, backups and upgrades
 

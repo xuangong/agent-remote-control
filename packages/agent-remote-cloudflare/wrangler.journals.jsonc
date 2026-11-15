@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // The Worker that holds the journal partitions, one Durable Object per Host. Deploy it before the Relay Worker:
+  // the Relay's JOURNALS binding names this Worker. It answers no request; only the Relay calls it.
+  "name": "agent-remote-control-journals",
+  "main": "../../dist/cloudflare/journals.js",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "JOURNALS",
+        "class_name": "JournalPartition"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "JournalPartition"
+      ]
+    }
+  ]
+}

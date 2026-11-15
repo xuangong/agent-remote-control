@@ -237,12 +237,9 @@ it('refuses requests for a Host that cannot publish journals or does not exist',
   await expect(plain.broker.requestOlder('no-such-host', SESSION, 5)).rejects.toMatchObject({ status: 404, code: 'host_not_found' });
 });
 
-it('refuses to open a journal whose index no message can carry, claims nothing and records a diagnostic', async () => {
+it('opens a journal whose index no single message can carry, and sends the rest a page at a time as the Controller asks', async () => {
   const memory = new MemoryJournalStore();
-  let saved: RelayDiagnostic[] = [];
-  const diagnostics = createDiagnosticJournal({ storage: { save: async events => { saved = structuredClone(events); } } });
-  close.push(() => diagnostics.close());
-  const probe = await connectedHost({ journals: memory, diagnostics });
+  const probe = await connectedHost({ journals: memory });
   const seeded = SessionJournal.create(probe.storeKey);
   const { generation } = seeded.claim('controller-1');
   for (let at = 0; at < 2100; at++) {
@@ -250,13 +247,22 @@ it('refuses to open a journal whose index no message can carry, claims nothing a
     seeded.append({ publisherId: 'controller-1', generation, sequence: at + 1 }, { ...row(itemKey, 'x'), sourceKey: itemKey });
   }
   await memory.apply(seeded.takeChanges()!);
-  probe.send({ type: 'journal_open', requestId: 'open-big', sessionKey: SESSION, publisherId: 'controller-2' });
-  expect(await probe.take('journal_open_refused')).toEqual({ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'open-big', sessionKey: SESSION, reason: 'index_too_large' });
-  expect((await memory.load(probe.storeKey))?.meta.publisher).toEqual({ publisherId: 'controller-1', generation: 1, watermark: 2100 });
-  await diagnostics.flush();
-  expect(saved).toEqual(expect.arrayContaining([expect.objectContaining({ event: 'journal_message_unencodable', hostId: probe.host.hostId })]));
-  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: 2, entries: [{ sequence: 1, op: 'seal', itemKey: 'x' }] });
-  expect(await probe.take('journal_refused')).toMatchObject({ reason: 'fenced' });
+  probe.send({ type: 'journal_open', requestId: 'open-big', sessionKey: SESSION, publisherId: 'controller-1' });
+  const opened = await probe.take('journal_opened');
+  expect(opened).toMatchObject({ requestId: 'open-big', generation: 2, watermark: 2100 });
+  expect(opened.indexAfter).toBeDefined();
+  const index: Wire[] = [...opened.index];
+  let after: number | undefined = opened.indexAfter;
+  for (let request = 0; after !== undefined; request++) {
+    probe.send({ type: 'journal_index_request', requestId: `index-${request}`, sessionKey: SESSION, generation: 2, epoch: opened.epoch, after });
+    const page = await probe.take('journal_index_page');
+    expect(page).toMatchObject({ requestId: `index-${request}`, sessionKey: SESSION });
+    index.push(...page.index);
+    after = page.indexAfter;
+  }
+  expect(index.map(entry => entry.seqStart)).toEqual(Array.from({ length: 2100 }, (_, at) => at + 1));
+  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: 2, entries: [{ sequence: 2101, op: 'seal', itemKey: index[0]!.itemKey }] });
+  expect(await probe.take('journal_ack')).toMatchObject({ generation: 2, watermark: 2101 });
 }, 30_000);
 
 it('records a diagnostic and closes the connection when the journal store fails', async () => {

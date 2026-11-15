@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import type { JournalIndexEntry } from '@orchardworks/agent-remote-journal';
 import {
-  encodeRemoteHostUplinkMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, REMOTE_HOST_UPLINK_VERSION,
+  encodeRemoteHostUplinkMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_INDEX_MAX_ITEMS, JOURNAL_INDEX_PAGE_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, REMOTE_HOST_UPLINK_VERSION,
   type JournalRefusalReason, type RemoteHostUplinkMessage,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { HostJournals, JournalFilled, JournalPublished } from './host-journals.js';
+import { packIndex } from './journal-index-pages.js';
 
 /** The most requests one connection has open to its Host at a time. */
 export const JOURNAL_REQUEST_LIMIT = 32;
@@ -14,10 +14,10 @@ export const JOURNAL_REQUEST_LIMIT = 32;
 export const JOURNAL_REQUEST_TIMEOUT_MS = 15_000;
 
 /** The journal messages a Host sends to its Relay. */
-export type JournalHostMessage = Extract<RemoteHostUplinkMessage, { type: 'journal_open' | 'journal_publish' | 'journal_fill' | 'journal_older_done' }>;
+export type JournalHostMessage = Extract<RemoteHostUplinkMessage, { type: 'journal_open' | 'journal_index_request' | 'journal_publish' | 'journal_fill' | 'journal_older_done' }>;
 
 export function isJournalHostMessage(message: RemoteHostUplinkMessage): message is JournalHostMessage {
-  return message.type === 'journal_open' || message.type === 'journal_publish' || message.type === 'journal_fill' || message.type === 'journal_older_done';
+  return message.type === 'journal_open' || message.type === 'journal_index_request' || message.type === 'journal_publish' || message.type === 'journal_fill' || message.type === 'journal_older_done';
 }
 
 export class JournalRequestError extends Error {
@@ -35,8 +35,8 @@ export interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Told about journal failures: a message that does not encode, a store that fails, and a fan-out that throws. */
-  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed'): void;
+  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, and live-only items the journal removed. */
+  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped'): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
@@ -125,17 +125,38 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
       switch (message.type) {
         case 'journal_open': {
           const { sessionKey, requestId } = message;
-          const reply = (generation: number, watermark: number, epoch: string, index: JournalIndexEntry[]): RemoteHostUplinkMessage =>
-            ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_opened', requestId, sessionKey, generation, watermark, epoch, index });
-          const result = await journals.open(hostId, sessionKey, message.publisherId, (index, epoch) => encodes(reply(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, epoch, index)));
+          const result = await journals.open(hostId, sessionKey, message.publisherId,
+            { maxIndexItems: JOURNAL_INDEX_MAX_ITEMS, pageItems: JOURNAL_INDEX_PAGE_MAX_ITEMS, allowed: () => options.current() });
           if (!options.current()) return;
           if ('refused' in result) {
             opened.delete(sessionKey);
-            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: result.refused });
+            if (result.refused === 'index_too_large') {
+              send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: 'index_too_large' });
+            }
             return;
           }
           opened.set(sessionKey, result.generation);
-          send(reply(result.generation, result.watermark, result.epoch, result.index));
+          const index = packIndex(result.index);
+          const last = index[index.length - 1];
+          send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_opened', requestId, sessionKey, generation: result.generation, watermark: result.watermark,
+            epoch: result.epoch, index, ...(last && (result.more || index.length < result.index.length) ? { indexAfter: last.seqStart } : {}) });
+          return;
+        }
+        case 'journal_index_request': {
+          const { sessionKey, requestId, generation, epoch, after } = message;
+          if (opened.get(sessionKey) !== generation) {
+            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: 'invalid' });
+            return;
+          }
+          const entries = await journals.indexPage(hostId, sessionKey, epoch, after, JOURNAL_INDEX_PAGE_MAX_ITEMS + 1);
+          if (!options.current()) return;
+          if (!entries) {
+            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: 'stale_epoch' });
+            return;
+          }
+          const index = packIndex(entries);
+          const last = index[index.length - 1];
+          send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_index_page', requestId, sessionKey, index, ...(last && entries.length > index.length ? { indexAfter: last.seqStart } : {}) });
           return;
         }
         case 'journal_publish': {
@@ -150,12 +171,14 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             try { options.published?.(sessionKey, result); }
             catch { options.diagnostic?.('journal_fanout_failed'); }
           }
+          if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
           if (!options.current()) return;
           if (result.cursor && stored) {
             send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_ack', sessionKey, generation, watermark: result.watermark, cursor: result.cursor });
           }
           if (result.refusal) {
             const { sequence, reason, itemKey } = result.refusal;
+            if (reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
             refuse(sessionKey, generation, sequence, reason, itemKey);
           }
           return;

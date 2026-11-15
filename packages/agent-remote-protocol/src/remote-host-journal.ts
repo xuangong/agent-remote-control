@@ -99,7 +99,7 @@ export const JournalIndexRequest = Type.Object({ requestId, sessionKey, generati
  * the Controller after the last page. `indexAfter` is absent when `index` is the whole index.
  */
 export const JournalOpened = Type.Object({ requestId, sessionKey, generation, watermark: SafeNonNegativeInteger, epoch: identity,
-  index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS }), indexAfter: Type.Optional(SafeTimelinePosition) }, object);
+  index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_PAGE_MAX_ITEMS }), indexAfter: Type.Optional(SafeTimelinePosition) }, object);
 /** The answer to a `journal_index_request`: the next entries in order, and `indexAfter` when more follow. */
 export const JournalIndexPage = Type.Object({ requestId, sessionKey,
   index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_PAGE_MAX_ITEMS }), indexAfter: Type.Optional(SafeTimelinePosition) }, object);

@@ -1584,13 +1584,32 @@ describe('a quota refusal and the live-only cap', () => {
     expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')])).unserved).toBeUndefined();
   });
 
-  it('removes the oldest live-only items beyond the cap, with their bodies, and reports how many', async () => {
+  it('removes the oldest complete live-only items beyond the cap, with their bodies, and reports how many', async () => {
     const { journals, store } = fixture({ limits: { liveOnlyItems: 2 } });
     await open(journals, HOST, SESSION);
-    const result = await journals.publish(HOST, SESSION, 1, [live(1, 'l1'), live(2, 'l2'), live(3, 'l3'), append(4, 'm1', 'kept', 1)]);
+    const result = await journals.publish(HOST, SESSION, 1, [live(1, 'l1'), live(2, 'l2'), live(3, 'l3'), complete(4, 'l1'), complete(5, 'l2'), complete(6, 'l3'), append(7, 'm1', 'kept', 1)]);
     expect(result.droppedLiveOnly).toBe(1);
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l2', 'l3', 'm1']);
-    expect((await journals.publish(HOST, SESSION, 1, [append(5, 'm1', 'more', 1)])).droppedLiveOnly).toBeUndefined();
+    expect((await journals.publish(HOST, SESSION, 1, [append(8, 'm1', 'more', 1)])).droppedLiveOnly).toBeUndefined();
+  });
+
+  it('never removes an open live-only item, so the count may stay above the cap, and removes the excess when an item completes', async () => {
+    const { journals, store } = fixture({ limits: { liveOnlyItems: 2 } });
+    await open(journals, HOST, SESSION);
+    const open3 = await journals.publish(HOST, SESSION, 1, [live(1, 'l1'), live(2, 'l2'), live(3, 'l3'), append(4, 'm1', 'kept', 1)]);
+    expect(open3.droppedLiveOnly).toBeUndefined();
+    expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l1', 'l2', 'l3', 'm1']);
+    const completed = await journals.publish(HOST, SESSION, 1, [complete(5, 'l1')]);
+    expect(completed.droppedLiveOnly).toBe(1);
+    expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l2', 'l3', 'm1']);
+  });
+
+  it('measures a replacement in UTF-8 bytes, so a three-byte character counts three times against the session budget', async () => {
+    const { journals } = fixture({ limits: { sessionBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    const replace = (text: string): JournalPublishEntry => ({ sequence: 1, op: 'replace', items: [{ row: rowOf('m1', text), digest: 'digest-m1' }] });
+    expect((await journals.publish(HOST, SESSION, 1, [replace('字'.repeat(1100))])).refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
+    expect((await journals.publish(HOST, SESSION, 1, [replace('x'.repeat(1100))])).refusal).toBeUndefined();
   });
 });
 
@@ -1972,14 +1991,16 @@ Replace the test `refuses an open whose reply fits only with small numbers, with
     expect(events).toEqual(['journal_quota_exceeded']);
   });
 
-  it('reports live-only items the journal removed beyond its cap', async () => {
+  it('reports live-only items the journal removed beyond its cap once they are complete', async () => {
     const events: string[] = [];
     const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { liveOnlyItems: 1 } });
     const f = fixture({ journals, diagnostic: event => events.push(event) });
     await f.open();
     await f.publish([{ sequence: 1, op: 'append', row: { ...row('l1', 'a'), liveOnly: true } }, { sequence: 2, op: 'append', row: { ...row('l2', 'b'), liveOnly: true } }]);
+    expect(events).toEqual([]);
+    await f.publish([{ sequence: 3, op: 'complete', itemKey: 'l1', digest: DIGEST }, { sequence: 4, op: 'complete', itemKey: 'l2', digest: DIGEST }]);
     expect(events).toEqual(['journal_live_only_dropped']);
-    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', watermark: 2 });
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', watermark: 4 });
   });
 ```
 
@@ -2048,7 +2069,7 @@ and change the `parseRelayDiagnosticBatch` line to `const batch = parseRelayDiag
 In `packages/agent-remote-protocol/src/remote-host-journal.ts`, in `JournalOpened`, change `index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS })` to `index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_PAGE_MAX_ITEMS })`.
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS. Rebuilding makes the hosted tests below use the narrowed schema.
+Expected: PASS, 412 tests (the new invalid-list case fails first). Rebuilding makes the hosted tests below use the narrowed schema.
 
 - [ ] **Step 4: Run the tests and see them fail.**
 
@@ -2132,7 +2153,7 @@ export function packIndex(entries: readonly JournalIndexEntry[]): JournalIndexEn
 ```ts
 import {
   bodyFromRow, JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, JournalItemTypeChangedError,
-  JournalStaleRevisionError, JournalUnknownItemError, SessionJournal,
+  JournalStaleRevisionError, JournalUnknownItemError, SessionJournal, utf8ByteLength,
   type JournalHead, type JournalIndexEntry, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
 import { JOURNAL_INDEX_MAX_ITEMS, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
@@ -2147,7 +2168,7 @@ const CACHE_MAX_BYTES = 128 * 1024 * 1024;
 const SESSION_MAX_BYTES = 64 * 1024 * 1024;
 /** The estimated size of all journals of a Host above which a growing entry is refused. */
 const HOST_MAX_BYTES = 1024 * 1024 * 1024;
-/** Live-only items kept per session; beyond it the oldest are removed. */
+/** Live-only items kept per session; beyond it the oldest complete ones are removed. An open one is never removed, so open items can keep the count above this. */
 const LIVE_ONLY_MAX_ITEMS = 2000;
 /** Turns whose bodies stay resident. */
 const RETAIN_TURNS = 50;
@@ -2444,7 +2465,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     return entry => {
       if (entry.op === 'replace') {
         if (entry.items.length + journal.liveOnlyCount > limits.sessionItems) throw new JournalQuotaRefused('items');
-        const need = JSON.stringify(entry).length + journal.liveOnlyBytes();
+        const need = utf8ByteLength(JSON.stringify(entry)) + journal.liveOnlyBytes();
         if (need > limits.sessionBytes) throw new JournalQuotaRefused('session');
         if (!hostHasRoom(hostId, sessionKey, need)) throw new JournalQuotaRefused('host');
         size = undefined;
@@ -2454,7 +2475,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const itemsAfter = entry.op === 'append' ? journal.itemCount + (journal.has(entry.row.itemKey) ? 0 : 1)
         : entry.op === 'prepend' ? journal.itemCount + entry.items.length : journal.itemCount;
       if (itemsAfter > limits.sessionItems) throw new JournalQuotaRefused('items');
-      const entryBytes = JSON.stringify(entry).length;
+      const entryBytes = utf8ByteLength(JSON.stringify(entry));
       size ??= journal.residentBytes();
       if (size + entryBytes > limits.sessionBytes) size = shrink(journal, limits.sessionBytes - entryBytes);
       if (size + entryBytes > limits.sessionBytes) throw new JournalQuotaRefused('session');
@@ -2559,7 +2580,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
             apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);
             if (fresh) {
               applied = true;
-              if (entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)) liveOnlyChanged = true;
+              if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)) liveOnlyChanged = true;
             }
           } catch (error) {
             const refusal = refusalOf(error, entry.sequence);
@@ -2601,7 +2622,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       let trimmed = false;
       for (const { row, digest } of items) {
         if (!journal || !journal.has(row.itemKey)) { unknown.push(row.itemKey); continue; }
-        const added = JSON.stringify(row).length;
+        const added = utf8ByteLength(JSON.stringify(row));
         if (!fits(journal, added) && !trimmed) {
           // The first body that does not fit: bodies outside the latest turns, such as ones filled earlier, make room once.
           trimmed = true;
@@ -2782,17 +2803,17 @@ In `packages/agent-remote-hosted/src/index.ts`, add `type JournalOpenOptions` to
 - [ ] **Step 8: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/host-journals-bounds.test.ts src/journal-index-pages.test.ts src/host-journals.test.ts src/journal-uplink.test.ts src/broker-journals.test.ts src/relay-diagnostics.test.ts --testTimeout=10000`
-Expected: PASS. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
+Expected: PASS, 6 files and 113 tests. Live-only items are closed (completed) in the tests before they are dropped: the core removes only complete live-only items, so the service runs the cap after `complete` as well as after an append of a live-only row, a seal and a replacement. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
 
 - [ ] **Step 9: Run the whole package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all. The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
+Expected: PASS for all: 66 files and 830 tests in hosted (790 before this task). The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
 
 - [ ] **Step 10: Commit.**
 
 ```bash
-git add packages/agent-remote-hosted/src
+git add packages/agent-remote-hosted/src packages/agent-remote-protocol/src packages/agent-remote-lab/compatibility.json
 git commit -m "feat(hosted): bound the journal service, take a quota-refused session out of serving, fill within limits, and pull the index page by page" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

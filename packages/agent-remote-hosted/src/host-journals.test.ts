@@ -1,8 +1,8 @@
-import { MemoryJournalStore, SessionJournal, type JournalIndexEntry, type JournalStore } from '@orchardworks/agent-remote-journal';
+import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
 import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { createHostJournals, type HostJournals, type JournalOpened } from './host-journals.js';
+import { createHostJournals, type HostJournals, type JournalOpenOptions, type JournalOpened } from './host-journals.js';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -20,9 +20,9 @@ const snapshot = {
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const },
 };
 
-const fitsAlways = () => true;
-const openSession = (journals: HostJournals, hostId: string, sessionKey: string, publisherId: string, fits: (index: JournalIndexEntry[], epoch: string) => boolean = fitsAlways) =>
-  journals.open(hostId, sessionKey, publisherId, fits) as Promise<JournalOpened>;
+const LIMITS: JournalOpenOptions = { maxIndexItems: 1_000_000, pageItems: 1_000_000 };
+const openSession = (journals: HostJournals, hostId: string, sessionKey: string, publisherId: string, options: JournalOpenOptions = LIMITS) =>
+  journals.open(hostId, sessionKey, publisherId, options) as Promise<JournalOpened>;
 
 function fixture(store: JournalStore = new MemoryJournalStore()) {
   return { journals: createHostJournals({ store, now: () => 1_000 }), store };
@@ -38,11 +38,11 @@ describe('createHostJournals', () => {
     expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, epoch: first.epoch });
   });
 
-  it('claims nothing when the reply for the index cannot be sent', async () => {
+  it('claims nothing when the index is larger than the Relay may send', async () => {
     const { journals, store } = fixture();
     await openSession(journals, HOST, SESSION, 'controller-1');
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
-    expect(await journals.open(HOST, SESSION, 'controller-1', () => false)).toEqual({ refused: 'index_too_large' });
+    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 0, pageItems: 10 })).toEqual({ refused: 'index_too_large' });
     expect((await store.load(KEY))?.meta.publisher?.generation).toBe(1);
     expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1 });
   });
@@ -317,8 +317,8 @@ describe('createHostJournals', () => {
     const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
       apply: async changes => { if (failures-- > 0) throw new Error('disk full'); await memory.apply(changes); } };
     const { journals } = fixture(store);
-    const first = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
-    const second = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
+    const first = journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const second = journals.open(HOST, SESSION, 'controller-1', LIMITS);
     await expect(first).rejects.toThrow('disk full');
     expect(await second).toMatchObject({ generation: 1 });
   });
@@ -330,7 +330,7 @@ describe('createHostJournals', () => {
     const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
       apply: async changes => { if (changes.meta.sessionKey.startsWith(`${HOST}:`)) await gate; await memory.apply(changes); } };
     const { journals } = fixture(store);
-    const blocked = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
+    const blocked = journals.open(HOST, SESSION, 'controller-1', LIMITS);
     expect(await openSession(journals, 'host-2', SESSION, 'controller-2')).toMatchObject({ generation: 1 });
     release();
     expect(await blocked).toMatchObject({ generation: 1 });

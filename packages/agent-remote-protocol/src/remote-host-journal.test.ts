@@ -96,6 +96,8 @@ describe('journal uplink envelopes', () => {
     ['an index page with a cursor and no entries', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [], indexAfter: -2 })],
     ['a first page with a cursor and no entries', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [], indexAfter: 0 })],
     ['a first page whose cursor is not its last position', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [indexEntry], indexAfter: 7 })],
+    ['a first page above the page bound', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e',
+      index: Array.from({ length: JOURNAL_INDEX_PAGE_MAX_ITEMS + 1 }, (_, at) => ({ ...indexEntry, itemKey: `i${at}`, seqStart: at, seqEnd: at })) })],
     ['an acknowledgement without an epoch', message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 1, cursor: { seq: 1 } })],
     ['a refusal with an unknown reason', message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 1, reason: 'nope' })],
     ['an open refusal with an unknown reason', message({ type: 'journal_open_refused', requestId: 'o', sessionKey: SESSION, reason: 'nope' })],

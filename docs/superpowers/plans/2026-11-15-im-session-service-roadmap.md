@@ -33,7 +33,7 @@ Every plan follows the repository rules in `AGENTS.md`:
   - Decide journal-served gating from an in-memory index of sessions that have a head, so opening a crude stream never waits on the store or on the Host's journal queue.
   - Page the index in `journal_opened` once it no longer fits in one 8 MiB uplink message. Long item keys reach that point well before 30,000 items.
 - **P1-C: chunk large rereads.** A single `replace` or `prepend` message is capped at 8 MiB, so the Controller chunks large rereads.
-- **P1-C: advertise diagnostic delivery version 4.** Journal diagnostics (`journal_message_unencodable`, `journal_store_failed`) reach only Controllers that advertise version 4. Every Controller advertises 3 today (`packages/agent-host/src/host.ts`), and it already decodes these events through the shared module.
+- **P1-C: advertise diagnostic delivery version 4.** Journal diagnostics (`journal_message_unencodable`, `journal_store_failed`, `journal_fanout_failed`) reach only Controllers that advertise version 4. Every Controller advertises 3 today (`packages/agent-host/src/host.ts`), and it already decodes these events through the shared module.
 - **P1-C: amendments and runtime events for journal-served clients.**
   - The journal has no amendment path yet, so a resource-binding replacement (`timeline_resource_binding_replaced`) never reaches a journal-served client; neither do non-timeline `agent_stream` events.
   - The publisher and the journal core add both.

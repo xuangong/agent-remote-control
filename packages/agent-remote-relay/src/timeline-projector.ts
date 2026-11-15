@@ -10,7 +10,7 @@ import { PROTOCOL_VERSION, mergeBackgroundActivity } from '@orchardworks/agent-r
 
 import { TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 
-export type { CanonicalTimelineRow } from './timeline-store.js';
+export { rowItemKey, type CanonicalTimelineRow } from './timeline-store.js';
 
 export interface TimelinePageRequest {
   requestId: string;

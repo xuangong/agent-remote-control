@@ -346,6 +346,7 @@ describe('session wire Timeline and manager-event projection', () => {
       agentId: 'agent-1',
       epoch: 'epoch-1',
       seq: 2,
+      itemKey: 'item-1',
       previous: { locator: 'output.png', resourceId: 'resource-2', status: 'pending' },
       replacement: { locator: 'output.png', resourceId: 'resource-1', status: 'available' },
     };

@@ -22,6 +22,7 @@ import type {
   AgentStreamEvent,
   ProviderObservation,
 } from '@orchardworks/agent-provider-sdk';
+import { supportsJournal } from '@orchardworks/agent-provider-sdk';
 import {
   PROTOCOL_VERSION,
   type AgentCommand,
@@ -38,11 +39,13 @@ import { createLocalFileResourceReader, type LocalFileResourceReader } from './r
 import { ResourceIngestor } from './resources/resource-ingestor.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
-import { TimelineStore } from './timeline-store.js';
+import { rowItemKey, TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 import { SessionSettingChanges, type SessionSettingIntentLifecycle } from './session-setting-changes.js';
 import type { OperationLifecycle } from './operation-settlement.js';
 
 export interface AgentManagerAttachOptions {
+  /** The provider declares `journal`: its observations carry item identities, and a missing one is told to the journal taps. */
+  journalContract?: true;
   agentId: string;
   provider: AgentProviderDescriptor;
   session: AgentSession;
@@ -80,6 +83,25 @@ export interface AgentManagerResumeOptions {
 
 export type AgentManagerListener = (event: AgentManagerEvent) => void;
 
+/**
+ * A follower that is not a viewer: it receives every event, but its presence does not keep an idle session from being
+ * released. The journal publisher is one.
+ */
+export interface AgentJournalTap {
+  event(event: AgentManagerEvent): void;
+  /** The manager closed; no more events follow. */
+  closed(): void;
+  /** A journal-capable provider broke the identity contract: an observation without `itemIdentity`, or with a key of the reserved `controller:` prefix. Told once per manager. */
+  identityMissing?(): void;
+}
+
+export interface AgentJournalSubscription {
+  /** The timeline as it stood when the tap began, oldest first. Events delivered to the tap after it are the changes since. */
+  rows: CanonicalTimelineRow[];
+  snapshot: AgentSnapshot;
+  release(): void;
+}
+
 export type InteractionResponseErrorCode = 'stale_interaction' | 'invalid_interaction_response';
 
 export class InteractionResponseError extends Error {
@@ -110,6 +132,8 @@ export class AgentManager {
   private applyingState = false;
   private readonly settingChanges: SessionSettingChanges;
   private readonly listeners = new Set<AgentManagerListener>();
+  private readonly taps = new Set<AgentJournalTap>();
+  private identityBroken = false;
   private timeline: TimelineStore;
   private attentionCursor: TimelineCursor;
   private attentionTurnId?: string;
@@ -146,6 +170,7 @@ export class AgentManager {
     private readonly inputImageStore?: InputImageStore,
     private readonly settingIntent?: OperationLifecycle['settingIntent'],
     private readonly inputResourceStore?: InputResourceStore,
+    private readonly journalContract = false,
   ) {
     this.timeline = new TimelineStore(epoch);
     this.attentionCursor = { epoch, seq: 0 };
@@ -213,6 +238,7 @@ export class AgentManager {
       options.inputImageStore,
       options.settingIntent,
       options.inputResourceStore,
+      options.journalContract === true,
     );
   }
 
@@ -241,6 +267,7 @@ export class AgentManager {
         agentId: options.agentId,
         provider: options.adapter.descriptor,
         session,
+        ...(supportsJournal(options.adapter) ? { journalContract: true as const } : {}),
         epoch: options.epoch,
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.resourceStore === undefined ? {} : { resourceStore: options.resourceStore }),
@@ -302,9 +329,16 @@ export class AgentManager {
     const page = this.fetchTimeline(request);
     if (request.direction !== 'before' || page.payload.reset || page.payload.gap || !this.olderHistoryCursor
       || page.payload.entries.length >= request.limit || !this.session.readTimelineHistory) return page;
+    await this.readOlderPage();
+    return this.fetchTimeline(request);
+  }
+
+  /** Reads one older page of native history into the timeline; callers that arrive while a read is running share it. */
+  private readOlderPage(): Promise<void> {
     if (!this.historyLoading) {
       const timeline = this.timeline;
       const cursor = this.olderHistoryCursor;
+      if (!cursor || !this.session.readTimelineHistory) return Promise.resolve();
       const load = async () => {
         const history = await this.session.readTimelineHistory!(cursor);
         if (this.closed || this.timeline !== timeline) return;
@@ -319,13 +353,54 @@ export class AgentManager {
       const pending = load().finally(() => { if (this.historyLoading === pending) this.historyLoading = undefined; });
       this.historyLoading = pending;
     }
-    await this.historyLoading;
-    return this.fetchTimeline(request);
+    return this.historyLoading as Promise<void>;
+  }
+
+  /** Whether native history may hold rows older than the timeline's oldest. */
+  hasOlderHistory(): boolean {
+    return this.olderHistoryCursor !== undefined && this.session.readTimelineHistory !== undefined;
+  }
+
+  /** Reads one older page of native history into the timeline, as a reader scrolling back would. */
+  async loadOlderHistory(): Promise<{ added: number; more: boolean }> {
+    if (!this.hasOlderHistory()) return { added: 0, more: false };
+    const before = this.timeline.rowCount();
+    await this.readOlderPage();
+    return { added: this.timeline.rowCount() - before, more: this.hasOlderHistory() };
   }
 
   subscribe(listener: AgentManagerListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * Follows this manager without being a viewer. The timeline and the events after it join without a gap. A manager that
+   * is closed already tells the tap so at once and delivers nothing, so a follower never waits for events that cannot come.
+   */
+  subscribeJournal(tap: AgentJournalTap): AgentJournalSubscription {
+    if (this.closed) {
+      try { tap.closed(); } catch { /* A tap cannot keep the manager open. */ }
+      return { rows: [], snapshot: this.snapshot(), release: () => undefined };
+    }
+    this.taps.add(tap);
+    if (this.identityBroken) queueMicrotask(() => { try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ } });
+    return { rows: this.timelineRows(), snapshot: this.snapshot(), release: () => { this.taps.delete(tap); } };
+  }
+
+  /** The timeline's rows, oldest first, with the item identity each came with. */
+  timelineRows(): CanonicalTimelineRow[] {
+    return [...this.timeline.rows()];
+  }
+
+  /** The rows of one item in sequence order; none for an unknown key. */
+  itemRows(key: string): CanonicalTimelineRow[] {
+    return this.timeline.rowsOfItem(key);
+  }
+
+  /** The key of the item the attention cursor points at, when that row is still in the timeline. */
+  attentionItemKey(): string | undefined {
+    return this.attentionCursor.epoch === this.timeline.epoch ? this.timeline.itemKeyAt(this.attentionCursor.seq) : undefined;
   }
 
   replaceTimeline(epoch: string): void {
@@ -638,6 +713,10 @@ export class AgentManager {
     this.settingChanges.close();
     this.resolveReadiness();
     this.listeners.clear();
+    for (const tap of [...this.taps]) {
+      this.taps.delete(tap);
+      try { tap.closed(); } catch { /* A tap cannot keep the manager open. */ }
+    }
     try {
       await this.session.dispose();
     } finally {
@@ -716,6 +795,7 @@ export class AgentManager {
 
   private async applyObservation(observation: ProviderObservation, historical = false): Promise<void> {
     if (this.isDuplicate(observation)) return;
+    this.checkIdentity(observation);
     let event = observation.event;
     if (observation.delivery === 'history' && event.type === 'background_activity_updated') {
       this.timeline.updateBackground(event.background);
@@ -775,6 +855,7 @@ export class AgentManager {
         occurredAt: observation.occurredAt,
         ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
         item: event.item,
+        ...(observation.itemIdentity === undefined ? {} : { identity: observation.itemIdentity }),
       });
       if (result.status === 'duplicate') return;
       this.remember(observation);
@@ -804,6 +885,7 @@ export class AgentManager {
               agentId: this.agentId,
               epoch: result.row.epoch,
               seq: result.row.seq,
+              itemKey: rowItemKey(result.row),
               previous,
               replacement: binding,
             });
@@ -837,6 +919,7 @@ export class AgentManager {
           ...(observation.nativeRevision === undefined ? {} : { nativeRevision: observation.nativeRevision }),
           ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
           item: completed.item,
+          ...(observation.itemIdentity === undefined ? {} : { identity: observation.itemIdentity }),
         });
         if (result.status === 'appended') this.emitStream(completed, result.row.timestamp, result.row);
       }
@@ -975,6 +1058,26 @@ export class AgentManager {
       } catch {
         this.listeners.delete(listener);
       }
+    }
+    for (const tap of [...this.taps]) {
+      try {
+        tap.event(structuredClone(event));
+      } catch {
+        this.taps.delete(tap);
+      }
+    }
+  }
+
+  /** A journal-capable provider owes an identity to every timeline observation and every `interaction_resolved` one. */
+  private checkIdentity(observation: ProviderObservation): void {
+    if (!this.journalContract || this.identityBroken) return;
+    const event = observation.event;
+    if (event.type !== 'timeline' && event.type !== 'interaction_resolved') return;
+    const key = observation.itemIdentity?.key;
+    if (key !== undefined && key.length > 0 && key.length <= 4096 && !key.startsWith('controller:')) return;
+    this.identityBroken = true;
+    for (const tap of [...this.taps]) {
+      try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ }
     }
   }
 }

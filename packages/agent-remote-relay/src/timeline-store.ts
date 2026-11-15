@@ -1,4 +1,4 @@
-import type { AgentTimelineItem } from '@orchardworks/agent-provider-sdk';
+import type { AgentTimelineItem, ProviderItemIdentity } from '@orchardworks/agent-provider-sdk';
 import { mergeBackgroundActivity, type BackgroundActivity } from '@orchardworks/agent-remote-protocol';
 import type { ResourceBinding, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
@@ -13,6 +13,13 @@ export interface CanonicalTimelineRow {
   turnId?: string;
   item: AgentTimelineItem;
   resources: ResourceBinding[];
+  /** What the provider said about the item this row belongs to; absent for a provider that does not declare journal support. */
+  identity?: ProviderItemIdentity;
+}
+
+/** The key a row's item has in a journal: the provider's, or one made from the row's source for a row that has none. */
+export function rowItemKey(row: Pick<CanonicalTimelineRow, 'identity' | 'sourceKey'>): string {
+  return row.identity?.key ?? `controller:${row.sourceKey}`;
 }
 
 export type TimelineRowInput = Omit<CanonicalTimelineRow, 'epoch' | 'seq' | 'timestamp' | 'resources'> & {
@@ -30,6 +37,8 @@ export type TimelineAppendResult = {
 export class TimelineStore {
   private readonly timelineRows: CanonicalTimelineRow[] = [];
   private readonly rowsBySourceRevision = new Map<string, Map<number | null, CanonicalTimelineRow>>();
+  /** The rows of each item in sequence order; they are the rows of `timelineRows`, so later changes to a row show here. */
+  private readonly rowsByItem = new Map<string, CanonicalTimelineRow[]>();
 
   private readonly backgroundOutcomes = new Map<string, BackgroundActivity>();
 
@@ -56,6 +65,7 @@ export class TimelineStore {
     };
     this.applyBackground(row);
     this.timelineRows.push(row);
+    this.indexItem(row, 'end');
     if (sourceRevisions) sourceRevisions.set(revision, row);
     else this.rowsBySourceRevision.set(input.sourceKey, new Map([[revision, row]]));
     return { status: 'appended', row: structuredClone(row) };
@@ -73,9 +83,40 @@ export class TimelineStore {
       timestamp: new Date(input.occurredAt).toISOString(), resources: structuredClone(input.resources ?? []) };
     this.applyBackground(row);
     this.timelineRows.unshift(row);
+    this.indexItem(row, 'start');
     if (revisions) revisions.set(revision, row);
     else this.rowsBySourceRevision.set(input.sourceKey, new Map([[revision, row]]));
     return { status: 'appended', row: structuredClone(row) };
+  }
+
+  private indexItem(row: CanonicalTimelineRow, end: 'start' | 'end'): void {
+    const key = rowItemKey(row);
+    const rows = this.rowsByItem.get(key);
+    if (!rows) this.rowsByItem.set(key, [row]);
+    else if (end === 'end') rows.push(row);
+    else rows.unshift(row);
+  }
+
+  /** How many rows the timeline holds. */
+  rowCount(): number { return this.timelineRows.length; }
+
+  /** The rows of one item in sequence order, as they stand now; none for a key the timeline does not know. */
+  rowsOfItem(key: string): CanonicalTimelineRow[] {
+    return structuredClone(this.rowsByItem.get(key) ?? []);
+  }
+
+  /** The key of the item the row at `seq` belongs to. */
+  itemKeyAt(seq: number): string | undefined {
+    let low = 0;
+    let high = this.timelineRows.length - 1;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const row = this.timelineRows[middle] as CanonicalTimelineRow;
+      if (row.seq === seq) return rowItemKey(row);
+      if (row.seq < seq) low = middle + 1;
+      else high = middle - 1;
+    }
+    return undefined;
   }
 
   updateBackground(background: BackgroundActivity): void {

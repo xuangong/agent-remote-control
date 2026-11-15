@@ -30,6 +30,8 @@ export type AgentManagerEvent =
       agentId: string;
       epoch: string;
       seq: number;
+      /** The key of the item whose row was rebound, as `rowItemKey` names it. */
+      itemKey: string;
       previous: ResourceBinding;
       replacement: ResourceBinding;
     }

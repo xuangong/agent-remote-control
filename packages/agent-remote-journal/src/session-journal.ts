@@ -2,8 +2,9 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import { canonicalRow, entryBody, itemEntry, mergeResources, stampRow } from './journal-items.js';
+import { replacementOrder } from './replacement.js';
 import {
-  JournalBodyMissingError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
+  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
   type CompleteItemInput, type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
@@ -56,26 +57,32 @@ export class SessionJournal {
   /** Appends one live row, opening its item or folding into it. Returns undefined for a duplicate publication. */
   append(publication: JournalPublication, input: JournalRowInput): JournalRow | undefined {
     if (this.duplicate(publication)) return undefined;
+    const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     const existing = this.byKey.get(input.itemKey);
     if (existing && existing.body === null) throw new JournalBodyMissingError(input.itemKey);
     const existingType = existing?.body?.item.type;
     if (existingType !== undefined && existingType !== input.item.type) {
       throw new JournalItemTypeChangedError(input.itemKey, existingType, input.item.type);
     }
-    this.advance(publication);
-    const row = stampRow(this.meta.epoch, this.meta.nextSeq++, input);
-    if (existing) {
-      const entry = itemEntry(existing);
-      mergeRowIntoEntry(entry, canonicalRow(row));
-      existing.seqEnd = entry.seqEnd;
-      existing.sourceSeqRanges = entry.sourceSeqRanges;
-      existing.body = entryBody(entry);
-      if (input.liveOnly) existing.liveOnly = true;
-      existing.revision += 1;
-      this.dirty.add(existing.itemKey);
-    } else {
-      this.insertLast(this.openItem(row, input.liveOnly === true));
+    if (!existing) {
+      const opened = this.openItem(structuredClone(row), input.liveOnly === true);
+      this.advance(publication);
+      this.meta.nextSeq += 1;
+      this.insertLast(opened);
+      return row;
     }
+    const entry = itemEntry(existing);
+    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
+    this.advance(publication);
+    this.meta.nextSeq += 1;
+    existing.seqEnd = entry.seqEnd;
+    existing.sourceSeqRanges = entry.sourceSeqRanges;
+    existing.body = entryBody(entry);
+    if (input.liveOnly) existing.liveOnly = true;
+    existing.state = 'open';
+    delete existing.digest;
+    existing.revision += 1;
+    this.dirty.add(existing.itemKey);
     return row;
   }
 
@@ -117,8 +124,9 @@ export class SessionJournal {
     if (this.duplicate(publication)) return undefined;
     const item = this.require(input.itemKey);
     if (item.revision !== expectedRevision) throw new JournalStaleRevisionError(item.itemKey, item.revision);
+    const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     this.advance(publication);
-    const row = stampRow(this.meta.epoch, this.meta.nextSeq++, input);
+    this.meta.nextSeq += 1;
     item.body = {
       item: structuredClone(row.item), timestamp: row.timestamp,
       collapsed: item.body?.collapsed ?? [], resources: mergeResources(item.body?.resources ?? [], row.resources),
@@ -132,45 +140,69 @@ export class SessionJournal {
     return row;
   }
 
-  /** Starts a new epoch from a reread of native history: one sequence per item, oldest first. */
+  /**
+   * Starts a new epoch from a reread of native history: one sequence per item, oldest first. Live-only items, which a
+   * reread cannot reproduce, are carried over in place.
+   */
   replace(publication: JournalPublication, items: readonly CompleteItemInput[], now: number): string {
     if (this.duplicate(publication)) return this.meta.epoch;
+    this.requireDistinct(items);
+    const epoch = crypto.randomUUID();
+    const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
+      const seq = offset + 1;
+      if (entry.kind === 'reread') return this.completeItem(epoch, entry.complete, seq);
+      return { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
+    });
     this.advance(publication);
     this.meta.retiredEpochs = [
       ...this.meta.retiredEpochs.filter(({ retiredAt }) => now - retiredAt < RETIRED_EPOCH_MS),
       { epoch: this.meta.epoch, retiredAt: now },
     ];
-    this.meta.epoch = crypto.randomUUID();
-    this.meta.nextSeq = 1;
+    this.meta.epoch = epoch;
+    this.meta.nextSeq = next.length + 1;
     this.meta.minSeq = 1;
     this.items.length = 0;
     this.byKey.clear();
     this.dirty.clear();
     this.replaced = true;
-    for (const complete of items) this.insertLast(this.completeItem(complete, this.meta.nextSeq++));
-    return this.meta.epoch;
+    for (const item of next) this.insertLast(item);
+    return epoch;
   }
 
   /** Adds older items below the lowest sequence as one batch, oldest first. Items already known are skipped. */
   prepend(publication: JournalPublication, older: readonly CompleteItemInput[]): JournalRow[] {
     if (this.duplicate(publication)) return [];
-    this.advance(publication);
-    const fresh = older.filter(({ row }) => !this.byKey.has(row.itemKey));
+    const seen = new Set<string>();
+    const fresh = older.filter(({ row }) => {
+      if (this.byKey.has(row.itemKey) || seen.has(row.itemKey)) return false;
+      seen.add(row.itemKey);
+      return true;
+    });
     const lowest = Math.min(this.meta.minSeq, this.items[0]?.seqStart ?? this.meta.nextSeq);
     const first = lowest - fresh.length;
     if (!Number.isSafeInteger(first)) throw new Error('Journal history position exhausted.');
-    const created = fresh.map((complete, offset) => this.completeItem(complete, first + offset));
+    const rows = fresh.map((complete, offset) => stampRow(this.meta.epoch, first + offset, complete.row));
+    const created = fresh.map((complete, offset) => this.completeItem(this.meta.epoch, complete, first + offset));
+    this.advance(publication);
     this.items.unshift(...created);
     for (const item of created) {
       this.byKey.set(item.itemKey, item);
       this.dirty.add(item.itemKey);
     }
     this.meta.minSeq = first;
-    return fresh.map((complete, offset) => stampRow(this.meta.epoch, first + offset, complete.row));
+    return rows;
   }
 
-  protected completeItem(complete: CompleteItemInput, seq: number): JournalItem {
-    return { ...this.openItem(stampRow(this.meta.epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
+  protected requireDistinct(items: readonly CompleteItemInput[]): void {
+    const seen = new Set<string>();
+    for (const { row } of items) {
+      if (seen.has(row.itemKey)) throw new JournalDuplicateItemError(row.itemKey);
+      seen.add(row.itemKey);
+    }
+  }
+
+  protected completeItem(epoch: string, complete: CompleteItemInput, seq: number): JournalItem {
+    return { ...this.openItem(stampRow(epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
   }
 
   index(): JournalIndexEntry[] {

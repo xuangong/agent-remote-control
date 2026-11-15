@@ -145,3 +145,10 @@ export class JournalItemTypeChangedError extends Error {
     this.name = 'JournalItemTypeChangedError';
   }
 }
+
+export class JournalDuplicateItemError extends Error {
+  constructor(readonly itemKey: string) {
+    super(`Journal batch repeats item ${itemKey}.`);
+    this.name = 'JournalDuplicateItemError';
+  }
+}

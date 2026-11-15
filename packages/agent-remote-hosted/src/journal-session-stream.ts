@@ -12,7 +12,6 @@ import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type BrokerScheduler, type R
 export const PENDING_CONTROL_REVISION = 'relay-pending';
 const PAGE_DEFAULT_LIMIT = 100;
 const PAGE_MAX_LIMIT = 500;
-const FILL_ROUNDS = 4;
 const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
 const CLOSE_REASON_MAX_BYTES = 123;

@@ -161,7 +161,7 @@ export interface HostJournals {
    * read through the Controller instead of looping. A later publication that sets a head serves it again.
    */
   unserve(hostId: string, sessionKey: string): void;
-  /** Deletes every journal of the Host. */
+  /** Deletes every journal of the Host; at most four Hosts are deleted at once across the service. */
   deleteHost(hostId: string): Promise<void>;
 }
 
@@ -181,6 +181,9 @@ class JournalIncompleteRefused extends Error {
   }
 }
 
+/** How many Hosts' journals the service deletes from the store at once, for every caller of the Relay. */
+const HOST_DELETIONS_AT_ONCE = 4;
+
 function wholeNumber(name: string, value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative whole number.`);
   return value;
@@ -193,6 +196,13 @@ type HostUsage = { total: number; sessions: Map<string, number> };
 
 export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const { store, now } = options;
+  let deletionsRunning = 0;
+  const deletionWaiters: Array<() => void> = [];
+  async function withDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
+    while (deletionsRunning >= HOST_DELETIONS_AT_ONCE) await new Promise<void>(resolve => deletionWaiters.push(resolve));
+    deletionsRunning += 1;
+    try { return await operation(); } finally { deletionsRunning -= 1; deletionWaiters.shift()?.(); }
+  }
   const cacheLimits = {
     maxJournals: wholeNumber('Journal cache journals', options.cache?.maxJournals ?? CACHE_MAX_JOURNALS),
     maxBytes: wholeNumber('Journal cache bytes', options.cache?.maxBytes ?? CACHE_MAX_BYTES),
@@ -607,7 +617,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       heads.markEveryHostLoaded();
     },
 
-    deleteHost: hostId => serialized<void>(hostId, async () => {
+    deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
       bump(hostId);
       const prefix = hostPrefix(hostId);
       const known = [...(usage.get(hostId)?.sessions.keys() ?? [])];
@@ -620,6 +630,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       usage.set(hostId, { total: 0, sessions: new Map() });
       hostsLoaded.add(hostId);
       bump(hostId);
-    }),
+    })),
   };
 }

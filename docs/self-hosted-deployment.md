@@ -240,7 +240,7 @@ installed, and nothing reads from a journal until the owner turns it on for a Ho
 | Setting | Meaning |
 | --- | --- |
 | `AGENT_REMOTE_JOURNALS=1` | Node / Docker only. Stores journals in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`). Needs Node 22.13 or later; the image uses Node 22. Node prints one `ExperimentalWarning` for its built-in SQLite. Unset or any other value: no journals. |
-| `agent-remote-controller api PUT /v1/remote/hosts/<host id>/smart-reading --body '{"providerId":"codex","enabled":true}'` | The owner turns reading from journals on or off for one provider of one Host. The command line signs in as the owner and adds the account prefix, session, `Origin` and content type a direct request would need. The default is off. Turning it off closes that provider's journal-served streams so their pages reconnect and read through the Controller. `agent-remote-controller api GET /v1/remote/hosts/<host id>/smart-reading` lists the providers that are on. |
+| run `agent-remote-controller login` once, then `agent-remote-controller api PUT /v1/remote/hosts/<host id>/smart-reading --body '{"providerId":"codex","enabled":true}'` | The owner turns reading from journals on or off for one provider of one Host. The command line signs in as the owner and adds the account prefix, session, `Origin` and content type a direct request would need. The default is off. Turning it off closes that provider's journal-served streams so their pages reconnect and read through the Controller. `agent-remote-controller api GET /v1/remote/hosts/<host id>/smart-reading` lists the providers that are on. |
 
 Journals are a working set, not an archive: the native session on the Host is the ground truth. The Relay keeps the
 bodies of the latest 50 turns of a session, bounds each session, each Host and its memory, and a Controller can read
@@ -248,7 +248,8 @@ evicted turns again from the Host. Items nothing can rebuild (live-only items) a
 session whose journal a limit refused is read through the Controller until its Controller publishes again. Revoking a
 Host deletes its journals; the Relay records the deletion with the revoke and retries it at start and whenever a Host
 registers, until the store confirms. The list of pending deletions holds 1,024 Hosts; a revoke that finds it full drops the
-oldest id, which keeps its journals until you remove them, and the Relay records a diagnostic. The journal file is inside
+oldest id, whose journals are then no longer deleted automatically (there is no supported way to remove them later short
+of deleting the database file while the Relay is stopped), and the Relay records a diagnostic. The journal file is inside
 the state directory, so the backup rules below cover it; copy it only while the Relay is stopped.
 
 ## Persistence, backups and upgrades

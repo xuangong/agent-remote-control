@@ -17,11 +17,11 @@ const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { vi.mocked(hostJournals.createHostJournals).mockClear(); for (const close of closers.splice(0).reverse()) await close(); });
 
 /** A durable state with two accounts, each with a Host revoked earlier whose journals are still to be deleted. */
-function twoAccounts() {
+function twoAccounts(pending = 1) {
   const initial = emptyRelayState(auth);
-  for (const [subject, pending] of [['alice', 'gone-alice'], ['bob', 'gone-bob']] as const) {
+  for (const subject of ['alice', 'bob']) {
     initial.tenants.push({ subject, namespace: createHash('sha256').update(JSON.stringify([auth.issuer, subject])).digest('hex'),
-      broker: { keys: [], hosts: [], bindings: [], creations: [], journalDeletions: [pending] } });
+      broker: { keys: [], hosts: [], bindings: [], creations: [], journalDeletions: Array.from({ length: pending }, (_, at) => pending === 1 ? `gone-${subject}` : `gone-${subject}-${at}`) } });
   }
   return { initial, async commit() {} };
 }
@@ -39,4 +39,22 @@ it('hands a journal service built elsewhere to every account, and builds none of
   closers.push(() => relay.close());
   await vi.waitFor(() => expect(deleted.sort()).toEqual(['gone-alice', 'gone-bob']));
   expect(hostJournals.createHostJournals).not.toHaveBeenCalled();
+});
+
+it('caps the store deletions of the whole Relay at four, not four per account', async () => {
+  const memory = new MemoryJournalStore();
+  let running = 0, peak = 0;
+  const journals = { load: (key: string) => memory.load(key), apply: memory.apply.bind(memory), delete: (key: string) => memory.delete(key),
+    catalog: { list: (prefix: string) => memory.catalog.list(prefix), deletePrefix: async (prefix: string) => {
+      running += 1; peak = Math.max(peak, running);
+      await new Promise(resolve => setTimeout(resolve, 15));
+      await memory.catalog.deletePrefix(prefix);
+      running -= 1;
+    } } };
+  const state = twoAccounts(6);
+  const relay = createHostedRelay({ ...auth, scheduler, journals, storage: state });
+  closers.push(() => relay.close());
+  await new Promise(resolve => setTimeout(resolve, 250));
+  expect(await memory.catalog.list('')).toEqual([]);
+  expect(peak).toBe(4);
 });

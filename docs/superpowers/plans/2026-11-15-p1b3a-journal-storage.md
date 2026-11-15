@@ -4275,9 +4275,10 @@ and in the same function change the condition that grants the journal connection
 ```ts
   /**
    * Pending journal deletions. A revoke records a Host's id in the state; a round of deletions then clears the ids:
-   * - one round runs at a time, and a revoke or a registration during a round only makes another pass follow it;
-   * - four workers take ids one by one, so a store call that never answers holds one worker, not the round, and no more than
-   *   four store deletions run at once, whoever asks for them;
+   * - one pool of at most four workers runs per broker; a revoke or a registration while it runs hands the new work to an idle
+   *   slot, or to a worker that is between ids, and never starts a second pool;
+   * - workers take ids one by one, so a store call that never answers holds one worker, and a Host revoked later is still deleted
+   *   by the others; the journal service caps the store deletions of the whole Relay;
    * - an id has one deletion in flight at a time, shared by every ask, kept until its confirmation is published;
    * - each id is confirmed as soon as the store confirms it, and confirmations that wait for a running commit share the next one;
    * - a re-revoke of an id bumps its revoke count, and a confirmation counts only for the count its deletion started under, so
@@ -4288,15 +4289,6 @@ and in the same function change the condition that grants the journal connection
   const deletionsInFlight = new Map<string, { revokeCount: number; run: Promise<boolean> }>();
   const deletionConfirmations: Array<{ hostId: string; revokeCount: number; settle(confirmed: boolean): void }> = [];
   let confirming = false;
-  let storeDeletions = 0;
-  const storeDeletionWaiters: Array<() => void> = [];
-  let deletionRoundRunning = false;
-  let deletionPassRequested = false;
-  async function withStoreDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
-    while (storeDeletions >= JOURNAL_DELETION_CONCURRENCY) await new Promise<void>(resolve => storeDeletionWaiters.push(resolve));
-    storeDeletions += 1;
-    try { return await operation(); } finally { storeDeletions -= 1; storeDeletionWaiters.shift()?.(); }
-  }
   /** Removes the confirmed ids that were not revoked again meanwhile from the pending list, one commit for everything queued. Never rejects. */
   async function confirmQueuedDeletions(): Promise<void> {
     if (confirming) return;
@@ -4331,7 +4323,7 @@ and in the same function change the condition that grants the journal connection
     // A deletion that started before the Host was revoked again cannot clear the new revoke: it is waited for, then run afresh.
     if (existing) return existing.revokeCount === revokeCount ? existing.run : existing.run.then(() => deleteJournals(hostId));
     const run = (async () => {
-      try { await withStoreDeletionSlot(() => service.deleteHost(hostId)); }
+      try { await service.deleteHost(hostId); }
       catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
       const confirmed = new Promise<boolean>(settle => deletionConfirmations.push({ hostId, revokeCount, settle }));
       void confirmQueuedDeletions();
@@ -4340,28 +4332,29 @@ and in the same function change the condition that grants the journal connection
     deletionsInFlight.set(hostId, { revokeCount, run });
     return run;
   }
-  /** Asks for a pass over the pending ids. Never rejects; does nothing but flag the pass when a round is already running. */
-  function finishJournalDeletions(): void {
-    deletionPassRequested = true;
-    if (deletionRoundRunning) return;
-    deletionRoundRunning = true;
-    void (async () => {
-      try {
-        while (deletionPassRequested) {
-          deletionPassRequested = false;
-          const tried = new Set<string>();
-          const worker = async () => {
-            for (;;) {
-              const hostId = journalDeletions.find(id => !tried.has(id));
-              if (hostId === undefined) return;
-              tried.add(hostId);
-              await deleteJournals(hostId);
-            }
-          };
-          await Promise.all(Array.from({ length: JOURNAL_DELETION_CONCURRENCY }, worker));
-        }
-      } finally { deletionRoundRunning = false; }
-    })();
+  /** The ids the workers have tried since the last request to retry failures; a failed id is not tried again until then. */
+  let triedDeletions = new Set<string>();
+  let deletionWorkers = 0;
+  /** Starts workers, up to four, for the pending ids no worker has tried. Never rejects. */
+  function startDeletionWorkers(): void {
+    while (deletionWorkers < JOURNAL_DELETION_CONCURRENCY && journalDeletions.some(id => !triedDeletions.has(id))) {
+      deletionWorkers += 1;
+      void (async () => {
+        try {
+          for (;;) {
+            const hostId = journalDeletions.find(id => !triedDeletions.has(id));
+            if (hostId === undefined) return;
+            triedDeletions.add(hostId);
+            await deleteJournals(hostId);
+          }
+        } finally { deletionWorkers -= 1; }
+      })();
+    }
+  }
+  /** Tries every pending id again, those that failed before included. */
+  function retryJournalDeletions(): void {
+    triedDeletions = new Set(deletionsInFlight.keys());
+    startDeletionWorkers();
   }
 ```
 
@@ -4471,7 +4464,7 @@ Expected: PASS. The landed `broker-journal-sessions.test.ts` runs against a Host
 - [ ] **Step 9: Run the whole hosted package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new). A follow-up review change (`fix(hosted): delete pending journals four at a time and confirm each batch in one commit`) raised the count to 906, and a second one to 914 (the final deletion design, below): one round per broker, four workers, each id confirmed as soon as its store deletion succeeds under its revoke count (kept in memory, bumped by every revoke; a confirmation of an older count leaves the id pending), confirmations that wait for a running commit share the next one, an in-flight deletion is shared by every ask until its confirmation is published, and at most four store deletions run at once. The fixture's `connectController` takes `journal: false`.
+Expected: PASS for all. 68 files and 903 tests in hosted (854 before this task; 49 new). A follow-up review change (`fix(hosted): delete pending journals four at a time and confirm each batch in one commit`) raised the count to 906, and a second one to 914 (the final deletion design, below): one pool of four workers per broker (a revoke or registration hands work to an idle slot, so a hung worker blocks nothing else), the journal service caps store deletions at four for the whole Relay, each id confirmed as soon as its store deletion succeeds under its revoke count (kept in memory, bumped by every revoke; a confirmation of an older count leaves the id pending), confirmations that wait for a running commit share the next one, an in-flight deletion is shared by every ask until its confirmation is published, and at most four store deletions run at once. The fixture's `connectController` takes `journal: false`.
 
 - [ ] **Step 10: Run the Cloudflare codec test.**
 
@@ -4585,7 +4578,7 @@ git commit -m "feat(hosted): one journal service for every account of a Relay, o
 
 ### Task 8: Enable journals on the Node hosts
 
-> **Landed (`5cf72c5c`, reworked in the follow-up fix):** `createGatewayRelay.listen` opens the journal database, builds the journal service with `createHostJournals` and awaits `loadAllServed()` before `server.listen`, so nothing connects while the gate is unloaded; it passes the service as `journalService` and closes the database when loading fails, when the port is taken, when the Relay cannot be built, and on `close()`. `HostedRelay.loadJournalIndex()` stays for hosts that build the relay on a store. Tests in `devbox.test.ts` watch the database handles and the service load. The journal file of `pnpm local` is `<instance>/relay/relay/journals.sqlite`. Also: a runner test (`scripts/local/runner.test.mjs`: `ARC_LOCAL_JOURNALS=1` passes `journals: true` to the server factory, otherwise nothing), and `packages/agent-remote-lab/compatibility.json` is committed with this task because the Lab suite's live-launcher and Codex tests read the manifest and fail while it is stale. The Lab suite: 2795 tests pass on Node 22; `pnpm test:cloudflare`: 219.
+> **Landed (`5cf72c5c`, reworked in the follow-up fix):** `createGatewayRelay.listen` takes the state lock first, then opens the journal database, builds the journal service with `createHostJournals` and awaits `loadAllServed()` before `server.listen`, so nothing connects while the gate is unloaded and a second Relay on the same directory fails on the lock before it touches the database (an origin with port 0, used by tests, can open the state only after it listens); it passes the service as `journalService` and closes the database when loading fails, when the port is taken, when the Relay cannot be built, and on `close()`. `HostedRelay.loadJournalIndex()` stays for hosts that build the relay on a store. Tests in `devbox.test.ts` watch the database handles and the service load. The journal file of `pnpm local` is `<instance>/relay/relay/journals.sqlite`. Also: a runner test (`scripts/local/runner.test.mjs`: `ARC_LOCAL_JOURNALS=1` passes `journals: true` to the server factory, otherwise nothing), and `packages/agent-remote-lab/compatibility.json` is committed with this task because the Lab suite's live-launcher and Codex tests read the manifest and fail while it is stale. The Lab suite: 2795 tests pass on Node 22; `pnpm test:cloudflare`: 219.
 
 **Files:**
 - Modify: `packages/agent-remote-lab/src/server/gateway-relay.ts`
@@ -4899,7 +4892,7 @@ Expected: exit 0, state ready, running build commit equal to the checkout commit
 Check the layers and report each as the skill's report format asks:
 
 1. **Site and Controller.** `agent-remote-controller-dev host providers` shows the expected providers `enabled`; `status` shows `uplink registered`. The development Controller does not request journals yet, so it registers exactly as before.
-2. **Feature: the store.** `ls -l <State>/relay/relay/journals.sqlite` exists (the runner's state directory is `relay/` and the Devbox adds its own `relay/`), mode `-rw-------`. `pnpm local logs` shows no store error. This is the Node store opened by the real Relay process, including `loadJournalIndex` at startup.
+2. **Feature: the store.** `ls -l <State>/relay/relay/journals.sqlite` exists (the runner's state directory is `relay/` and the Devbox adds its own `relay/`), mode `-rw-------`. `pnpm local logs` shows no store error. This is the Node store opened by the real Relay process, including `createHostJournals(...).loadAllServed()` at startup, before the server listens.
 3. **Feature: the switch.** `agent-remote-controller-dev api GET /v1/remote/hosts` gives the Host id. Then `agent-remote-controller-dev api PUT /v1/remote/hosts/<id>/smart-reading --body '{"providerId":"codex","enabled":true}'` answers `{"providers":["codex"]}` (if the command line `api` does not accept `PUT`, use `pnpm --silent local api v1/remote/hosts/<id>/smart-reading --method PUT --data '{"providerId":"codex","enabled":true}'`, which signs in once). Read it back with `GET`. Restart with `ARC_LOCAL_JOURNALS=1 pnpm local up --no-build` and read it again: it must survive. Turn it off again with `enabled:false` and read `{"providers":[]}`.
 4. **Model turn: the crude path is unchanged with journals on.** Create a session in the instance workspace and read a real reply, as `references/test-loop.md` describes: `agent-remote-controller-dev session create --provider claude --message "Reply with the single word ready."`, then `session read <address> --limit 2`. With smart reading on for the provider and no journal head, the session must still answer through the Controller. Release any Codex session you created (`session release <address>`).
 5. **Page.** Not exercised; nothing in this plan changes the page. Say so.
@@ -4919,7 +4912,7 @@ Run: `pnpm local down` when nobody needs the instance (it belongs to this worktr
 - **Re-review:** the first-page bound narrows in Task 4 with the test it breaks (item 1); every head change raises the Host's epoch and a stream without a head calls `unserve` (2); a fill makes room once by evicting bodies outside the latest turns (3); deletions run until none is untried and a restored Host's own deletion is waited for before `registered` (4); `journal_index_request` carries the epoch and a stale one is refused with `stale_epoch` (5).
 - **I4:** Task 6: `stopReading` closes that Host and provider's journal-served streams with 1012.
 - **I6:** Tasks 2 and 5: incremental `residentBytes`; the benchmark runs `status()` cold, `publish()` of realistic batches and a large load through `createHostJournals`; a failed threshold stops the plan and goes to the owner.
-- **Minor items:** the journal message limit is 8 MiB (Task 4 `JOURNAL_INDEX_PAGE_MAX_BYTES` comment); the scheduler is the broker's (Task 6 `waitFor`); the PUT list change is inside `commit`; `deletePrefix` uses a key range and chunk rows are not `WITHOUT ROWID`; limits are whole numbers and `sessionItems` is clamped; the hedges are gone; the runtime closes when `loadJournalIndex` fails (Task 8); the head index loads once per Host, shared, outside the Host's queue (Task 4 `loadHost`, Task 6 `loadServed`); every `node --test` has `--test-timeout`.
+- **Minor items:** the journal message limit is 8 MiB (Task 4 `JOURNAL_INDEX_PAGE_MAX_BYTES` comment); the scheduler is the broker's (Task 6 `waitFor`); the PUT list change is inside `commit`; `deletePrefix` uses a key range and chunk rows are not `WITHOUT ROWID`; limits are whole numbers and `sessionItems` is clamped; the hedges are gone; the database closes and nothing listens when the head index load fails (Task 8); the head index loads once per Host, shared, outside the Host's queue (Task 4 `loadHost`, Task 6 `loadServed`); every `node --test` has `--test-timeout`.
 - **YAGNI:** no `deleteSession`, `deleteJournals`, `journalTuning`, `journalRetentionIntervalMs`; `JournalHeadIndex` and the service constants are not exported.
 
 ## Open risks

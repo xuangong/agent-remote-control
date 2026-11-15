@@ -505,3 +505,46 @@ it('never runs more than four store deletions or deletes one Host twice at once,
     expect(states.at(-1)).not.toHaveProperty('journalDeletions');
   } finally { broker.close(); }
 });
+
+it('deletes a Host revoked later while another Host\'s deletion still hangs', async () => {
+  const memory = new MemoryJournalStore();
+  await goneJournal(memory, 'gone-0');
+  await seedJournal(memory);
+  const states: RemoteHostBrokerState[] = [];
+  const broker = revocation(storeDeleting(memory, prefix => (prefix === 'gone-0:' ? 'hang' : 'delete')), states, { keys: [], creations: [], journalDeletions: ['gone-0'],
+    hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+    bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] });
+  try {
+    await sleep(30);
+    expect((await revoke(broker))!.status).toBe(200);
+    await sleep(60);
+    expect(await memory.catalog.list(`${HOST_ID}:`)).toEqual([]);
+    expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
+  } finally { broker.close(); }
+});
+
+it('asks the journal service for at most four deletions at once from one broker, however many revokes and registrations come', async () => {
+  const ids = Array.from({ length: 12 }, (_, at) => `gone-${at}`);
+  let running = 0, peak = 0;
+  const asked: string[] = [];
+  const journalService = { deleteHost: async (hostId: string) => {
+    asked.push(hostId); running += 1; peak = Math.max(peak, running);
+    await sleep(15);
+    running -= 1;
+  } } as unknown as NonNullable<Parameters<typeof createHostBroker>[0]['journalService']>;
+  const states: RemoteHostBrokerState[] = [];
+  const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journalService, now: () => 10_000,
+    onStateChange: async state => { states.push(structuredClone(state)); },
+    initialState: { keys: [], creations: [], bindings: [], journalDeletions: ids,
+      hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false },
+        { id: 'host-2', installationId: 'second-installation', name: 'Second Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }] } });
+  try {
+    await sleep(5);
+    await revoke(broker);
+    await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host-2/revoke', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, body: '{}' }), {});
+    await sleep(300);
+    expect(peak).toBe(4);
+    expect(asked.sort()).toEqual([...ids, 'host-2', HOST_ID].sort());
+    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
+  } finally { broker.close(); }
+});

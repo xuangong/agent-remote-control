@@ -369,3 +369,13 @@ it('closes the journal database when the port is taken', async () => {
   await expect(f.server.listen(f.port, '127.0.0.1')).rejects.toThrow(/EADDRINUSE/);
   expect(handles[0]!.closed).toBe(true);
 });
+
+it('fails on the state lock, before it opens the journal database, when another Relay holds the state directory', async () => {
+  const handles = watchJournalDatabases();
+  const first = await fixture('127.0.0.1', { journals: true });
+  expect(handles).toHaveLength(1);
+  const second = await createDevboxServer(first.options);
+  await expect(second.listen(first.port, '127.0.0.1')).rejects.toThrow(/lock|another/i);
+  expect(handles).toHaveLength(1);
+  expect((await request(first.origin + '/auth/status')).status).toBe(200);
+});

@@ -100,23 +100,28 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   return {
     server,
     async listen(port: number, host = '127.0.0.1') {
-      // The journal database is opened and its head index loaded before the server accepts a connection, so no Host registers and
-      // no browser opens a session while the gate does not know which sessions are journal-served.
+      // The state lock comes first, so a second Relay started on the same directory fails before it touches the live journal
+      // database; the journal database is then opened and its head index loaded before the server accepts a connection, so no
+      // Host registers and no browser opens a session while the gate does not know which sessions are journal-served. The state
+      // is keyed by the origin, so an origin whose port the system picks can be opened only once the server listens.
+      const originKnown = new URL(auth.origin).port !== '0';
       let journalService: HostJournals | undefined;
-      if (options.journalFile) {
-        journalDatabase = await openNodeJournalDatabase(options.journalFile);
-        try {
-          journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase), now: Date.now });
-          await journalService.loadAllServed();
-        } catch (error) { journalDatabase.close(); journalDatabase = undefined; throw error; }
-      }
-      try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); resolve(); }); }); }
-      catch (error) { journalDatabase?.close(); journalDatabase = undefined; throw error; }
-      const address = server.address() as AddressInfo;
-      if (new URL(auth.origin).port === '0') { const origin = new URL(auth.origin); origin.port = String(address.port); auth.origin = origin.origin; }
-      if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
-      try {
+      let listening = false;
+      const openDurableParts = async () => {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
+        if (!options.journalFile) return;
+        journalDatabase = await openNodeJournalDatabase(options.journalFile);
+        journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase), now: Date.now });
+        await journalService.loadAllServed();
+      };
+      try {
+        if (originKnown) await openDurableParts();
+        await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); resolve(); }); });
+        listening = true;
+        const address = server.address() as AddressInfo;
+        if (!originKnown) { const origin = new URL(auth.origin); origin.port = String(address.port); auth.origin = origin.origin; }
+        if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
+        if (!originKnown) await openDurableParts();
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
@@ -124,8 +129,12 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),
           ...(journalService ? { journalService } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
-      } catch (error) { storage?.close(); journalDatabase?.close(); journalDatabase = undefined; server.close(); throw error; }
-      return { port: address.port, url: auth.origin };
+        return { port: address.port, url: auth.origin };
+      } catch (error) {
+        storage?.close(); storage = undefined; journalDatabase?.close(); journalDatabase = undefined;
+        if (listening) server.close();
+        throw error;
+      }
     },
     async close() {
       await runtime?.close();

@@ -2291,38 +2291,52 @@ export function createHostBroker(options: HostBrokerOptions) {
     } };
   }
   /** The deletion of each Host's journals in flight; a second ask for the same Host shares it, so a Host's journals are never deleted twice. */
-  const deletionRuns = new Map<string, Promise<void>>();
-  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
-  function deleteJournals(hostId: string): Promise<void> {
+  const deletionRuns = new Map<string, Promise<boolean>>();
+  /** How many Hosts' journals one round deletes at the same time. */
+  const JOURNAL_DELETION_CONCURRENCY = 4;
+  /** Deletes one revoked Host's journals from the store. Resolves true once the store confirms, false when it fails. Never rejects. */
+  function eraseJournals(hostId: string): Promise<boolean> {
     const service = journals;
-    if (!service) return Promise.resolve();
+    if (!service) return Promise.resolve(false);
     let run = deletionRuns.get(hostId);
     if (!run) {
-      run = (async () => {
-        try {
-          await service.deleteHost(hostId);
-          await commit(draft => {
-            const rest = (draft.journalDeletions ?? []).filter(id => id !== hostId);
-            if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-            return { value: undefined, publish() { journalDeletions = rest; } };
-          });
-        } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
-      })().finally(() => { deletionRuns.delete(hostId); });
+      run = service.deleteHost(hostId).then(() => true, () => { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; })
+        .finally(() => { deletionRuns.delete(hostId); });
       deletionRuns.set(hostId, run);
     }
     return run;
   }
+  /** Removes the ids whose journals the store confirmed deleted from the pending list, in one commit. Never rejects. */
+  async function confirmDeletions(hostIds: string[]): Promise<void> {
+    try {
+      await commit(draft => {
+        const confirmed = new Set(hostIds);
+        const pending = draft.journalDeletions ?? [];
+        if (!pending.some(id => confirmed.has(id))) return { value: undefined, unchanged: true, publish() {} };
+        const rest = pending.filter(id => !confirmed.has(id));
+        if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+        return { value: undefined, publish() { journalDeletions = rest; } };
+      });
+    } catch { for (const hostId of hostIds) options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
+  }
+  /** Deletes one revoked Host's journals and removes its id from the state once the store confirms. An id that failed stays. Never rejects. */
+  async function deleteJournals(hostId: string): Promise<void> {
+    if (await eraseJournals(hostId)) await confirmDeletions([hostId]);
+  }
   /**
    * Deletes the journals of every revoked Host the state still lists, until none is left that this round has not tried, so
-   * a Host revoked while a round is going is not left for the next start. Never rejects.
+   * a Host revoked while a round is going is not left for the next start. Hosts are deleted a few at a time, and the ids a
+   * group's store calls confirm are removed from the state together, so a long list costs a few commits, not one per Host. Never rejects.
    */
   async function finishJournalDeletions(): Promise<void> {
     const tried = new Set<string>();
     for (;;) {
-      const ids = journalDeletions.filter(id => !tried.has(id));
-      if (ids.length === 0) return;
-      for (const id of ids) tried.add(id);
-      await Promise.all(ids.map(deleteJournals));
+      const batch = journalDeletions.filter(id => !tried.has(id)).slice(0, JOURNAL_DELETION_CONCURRENCY);
+      if (batch.length === 0) return;
+      for (const id of batch) tried.add(id);
+      const results = await Promise.all(batch.map(async id => (await eraseJournals(id)) ? id : undefined));
+      const confirmed = results.filter((id): id is string => id !== undefined);
+      if (confirmed.length > 0) await confirmDeletions(confirmed);
     }
   }
   const handlesRequest = (url: URL) => {

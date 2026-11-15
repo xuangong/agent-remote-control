@@ -397,3 +397,50 @@ it('registers a returning Host without journals after the deadline when the stor
   expect(registeredOf(controller)).not.toHaveProperty('journal');
   expect(saved.at(-1)?.journalDeletions ?? [HOST_ID]).toEqual([HOST_ID]);
 });
+
+it('deletes the journals of a pending Host once, however many asks share the run', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const prefixes: string[] = [];
+  const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    broker: { journalDeletionWaitMs: 3000 },
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => { prefixes.push(prefix); await gate; await memory.catalog.deletePrefix(prefix); } } }) });
+  const connecting = r.connectController();
+  await sleep(60);
+  release();
+  await connecting;
+  await sleep(50);
+  expect(prefixes).toEqual([`${HOST_ID}:`]);
+});
+
+it('does not hold a returning Host back for its pending deletion when its Controller asked for no journals', async () => {
+  const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    broker: { journalDeletionWaitMs: 3000 }, journalStore: memory => storeDeleting(memory, () => 'hang') });
+  const started = Date.now();
+  const controller = await r.connectController({ journal: false });
+  expect(Date.now() - started).toBeLessThan(1000);
+  expect(registeredOf(controller)).not.toHaveProperty('journal');
+});
+
+it('deletes many pending Hosts four at a time and confirms each group in one commit', async () => {
+  const ids = Array.from({ length: 40 }, (_, at) => `gone-${at}`);
+  const memory = new MemoryJournalStore();
+  let running = 0, peak = 0;
+  const store: JournalStore = { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+    catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => {
+      running += 1; peak = Math.max(peak, running);
+      await sleep(5);
+      await memory.catalog.deletePrefix(prefix);
+      running -= 1;
+    } } };
+  const states: RemoteHostBrokerState[] = [];
+  const broker = revocation(store, states, { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ids });
+  try {
+    await sleep(400);
+    expect(peak).toBe(4);
+    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
+    expect(states.length).toBeLessThanOrEqual(ids.length / 4 + 1);
+    expect(states.length).toBeGreaterThan(0);
+  } finally { broker.close(); }
+});

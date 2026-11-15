@@ -129,7 +129,13 @@ export interface ProviderResourceReference {
 export interface ProviderItemIdentity {
   /** At most 4096 characters. Record, message, call or part identities of the native runtime, never a source key of a delta. */
   key: string;
-  /** This observation finishes the item. A history observation completes its item unless the native record is still being written. A provider whose last live delta carries no content emits an empty body of the same item type to say so. */
+  /**
+   * This observation finishes the item. The adapter sets it itself on every history observation whose native record is
+   * complete, interaction items included; the Controller never infers completion. A provider whose last live delta of a
+   * text item carries no content may finish it with an empty body of the same text item type. That does not apply to
+   * `tool_call` and `todo`, whose row replaces the whole item, nor to `compaction`, whose row overwrites its fields: an
+   * empty body would wipe their content, so such an adapter repeats the full content with `completes`.
+   */
   completes?: true;
   /** A reread of native history cannot reproduce this item, so the journal keeps its only copy. */
   liveOnly?: true;

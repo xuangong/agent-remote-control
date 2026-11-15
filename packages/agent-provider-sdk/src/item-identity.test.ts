@@ -8,6 +8,8 @@ describe('the journal capability', () => {
   it('is declared only by an adapter that says so', () => {
     expect(supportsJournal(adapter())).toBe(false);
     expect(supportsJournal(adapter({ itemIdentity: 1 }))).toBe(true);
+    expect(supportsJournal(adapter({ itemIdentity: 2 } as unknown as AgentProviderAdapter['journal']))).toBe(false);
+    expect(supportsJournal(adapter({} as unknown as AgentProviderAdapter['journal']))).toBe(false);
   });
 
   it('lets an observation carry the native identity of its item, its completion and whether history can rebuild it', () => {

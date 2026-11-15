@@ -30,7 +30,7 @@ Every plan follows the repository rules in `AGENTS.md`:
 | P0 Baselines | Done | [baselines](2026-11-15-p0-baselines.md); targets revised in the design |
 | P1-B1 Relay journal service | Done | uplink journal messages, `host-journals.ts`, `journal-uplink.ts` |
 | P1-B2 Journal-served sessions | Done | hosted suite 790 tests; crude-mode guard suites unchanged; local instance verified (crude path, model turn) |
-| P1-B3a Journal storage (Node) | In progress | Tasks 1–5 landed: paged index protocol, incremental UTF-8 sizes, SQLite store, bounded service, benchmark (`node:sqlite` kept) |
+| P1-B3a Journal storage (Node) | Done | SQLite store (`node:sqlite`, benchmarked), bounded service with head index, quota fencing, incremental retention window, atomic fill and page, pulled index pages; smart-reading switch per Host and provider (off by default); durable deletion on revoke; `AGENT_REMOTE_JOURNALS=1` / `ARC_LOCAL_JOURNALS=1`. Suites: hosted 918, lab 2801, cloudflare 219, conformance 31, relay 396, controller 1469 (one pre-existing local-test failure, also on main). Local instance verified with journals on (store file 0600, switch round-trip across a restart, model turn on the crude path). |
 | P1-B3b Cloudflare journal partition | Planned and reviewed | `2026-11-15-p1b3b-cloudflare-journal-partition.md` |
 | P1-C Controller publisher | Planned and reviewed | `2026-11-15-p1c1-controller-publisher.md` (full), `-p1c2-` and `-p1c3-` (outlines) |
 | P1-D Client device store | Planned and reviewed | `2026-11-15-p1d-client-device-store.md`, `2026-11-15-p1d2-client-measurement.md` |

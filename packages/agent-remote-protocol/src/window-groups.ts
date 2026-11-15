@@ -81,6 +81,15 @@ export function isBotView(view: WindowView): view is WindowView & { binding: Win
   return view.binding !== undefined && view.binding.sessionIntent === undefined
     && view.binding.parentNativeSessionId === undefined && view.feature?.kind !== 'ask';
 }
+/**
+ * Whether binding the view to this session would take a bot's conversation away, which a group with bot details refuses
+ * (rule 1: a bot keeps its conversation). The bot's own session may change its title or role details; another session,
+ * or a history or subagent view of any session, opens beside the bot instead. Clients ask before binding, as the Relay does.
+ */
+export function rebindsBot(group: Pick<WindowGroup, 'bots'> | undefined, view: WindowView | undefined, binding: WindowSessionBinding): boolean {
+  return !!group?.bots && !!view && isBotView(view)
+    && (!isBotView({ ...view, binding }) || windowSessionIdentity(view.binding) !== windowSessionIdentity(binding));
+}
 export const windowSessionIdentity = (binding: Pick<WindowSessionBinding, 'hostId' | 'providerId' | 'nativeSessionId'>) =>
   JSON.stringify([binding.hostId, binding.providerId, binding.nativeSessionId]);
 /** Every view of the group that is a bot, whether or not the group carries bot details or appears in Bot mode. */
@@ -178,14 +187,10 @@ function edit(group: WindowGroup, item: WindowGroupEdit): WindowGroup {
       if (!group.bots) fail('section_missing', 'This group is not a section.');
       return { ...group, bots: { ...group.bots, rank: item.rank } };
     default: {
-      if (item.type === 'view.bind' && group.bots) {
-        const view = group.window.views.find(candidate => candidate.id === item.viewId);
-        // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot (a Team member,
-        // a TPM or Support session) never takes view.bind: its feature rebinds it through the layout, like succession.
-        if (view && isBotView(view) && (!isBotView({ ...view, binding: item.binding })
-          || windowSessionIdentity(view.binding) !== windowSessionIdentity(item.binding))) {
-          fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');
-        }
+      // Rule 1: a bot keeps its conversation; the title and role details of that session may change. A managed bot (a Team member,
+      // a TPM or Support session) never takes view.bind: its feature rebinds it through the layout, like succession.
+      if (item.type === 'view.bind' && rebindsBot(group, group.window.views.find(candidate => candidate.id === item.viewId), item.binding)) {
+        fail('bot_view', 'A bot keeps its conversation. Open the other session beside it.');
       }
       // A batch advances the revision once, at the end; the delegated edit must not advance it as well.
       return { ...group, window: { ...applyWindowOperation(group.window, item), revision: group.window.revision } };

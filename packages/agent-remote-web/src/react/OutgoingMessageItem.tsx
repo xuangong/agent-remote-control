@@ -1,6 +1,7 @@
 import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useState } from 'react';
 import type { OutgoingMessage } from '../replica/types.js';
+import { isUncertainSend } from '../client/transport.js';
 import { UserMessageItem } from './items/MessageItem.js';
 
 export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContext }: {
@@ -21,7 +22,11 @@ export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContex
     if (!onRetry || busy) return;
     setBusy(true); setError(undefined);
     try { await onRetry(message.id); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Retry failed.'); }
+    catch (reason) {
+      // An uncertain delivery is recorded on the message in plain words (what to check, what Retry does next); the Host's
+      // own reply, written for operators, would only hide them.
+      if (!isUncertainSend(reason)) setError(reason instanceof Error ? reason.message : 'Retry failed.');
+    }
     finally { setBusy(false); }
   }
   return <div className="agent-timeline-entry agent-outgoing-message" data-entry-key={message.id}

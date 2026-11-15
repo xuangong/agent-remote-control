@@ -1,4 +1,4 @@
-import { applyInteractionRequested, remoteSessionState, SessionHandoff } from '@orchardworks/agent-remote-web';
+import { applyInteractionRequested, remoteSessionState, RemoteOperationError, SessionHandoff } from '@orchardworks/agent-remote-web';
 import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -536,4 +536,26 @@ it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info
   await act(async () => toggle.click());
   const rows = [...view.querySelectorAll('.agent-session-attributions tr')].map(row => row.textContent);
   expect(rows.slice(0, 4)).toEqual(['HostMac Studiohost-id', 'Providerrecorded', `cwd${cached ? '/saved/workspace' : 'Not available in saved history'}`, 'Session IDnative-id']);
+});
+
+it('leaves an uncertain retry to the message, which says what to check, and reports other retry failures', async () => {
+  const outgoing = { id: 'outgoing-1', agentId: replicaState.agent!.id, text: 'Deploy the fix', status: 'unconfirmed' as const, epoch: replicaState.timeline.epoch, afterSeq: 0,
+    retryRequiresNewOperation: true, error: 'This message may not have arrived. If it is not in the conversation, Retry sends it again.' };
+  const state = { ...replicaState, pendingInteractions: [], outgoingMessages: [outgoing], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null } };
+  const retryMessage = vi.fn(async () => {
+    throw new RemoteOperationError('operation_outcome_unknown', 'The operation may have reached the native runtime. Inspect native state before creating a new intent.', true);
+  });
+  const container = await render(<ToastProvider><LabWorkbench state={state} sessionStatus="ready" actions={{ retryMessage }} /></ToastProvider>);
+  const retry = () => container.querySelector<HTMLButtonElement>('.agent-outgoing-message button[aria-label="Retry message"]')!;
+  await act(async () => retry().click());
+  expect(retryMessage).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('.lab-toast')).toBeNull();
+  expect(container.textContent).not.toContain('native runtime');
+  // The message itself says what to check, under its delivery mark.
+  await act(async () => container.querySelector<HTMLButtonElement>('.agent-outgoing-message button[aria-label="Delivery error"]')!.click());
+  expect(container.querySelector('.agent-outgoing-message .agent-delivery-error')?.textContent).toBe('This message may not have arrived. If it is not in the conversation, Retry sends it again.');
+  retryMessage.mockImplementationOnce(async () => { throw new Error('This message is not available to retry.'); });
+  await act(async () => retry().click());
+  expect(container.querySelector('.lab-toast')?.textContent).toContain('This message is not available to retry.');
+  await unmount(container);
 });

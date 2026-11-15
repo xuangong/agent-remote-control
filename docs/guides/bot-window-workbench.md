@@ -34,10 +34,10 @@ Each bot has a ⋯ menu above its conversation. On a desktop, right-click its ro
 
 In a bot's conversation:
 - **/side** (or **/btw**) opens a Side beside the bot in the same group.
-- **/handoff** continues the bot on another provider of its Host. The bot keeps its place and its earlier conversation, which stays readable above a quiet divider.
+- **/handoff** continues the bot on another provider of its Host. The bot keeps its place and its earlier conversation, which stays readable above a quiet divider. In Window mode, **Continued from** above the conversation leads there. In a Window none of whose bots you have labeled, put to sleep or hidden, it opens the earlier session in the pane instead, with **Return to current**.
 - To start a Team, TPM work or a call for support from a bot, open its group in Window mode.
 
-In Window mode, opening another session from a bot's pane opens it **beside** the bot, through the sidebar, Favorites, Track or a new session. Navigating within the bot's own handoff history stays in place, as do empty and history views.
+In Window mode, opening another session from a bot's pane opens it **beside** the bot, through the sidebar, Favorites, Track or a new session, and in a Window with labeled, sleeping or hidden bots also through the pane's session list or a link in the conversation. Navigating within the bot's own handoff history stays in place, as do empty and history views.
 
 ## Folding, sleep and what stays live
 

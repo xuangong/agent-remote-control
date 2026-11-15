@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import * as workbench from './components/LabWorkbench.js';
 import * as dialogs from './components/SessionSuccessionDialog.js';
+import * as managerComponents from './components/ChatSessionManager.js';
 import { loadSuccessionIntent } from './session-succession-intent.js';
 import { SessionDirectoryClient, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { SessionViewOperationsContext, type SessionViewOperations } from './session-view-operations.js';
@@ -273,4 +274,50 @@ it('continues a handed-off bot into its earlier session above the current conver
   const rows = Object.fromEntries([...document.querySelectorAll('dialog .lab-bot-info dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]));
   expect(rows).toMatchObject({ Provider: 'Recorded Provider', Earlier: 'Recorded Provider' });
   await app.close();
+});
+
+it('continues a handed-off bot of the shown Window into its earlier session in place; Continued from reads there and never rebinds the bot', async () => {
+  const scope = 'http://localhost/window-bot-earlier/'; seedGroup(scope, botGroup('A')); seedGroup(scope, botGroup('B'));
+  history.replaceState(null, '', '/?window=B');
+  const scrolled: string[] = [];
+  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value(this: Element) { scrolled.push(this.getAttribute('aria-label') ?? this.className); } });
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('B'));
+    await until(() => expect(leaves.get('B1')).toBeDefined());
+    app.setReplays([replay()]);
+    await act(async () => app.succession().refresh());
+    await until(() => expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.nativeSessionId).toBe('C'));
+    const pane = () => app.container.querySelector<HTMLElement>('#lab-workbench [data-primary-group-id="B1"]')!;
+    // As in Bot mode, the bot's conversation goes on into its earlier session, read above it: one bot, one conversation.
+    await until(() => expect(pane().querySelector('.lab-earlier-session')?.getAttribute('aria-label')).toBe('Earlier conversation: B1'));
+    // Window mode still says where the conversation came from; the link reads the earlier session where it is.
+    const link = await vi.waitFor(() => { const found = pane().querySelector<HTMLAnchorElement>('.lab-succession-history a'); expect(found?.textContent).toBe('B1'); return found!; });
+    await act(async () => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
+    await act(async () => {});
+    expect(scrolled).toContain('Earlier conversation: B1');
+    expect(pane().textContent).not.toContain('A bot keeps its conversation');
+    expect(pane().querySelector('.lab-succession-history-error')).toBeNull();
+    expect(app.workspace().readGroup('B')!.window.views[0]!.binding).toMatchObject({ nativeSessionId: 'C' });
+    expect(app.workspace().readGroup('B')!.window.views[0]!.binding?.sessionIntent).toBeUndefined();
+  } finally { delete (Element.prototype as Partial<Element>).scrollIntoView; await app.close(); }
+});
+
+it('opens a session chosen over a bot of the shown Window beside the bot rather than in its place', async () => {
+  const scope = 'http://localhost/window-bot-open-beside/'; seedGroup(scope, botGroup('A'));
+  history.replaceState(null, '', '/?window=A');
+  const managers = new Map<string, ComponentProps<typeof managerComponents.ChatSessionManager>>(), realManager = managerComponents.ChatSessionManager;
+  vi.spyOn(managerComponents, 'ChatSessionManager').mockImplementation(props => { managers.set(props.current.nativeSessionId, props); return realManager(props); });
+  const app = await mountBotApp(scope, { hosted: true });
+  try {
+    await until(() => expect(app.workspace().window?.id).toBe('A'));
+    await until(() => expect(managers.get('A2')).toBeDefined());
+    // The pane's session list opens Other: the bot keeps its conversation, and Other opens beside it, selected.
+    await act(async () => managers.get('A2')!.onOpen(botTarget('Other')));
+    await until(() => expect(app.workspace().readGroup('A')!.window.views.some(view => view.binding?.nativeSessionId === 'Other')).toBe(true));
+    const window = app.workspace().readGroup('A')!.window;
+    expect(window.views.find(view => view.id === 'A2')!.binding).toMatchObject({ nativeSessionId: 'A2' });
+    expect(window.views.find(view => view.id === window.selectedPrimaryViewId)!.binding).toMatchObject({ nativeSessionId: 'Other' });
+    expect(app.container.textContent).not.toContain('A bot keeps its conversation');
+  } finally { await app.close(); }
 });

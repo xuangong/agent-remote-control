@@ -1,9 +1,10 @@
 import { expect, it } from 'vitest';
-import type { WorkspaceWindow } from './window-workspace.js';
+import type { WindowSessionBinding, WorkspaceWindow } from './window-workspace.js';
 import { WindowLayoutError, createWindowView } from './window-workspace-operations.js';
 import {
   WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, hasBotAppearance, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
+  rebindsBot,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -273,4 +274,19 @@ it('accepts every group operation and refuses anything else', () => {
   expect(isWindowGroupOperation({ type: 'bots.add' })).toBe(false);
   expect(isWindowGroupOperation({ type: 'delete' })).toBe(false);
   expect(isWindowGroupOperation(undefined)).toBe(false);
+});
+
+it('tells when binding a view would take a bot\'s conversation away, as the group rule refuses it', () => {
+  const binding = (nativeSessionId: string, extra: Partial<WindowSessionBinding> = {}): WindowSessionBinding => ({ hostId: 'h', providerId: 'codex', nativeSessionId, title: nativeSessionId, ...extra });
+  const bot = createWindowView('bot', binding('one'), 'primary');
+  const group = { bots: { rank: 'm', members: {} } };
+  // The bot's own session may change its title; another session, or a history or subagent view of any, opens beside it.
+  expect(rebindsBot(group, bot, binding('one', { title: 'Renamed' }))).toBe(false);
+  expect(rebindsBot(group, bot, binding('two'))).toBe(true);
+  expect(rebindsBot(group, bot, binding('one', { sessionIntent: 'history' }))).toBe(true);
+  expect(rebindsBot(group, bot, binding('one', { parentNativeSessionId: 'root' }))).toBe(true);
+  // Without bot details the group takes any binding, and a view that is not a bot keeps no conversation.
+  expect(rebindsBot({}, bot, binding('two'))).toBe(false);
+  expect(rebindsBot(group, createWindowView('empty', undefined, 'primary'), binding('two'))).toBe(false);
+  expect(rebindsBot(group, undefined, binding('two'))).toBe(false);
 });

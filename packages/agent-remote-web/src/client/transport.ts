@@ -28,6 +28,18 @@ export interface RemoteProtocolObservation {
   readonly message: ClientMessage | RemoteServerMessage;
 }
 
+/**
+ * Send outcomes that leave delivery uncertain: the message may or may not have reached the agent. The client records
+ * them on the outgoing message in plain words, which the conversation shows instead of the Host's reply.
+ */
+export const UNCERTAIN_SEND_CODES: readonly string[] = ['operation_timeout', 'connection_disconnected', 'operation_stopped', 'command_failed', 'operation_outcome_unknown'];
+/** Uncertain outcomes whose operation the Host will not run again: only a new attempt can send the message. */
+export const NEW_ATTEMPT_SEND_CODES: readonly string[] = ['command_failed', 'operation_outcome_unknown'];
+/** Whether a send or a retry ended uncertain. Its outgoing message then says what to check and what Retry does next. */
+export function isUncertainSend(error: unknown): error is RemoteOperationError {
+  return error instanceof RemoteOperationError && UNCERTAIN_SEND_CODES.includes(error.code);
+}
+
 export class RemoteOperationError extends Error {
   readonly name = 'RemoteOperationError';
 

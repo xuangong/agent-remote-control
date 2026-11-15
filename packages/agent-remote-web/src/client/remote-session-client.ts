@@ -34,7 +34,9 @@ import { watchMessageEchoes } from './message-echo-sync.js';
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';
 import {
+  NEW_ATTEMPT_SEND_CODES,
   RemoteOperationError,
+  isUncertainSend,
   type RemoteAgentTransport,
   type RemoteConnection,
   type RemoteServerMessage,
@@ -506,12 +508,10 @@ export class RemoteSessionClient {
       this.replica.acknowledgeMessage(outgoingId, acknowledgement.payload.inputAcceptance, acknowledgement.payload.submittedTextSha256);
     }, error => {
       if (!isCurrentAttempt()) return;
-      const uncertain = error instanceof RemoteOperationError && [
-        'operation_timeout', 'connection_disconnected', 'operation_stopped', 'command_failed', 'operation_outcome_unknown',
-      ].includes(error.code);
-      const retryRequiresNewOperation = error instanceof RemoteOperationError && ['command_failed', 'operation_outcome_unknown'].includes(error.code);
+      const uncertain = isUncertainSend(error);
+      const retryRequiresNewOperation = error instanceof RemoteOperationError && NEW_ATTEMPT_SEND_CODES.includes(error.code);
       this.replica.updateMessage(outgoingId, uncertain ? 'unconfirmed' : 'failed',
-        retryRequiresNewOperation ? 'The previous result cannot be recovered. Check the conversation before retrying; Retry starts a new attempt.'
+        retryRequiresNewOperation ? 'This message may not have arrived. If it is not in the conversation, Retry sends it again.'
           : uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
           : error instanceof Error ? error.message : 'The message could not be sent.', retryRequiresNewOperation);
     });

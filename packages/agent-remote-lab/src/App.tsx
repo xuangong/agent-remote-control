@@ -3,7 +3,7 @@ import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
 import { windowTitleEdits } from './window-titles.js';
 import { useWindowSessionBridge } from './hooks/useWindowSessionBridge.js';
-import { createWindowView, hasBotAppearance, isBotView, nativeSessionRefKey, primaryWindowViews, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
+import { createWindowView, hasBotAppearance, isBotView, nativeSessionRefKey, primaryWindowViews, rebindsBot, windowPrimaryViewId, type WindowEdit, type WindowView } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from './window-workspace.js';
 import { useWorkbenchMode } from './hooks/useWorkbenchMode.js';
 import { useBotWorkspace } from './hooks/useBotWorkspace.js';
@@ -1052,8 +1052,15 @@ function AppContent({
     setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined);
     closeContext();
     if (compactLayoutRef.current) setInspectorOpen(false);
+    // A bot keeps its conversation: a session that would take a bot's place in a group with bot details opens beside it, as
+    // the directory does, rather than asking the group for an edit it refuses ("A bot keeps its conversation…").
+    const shownWindow = sharedWindow && !takeOver && !onRestoring ? windowWorkspace.readWindow() ?? sharedWindow : undefined;
+    const destination = shownWindow?.views.find(view => view.id === (targetPrimaryViewId ?? shownWindow.selectedPrimaryViewId));
+    const beside = shownWindow && destination && rebindsBot(windowWorkspace.readGroup(shownWindow.id), destination, windowSessionBinding(selection, sessionIntent))
+      ? { windowId: shownWindow.id, viewId: destination.id, binding: JSON.stringify(destination.binding ?? null) } : undefined;
     try {
-      const result = sharedWindow && !takeOver && !onRestoring
+      const result = beside ? await bindDirectorySession({ ...selection, ...(sessionIntent ? { sessionIntent } : {}) }, beside)
+        : sharedWindow && !takeOver && !onRestoring
         ? await windowSession.openPrimary(selection, undefined, false, keepOriginal, primarySlot, targetPrimaryViewId, sessionIntent)
         : await succession.open(selection, sessionIntent, keepOriginal, primarySlot, takeOver, onRestoring);
       return result;
@@ -1464,8 +1471,10 @@ function AppContent({
     // is already a bot here is selected instead. Navigation within the bot's own chain (its handoff history) stays in place.
     let target = view, expected = expectedBinding;
     const shownGroup = windowWorkspace.readGroup(current.id);
-    if (shownGroup && hasBotAppearance(shownGroup) && isBotView(view) && session.sessionIntent !== 'history'
-      && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session))) {
+    // Opening another session over a bot opens it beside (rule 6), and always where the group would refuse the edit (rule 1):
+    // in a group with bot details, a bot takes neither another session nor a history or subagent view of one.
+    if (shownGroup && isBotView(view) && (rebindsBot(shownGroup, view, windowSessionBinding(session))
+      || hasBotAppearance(shownGroup) && session.sessionIntent !== 'history' && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session)))) {
       const binding = windowSessionBinding(session);
       const existing = current.views.find(candidate => isBotView(candidate) && windowBindingKey(candidate.binding) === windowBindingKey(binding));
       if (existing) {
@@ -2908,11 +2917,33 @@ function AppContent({
     }
     return element;
   }
+  /**
+   * Shows one of a Window bot's earlier sessions, read above its conversation in its own pane: the bot keeps its view and
+   * session, so nothing is rebound. A session not revealed yet scrolls to the start of the earlier conversation, where
+   * "Show earlier conversation" reveals more.
+   */
+  function revealEarlier(viewId: string, session: SessionEntry): boolean {
+    const key = sessionKey(session);
+    const panes = [...document.querySelectorAll<HTMLElement>('[data-primary-group-id], [data-view-id]')]
+      .filter(node => node.dataset.primaryGroupId === viewId || node.dataset.viewId === viewId);
+    for (const pane of panes) {
+      const target = [...pane.querySelectorAll<HTMLElement>('.lab-earlier-session')].find(section => section.dataset.session === key)
+        ?? pane.querySelector<HTMLElement>('.lab-earlier-conversation');
+      if (!target) continue;
+      target.scrollIntoView({ block: 'start', behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      return true;
+    }
+    return false;
+  }
   function sessionViewPresentation(context: FamilySessionPresentationContext, options: { team?: boolean; bot?: { groupId: string; viewId: string }; fallback?: boolean } = {}) {
     const team = options.team === true, botPresentation = !!options.bot || options.fallback === true;
     const source = { ...(team ? context.session : withConfirmedTitle(context.session)), hostId: context.session.hostId ?? 'local', viewId: context.viewId!, ...(options.bot ? { bot: options.bot } : options.fallback ? { fallback: true } : {}) };
     const botGroup = options.bot ? windowWorkspace.readGroup(options.bot.groupId) : undefined;
     const view = options.bot ? botGroup?.window.views.find(view => view.id === options.bot!.viewId) : sharedWindow?.views.find(view => view.id === context.windowViewId);
+    // In a group with bot details, a bot's pane in Window mode is the same bot: its conversation goes on into its earlier
+    // sessions in place, as in Bot mode, since the group keeps the bot's conversation (rule 1). An ordinary Window opens
+    // them in the view instead.
+    const windowBot = !botPresentation && !!view && isBotView(view) && !!sharedWindow && !!windowWorkspace.readGroup(sharedWindow.id)?.bots;
     const isPrimary = view?.placement === 'primary';
     const fork = forkStore.find(source);
     // In a Window, a fork view's input belongs to the fork only while that view still shows it.
@@ -2996,7 +3027,7 @@ function AppContent({
         {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => setQuoteNotice(undefined)}
           onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; setQuoteNotice(undefined); void open().catch(() => {}); } : undefined} /> : null}</>,
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
-      timelineStart: botPresentation ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
+      timelineStart: botPresentation || windowBot ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
       // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
       timelineEnd: <>{transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
@@ -3004,9 +3035,10 @@ function AppContent({
       ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
         detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
+      // Window mode says where a bot's conversation came from; its links read the earlier session in the bot's own pane.
       headingContext: botPresentation ? undefined : <SessionSuccessionHistory navigation={succession.historyNavigationFor(source)}
-        onOpen={(session, intent) => view && sharedWindow
-          ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
+        onOpen={(session, intent) => windowBot ? Promise.resolve(revealEarlier(view!.id, session))
+          : view && sharedWindow ? bindDirectorySession({ ...session, sessionIntent: intent }, { windowId: sharedWindow.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) })
           : Promise.resolve(false)} />,
       composerContext: botPresentation ? undefined : <>{referencing ? <SessionReferences scope={baseUrl} holder={refHolder} providers={host?.providers?.map(provider => provider.providerId) ?? [source.providerId]}
           fallback={forkReference} snapshot={fork?.mode === 'reference' ? null : forkReference} picking={referencePicker === source.viewId}

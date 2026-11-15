@@ -68,3 +68,12 @@
   - `team.spec.ts` "Add member Browse" on mobile passed 3 of 3 alone, so it is flaky.
 - **A loading Window opened scrolled away from its selection.** Every dock brought itself into view as it mounted, so the last dock won and the first pane was cut off at the left. Now only the selected view's dock does; opening a view beside still selects and reveals it.
 - **Kept as they are:** the sidebar's Window options disclosure (the e2e reach Copy link and Agent control through it; on desktop the toolbar's ⋯ offers the same), the phone's Window layout (the walkthrough's phone scene is Bot mode) and Team's Gather button.
+
+## Follow-up: two errors the owner met after the release
+
+- **"A bot keeps its conversation. Open the other session beside it."** In a group with bot details (a bot labeled, asleep or hidden, or a group started with + New bot), **Continued from** above a handed-off bot's pane bound the pane to the earlier session as a history view, and the group refuses any edit that takes a bot's conversation away (rule 1). The pane's session list and links in the conversation asked the same of the bot's view. Now:
+  - The bot's Window pane reads its earlier sessions in place, above the quiet divider, as Bot mode does; **Continued from** scrolls there. Reading uses HTTP pages only, so no second stream is opened and nothing is rebound.
+  - Every other way of opening a session over a bot in such a group opens it beside the bot. `rebindsBot` in the protocol is the one test the Relay and the clients share.
+  - Windows without bot details keep opening the earlier session in the pane, with **Return to current**; nothing refuses that.
+- **"Retry message: The operation may have reached the native runtime…"** A send whose outcome the Host cannot settle came back on Retry as the Host's operator text, in a toast. Now the outgoing message carries plain words ("This message may not have arrived. If it is not in the conversation, Retry sends it again."), no toast repeats the raw text, and the next Retry sends with a new operation, as it already did.
+- Tests: protocol (`rebindsBot`), web (the message and its retry), Lab (the bot pane, the session list over a bot, the retry toast) and a Playwright check on desktop and phone (`bot-mode.spec.ts`, "reads a handed-off bot's earlier session in its Window pane").

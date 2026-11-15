@@ -24,3 +24,24 @@ it('renders pending images in their original positions and uses authorized previ
   expect(resolve).toHaveBeenCalledWith('input-image:opaque', undefined);
   expect(container.textContent).toContain('not authorized');
 });
+
+it('explains a retry the Host could not settle in plain words, as the message records it, rather than the Host\'s raw reply', async () => {
+  const { RemoteOperationError } = await import('../client/transport.js');
+  const raw = 'The operation may have reached the native runtime. Inspect native state before creating a new intent.';
+  const guidance = 'This message may not have arrived. If it is not in the conversation, Retry sends it again.';
+  const message = { id: 'unsure', agentId: 'one', text: 'Ship it', status: 'unconfirmed' as const, epoch: 'epoch', afterSeq: 1, error: 'Delivery is not confirmed. Check the conversation before sending again.' };
+  // The client records the plain explanation on the message as the retry fails; the item shows that, not the Host's words.
+  let rerender!: (next: typeof message) => Promise<void>;
+  const retry = vi.fn(async () => { await rerender({ ...message, error: guidance }); throw new RemoteOperationError('operation_outcome_unknown', raw, true); });
+  const host = document.createElement('div'); document.body.append(host);
+  const { createRoot } = await import('react-dom/client');
+  const root = createRoot(host);
+  rerender = async next => { await act(async () => root.render(<OutgoingMessageItem message={next} onRetry={retry} />)); };
+  await rerender(message);
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Retry message"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delivery error"]')!.click());
+  expect(host.querySelector('.agent-delivery-error')?.textContent).toBe(guidance);
+  expect(host.querySelector<HTMLElement>('[aria-label="Delivery error"]')!.title).toBe(guidance);
+  expect(host.textContent).not.toContain('native runtime');
+  await act(async () => root.unmount()); host.remove();
+});

@@ -483,6 +483,35 @@ test('keeps Handoff modal and progress reachable across Bot and Window without r
   } finally { release(); await page.close(); await fixture.close(); }
 });
 
+test('reads a handed-off bot\'s earlier session in its Window pane, where Continued from leads, and keeps the bot', async ({ page, context }) => {
+  const fixture = await joinedFixture();
+  try {
+    await fixture.seed(context); const client = fixtureClient(context, fixture.scope, fixture.origin);
+    const target = (nativeSessionId: string, title: string) => ({ hostId: fixture.hostId, providerId: 'fixture', nativeSessionId, title });
+    const id = randomUUID();
+    await client.create({ schemaVersion: 3, id, revision: 0, title: 'Window B', views: [createWindowView('B1', target('S', 'Bot source S'), 'primary'), createWindowView('B2', target('T', 'Bot other T'), 'primary')], selectedViewId: 'B1', selectedPrimaryViewId: 'B1' });
+    await withBotDetails(client, id);
+    await page.goto(`${fixture.origin}/?window=${id}`); await showWindowConversation(page);
+    const pane = modeRegion(page, 'window').locator('[data-primary-group-id="B1"]');
+    await activateComposerAction(pane, 'Open chat commands', true); await pane.getByRole('option', { name: /^\/handoff/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Hand off conversation', exact: true });
+    await dialog.getByRole('button', { name: 'Hand off', exact: true }).click();
+    await expect.poll(async () => (await client.inspect(id)).window.views.find(view => view.id === 'B1')?.binding?.nativeSessionId).toBe('B');
+    // One bot, one conversation: the earlier session reads above the current one in the bot's own pane, as in Bot mode.
+    const earlier = pane.getByRole('region', { name: 'Earlier conversation: Bot source S', exact: true });
+    await expect(earlier).toBeAttached();
+    const link = pane.getByRole('navigation', { name: 'Session handoff history', exact: true }).getByRole('link', { name: 'Bot source S', exact: true });
+    await expect(link).toBeVisible(); await link.click();
+    await expect(earlier).toBeInViewport();
+    await expect(page.getByText('A bot keeps its conversation')).toHaveCount(0);
+    await expect(pane.locator('.lab-succession-history-error')).toHaveCount(0);
+    await screenshot(page, 'window-bot-earlier-conversation');
+    const binding = (await client.inspect(id)).window.views.find(view => view.id === 'B1')!.binding!;
+    expect(binding.nativeSessionId).toBe('B'); expect(binding.sessionIntent).toBeUndefined();
+    expect(fixture.sessions.get('S')!.sent).toEqual([]);
+  } finally { await page.close(); await fixture.close(); }
+});
+
 for (const [width, height] of [[1440, 900], [1181, 800], [1180, 800], [390, 844], [320, 568]] as const) {
   test(`keeps one shared editor with keyboard and compact navigation at ${width}x${height}`, async ({ page }) => {
     await page.setViewportSize({ width, height }); await page.emulateMedia({ reducedMotion: 'reduce' });

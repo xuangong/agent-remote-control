@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
-import { remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
+import { isUncertainSend, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -249,18 +249,21 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
   const [failure, setFailure] = useState<{ title: string; message: string; reauthenticate: boolean }>();
   useFeedbackToast(failure?.title ?? 'Session action', failure?.reauthenticate ? undefined : failure?.message);
   useEffect(() => setFailure(undefined), [sessionId]);
-  function report<Args extends unknown[], Result>(title: string, action: ((...args: Args) => Result) | undefined) {
+  /** `recorded` tells the failures the conversation shows itself, which need no toast. */
+  function report<Args extends unknown[], Result>(title: string, action: ((...args: Args) => Result) | undefined, recorded: (error: unknown) => boolean = () => false) {
     return action ? async (...args: Args): Promise<Awaited<Result>> => {
       setFailure(undefined);
       try { return await action(...args); }
       catch (error) {
-        if (activeSession.current === sessionId) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.', reauthenticate: isAuthenticationError(error) });
+        if (activeSession.current === sessionId && !recorded(error)) setFailure({ title, message: error instanceof Error ? error.message : 'The action could not be confirmed. Check its status before retrying.', reauthenticate: isAuthenticationError(error) });
         throw error;
       }
     } : undefined;
   }
+  // An uncertain send stays on its outgoing message, which says in plain words what to check and what Retry does next.
   const reportedActions = useMemo(() => ({ ...actions,
-    sendMessage: report('Send message', actions.sendMessage), sendMessageContent: report('Send message', actions.sendMessageContent), retryMessage: report('Retry message', actions.retryMessage),
+    sendMessage: report('Send message', actions.sendMessage, isUncertainSend), sendMessageContent: report('Send message', actions.sendMessageContent, isUncertainSend),
+    retryMessage: report('Retry message', actions.retryMessage, isUncertainSend),
     steer: report('Steer session', actions.steer), cancel: report('Stop work', actions.cancel),
     respondToInteraction: report('Submit response', actions.respondToInteraction),
     setPlanning: report('Change session mode', actions.setPlanning), setSessionSetting: report('Change session setting', actions.setSessionSetting),

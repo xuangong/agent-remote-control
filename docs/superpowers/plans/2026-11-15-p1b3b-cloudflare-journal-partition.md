@@ -592,16 +592,16 @@ git commit -m "feat(hosted): the journal partition contract, its server side and
 - Modify: `packages/agent-remote-cloudflare/test/fixture.ts`
 - Create: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`
 
-- [ ] **Step 1: Add the dependency.** In `packages/agent-remote-cloudflare/package.json`, add to `dependencies`, after the hosted line:
+- [x] **Step 1: Add the dependency.** In `packages/agent-remote-cloudflare/package.json`, add to `dependencies`, after the hosted line:
 
 ```json
     "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
 ```
 
-Run: `pnpm install --offline` (or `pnpm install`)
-Expected: the Cloudflare package links the store package; `pnpm-lock.yaml` changes by that link only.
+Edit only the Cloudflare importer entry of `pnpm-lock.yaml` by hand (`pnpm install` rewrites unrelated registry entries of this checkout), then run `pnpm install --frozen-lockfile --prefer-offline`.
+Expected: the Cloudflare package links the store package; `pnpm-lock.yaml` changes by that importer entry only.
 
-- [ ] **Step 2: Extend the Miniflare fixture.** All edits are in `packages/agent-remote-cloudflare/test/fixture.ts`. They add a second Durable Object binding, a test subclass of the partition that can be tuned and inspected, and two routes on the test `primary` object.
+- [x] **Step 2: Extend the Miniflare fixture.** All edits are in `packages/agent-remote-cloudflare/test/fixture.ts`. They add a second Durable Object binding, a test subclass of the partition that can be tuned and inspected, and two routes on the test `primary` object.
 
 (a) In the signature of `fixture`, replace `workerVersionId?: string; authorityOutageGraceMs?: number } = {}) {` with
 
@@ -659,7 +659,7 @@ and replace `      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADA
       bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}),
 ```
 
-- [ ] **Step 3: Write the failing tests for the object.** `packages/agent-remote-cloudflare/test/journal-partition.test.ts`:
+- [x] **Step 3: Write the failing tests for the object.** `packages/agent-remote-cloudflare/test/journal-partition.test.ts`:
 
 ```ts
 import { expect, test } from 'vitest';
@@ -753,14 +753,29 @@ test('refuses to open a journal whose index is over the item bound, claims nothi
   expect(rest.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m3']);
   expect(await call(f, 'host-1', 'indexPage', 'host-1', SESSION, 'another-epoch', 0, 10)).toBeNull();
 }, 60_000);
+
+test('fills bodies and reads the page in one call, and serves a page of several MiB in one reply', async () => {
+  const f = await fixture({ journals: { tuning: { retention: { turns: 1, minItems: 1 } } } });
+  const text = 'é'.repeat(1_000_000);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  for (const n of [1, 2, 3]) {
+    await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
+      { sequence: n * 2 - 1, op: 'append', row: row(`m${n}`, text, n) }, { sequence: n * 2, op: 'complete', itemKey: `m${n}`, digest: `digest-m${n}` }]);
+  }
+  expect(await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false)).toEqual({ kind: 'missing', itemKeys: ['m1', 'm2'] });
+  const filled = await call(f, 'host-1', 'fill', 'host-1', SESSION,
+    ['m1', 'm2'].map(key => ({ row: row(key, text, Number(key.slice(1))), digest: `digest-${key}` })), { request: tail, olderBeyondJournal: true });
+  expect(filled).toMatchObject({ filled: ['m1', 'm2'], page: { kind: 'page', page: { payload: { hasOlder: true } } } });
+  expect(filled.page.page.payload.entries.map((entry: { item: { text: string } }) => entry.item.text.length)).toEqual([1_000_000, 1_000_000, 1_000_000]);
+}, 120_000);
 ```
 
-- [ ] **Step 4: Run the tests and see them fail.**
+- [x] **Step 4: Run the tests and see them fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
 Expected: FAIL at start-up (the bundle cannot resolve `./src/journal-partition.ts`).
 
-- [ ] **Step 5: Implement the binding of the store to a Durable Object.** `packages/agent-remote-cloudflare/src/journal-sql-database.ts`:
+- [x] **Step 5: Implement the binding of the store to a Durable Object.** `packages/agent-remote-cloudflare/src/journal-sql-database.ts`:
 
 ```ts
 import type { JournalSqlDatabase, SqlValue } from '@orchardworks/agent-remote-journal-sqlite';
@@ -782,7 +797,7 @@ export function durableObjectJournalDatabase(storage: DurableObjectStorage): Jou
 }
 ```
 
-- [ ] **Step 6: Implement the Durable Object.** `packages/agent-remote-cloudflare/src/journal-partition.ts`:
+- [x] **Step 6: Implement the Durable Object.** `packages/agent-remote-cloudflare/src/journal-partition.ts`:
 
 ```ts
 import { DurableObject } from 'cloudflare:workers';
@@ -838,17 +853,17 @@ In `packages/agent-remote-cloudflare/src/worker.ts`, after `export { RelayObject
 export { JournalPartition } from './journal-partition.js';
 ```
 
-- [ ] **Step 7: Run the tests and see them pass.**
+- [x] **Step 7: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
-Expected: PASS. If the bundle step cannot resolve `@orchardworks/agent-remote-journal-sqlite`, run `pnpm --filter @orchardworks/agent-remote-journal-sqlite run build` first. If a `cloudflare:workers` import is rejected by the bundler, check that the fixture's esbuild call lists `cloudflare:*` in `external` (it already does).
+Expected: PASS (6 tests; the whole Cloudflare suite then has 225, run in two halves of at most 300 s). If the bundle step cannot resolve `@orchardworks/agent-remote-journal-sqlite`, run `pnpm --filter @orchardworks/agent-remote-journal-sqlite run build` first. If a `cloudflare:workers` import is rejected by the bundler, check that the fixture's esbuild call lists `cloudflare:*` in `external` (it already does).
 
-- [ ] **Step 8: Typecheck the Cloudflare package.**
+- [x] **Step 8: Typecheck the Cloudflare package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck`
-Expected: PASS. If `implements JournalPartitionApi` rejects a method because the Durable Object RPC types demand `Rpc.Serializable` results, keep the class as it is and drop only the `implements` clause: `primary` casts the stub to `JournalPartitionApi` and never relies on the class type.
+Expected: PASS with `implements JournalPartitionApi` kept. If a later change makes the Durable Object RPC types reject a method because they demand `Rpc.Serializable` results, drop only the `implements` clause: `primary` casts the stub to `JournalPartitionApi` and never relies on the class type.
 
-- [ ] **Step 9: Commit.**
+- [x] **Step 9: Commit.**
 
 ```bash
 git add packages/agent-remote-cloudflare/package.json pnpm-lock.yaml packages/agent-remote-cloudflare/src packages/agent-remote-cloudflare/test

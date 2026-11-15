@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*"
   },
   "devDependencies": {

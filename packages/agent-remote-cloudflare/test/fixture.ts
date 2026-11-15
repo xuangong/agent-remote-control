@@ -25,15 +25,16 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object } } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
-    const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
+    const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject, JournalPartition } from './src/worker.ts';` : `
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
       import { SqliteRelayStore } from './src/storage.ts';
       import { createHostedRelay } from '@orchardworks/agent-remote-hosted';
       import { WorkerRelaySocket } from './src/socket.ts';
+      import { JournalPartition } from './src/journal-partition.ts';
       export class TestRelayObject extends RelayObject {
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
           this.completeCodec = ${options.completeCodec === true};
@@ -64,6 +65,12 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
             blob: this.fixtureContext.storage.sql.exec('SELECT bytes FROM relay_snapshot_chunks LIMIT 1').toArray().map(row => ({ arrayBuffer: row.bytes instanceof ArrayBuffer, size: row.bytes.byteLength, prefix: Array.from(new Uint8Array(row.bytes).slice(0, 16)) }))
           });
           if (path === '/_fixture/alarm') { await this.alarm(); return new Response('ok'); }
+          if (path === '/_fixture/journal-tables') return Response.json(this.fixtureContext.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'journal%'").toArray());
+          if (path.startsWith('/_fixture/partition/')) {
+            const [, , , hostId, method] = path.split('/');
+            try { const result = await this.fixtureEnv.JOURNALS.getByName(hostId)[method](...await request.json()); return Response.json({ result: result ?? null }); }
+            catch (error) { return Response.json({ error: String(error) }, { status: 500 }); }
+          }
           if (path === '/_fixture/storage') return Response.json({ alarm: await this.fixtureContext.storage.getAlarm(),
             rows: this.fixtureContext.storage.sql.exec('SELECT kind, count(*) AS count FROM (SELECT kind FROM relay_records UNION ALL SELECT kind FROM relay_snapshot_manifests) GROUP BY kind ORDER BY kind').toArray() });
           if (path === '/_fixture/alarm-set') { await this.fixtureContext.storage.setAlarm(Number(new URL(request.url).searchParams.get('at'))); return new Response('ok'); }
@@ -84,6 +91,10 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
           return super.fetch(request);
         }
       }
+      export class TestJournalPartition extends JournalPartition {
+        tuning() { const raw = this.env.JOURNAL_TUNING; return raw ? JSON.parse(raw) : super.tuning(); }
+        async inspect(sql) { return this.ctx.storage.sql.exec(sql).toArray(); }
+      }
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
       conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
@@ -103,8 +114,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const googleCodes = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   async function start() {
     mf = new Miniflare({ modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
-      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'

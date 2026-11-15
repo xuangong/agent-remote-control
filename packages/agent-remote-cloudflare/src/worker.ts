@@ -1,6 +1,7 @@
 import { isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
+export { JournalPartition } from './journal-partition.js';
 
 export default {
   async fetch(request: Request, env: RelayEnvironment): Promise<Response> {

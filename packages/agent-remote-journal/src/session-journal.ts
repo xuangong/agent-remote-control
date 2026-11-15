@@ -2,6 +2,7 @@ import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import { canonicalRow, entryBody, itemEntry, mergeResources, stampRow } from './journal-items.js';
+import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
 import { replacementOrder } from './replacement.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
@@ -212,6 +213,11 @@ export class SessionJournal {
       ...(item.clientMessageId === undefined ? {} : { clientMessageId: item.clientMessageId }),
       revision: item.revision, resident: item.body !== null,
     }));
+  }
+
+  /** A page of the journal; `olderBeyondJournal` says whether the Host still holds history older than the journal. */
+  page(request: JournalPageRequest, options: { olderBeyondJournal: boolean }): JournalPageResult {
+    return pageJournal({ epoch: this.meta.epoch, items: this.items, nextSeq: this.meta.nextSeq }, request, options);
   }
 
   state(): JournalState {

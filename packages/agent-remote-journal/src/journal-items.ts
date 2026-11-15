@@ -3,11 +3,15 @@ import { includeResources, type CanonicalTimelineRow } from '@orchardworks/agent
 
 import { JournalBodyMissingError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
 
+export function rowTimestamp(occurredAt: number): string {
+  return new Date(occurredAt).toISOString();
+}
+
 export function stampRow(epoch: string, seq: number, input: JournalRowInput): JournalRow {
   return {
     epoch, seq, itemKey: input.itemKey, providerId: input.providerId, sourceKey: input.sourceKey,
     ...(input.nativeRevision === undefined ? {} : { nativeRevision: input.nativeRevision }),
-    occurredAt: input.occurredAt, timestamp: new Date(input.occurredAt).toISOString(),
+    occurredAt: input.occurredAt, timestamp: rowTimestamp(input.occurredAt),
     ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
     item: structuredClone(input.item), resources: structuredClone(input.resources ?? []),
   };
@@ -42,7 +46,7 @@ export function entryBody(entry: ProjectedTimelineEntry): JournalBody {
 /** The body of a complete item read again from native history, for a fill. */
 export function bodyFromRow(input: JournalRowInput): JournalBody {
   return {
-    item: structuredClone(input.item), timestamp: new Date(input.occurredAt).toISOString(),
+    item: structuredClone(input.item), timestamp: rowTimestamp(input.occurredAt),
     collapsed: [], resources: structuredClone(input.resources ?? []),
   };
 }

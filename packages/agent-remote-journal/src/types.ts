@@ -138,3 +138,10 @@ export class JournalUnknownItemError extends Error {
     this.name = 'JournalUnknownItemError';
   }
 }
+
+export class JournalItemTypeChangedError extends Error {
+  constructor(readonly itemKey: string, readonly from: string, readonly to: string) {
+    super(`Journal item ${itemKey} changed from ${from} to ${to}.`);
+    this.name = 'JournalItemTypeChangedError';
+  }
+}

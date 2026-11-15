@@ -45,6 +45,8 @@ export interface JournalReads {
   /** Asks the Controller to read up to `limit` older items and publish them; rejects when it cannot be done. */
   older(limit: number): Promise<void>;
   olderBeyondJournal(): boolean;
+  /** The journal has no head although the index said it had one; the index forgets the session before the stream closes. */
+  noHead?(): void;
 }
 
 export interface JournalSessionStreamOptions {
@@ -246,7 +248,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   async function refreshHead(): Promise<void> {
     const status = await reads.status();
     if (isPhase('closed')) return;
-    if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
+    if (!status?.head) { reads.noHead?.(); shutdown(1012, 'Session journal unavailable'); return; }
     if (activityOnly) observe(status.head.snapshot, status.cursor);
     else sendServer(snapshotMessage('agent_update', status.head));
   }
@@ -254,7 +256,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   async function negotiate(): Promise<void> {
     const status = await reads.status();
     if (!isPhase('negotiating')) return;
-    if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
+    if (!status?.head) { reads.noHead?.(); shutdown(1012, 'Session journal unavailable'); return; }
     sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
     if (activityOnly) {
       observe(status.head.snapshot, status.cursor);

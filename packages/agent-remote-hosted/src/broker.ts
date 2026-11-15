@@ -37,7 +37,7 @@ import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FEATURE_BYTES } from './succession-capacity.js';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
-import { createHostJournals, type JournalReadRequest } from './host-journals.js';
+import { createHostJournals, type HostJournals, type JournalReadRequest } from './host-journals.js';
 import { createJournalConnection, isJournalHostMessage, type JournalConnection } from './journal-uplink.js';
 import { createHostStreamOpener, type HostStreamEntry } from './journal-host-stream.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
@@ -59,6 +59,8 @@ type Host = {
   hostStatus?: true;
   /** The Controller delivers messages from the outbox; it said so when it last connected, and the Host keeps it while offline. */
   outbox?: 1;
+  /** Providers whose sessions are read from their journals; saved with the Host. Absent: every read goes to the Controller. */
+  smartReading?: string[];
   /** The Controller publishes session journals on this connection; set when the Relay acknowledges it, never persisted. */
   journal?: JournalConnection;
   teamManagement?: true;
@@ -89,12 +91,14 @@ export interface RemoteHostBrokerState {
   /** Call For Support profiles and session enablement of this account. */
   callForSupport?: CallForSupportState;
   revokedHosts?: RevokedHost[];
+  /** Hosts that were revoked and whose journals are not yet confirmed deleted. */
+  journalDeletions?: string[];
   associations?: BrokerAssociationState;
   pairings?: SavedPairingKey[];
   previews?: HostPreviewState[];
   sharing?: HostSharingState;
   keys: Array<[string, DeviceCredential]>;
-  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement' | 'teamManagement' | 'outbox'>>;
+  hosts: Array<Pick<Host, 'id' | 'installationId' | 'name' | 'providers' | 'legacyDsh' | 'credentialRotation' | 'gatewayKeyRequested' | 'environment' | 'pairingPurpose' | 'controller' | 'providerManagement' | 'tpmManagement' | 'teamManagement' | 'outbox' | 'smartReading'>>;
   bindings: Array<Omit<Binding, 'generation' | 'recovery'>>;
   creations: Array<[string, { fingerprint: string; agentId: string }]>;
 }
@@ -108,6 +112,8 @@ export interface HostBrokerOptions {
   journals?: JournalStore;
   /** How long a Controller has to answer a journal request. Defaults to 15 seconds. */
   journalRequestTimeoutMs?: number;
+  /** A journal service built elsewhere, such as one shared by every account or one that reaches journal partitions; used instead of `journals`. */
+  journalService?: HostJournals;
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
   successionEnrollment?: SuccessionAssociationAuthority;
   /** Pure synchronous selection from the complete post-increment Broker draft; no native effects. */
@@ -149,7 +155,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
-  const journals = options.journals && createHostJournals({ store: options.journals, now });
+  const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals, now }));
   const heartbeat = { intervalMs: options.heartbeatIntervalMs ?? 30_000, timeoutMs: options.heartbeatTimeoutMs ?? 10_000 };
   if (!Number.isSafeInteger(heartbeat.intervalMs) || !Number.isSafeInteger(heartbeat.timeoutMs) || heartbeat.timeoutMs < 1 || heartbeat.timeoutMs >= heartbeat.intervalMs || heartbeat.intervalMs > 600_000) {
     throw new RangeError('Host heartbeat deadlines require 0 < timeout < interval <= 600000 milliseconds.');
@@ -161,6 +167,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const hosts = new Map<string, Host>();
   let pairings = structuredClone(options.initialState?.pairings ?? []);
   let revokedHosts = structuredClone(options.initialState?.revokedHosts);
+  let journalDeletions = [...(options.initialState?.journalDeletions ?? [])];
   const bindings = new Map<string, Binding>();
   const runtimeBindings = new Map<string, { generation: number; agentId: string }>();
   const activeStreamCount = (subject: string) => [...hosts.values()].reduce((sum, host) => sum + [...host.streams.values()].filter(stream => stream.subject === subject).length, 0);
@@ -197,8 +204,8 @@ export function createHostBroker(options: HostBrokerOptions) {
    * objects themselves: they are frozen, and changes replace them. Everything else is a copy of the runtime state.
    */
   function snapshot(): RemoteHostBrokerState {
-    return { teams: teamState, ...(callForSupportState ? { callForSupport: callForSupportState } : {}), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations } : {}), pairings: structuredClone(pairings), previews: structuredClone(previews.snapshot()), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
-      hosts: structuredClone([...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement, outbox }) => ({ ...(outbox ? { outbox } : {}), ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) }))),
+    return { teams: teamState, ...(callForSupportState ? { callForSupport: callForSupportState } : {}), ...(revokedHosts ? { revokedHosts: structuredClone(revokedHosts) } : {}), ...(journalDeletions.length > 0 ? { journalDeletions: [...journalDeletions] } : {}), ...(options.successionEnrollment || options.initialState?.associations ? { associations } : {}), pairings: structuredClone(pairings), previews: structuredClone(previews.snapshot()), ...(options.ownerSubject ? { sharing: sharing.snapshot() } : {}), keys: [...keys].map(([key, value]) => [key, structuredClone(value)]),
+      hosts: structuredClone([...hosts.values()].map(({ id, installationId, name, providers, legacyDsh, credentialRotation, gatewayKeyRequested, environment, pairingPurpose, controller, providerManagement, tpmManagement, teamManagement, outbox, smartReading }) => ({ ...(outbox ? { outbox } : {}), ...(smartReading ? { smartReading: [...smartReading] } : {}), ...(teamManagement ? { teamManagement } : {}), ...(tpmManagement ? { tpmManagement } : {}), ...(providerManagement ? { providerManagement } : {}), ...(controller ? { controller } : {}), ...(pairingPurpose ? { pairingPurpose } : {}), ...(environment ? { environment } : {}), id, installationId, name, providers, legacyDsh, ...(credentialRotation ? {credentialRotation} : {}), ...(gatewayKeyRequested ? { gatewayKeyRequested } : {}) }))),
       bindings: structuredClone([...bindings.values()].map(({ generation: _generation, recovery: _recovery, ...binding }) => binding)),
       creations: structuredClone([...completedCreations]) };
   }
@@ -761,6 +768,11 @@ export function createHostBroker(options: HostBrokerOptions) {
   /** Serves the reads of sessions that have a journal head from their journals; see journal-sessions.ts. */
   const journalSessions = journals && createJournalSessions({
     journals, scheduler,
+    gate: {
+      readingEnabled: (hostId, providerId) => hosts.get(hostId)?.smartReading?.includes(providerId) === true,
+      served: (hostId, sessionKey) => journals.served(hostId, sessionKey),
+      loadServed: async hostId => { await journals.servedSessions(hostId); },
+    },
     requestFill: async (hostId, sessionKey, itemKeys, read) => requireJournal(hostId).requestFill(sessionKey, itemKeys, read),
     requestOlder: async (hostId, sessionKey, limit) => requireJournal(hostId).requestOlder(sessionKey, limit),
   });
@@ -856,11 +868,17 @@ export function createHostBroker(options: HostBrokerOptions) {
       try { send(host!, { uplinkVersion: 2, type: 'heartbeat', nonce }); }
       catch { closeConnection(1012, 'Host heartbeat delivery failed'); }
     }
+    let pendingDeletionHandled = false;
     function registered() {
       if (retired || !host || host.socket !== socket) return;
+      if (!pendingDeletionHandled && journals && journalDeletions.includes(host.id)) {
+        pendingDeletionHandled = true;
+        void finishJournalDeletions(host.id).then(registered);
+        return;
+      }
       host.tunnelToken ??= randomBytes(32).toString('base64url');
       const journalHost = host;
-      host.journal ??= journalRequested && journals
+      host.journal ??= journalRequested && journals && !journalDeletions.includes(host.id)
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
           send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }),
           published: (sessionKey, result) => journalSessions?.published(journalHost.id, sessionKey, result) })
@@ -869,6 +887,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (retired || host.socket !== socket) return;
       host.ready = true;
       journalSessions?.hostReturned(host.id);
+      if (journalDeletions.length > 0) void finishJournalDeletions();
       host.hostStatus = statusRequested ? true : undefined;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
       notifySessionStates();
@@ -944,6 +963,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             readOnlyProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? callForSupportRequested : undefined, pairingPurpose: purpose,
             outbox: outboxRequested && options.outbox ? 1 as const : undefined,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
+            ...(existing?.smartReading ? { smartReading: existing.smartReading } : {}),
             providers, legacyDsh: 'providerId' in message, ...(message.credentialRotation ? {credentialRotation:true} : {credentialRotation:undefined}) };
           draft.hosts = draft.hosts.filter(value => value.id !== next.id); draft.hosts.push(next);
           const pairing = draft.pairings?.find(value => value.id === credential.pairingId);
@@ -1908,6 +1928,35 @@ export function createHostBroker(options: HostBrokerOptions) {
       const result = await rpc(host, 'POST', '/remote/stop', undefined, JSON.stringify({ operationId: required(body.operationId, 'operationId') }));
       return rawJson(result);
     }
+    const reading = /^\/v1\/remote\/hosts\/([^/]+)\/smart-reading$/.exec(url.pathname);
+    if (reading) {
+      requireOwner(subject);
+      const host = hosts.get(reading[1]!);
+      if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+      if (request.method === 'GET') return json(200, { providers: host.smartReading ?? [] });
+      if (request.method !== 'PUT') return json(405, { error: 'Method is not allowed.' });
+      const body = await readBody(request);
+      if (Object.keys(body).some(key => key !== 'providerId' && key !== 'enabled') || typeof body.enabled !== 'boolean') {
+        throw new BrokerError(400, 'invalid_request', 'Name a provider and whether smart reading is on for it.');
+      }
+      const providerId = required(body.providerId, 'providerId');
+      const enabled = body.enabled;
+      const providers = await commit(draft => {
+        assertHostCurrent(host);
+        const saved = draft.hosts.find(value => value.id === host.id);
+        if (!saved) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
+        const next = new Set(saved.smartReading ?? []);
+        if (enabled) next.add(providerId); else next.delete(providerId);
+        if (next.size > 64) throw new BrokerError(400, 'invalid_request', 'Smart reading names at most 64 providers per Host.');
+        const list = [...next].sort();
+        if (list.length > 0) saved.smartReading = list; else delete saved.smartReading;
+        return { value: list, publish() {
+          host.smartReading = list.length > 0 ? list : undefined;
+          if (!enabled) journalSessions?.stopReading(host.id, providerId);
+        } };
+      });
+      return json(200, { providers });
+    }
     const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
     if (accountBacked && revoking && request.method === 'POST') {
       requireOwner(subject);
@@ -1926,6 +1975,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
         draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
         draft.hosts = draft.hosts.filter(value => value.id !== host.id);
+        if (journals) draft.journalDeletions = [...(draft.journalDeletions ?? []).filter(id => id !== host.id), host.id];
         draft.previews = (draft.previews ?? []).filter(value => value.hostId !== host.id);
         return { value: undefined, publish() {
           revokedHosts = draft.revokedHosts;
@@ -1941,6 +1991,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           for (const key of attachmentRequests.keys()) if (JSON.parse(JSON.parse(key)[0])[0] === host.id) attachmentRequests.delete(key);
           hosts.delete(host.id);
           previews.forget(host.id);
+          if (journals) { journalDeletions = draft.journalDeletions ?? []; void finishJournalDeletions(); }
           if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
         } };
       });
@@ -2163,7 +2214,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     // Authorization above is the same for both modes. A session with a journal head is read from it, whether or not its Host is online.
     const journalHost = journalSessions && hosts.get(binding.hostId);
     // A store that cannot be read must not stop the session from opening: the Controller path still works.
-    const journaled = journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => {
+    const journaled = journalHost && await journalSessions!.serves(journalHost.id, binding.providerId, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => {
       diagnostic(journalHost, { event: 'journal_store_failed' });
       return false;
     });
@@ -2213,6 +2264,34 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { client.close(1012, 'Remote Host disconnected'); }
     } };
   }
+  /**
+   * Deletes the journals of revoked Hosts the state still lists, one at a time, until none is left that this run has not
+   * tried, so a Host revoked while a run is going is not left for the next start. `first` is deleted before the others. Each
+   * id leaves the state once the store confirms; an id that failed stays. Runs queue one after another and never reject.
+   */
+  let deletionTail: Promise<void> = Promise.resolve();
+  function finishJournalDeletions(first?: string): Promise<void> {
+    const service = journals;
+    if (!service) return Promise.resolve();
+    const run = deletionTail.then(async () => {
+      const tried = new Set<string>();
+      for (;;) {
+        const hostId = first !== undefined && !tried.has(first) && journalDeletions.includes(first) ? first : journalDeletions.find(id => !tried.has(id));
+        if (hostId === undefined) return;
+        tried.add(hostId);
+        try {
+          await service.deleteHost(hostId);
+          await commit(draft => {
+            const rest = (draft.journalDeletions ?? []).filter(id => id !== hostId);
+            if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+            return { value: undefined, publish() { journalDeletions = rest; } };
+          });
+        } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); }
+      }
+    });
+    deletionTail = run;
+    return run;
+  }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
     return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams|call-for-support)(\/|$)/.test(url.pathname) || !!(session && bindings.has(session[1]!));
@@ -2230,6 +2309,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     return { hostId: host.id, hostName: host.name, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'),
       current: () => !unavailable && keys.get(hash) === credential && credential.expires > now() && hosts.get(host.id) === host };
   }
+  if (journalDeletions.length > 0) void finishJournalDeletions();
   return {
     previews,
     authenticateDevice,

@@ -37,6 +37,17 @@ test('real Worker SQLite stores bounded BLOB records and ordered headers, surviv
   expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
 }, 30000);
 
+test('keeps the smart reading switch of a Host and the pending journal deletions through the SQL snapshot and a persisted restart', async () => {
+  const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
+  const broker = state.tenants[0]!.broker;
+  broker.hosts[0]!.smartReading = ['claude', 'codex'];
+  broker.journalDeletions = ['revoked-host'];
+  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
+  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
+  await f.restart();
+  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
+}, 30000);
+
 test('authenticated Worker HTTP and WS reopen complete saved C evidence, Favorites and recovery history without native replay', async () => {
   const f = await fixture({ completeCodec: true }); const owner = await f.login('owner'); const viewer = await f.login('viewer');
   const state = codecState({ origin, issuer, secret }); const authenticated = await (await f.inspect('codec/snapshot')).json() as any;

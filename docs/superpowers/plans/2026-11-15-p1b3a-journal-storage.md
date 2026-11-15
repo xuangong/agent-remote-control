@@ -3956,7 +3956,7 @@ with
     },
 ```
 
-In `attach`, change the object literal `{ hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 }` to
+In `attach`, annotate the variable as `const shared: SharedSession = sessions.get(key) ?? ...` (the literal alone makes TypeScript infer a union that lacks `older`), and change the object literal `{ hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 }` to
 
 ```ts
 { hostId, sessionKey, clients: new Map(), streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 }
@@ -4180,12 +4180,12 @@ Expected: PASS. The landed `broker-journal-sessions.test.ts` runs against a Host
 - [ ] **Step 9: Run the whole hosted package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all.
+Expected: PASS for all. 68 files and 885 tests in hosted (854 before this task; 31 new).
 
 - [ ] **Step 10: Run the Cloudflare codec test.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/storage-codec-worker.test.ts --testTimeout=30000 --maxWorkers=1` (Bash `timeout` 300000)
-Expected: PASS.
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/storage-codec-worker.test.ts --testTimeout=30000 --maxWorkers=1` (Bash `timeout` 300000; about 170 s)
+Expected: PASS (the cloudflare suite, `pnpm --filter @orchardworks/agent-remote-cloudflare run test`, is 35 files and 219 tests).
 
 - [ ] **Step 11: Commit.**
 

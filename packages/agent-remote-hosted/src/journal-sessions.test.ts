@@ -3,7 +3,7 @@ import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent
 import { describe, expect, it, vi } from 'vitest';
 
 import type { HostStream, HostStreamOpener } from './journal-host-stream.js';
-import { createJournalSessions } from './journal-sessions.js';
+import { createJournalSessions, type JournalGate } from './journal-sessions.js';
 
 const headSnapshot = { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } } as AgentSnapshotPayload;
 
@@ -22,7 +22,8 @@ describe('the journal sessions of a Relay', () => {
   it('tells only the waiting streams of the returned Host that it is back', async () => {
     const head = { snapshot: headSnapshot, observedAt: 1 };
     const sessions = createJournalSessions({
-      journals: { status: async () => ({ cursor: { epoch: 'e', seq: 0 }, head } as never), page: async () => undefined },
+      journals: { status: async () => ({ cursor: { epoch: 'e', seq: 0 }, head } as never), page: async () => undefined, unserve: () => undefined },
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
       requestFill: async () => ({}) as never,
       requestOlder: async () => ({ olderAvailable: false }),
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
@@ -58,7 +59,9 @@ describe('the journal sessions of a Relay', () => {
     const olderReads: Array<{ answer(olderAvailable: boolean): void }> = [];
     const olderArguments: boolean[] = [];
     const sessions = createJournalSessions({
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
       journals: {
+        unserve: () => undefined,
         status: async () => ({ cursor: journal.cursor, head: journal.head! }),
         page: async (_host, _key, request, olderBeyondJournal) => { olderArguments.push(olderBeyondJournal); return journal.page(request, { olderBeyondJournal }); },
       },
@@ -118,5 +121,125 @@ describe('the journal sessions of a Relay', () => {
     await f.open(100, 'before');
     await vi.waitFor(() => expect(f.olderArguments.at(-1)).toBe(true));
     expect(f.olderArguments.at(-1)).toBe(true);
+  });
+});
+
+describe('whether a session is read from its journal', () => {
+  function build(gate: Partial<JournalGate>) {
+    const timers = new Map<number, () => void>();
+    let nextTimer = 0;
+    const calls: string[] = [];
+    const sessions = createJournalSessions({
+      journals: { status: async () => undefined, page: async () => undefined, unserve: () => undefined },
+      gate: {
+        readingEnabled: () => { calls.push('enabled'); return true; },
+        served: () => { calls.push('served'); return true; },
+        loadServed: async () => { calls.push('load'); },
+        ...gate,
+      },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: callback => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: timer => { timers.delete(timer as number); } },
+    });
+    return { sessions, calls, timers };
+  }
+
+  it('is crude while the switch is off, without asking the index', async () => {
+    const { sessions, calls } = build({ readingEnabled: () => false });
+    expect(await sessions.serves('host-1', 'codex', 'codex:a')).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it('answers from the index without loading anything', async () => {
+    const served = build({});
+    expect(await served.sessions.serves('host-1', 'codex', 'codex:a')).toBe(true);
+    const unserved = build({ served: () => false });
+    expect(await unserved.sessions.serves('host-1', 'codex', 'codex:a')).toBe(false);
+    expect(served.calls).not.toContain('load');
+    expect(unserved.calls).not.toContain('load');
+  });
+
+  it('loads the Host once for every open that asks while it loads, and then answers', async () => {
+    let loaded = false;
+    let loads = 0;
+    let finish!: () => void;
+    const held = new Promise<void>(resolve => { finish = resolve; });
+    const { sessions } = build({ served: () => (loaded ? true : undefined), loadServed: async () => { loads += 1; await held; loaded = true; } });
+    const answers = [sessions.serves('host-1', 'codex', 'codex:a'), sessions.serves('host-1', 'codex', 'codex:b'), sessions.serves('host-1', 'codex', 'codex:c')];
+    finish();
+    expect(await Promise.all(answers)).toEqual([true, true, true]);
+    expect(loads).toBe(1);
+  });
+
+  it('serves crude when the load takes longer than the wait, on the broker\'s scheduler', async () => {
+    const { sessions, timers } = build({ served: () => undefined, loadServed: () => new Promise<void>(() => undefined) });
+    const answer = sessions.serves('host-1', 'codex', 'codex:a');
+    expect(timers.size).toBe(1);
+    [...timers.values()][0]!();
+    expect(await answer).toBe(false);
+  });
+
+  it('serves crude when the load fails', async () => {
+    const { sessions } = build({ served: () => undefined, loadServed: async () => { throw new Error('store unavailable'); } });
+    expect(await sessions.serves('host-1', 'codex', 'codex:a')).toBe(false);
+  });
+});
+
+describe('stopping journal-served streams', () => {
+  function attached() {
+    const sessions = createJournalSessions({
+      journals: { status: async () => undefined, page: async () => undefined, unserve: () => undefined },
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+    });
+    const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
+    const attach = (hostId: string, sessionKey: string) => {
+      const { client, closed } = socket();
+      sessions.attach({ hostId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
+      return closed;
+    };
+    return { sessions, attach };
+  }
+
+  it('closes the streams of one provider of one Host with 1012 when its smart reading is turned off, and no others', () => {
+    const { sessions, attach } = attached();
+    const codex = attach('host-1', 'codex:a');
+    const claude = attach('host-1', 'claude:a');
+    const other = attach('host-2', 'codex:a');
+    sessions.stopReading('host-1', 'codex');
+    expect(codex).toEqual([[1012, 'Smart reading turned off']]);
+    expect(claude).toEqual([]);
+    expect(other).toEqual([]);
+  });
+
+  it('closes the streams of a session that a quota took out of serving', () => {
+    const { sessions, attach } = attached();
+    const taken = attach('host-1', 'codex:a');
+    const kept = attach('host-1', 'codex:b');
+    sessions.published('host-1', 'codex:a', { events: [], watermark: 4, unserved: true, hasHead: false });
+    expect(taken).toEqual([[1012, 'Journal unavailable']]);
+    expect(kept).toEqual([]);
+  });
+});
+
+describe('a journal that has no head although the index said it had one', () => {
+  it('is forgotten by the index before the stream closes with 1012, so the client\'s reconnect is read through the Controller', async () => {
+    const unserved: string[] = [];
+    const sessions = createJournalSessions({
+      journals: { status: async () => undefined, page: async () => undefined, unserve: (hostId, sessionKey) => { unserved.push(`${hostId}/${sessionKey}`); } },
+      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+    });
+    const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
+    const { client, closed } = socket();
+    const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams: offline });
+    stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(unserved).toEqual(['host-1/codex:a']);
+    expect(closed).toEqual([[1012, 'Session journal unavailable']]);
   });
 });

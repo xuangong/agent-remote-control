@@ -1,7 +1,7 @@
-import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
+import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 
-import { createHostBroker, type BrokerRequestContext, type HostBrokerOptions, type RelaySocket, type RemoteHostBrokerState } from '../index.js';
+import { createHostBroker, createHostJournals, type BrokerRequestContext, type HostBrokerOptions, type HostJournalsOptions, type RelaySocket, type RemoteHostBrokerState } from '../index.js';
 
 export type Wire = Record<string, any>;
 export const HOST_ID = 'host';
@@ -24,7 +24,7 @@ export const snapshot = (status: 'idle' | 'running', id: string): AgentSnapshotP
 /** A paired Host that is offline, with one bound session; the credential `arc_fixture` is the Host's. */
 const savedState = (): RemoteHostBrokerState => ({
   keys: [['7a8ce1c8927a74e75f9bc855677bd2cb361d6b19a58f85296a8777022d022a14', { expires: 20_000, installationId: 'restored-installation' }]],
-  hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+  hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false, smartReading: ['codex'] }],
   bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }],
   creations: [],
 });
@@ -96,7 +96,11 @@ export interface RelayOptions {
   requestTimeoutMs?: number;
   seed?(store: MemoryJournalStore): Promise<void>;
   /** Broker options that tests vary, such as `ownerSubject` and `userStreamCount`. */
-  broker?: Partial<Pick<HostBrokerOptions, 'ownerSubject' | 'userStreamCount'>>;
+  broker?: Partial<Pick<HostBrokerOptions, 'ownerSubject' | 'userStreamCount' | 'onStateChange'>>;
+  /** Safety limits of the journal service, for tests of a quota. */
+  journalLimits?: HostJournalsOptions['limits'];
+  /** Wraps the in-memory store the broker keeps its journals in, for tests of a store that is slow or fails. */
+  journalStore?(memory: MemoryJournalStore): JournalStore;
   /** Changes the saved state the broker starts from, for example to share the Host with another user. */
   state?(saved: RemoteHostBrokerState): RemoteHostBrokerState;
 }
@@ -106,7 +110,8 @@ export async function startRelay(options: RelayOptions = {}) {
   const store = new MemoryJournalStore();
   await options.seed?.(store);
   const broker = createHostBroker({ origin: 'https://relay.example', initialState: options.state ? options.state(savedState()) : savedState(), now: () => 10_000, rpcTimeoutMs: 1000,
-    journals: store, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000, ...options.broker });
+    ...(options.journalLimits ? { journalService: createHostJournals({ store, now: () => 10_000, limits: options.journalLimits }) } : {}),
+    journals: options.journalStore ? options.journalStore(store) : store, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000, ...options.broker });
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1`. It answers the attach of the session and the streams the Relay opens. */

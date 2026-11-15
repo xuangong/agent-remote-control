@@ -94,6 +94,14 @@ function record(value: unknown): value is Record<string, any> { return value !==
 const string = (value: unknown, max = 512): value is string => typeof value === 'string' && value.length > 0 && value.length <= max;
 const time = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 function unique<T>(values: T[], key: (value: T) => string) { return new Set(values.map(key)).size === values.length; }
+/** The providers a Host reads from journals: a nonempty list of at most 64 distinct provider ids. */
+function validSmartReading(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 64 && value.every(item => string(item)) && unique(value, item => item);
+}
+/** Hosts whose journals still await deletion: a nonempty list of at most 128 distinct Host ids. */
+function validJournalDeletions(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 128 && value.every(item => string(item)) && unique(value, item => item);
+}
 function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (!record(value) || !Array.isArray(value.keys) || value.keys.length > 128 || !Array.isArray(value.hosts) || value.hosts.length > 128 ||
     !Array.isArray(value.bindings) || value.bindings.length > 4096 || !Array.isArray(value.creations) || value.creations.length > 4096) return false;
@@ -101,6 +109,7 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
   if (value.callForSupport !== undefined && !validCallForSupportState(value.callForSupport)) return false;
   if (value.associations !== undefined) { try { migrateBrokerAssociations(value.associations); } catch { return false; } }
   if (value.revokedHosts !== undefined && !validRevokedHosts(value.revokedHosts)) return false;
+  if (value.journalDeletions !== undefined && !validJournalDeletions(value.journalDeletions)) return false;
   try { retainedHostIdentities(value as RemoteHostBrokerState); } catch { return false; }
   if (value.keys.some((item: unknown) => Array.isArray(item) && record(item[1]) && item[1].recovery !== undefined && (!validHostRecovery(item[1].recovery)
     || item[1].installationId !== item[1].recovery.installationId || item[1].requiresRotation !== true || item[1].kind !== undefined || item[1].purpose !== 'host-only'
@@ -111,7 +120,7 @@ function validBroker(value: unknown): value is RemoteHostBrokerState {
     && unique(entry.pendingRemovals, (id: string) => id) && validPreviewNames(entry) && decodeRemoteHostUplinkMessage(JSON.stringify({ uplinkVersion: 2, type: 'preview_snapshot', snapshot: entry.snapshot })).status === 'ok')
     || (Array.isArray(value.previews) && !unique(value.previews, (entry: HostPreviewState) => entry.hostId)))) return false;
   if (!value.keys.every((item: unknown) => Array.isArray(item) && item.length === 2 && /^[a-f0-9]{64}$/.test(item[0]) && record(item[1]) && time(item[1].expires) && (item[1].purpose === undefined || isPairingPurpose(item[1].purpose)) && (item[1].pairingId === undefined || string(item[1].pairingId, 128)) && (item[1].claimedAt === undefined || time(item[1].claimedAt)) && (item[1].installationId === undefined || string(item[1].installationId)) && (item[1].kind === undefined || item[1].kind === 'device') && (item[1].requiresRotation === undefined || typeof item[1].requiresRotation === 'boolean')) ||
-    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.pairingPurpose === undefined || isPairingPurpose(host.pairingPurpose)) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.controller === undefined || isControllerIdentity(host.controller)) && (host.outbox === undefined || host.outbox === 1) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
+    !value.hosts.every((host: unknown) => record(host) && string(host.id) && string(host.installationId) && string(host.name) && (host.pairingPurpose === undefined || isPairingPurpose(host.pairingPurpose)) && (host.environment === undefined || isHostEnvironment(host.environment)) && (host.controller === undefined || isControllerIdentity(host.controller)) && (host.outbox === undefined || host.outbox === 1) && (host.smartReading === undefined || validSmartReading(host.smartReading)) && (host.gatewayKeyRequested === undefined || typeof host.gatewayKeyRequested === 'boolean') && typeof host.legacyDsh === 'boolean' && Array.isArray(host.providers) && host.providers.every((provider: unknown) => record(provider) && string(provider.providerId) && string(provider.displayName))) ||
     !value.bindings.every((binding: unknown) => record(binding) && ['hostId', 'providerId', 'nativeSessionId', 'agentId'].every(key => string(binding[key], 4096)) && value.hosts.some((host: any) => host.id === binding.hostId) && (binding.sourceRelation === undefined || validSourceRelation(binding.sourceRelation) && binding.sourceRelation.sourceNativeSessionId !== binding.nativeSessionId) && (binding.creatorSubject === undefined || string(binding.creatorSubject)) && (binding.parentNativeSessionId === undefined || string(binding.parentNativeSessionId, 4096))) ||
     !value.creations.every((item: unknown) => Array.isArray(item) && item.length === 2 && string(item[0], 16384) && record(item[1]) && string(item[1].fingerprint, 65536) && value.bindings.some((binding: any) => binding.agentId === item[1].agentId))) return false;
   if (!unique(value.keys, item => item[0]) || !unique(value.hosts, item => item.id) || !unique(value.hosts, item => item.installationId) || !unique(value.bindings, item => item.agentId) || !unique(value.bindings, item => JSON.stringify([item.hostId, item.providerId, item.nativeSessionId])) || !unique(value.creations, item => item[0])) return false;

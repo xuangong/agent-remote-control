@@ -8,6 +8,7 @@ import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
 import { HostSessionStates } from './session-states.js';
+import { JournalAck, JournalFill, JournalFillRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalPublish, JournalRefused, validJournalMessage } from './remote-host-journal.js';
 
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
@@ -63,11 +64,22 @@ export const RemoteHostUplinkMessage = Type.Union([
   // teamSuccession: Team recipients follow a generic succession of their session, including one to another provider.
   // callForSupport: the Host runs Call For Support groups: requester seats, coordinators and supporters.
   // It requested them with callForSupport=1 and named its read-only providers with readOnlyProvider=<id> query parameters.
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), outbox: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), outbox: Type.Optional(Type.Literal(1)), journal: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   // Only after the Relay acknowledged sessionStates in registered; reply facts only after it acknowledged sessionStates: 2.
   Type.Object({ uplinkVersion: version, type: Type.Literal('session_states'), ...HostSessionStates.properties }, object),
+  // Journals: only after the Relay acknowledged journal: 1 in registered. The Controller opens a session's journal, publishes to it
+  // and answers fills and older-history reads; the Relay acknowledges durable publications, refuses what it cannot apply and asks for reads.
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_open'), ...JournalOpen.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_publish'), ...JournalPublish.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_fill'), ...JournalFill.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_older_done'), ...JournalOlderDone.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_opened'), ...JournalOpened.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_ack'), ...JournalAck.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_refused'), ...JournalRefused.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_fill_request'), ...JournalFillRequest.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_older_request'), ...JournalOlderRequest.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat'), nonce: heartbeatNonce }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('heartbeat_ack'), nonce: heartbeatNonce }, object),
   Type.Object({ ...rpc, type: Type.Literal('rpc_request'), method: Type.Union([Type.Literal('GET'), Type.Literal('POST')]),
@@ -83,7 +95,7 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'team_response' | 'outbox_response' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;
@@ -105,6 +117,7 @@ export function encodeRemoteHostUplinkMessage(value: RemoteHostUplinkMessage): W
 
 function validRemoteHostUplinkMessage(value: unknown): value is RemoteHostUplinkMessage {
   if (!Value.Check(RemoteHostUplinkMessage, value)) return false;
+  if (value.type.startsWith('journal_') && !validJournalMessage(value)) return false;
   if (value.type === 'registered' && (value.heartbeat.timeoutMs >= value.heartbeat.intervalMs || value.successionEnrollmentVersion !== undefined && !value.successionEnrollment)) return false;
   if ((value.type === 'register' || value.type === 'provider_snapshot') && 'providers' in value
     && new Set(value.providers.map((provider) => provider.providerId)).size !== value.providers.length) return false;

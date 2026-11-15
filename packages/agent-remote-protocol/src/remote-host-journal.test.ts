@@ -54,7 +54,8 @@ describe('journal uplink envelopes', () => {
   it.each<[string, Record<string, unknown>]>([
     ['a publication without entries', publish([])],
     ['an entry with an unknown operation', publish([{ sequence: 1, op: 'erase', itemKey: 'item-1' }])],
-    ['an entry that repeats or reverses a sequence', publish([seal(2), seal(2)])],
+    ['an entry that repeats a sequence', publish([seal(2), seal(2)])],
+    ['an entry whose sequence goes backwards', publish([seal(3), seal(2)])],
     ['an entry with sequence zero', publish([seal(0)])],
     ['a completion without a digest', publish([{ sequence: 1, op: 'complete', itemKey: 'item-1' }])],
     ['a row with an extra field', publish([{ sequence: 1, op: 'append', row: { ...row, title: 'Secret' } }])],

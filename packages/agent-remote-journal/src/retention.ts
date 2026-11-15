@@ -1,8 +1,9 @@
 import type { JournalItem } from './types.js';
 
 /**
- * Items whose bodies may be evicted: complete, resident and not live-only, outside the latest turns. Consecutive items
- * of one turn form one unit; an item without a turn is a unit of its own.
+ * Items whose bodies may be evicted: complete, resident, not live-only and carrying a digest, outside the latest turns.
+ * An item without a digest, such as a sealed one, has no native copy to fill from and is never evicted. Consecutive
+ * items of one turn form one unit; an item without a turn is a unit of its own.
  */
 export function evictableItems(items: readonly JournalItem[], keepLatestTurns: number): string[] {
   const units: JournalItem[][] = [];
@@ -12,6 +13,6 @@ export function evictableItems(items: readonly JournalItem[], keepLatestTurns: n
     else units.push([item]);
   }
   return units.slice(0, Math.max(0, units.length - keepLatestTurns)).flat()
-    .filter(item => item.state === 'complete' && item.body !== null && !item.liveOnly)
+    .filter(item => item.state === 'complete' && item.digest !== undefined && item.body !== null && !item.liveOnly)
     .map(({ itemKey }) => itemKey);
 }

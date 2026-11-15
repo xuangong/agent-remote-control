@@ -35,4 +35,16 @@ describe('retention', () => {
     expect(journal.page(request, { olderBeyondJournal: false }).kind).toBe('page');
     expect(journal.fill('unknown', body, 'digest-1')).toBe('unknown');
   });
+
+  it('never evicts a sealed item, which has no digest to fill it back', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('s1', 'ds1', 'sealed', 'turn-1'));
+    journal.seal(publish(), 's1');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    journal.complete(publish(), 'm2', 'digest-2');
+    journal.append(publish(), text('m3', 'd3', 'third', 'turn-3'));
+    expect(evictableItems(journal.state().items, 1)).toEqual(['m2']);
+    expect(journal.evict(1)).toEqual(['m2']);
+    expect(journal.index()[0]).toMatchObject({ itemKey: 's1', resident: true });
+  });
 });

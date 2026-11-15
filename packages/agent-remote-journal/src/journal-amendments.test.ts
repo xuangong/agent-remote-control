@@ -152,6 +152,23 @@ describe('the attention cursor of the head', () => {
     expect(journal.head?.snapshot.attention?.cursor).toEqual({ epoch, seq: 1 });
   });
 
+  it('is the journal\'s latest cursor, in its own epoch, when the named item is unknown', () => {
+    const { journal, publish } = withTwoItems();
+    journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'gone' });
+    expect(journal.head?.snapshot.attention?.cursor).toEqual({ epoch: 'epoch-1', seq: 2 });
+  });
+
+  it('never goes below zero when the named item was prepended below the first sequence', () => {
+    const { journal, publish } = openJournal();
+    journal.replace(publish(), [{ row: text('a', 'a:1', 'Alpha'), digest: DIGEST }], 1_000);
+    journal.prepend(publish(), [
+      { row: text('p1', 'p1:1', 'One'), digest: DIGEST }, { row: text('p2', 'p2:1', 'Two'), digest: DIGEST }, { row: text('p3', 'p3:1', 'Three'), digest: DIGEST },
+    ]);
+    expect(journal.index()[0]!.seqStart).toBeLessThan(0);
+    journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'p1' });
+    expect(journal.head?.snapshot.attention?.cursor?.seq).toBe(0);
+  });
+
   it('survives a store round trip with the item it names', () => {
     const { journal, publish } = withTwoItems();
     journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'a' });

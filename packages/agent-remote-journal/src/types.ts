@@ -42,8 +42,8 @@ export interface JournalItem {
   clientMessageId?: string;
   /** The background outcome of the item, kept while its body is evicted. */
   background?: BackgroundActivity;
-  /** The rest of the body that is not reread from the Host, kept while the body is evicted. */
-  keptBody?: Omit<JournalBody, 'item'>;
+  /** The rest of the body that is not reread from the Host, kept while the body is evicted, and the item's type (absent in data stored before it was recorded). */
+  keptBody?: Omit<JournalBody, 'item'> & { itemType?: AgentTimelineItem['type'] };
   revision: number;
   body: JournalBody | null;
 }

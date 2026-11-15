@@ -152,6 +152,9 @@ export interface HostBrokerOptions {
   now?(): number;
   scheduler?: BrokerScheduler;
 }
+/** How long a connection waits for the journal service to say what it supports before it is closed to connect again. */
+const JOURNAL_CAPABILITIES_WAIT_MS = 3000;
+
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
   const origin = new URL(options.origin).origin;
@@ -875,6 +878,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     let pendingDeletionHandled = false;
     /** The journal level this connection is granted: 2 only for a Controller that asked for it of a service that supports it. Undefined until the service has said what it supports. */
+    let capabilitiesPending = false;
     let journalLevel: 0 | 1 | 2 | undefined = journals && journalRequested ? (journalRequested === 2 ? undefined : 1) : 0;
     function registered() {
       if (retired || !host || host.socket !== socket) return;
@@ -890,8 +894,16 @@ export function createHostBroker(options: HostBrokerOptions) {
         return;
       }
       if (journalLevel === undefined) {
-        const ownHost = host.id;
-        void journals!.capabilities(ownHost).then(capabilities => capabilities.journal, () => 1 as const).then(level => { journalLevel = level >= 2 ? 2 : 1; registered(); });
+        // A failure to learn what the service supports is not a reason to grant less: the Controller connects again and asks again.
+        if (capabilitiesPending) return;
+        capabilitiesPending = true;
+        const unavailable = setTimeout(() => closeConnection(1013, 'Journal capabilities unavailable'), JOURNAL_CAPABILITIES_WAIT_MS);
+        journals!.capabilities(host.id).then(capabilities => {
+          clearTimeout(unavailable);
+          if (retired) return;
+          journalLevel = capabilities.journal >= 2 ? 2 : 1;
+          registered();
+        }, () => { clearTimeout(unavailable); closeConnection(1013, 'Journal capabilities unavailable'); });
         return;
       }
       host.tunnelToken ??= randomBytes(32).toString('base64url');

@@ -2,7 +2,8 @@ import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { expectNoChange, openJournal, text } from './journal.test-fixture.js';
-import { JournalBodyMissingError, type JournalRowInput } from './types.js';
+import { SessionJournal } from './session-journal.js';
+import { JournalBodyMissingError, JournalItemTypeChangedError, type JournalRowInput } from './types.js';
 
 const DIGEST = 'a'.repeat(64);
 const one: ResourceBinding = { locator: 'one.md', resourceId: 'r1', status: 'available' };
@@ -31,6 +32,8 @@ function withEvictedTool() {
   expect(journal.index().map(entry => [entry.itemKey, entry.resident])).toEqual([['tool:w1', false], ['later', true]]);
   return { journal, publish };
 }
+
+const todoRow = (itemKey: string): JournalRowInput => ({ itemKey, providerId: 'codex', sourceKey: `${itemKey}:todo`, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'todo', items: [{ text: 'Ship', completed: false }] } });
 
 const tail = (journal: ReturnType<typeof openJournal>['journal']) => {
   const page = journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false });
@@ -73,6 +76,28 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
     journal.complete(publish(), 'later', DIGEST);
     journal.evict(1);
     expectNoChange(journal, () => journal.append(publish(), { itemKey: 'c', providerId: 'codex', sourceKey: 'c:2', occurredAt: 1_725_000_002_000, turnId: 'turn-1', item: { type: 'compaction', status: 'completed' } }), JournalBodyMissingError);
+  });
+
+  it('refuses a row of another type for an evicted item, which remembers its type', () => {
+    const { journal, publish } = withEvictedTool();
+    expectNoChange(journal, () => journal.append(publish(), { ...text('tool:w1', 'w1:text', 'Text'), turnId: 'turn-1' }), JournalItemTypeChangedError);
+    expectNoChange(journal, () => journal.append(publish(), todoRow('tool:w1')), JournalItemTypeChangedError);
+  });
+
+  it('still accepts a late row for an item stored without a type', () => {
+    const state = withEvictedTool().journal.state();
+    delete state.items[0]!.keptBody!.itemType;
+    const restored = new SessionJournal(state);
+    const { generation } = restored.claim('controller-2');
+    restored.append({ publisherId: 'controller-2', generation, sequence: 1 }, tool('completed'));
+    expect(restored.index()[0]).toMatchObject({ itemKey: 'tool:w1', resident: true, state: 'open' });
+  });
+
+  it('marks an evicted item live-only when the late row says so', () => {
+    const { journal, publish } = withEvictedTool();
+    journal.append(publish(), { ...tool('completed'), liveOnly: true });
+    expect(journal.index()[0]).toMatchObject({ itemKey: 'tool:w1', liveOnly: true, state: 'open' });
+    expect(journal.liveOnlyCount).toBe(1);
   });
 
   it('replaces a todo list', () => {

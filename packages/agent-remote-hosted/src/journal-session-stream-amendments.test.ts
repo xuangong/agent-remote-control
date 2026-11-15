@@ -27,7 +27,8 @@ function fixture() {
     fill: async () => undefined, older: async () => undefined, olderBeyondJournal: () => false,
   };
   const sent: Wire[] = [];
-  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: () => undefined };
+  const closes: Array<number | undefined> = [];
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number) => { closes.push(code); } };
   let sink: HostStreamSink | undefined;
   const hostStreams: HostStreamOpener = { async open(next) { sink = next; const stream: HostStream = { send: () => undefined, close: () => undefined }; return stream; } };
   const timers = new Map<number, () => void>();
@@ -36,7 +37,7 @@ function fixture() {
   const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
   const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
-    journal, sent, stream, sink: () => sink!, timers,
+    journal, sent, closes, at, stream, sink: () => sink!, timers,
     types: () => sent.map(message => message.type),
     fromController: (fields: Wire) => sink!.frame(frame(fields)),
     setHead(pending: unknown[]): JournalPublished {
@@ -81,6 +82,19 @@ describe('amendments of a journal-served stream', () => {
     expect(f.sent).toHaveLength(before);
     f.stream.deliver(f.published([{ kind: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'failed' }, occurredAt: 1_725_000_000_000 }]));
     expect(f.sent.at(-1)).toMatchObject({ type: 'agent_stream', payload: { event: { type: 'background_activity_updated' } } });
+  });
+});
+
+describe('the attention cursor of a served head', () => {
+  it('is served as a live cursor when the attention item sits below the first sequence', async () => {
+    const f = fixture();
+    const text = (itemKey: string) => ({ row: { itemKey, providerId: 'codex', sourceKey: `${itemKey}:1`, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message' as const, text: itemKey, messageId: itemKey } }, digest: 'a'.repeat(64) });
+    f.journal.replace(f.at(), [text('a')], 1_000);
+    f.journal.prepend(f.at(), [text('p1'), text('p2'), text('p3')]);
+    f.journal.setHead(f.at(), { snapshot: { ...snapshot(), attention: { cursor: { epoch: 'controller-epoch', seq: 7 } } }, observedAt: 7, attentionItemKey: 'p1' });
+    await f.ready(false);
+    expect(f.sent.find(message => message.type === 'agent_snapshot')?.payload.attention.cursor).toEqual({ epoch: f.journal.epoch, seq: 0 });
+    expect(f.closes).toEqual([]);
   });
 });
 
@@ -131,6 +145,26 @@ describe('interaction frames from the Controller', () => {
     expect(f.timers.size).toBe(1);
     f.stream.close();
     expect(f.timers.size).toBe(0);
+  });
+
+  it('are bounded in bytes too: past one mebibyte of waiting frames the oldest is sent at once', async () => {
+    const f = fixture();
+    await f.ready();
+    const before = f.sent.length;
+    const large = (at: number) => ({ ...request, requestId: `large-${at}`, questions: [{ ...request.questions[0]!, prompt: 'x'.repeat(400_000) }] });
+    for (let at = 0; at < 3; at += 1) f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: large(at) } });
+    expect(f.sent.slice(before).map(message => message.payload.request.requestId)).toEqual(['large-0']);
+    expect(f.timers.size).toBe(2);
+  });
+
+  it('are dropped, without a timer, when they arrive after the stream closed', async () => {
+    const f = fixture();
+    await f.ready();
+    const before = f.sent.length;
+    f.stream.close();
+    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
+    expect(f.timers.size).toBe(0);
+    expect(f.sent).toHaveLength(before);
   });
 
   it('are bounded: past 64 waiting frames the oldest is sent at once', async () => {

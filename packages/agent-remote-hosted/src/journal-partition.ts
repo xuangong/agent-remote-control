@@ -101,9 +101,14 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
   };
 }
 
+/** Whether an RPC error says the receiver has no such method, as a partition of an earlier version answers for `capabilities`. */
+function isMissingMethod(error: unknown): boolean {
+  return error instanceof Error && /does not implement the method/i.test(error.message);
+}
+
 /** What a partition that has no `capabilities` method can serve. */
 const VERSION_ONE_PARTITION: JournalCapabilities = { journal: 1 };
-/** How long a failed `capabilities` call is remembered; an answer is remembered for the life of the proxy. */
+/** How long a partition without the `capabilities` method is remembered as version 1 before it is asked again; an answer is remembered for the life of the proxy. */
 const CAPABILITIES_RETRY_MS = 30_000;
 
 export interface PartitionJournalsOptions {
@@ -214,8 +219,9 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
         const capabilities = await partition(hostId).capabilities(hostId);
         capabilitiesOf.set(hostId, { capabilities });
         return { ...capabilities };
-      } catch {
-        // An error is what a partition without the method answers: grant nothing it may not know.
+      } catch (error) {
+        // Only a partition that lacks the method is version 1. Any other failure is not an answer: it is thrown, remembered as nothing, and the caller decides.
+        if (!isMissingMethod(error)) throw error;
         capabilitiesOf.set(hostId, { capabilities: VERSION_ONE_PARTITION, failedAt: now() });
         return { ...VERSION_ONE_PARTITION };
       }

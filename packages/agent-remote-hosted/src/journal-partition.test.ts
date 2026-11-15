@@ -372,6 +372,15 @@ describe('the partition contract across a rollout', () => {
     expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
     expect(failures).toBe(2);
   });
+
+  it('throws a failure that is not a missing method, and asks again instead of remembering version 1', async () => {
+    const fresh = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    let broken = true;
+    const journals = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { if (broken) throw new Error('The Durable Object is overloaded.'); return fresh.capabilities(host); } }) });
+    await expect(journals.capabilities(HOST)).rejects.toThrow('overloaded');
+    broken = false;
+    expect(await journals.capabilities(HOST)).toEqual({ journal: 2 });
+  });
 });
 
 describe('estimateCloneBytes', () => {

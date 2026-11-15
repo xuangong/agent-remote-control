@@ -12,7 +12,11 @@ export interface JournalCapabilities {
   journal: 1 | 2;
 }
 
-/** The capabilities of the journal service in this build. */
+/**
+ * The capabilities of the journal service in this build. Grant 2 means the service applies the amendment operations
+ * (`rebind`, `outcome`), items and corrections without a digest, a head's `attentionItemKey`, `journal_unserve`,
+ * `journal_request_refused` and the reset open.
+ */
 export const JOURNAL_CAPABILITIES: JournalCapabilities = { journal: 2 };
 
 /** Journals kept in memory, for the whole Relay. */

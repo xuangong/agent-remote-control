@@ -674,6 +674,23 @@ describe('the attention cursor of the head', () => {
     expect(journal.head?.snapshot.attention?.cursor).toEqual({ epoch, seq: 1 });
   });
 
+  it('is the journal\'s latest cursor, in its own epoch, when the named item is unknown', () => {
+    const { journal, publish } = withTwoItems();
+    journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'gone' });
+    expect(journal.head?.snapshot.attention?.cursor).toEqual({ epoch: 'epoch-1', seq: 2 });
+  });
+
+  it('never goes below zero when the named item was prepended below the first sequence', () => {
+    const { journal, publish } = openJournal();
+    journal.replace(publish(), [{ row: text('a', 'a:1', 'Alpha'), digest: DIGEST }], 1_000);
+    journal.prepend(publish(), [
+      { row: text('p1', 'p1:1', 'One'), digest: DIGEST }, { row: text('p2', 'p2:1', 'Two'), digest: DIGEST }, { row: text('p3', 'p3:1', 'Three'), digest: DIGEST },
+    ]);
+    expect(journal.index()[0]!.seqStart).toBeLessThan(0);
+    journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'p1' });
+    expect(journal.head?.snapshot.attention?.cursor?.seq).toBe(0);
+  });
+
   it('survives a store round trip with the item it names', () => {
     const { journal, publish } = withTwoItems();
     journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'a' });
@@ -690,7 +707,8 @@ import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { expectNoChange, openJournal, text } from './journal.test-fixture.js';
-import { JournalBodyMissingError, type JournalRowInput } from './types.js';
+import { SessionJournal } from './session-journal.js';
+import { JournalBodyMissingError, JournalItemTypeChangedError, type JournalRowInput } from './types.js';
 
 const DIGEST = 'a'.repeat(64);
 const one: ResourceBinding = { locator: 'one.md', resourceId: 'r1', status: 'available' };
@@ -719,6 +737,8 @@ function withEvictedTool() {
   expect(journal.index().map(entry => [entry.itemKey, entry.resident])).toEqual([['tool:w1', false], ['later', true]]);
   return { journal, publish };
 }
+
+const todoRow = (itemKey: string): JournalRowInput => ({ itemKey, providerId: 'codex', sourceKey: `${itemKey}:todo`, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'todo', items: [{ text: 'Ship', completed: false }] } });
 
 const tail = (journal: ReturnType<typeof openJournal>['journal']) => {
   const page = journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false });
@@ -761,6 +781,28 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
     journal.complete(publish(), 'later', DIGEST);
     journal.evict(1);
     expectNoChange(journal, () => journal.append(publish(), { itemKey: 'c', providerId: 'codex', sourceKey: 'c:2', occurredAt: 1_725_000_002_000, turnId: 'turn-1', item: { type: 'compaction', status: 'completed' } }), JournalBodyMissingError);
+  });
+
+  it('refuses a row of another type for an evicted item, which remembers its type', () => {
+    const { journal, publish } = withEvictedTool();
+    expectNoChange(journal, () => journal.append(publish(), { ...text('tool:w1', 'w1:text', 'Text'), turnId: 'turn-1' }), JournalItemTypeChangedError);
+    expectNoChange(journal, () => journal.append(publish(), todoRow('tool:w1')), JournalItemTypeChangedError);
+  });
+
+  it('still accepts a late row for an item stored without a type', () => {
+    const state = withEvictedTool().journal.state();
+    delete state.items[0]!.keptBody!.itemType;
+    const restored = new SessionJournal(state);
+    const { generation } = restored.claim('controller-2');
+    restored.append({ publisherId: 'controller-2', generation, sequence: 1 }, tool('completed'));
+    expect(restored.index()[0]).toMatchObject({ itemKey: 'tool:w1', resident: true, state: 'open' });
+  });
+
+  it('marks an evicted item live-only when the late row says so', () => {
+    const { journal, publish } = withEvictedTool();
+    journal.append(publish(), { ...tool('completed'), liveOnly: true });
+    expect(journal.index()[0]).toMatchObject({ itemKey: 'tool:w1', liveOnly: true, state: 'open' });
+    expect(journal.liveOnlyCount).toBe(1);
   });
 
   it('replaces a todo list', () => {
@@ -823,7 +865,8 @@ The head serves the attention cursor of the item the publisher named:
     const { attentionItemKey, ...head } = structuredClone(this.meta.head);
     if (head.snapshot.attention) {
       const item = attentionItemKey === undefined ? undefined : this.byKey.get(attentionItemKey);
-      head.snapshot.attention.cursor = { epoch: this.meta.epoch, seq: item ? item.seqEnd : this.meta.nextSeq - 1 };
+      // A live cursor is never negative; a prepended item sits below zero, so the cursor of the oldest items is the start.
+      head.snapshot.attention.cursor = { epoch: this.meta.epoch, seq: Math.max(0, item ? item.seqEnd : this.meta.nextSeq - 1) };
     }
     return head;
   }
@@ -1034,10 +1077,14 @@ A row that replaces an item's content reaches an item whose body was evicted:
 <!-- new -->
 ```ts
     if (existing && existing.body === null) {
+      const keptType = existing.keptBody?.itemType;
+      if (keptType !== undefined && keptType !== input.item.type) throw new JournalItemTypeChangedError(input.itemKey, keptType, input.item.type);
       if (!CONTENT_REPLACING_TYPES.has(input.item.type)) throw new JournalBodyMissingError(input.itemKey);
-      return this.appendToEvicted(publication, existing, row);
+      return this.appendToEvicted(publication, existing, row, input.liveOnly === true);
     }
 ```
+
+Eviction records the item's type, so a late row of another type is refused as `type_changed`; data stored before it was recorded has none and is still accepted. In `types.ts`, `keptBody?: Omit<JournalBody, 'item'> & { itemType?: AgentTimelineItem['type'] }`; `evictKeys` stores `itemType: body.item.type` in `keptBody`; `fill` copies `keptBody` without `itemType` into the body.
 
 <!-- edit: packages/agent-remote-journal/src/session-journal.ts -->
 <!-- old -->
@@ -1054,7 +1101,7 @@ A row that replaces an item's content reaches an item whose body was evicted:
    * - the background the item kept, merged with the row's so an outcome never regresses.
    * A row of any other type, which would append to or spread over content the journal no longer holds, is refused as before (a compaction's merge spreads fields, so a late row would lose the fields it omits and break the digest).
    */
-  protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow): JournalRow {
+  protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow, liveOnly: boolean): JournalRow {
     const kept = existing.keptBody;
     if (!kept) throw new JournalBodyMissingError(existing.itemKey);
     const entry: ProjectedTimelineEntry = {
@@ -1070,6 +1117,7 @@ A row that replaces an item's content reaches an item whose body was evicted:
     delete existing.background;
     existing.seqEnd = row.seq;
     extendSequenceRanges(existing.sourceSeqRanges, row.seq);
+    if (liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
     existing.revision = this.nextRevision();
@@ -1106,7 +1154,7 @@ import { mergeBackgroundActivity, type AgentTimelineItem, type BackgroundActivit
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal exec vitest run src/journal-amendments.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-journal run test` then `pnpm --filter @orchardworks/agent-remote-journal run typecheck` then `pnpm --filter @orchardworks/agent-remote-journal run build`
-Expected: PASS for all (the package has 195 tests). Rebuild the package so `agent-remote-hosted` and `agent-host` see the new methods.
+Expected: PASS for all (the package has 200 tests). Rebuild the package so `agent-remote-hosted` and `agent-host` see the new methods.
 
 - [ ] **Step 5: Commit.**
 
@@ -1166,7 +1214,7 @@ const snapshot: AgentSnapshotPayload = {
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' },
 };
 
-async function seeded(limits?: { liveOnlyItems?: number }) {
+async function seeded(limits?: { liveOnlyItems?: number; sessionBytes?: number }) {
   const store = new MemoryJournalStore();
   const journal = SessionJournal.create(KEY);
   journal.claim(PUBLISHER);
@@ -1239,6 +1287,15 @@ describe('amendments published to a journal', () => {
     expect(result.refusal).toBeUndefined();
     const saved = await store.load(KEY);
     expect(saved?.items.map(item => [item.itemKey, item.state, item.digest])).toEqual([['a', 'complete', 'd'.repeat(64)], ['b', 'open', undefined]]);
+  });
+
+  it('counts a rebind against the session\'s size limit, like the entries that carry content', async () => {
+    const { journals } = await seeded({ sessionBytes: 3000 });
+    expect((await journals.publish(HOST, SESSION, 1, [{ sequence: 1, op: 'append', row: row('a', 'Alpha', [pending]) }])).refusal).toBeUndefined();
+    const large: ResourceBinding = { ...settled, locator: 'docs/' + 'x'.repeat(3500) };
+    const result = await journals.publish(HOST, SESSION, 1, [{ sequence: 2, op: 'rebind', itemKey: 'a', previous: pending, replacement: large }]);
+    expect(result.refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+    expect(result.watermark).toBe(1);
   });
 
   it('counts prepended live-only items against the live-only cap', async () => {
@@ -1640,7 +1697,7 @@ type GrantOneEntry = Exclude<JournalPublishEntry, { op: 'rebind' | 'outcome' }> 
 
 `admission` and `apply` take `JournalPublishEntry` again (`CompleteItemInput` stays imported for the fill path). The grant is enforced per connection in the broker (Step 11), where a violation closes the connection instead of refusing entries one by one. The landed `host-journals.test.ts` has a test of the removed guard ("refuses entries that need a later journal grant"); delete it, since the broker test below covers the same entries at the connection.
 
-The journal partition is the other implementation of `HostJournals`, so it carries the two new service calls. In `packages/agent-remote-hosted/src/journal-partition.ts`, `JournalPartitionApi.open` takes `options: { maxIndexItems: number; pageItems: number; reset?: true }`, the interface gains `unserveHead(hostId, sessionKey, generation): Promise<JournalPublished | undefined>`, `serveJournalPartition` forwards it, and `createPartitionJournals` passes `reset` when it is set, forgets the session in its head index for any open that reports `unserved` (a reset included) and for an `unserveHead` that found a journal. `packages/agent-remote-cloudflare/src/journal-partition.ts` exposes `unserveHead` on the Durable Object. The recorded contract `journal-partition.contract.json` is only extended: new steps at its end open a session, publish `append`, `rebind`, `outcome`, an open `correct` and a `head` with `attentionItemKey`, call `unserveHead`, and open a second session with `reset: true`; `journal-partition.test.ts` lists `unserveHead` among the contract's methods and gains a test of the proxy, and the Cloudflare test calls `unserveHead` and a reset open through Durable Object RPC. A partitions Worker deployed before this change reports `journal: 2` without these calls, so it must be redeployed before any Relay that is allowed to grant 2 serves a Controller that asks for it.
+The journal partition is the other implementation of `HostJournals`, so it carries the two new service calls. In `packages/agent-remote-hosted/src/journal-partition.ts`, `JournalPartitionApi.open` takes `options: { maxIndexItems: number; pageItems: number; reset?: true }`, the interface gains `unserveHead(hostId, sessionKey, generation): Promise<JournalPublished | undefined>`, `serveJournalPartition` forwards it, and `createPartitionJournals` passes `reset` when it is set, forgets the session in its head index for any open that reports `unserved` (a reset included) and for an `unserveHead` that found a journal. `packages/agent-remote-cloudflare/src/journal-partition.ts` exposes `unserveHead` on the Durable Object. The recorded contract `journal-partition.contract.json` is only extended: new steps at its end open a session, publish `append`, `rebind`, `outcome`, an open `correct` and a `head` with `attentionItemKey`, call `unserveHead`, and open a second session with `reset: true`; `journal-partition.test.ts` lists `unserveHead` among the contract's methods and gains a test of the proxy, and the Cloudflare test calls `unserveHead` and a reset open through Durable Object RPC. `capabilities()` of the proxy answers `{ journal: 1 }` only for a partition that lacks the method (the RPC error "does not implement the method"); any other failure is thrown and remembered as nothing. The broker waits at most 3 seconds for it and closes the uplink with 1013 on a failure or a timeout, so the Controller connects again and asks again; a transient error never fixes a connection at grant 1. Held interaction frames are bounded to 64 frames and 1 MiB, the oldest is released beyond either, and a frame that arrives after the stream closed is dropped without a timer. A partitions Worker deployed before this change reports `journal: 2` without these calls, so it must be redeployed before any Relay that is allowed to grant 2 serves a Controller that asks for it.
 
 - [ ] **Step 4: Run the service test and see it pass.**
 
@@ -1705,6 +1762,18 @@ describe('the Controller\'s unserve and request refusals', () => {
     published.length = 0;
     await connection.receive(wire({ type: 'journal_unserve', sessionKey: SESSION, generation: generation + 1 }));
     await connection.receive(wire({ type: 'journal_unserve', sessionKey: 'codex:other', generation }));
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(published).toEqual([]);
+  });
+
+  it('ignores an unserve for a session this connection never opened, whoever published its head', async () => {
+    const { journals, connection, open } = fixture();
+    const generation = await open();
+    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [{ sequence: 1, op: 'head', head: { snapshot, observedAt: 5 } }] }));
+    const published: string[] = [];
+    const other = createJournalConnection({ hostId: HOST, journals, current: () => true, send: () => undefined,
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined }, published: sessionKey => { published.push(sessionKey); } });
+    await other.receive(wire({ type: 'journal_unserve', sessionKey: SESSION, generation }));
     expect(journals.served(HOST, SESSION)).toBe(true);
     expect(published).toEqual([]);
   });
@@ -1870,6 +1939,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createHostBroker } from './index.js';
 import { createHostJournals, type HostJournals } from './host-journals.js';
+import { createPartitionJournals, type JournalPartitionApi } from './journal-partition.js';
 import { collect, socketPair, until } from './test-utils/journal-session-fixture.js';
 
 const closers: Array<() => void | Promise<void>> = [];
@@ -1890,6 +1960,20 @@ async function connected(query: string, journals: MemoryJournalStore | undefined
   return { pair, inbox, registered };
 }
 
+async function connectWithoutRegistered(query: string, journalService: HostJournals) {
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, journalService });
+  closers.push(() => broker.close());
+  const pairing = await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', body: '{}' }));
+  const { key } = await pairing!.json();
+  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, { headers: { authorization: `Bearer ${key}` } }));
+  if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
+  const pair = socketPair(closers);
+  const inbox = collect(pair.native);
+  prepared.accept(pair.server);
+  pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  return { pair, inbox };
+}
+
 const registered = async (query: string, journals: MemoryJournalStore | undefined, journalService?: HostJournals): Promise<Record<string, unknown>> =>
   (await connected(query, journals, journalService)).registered;
 
@@ -1906,6 +1990,29 @@ describe('the journal grant', () => {
   it('grants level 1 to a Controller that asks for 2 of a journal service that reports only 1', async () => {
     const service = { ...createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), capabilities: async () => ({ journal: 1 as const }) };
     expect((await registered('?journal=2', undefined, service)).journal).toBe(1);
+  });
+
+  it('grants level 1 when the partition lacks the capabilities method', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const service = createPartitionJournals({ partition: () => ({ capabilities: async () => { throw new TypeError('The RPC receiver does not implement the method "capabilities".'); } }) as unknown as JournalPartitionApi });
+    expect((await registered('?journal=2', undefined, { ...own, capabilities: service.capabilities })).journal).toBe(1);
+  });
+
+  it('closes the connection with 1013 when the capabilities fail, so the Controller connects and asks again', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const { pair, inbox } = await connectWithoutRegistered('?journal=2', { ...own, capabilities: async () => { throw new Error('The Durable Object is overloaded.'); } });
+    await until(() => pair.native.closeCode === 1013 || undefined, 'the connection to close');
+    expect(inbox.all.some(message => message.type === 'registered')).toBe(false);
+  });
+
+  it('closes the connection with 1013 when the capabilities do not arrive within three seconds', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const started = Date.now();
+    const { pair, inbox } = await connectWithoutRegistered('?journal=2', { ...own, capabilities: () => new Promise(() => undefined) });
+    while (pair.native.closeCode === undefined && Date.now() - started < 4500) await new Promise(resolve => setTimeout(resolve, 20));
+    expect(pair.native.closeCode).toBe(1013);
+    expect(Date.now() - started).toBeLessThan(4500);
+    expect(inbox.all.some(message => message.type === 'registered')).toBe(false);
   });
 
   it('closes, with 1008, a connection granted 1 that sends what needs 2, and keeps one granted 2', async () => {
@@ -1993,6 +2100,7 @@ The level is settled once, before the journal connection is made. `registered` a
 ```ts
     let pendingDeletionHandled = false;
     /** The journal level this connection is granted; known once the service has told what it supports. */
+    let capabilitiesPending = false;
     let journalLevel: 0 | 1 | 2 | undefined = journals && journalRequested ? (journalRequested === 2 ? undefined : 1) : 0;
 ```
 
@@ -2006,8 +2114,16 @@ The level is settled once, before the journal connection is made. `registered` a
 ```ts
       if (journalLevel === undefined) {
         // A Controller that asked for 2 gets it only from a service that reports 2.
-        const ownHost = host.id;
-        void journals!.capabilities(ownHost).then(capabilities => capabilities.journal, () => 1 as const).then(level => { journalLevel = level >= 2 ? 2 : 1; registered(); });
+        // A failure to learn what the service supports is not a reason to grant less: the Controller connects again and asks again.
+        if (capabilitiesPending) return;
+        capabilitiesPending = true;
+        const unavailable = setTimeout(() => closeConnection(1013, 'Journal capabilities unavailable'), JOURNAL_CAPABILITIES_WAIT_MS);
+        journals!.capabilities(host.id).then(capabilities => {
+          clearTimeout(unavailable);
+          if (retired) return;
+          journalLevel = capabilities.journal >= 2 ? 2 : 1;
+          registered();
+        }, () => { clearTimeout(unavailable); closeConnection(1013, 'Journal capabilities unavailable'); });
         return;
       }
       host.tunnelToken ??= randomBytes(32).toString('base64url');
@@ -2124,7 +2240,8 @@ function fixture() {
     fill: async () => undefined, older: async () => undefined, olderBeyondJournal: () => false,
   };
   const sent: Wire[] = [];
-  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: () => undefined };
+  const closes: Array<number | undefined> = [];
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number) => { closes.push(code); } };
   let sink: HostStreamSink | undefined;
   const hostStreams: HostStreamOpener = { async open(next) { sink = next; const stream: HostStream = { send: () => undefined, close: () => undefined }; return stream; } };
   const timers = new Map<number, () => void>();
@@ -2133,7 +2250,7 @@ function fixture() {
   const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
   const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
-    journal, sent, stream, sink: () => sink!, timers,
+    journal, sent, closes, at, stream, sink: () => sink!, timers,
     types: () => sent.map(message => message.type),
     fromController: (fields: Wire) => sink!.frame(frame(fields)),
     setHead(pending: unknown[]): JournalPublished {
@@ -2178,6 +2295,19 @@ describe('amendments of a journal-served stream', () => {
     expect(f.sent).toHaveLength(before);
     f.stream.deliver(f.published([{ kind: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'failed' }, occurredAt: 1_725_000_000_000 }]));
     expect(f.sent.at(-1)).toMatchObject({ type: 'agent_stream', payload: { event: { type: 'background_activity_updated' } } });
+  });
+});
+
+describe('the attention cursor of a served head', () => {
+  it('is served as a live cursor when the attention item sits below the first sequence', async () => {
+    const f = fixture();
+    const text = (itemKey: string) => ({ row: { itemKey, providerId: 'codex', sourceKey: `${itemKey}:1`, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message' as const, text: itemKey, messageId: itemKey } }, digest: 'a'.repeat(64) });
+    f.journal.replace(f.at(), [text('a')], 1_000);
+    f.journal.prepend(f.at(), [text('p1'), text('p2'), text('p3')]);
+    f.journal.setHead(f.at(), { snapshot: { ...snapshot(), attention: { cursor: { epoch: 'controller-epoch', seq: 7 } } }, observedAt: 7, attentionItemKey: 'p1' });
+    await f.ready(false);
+    expect(f.sent.find(message => message.type === 'agent_snapshot')?.payload.attention.cursor).toEqual({ epoch: f.journal.epoch, seq: 0 });
+    expect(f.closes).toEqual([]);
   });
 });
 
@@ -2228,6 +2358,26 @@ describe('interaction frames from the Controller', () => {
     expect(f.timers.size).toBe(1);
     f.stream.close();
     expect(f.timers.size).toBe(0);
+  });
+
+  it('are bounded in bytes too: past one mebibyte of waiting frames the oldest is sent at once', async () => {
+    const f = fixture();
+    await f.ready();
+    const before = f.sent.length;
+    const large = (at: number) => ({ ...request, requestId: `large-${at}`, questions: [{ ...request.questions[0]!, prompt: 'x'.repeat(400_000) }] });
+    for (let at = 0; at < 3; at += 1) f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: large(at) } });
+    expect(f.sent.slice(before).map(message => message.payload.request.requestId)).toEqual(['large-0']);
+    expect(f.timers.size).toBe(2);
+  });
+
+  it('are dropped, without a timer, when they arrive after the stream closed', async () => {
+    const f = fixture();
+    await f.ready();
+    const before = f.sent.length;
+    f.stream.close();
+    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
+    expect(f.timers.size).toBe(0);
+    expect(f.sent).toHaveLength(before);
   });
 
   it('are bounded: past 64 waiting frames the oldest is sent at once', async () => {
@@ -2457,7 +2607,7 @@ Deliver every kind of event:
 - [ ] **Step 16: Run the package and see it pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-session-stream-amendments.test.ts src/host-journals-amendments.test.ts src/journal-uplink-controller-messages.test.ts src/broker-journal-grant.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-hosted run test` then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all (980 tests of the package, with the partition tests). Rebuild the package: the Controller's tests use its journal service and its connection adapter from `dist`. Run the Cloudflare suite in two halves (22 and 15 test files); it covers the partition's Durable Object. The compatibility digest changes with this task: `git add` the new files, run `pnpm compatibility:update`, and commit `packages/agent-remote-lab/compatibility.json` with it. The landed suites of `journal-session-stream.test.ts` and `broker-journal-sessions.test.ts` must stay green; none of them sends an interaction frame through a stream whose head disagrees.
+Expected: PASS for all (989 tests of the package, with the partition tests). Rebuild the package: the Controller's tests use its journal service and its connection adapter from `dist`. Run the Cloudflare suite in two halves (22 and 15 test files); it covers the partition's Durable Object. The compatibility digest changes with this task: `git add` the new files, run `pnpm compatibility:update`, and commit `packages/agent-remote-lab/compatibility.json` with it. The landed suites of `journal-session-stream.test.ts` and `broker-journal-sessions.test.ts` must stay green; none of them sends an interaction frame through a stream whose head disagrees.
 
 - [ ] **Step 17: Commit.**
 

@@ -78,7 +78,8 @@ export class SessionJournal {
     const { attentionItemKey, ...head } = structuredClone(this.meta.head);
     if (head.snapshot.attention) {
       const item = attentionItemKey === undefined ? undefined : this.byKey.get(attentionItemKey);
-      head.snapshot.attention.cursor = { epoch: this.meta.epoch, seq: item ? item.seqEnd : this.meta.nextSeq - 1 };
+      // A live cursor is never negative; a prepended item sits below zero, so the cursor of the oldest items is the start.
+      head.snapshot.attention.cursor = { epoch: this.meta.epoch, seq: Math.max(0, item ? item.seqEnd : this.meta.nextSeq - 1) };
     }
     return head;
   }
@@ -195,8 +196,10 @@ export class SessionJournal {
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     const existing = this.byKey.get(input.itemKey);
     if (existing && existing.body === null) {
+      const keptType = existing.keptBody?.itemType;
+      if (keptType !== undefined && keptType !== input.item.type) throw new JournalItemTypeChangedError(input.itemKey, keptType, input.item.type);
       if (!CONTENT_REPLACING_TYPES.has(input.item.type)) throw new JournalBodyMissingError(input.itemKey);
-      return this.appendToEvicted(publication, existing, row);
+      return this.appendToEvicted(publication, existing, row, input.liveOnly === true);
     }
     const existingType = existing?.body?.item.type;
     if (existingType !== undefined && existingType !== input.item.type) {
@@ -235,7 +238,7 @@ export class SessionJournal {
    * A row of any other type, which would append to or spread over content the journal no longer holds, is refused as before:
    * a compaction's merge spreads fields, so a late row would lose the fields it omits and break the digest.
    */
-  protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow): JournalRow {
+  protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow, liveOnly: boolean): JournalRow {
     const kept = existing.keptBody;
     if (!kept) throw new JournalBodyMissingError(existing.itemKey);
     const entry: ProjectedTimelineEntry = {
@@ -252,6 +255,7 @@ export class SessionJournal {
     delete existing.background;
     existing.seqEnd = row.seq;
     extendSequenceRanges(existing.sourceSeqRanges, row.seq);
+    if (liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
     existing.revision = this.nextRevision();
@@ -506,7 +510,7 @@ export class SessionJournal {
       const body = item.body as JournalBody;
       if (body.item.background) item.background = structuredClone(body.item.background);
       else delete item.background;
-      item.keptBody = { timestamp: body.timestamp, collapsed: [...body.collapsed], resources: structuredClone(body.resources) };
+      item.keptBody = { itemType: body.item.type, timestamp: body.timestamp, collapsed: [...body.collapsed], resources: structuredClone(body.resources) };
       item.body = null;
       this.touch(item.itemKey);
       keys.push(item.itemKey);
@@ -526,7 +530,10 @@ export class SessionJournal {
     if (item.digest === undefined || item.digest !== digest) return 'mismatch';
     const filled = structuredClone(body);
     carryKnownFields(filled.item, knownFields(item));
-    if (item.keptBody) Object.assign(filled, structuredClone(item.keptBody));
+    if (item.keptBody) {
+      const { itemType: _itemType, ...kept } = item.keptBody;
+      Object.assign(filled, structuredClone(kept));
+    }
     item.body = filled;
     delete item.background;
     delete item.keptBody;

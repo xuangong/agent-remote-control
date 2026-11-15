@@ -20,7 +20,7 @@ const snapshot: AgentSnapshotPayload = {
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' },
 };
 
-async function seeded(limits?: { liveOnlyItems?: number }) {
+async function seeded(limits?: { liveOnlyItems?: number; sessionBytes?: number }) {
   const store = new MemoryJournalStore();
   const journal = SessionJournal.create(KEY);
   journal.claim(PUBLISHER);
@@ -93,6 +93,15 @@ describe('amendments published to a journal', () => {
     expect(result.refusal).toBeUndefined();
     const saved = await store.load(KEY);
     expect(saved?.items.map(item => [item.itemKey, item.state, item.digest])).toEqual([['a', 'complete', 'd'.repeat(64)], ['b', 'open', undefined]]);
+  });
+
+  it('counts a rebind against the session\'s size limit, like the entries that carry content', async () => {
+    const { journals } = await seeded({ sessionBytes: 3000 });
+    expect((await journals.publish(HOST, SESSION, 1, [{ sequence: 1, op: 'append', row: row('a', 'Alpha', [pending]) }])).refusal).toBeUndefined();
+    const large: ResourceBinding = { ...settled, locator: 'docs/' + 'x'.repeat(3500) };
+    const result = await journals.publish(HOST, SESSION, 1, [{ sequence: 2, op: 'rebind', itemKey: 'a', previous: pending, replacement: large }]);
+    expect(result.refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+    expect(result.watermark).toBe(1);
   });
 
   it('counts prepended live-only items against the live-only cap', async () => {

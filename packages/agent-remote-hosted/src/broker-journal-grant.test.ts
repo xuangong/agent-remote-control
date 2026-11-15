@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { createHostBroker } from './index.js';
 import { createHostJournals, type HostJournals } from './host-journals.js';
+import { createPartitionJournals, type JournalPartitionApi } from './journal-partition.js';
 import { collect, socketPair, until } from './test-utils/journal-session-fixture.js';
 
 const closers: Array<() => void | Promise<void>> = [];
@@ -23,6 +24,20 @@ async function connected(query: string, journals: MemoryJournalStore | undefined
   return { pair, inbox, registered };
 }
 
+async function connectWithoutRegistered(query: string, journalService: HostJournals) {
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, journalService });
+  closers.push(() => broker.close());
+  const pairing = await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', body: '{}' }));
+  const { key } = await pairing!.json();
+  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, { headers: { authorization: `Bearer ${key}` } }));
+  if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
+  const pair = socketPair(closers);
+  const inbox = collect(pair.native);
+  prepared.accept(pair.server);
+  pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
+  return { pair, inbox };
+}
+
 const registered = async (query: string, journals: MemoryJournalStore | undefined, journalService?: HostJournals): Promise<Record<string, unknown>> =>
   (await connected(query, journals, journalService)).registered;
 
@@ -39,6 +54,29 @@ describe('the journal grant', () => {
   it('grants level 1 to a Controller that asks for 2 of a journal service that reports only 1', async () => {
     const service = { ...createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), capabilities: async () => ({ journal: 1 as const }) };
     expect((await registered('?journal=2', undefined, service)).journal).toBe(1);
+  });
+
+  it('grants level 1 when the partition lacks the capabilities method', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const service = createPartitionJournals({ partition: () => ({ capabilities: async () => { throw new TypeError('The RPC receiver does not implement the method "capabilities".'); } }) as unknown as JournalPartitionApi });
+    expect((await registered('?journal=2', undefined, { ...own, capabilities: service.capabilities })).journal).toBe(1);
+  });
+
+  it('closes the connection with 1013 when the capabilities fail, so the Controller connects and asks again', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const { pair, inbox } = await connectWithoutRegistered('?journal=2', { ...own, capabilities: async () => { throw new Error('The Durable Object is overloaded.'); } });
+    await until(() => pair.native.closeCode === 1013 || undefined, 'the connection to close');
+    expect(inbox.all.some(message => message.type === 'registered')).toBe(false);
+  });
+
+  it('closes the connection with 1013 when the capabilities do not arrive within three seconds', async () => {
+    const own = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const started = Date.now();
+    const { pair, inbox } = await connectWithoutRegistered('?journal=2', { ...own, capabilities: () => new Promise(() => undefined) });
+    while (pair.native.closeCode === undefined && Date.now() - started < 4500) await new Promise(resolve => setTimeout(resolve, 20));
+    expect(pair.native.closeCode).toBe(1013);
+    expect(Date.now() - started).toBeLessThan(4500);
+    expect(inbox.all.some(message => message.type === 'registered')).toBe(false);
   });
 
   it('closes, with 1008, a connection granted 1 that sends what needs 2, and keeps one granted 2', async () => {

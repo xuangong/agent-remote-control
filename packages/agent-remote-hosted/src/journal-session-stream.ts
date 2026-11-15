@@ -20,8 +20,9 @@ const CLOSE_REASON_MAX_BYTES = 123;
 const ACTIVITY_COALESCE_MS = 500;
 /** How long an interaction frame of the Controller waits for the head to agree with it. */
 const INTERACTION_HOLD_MS = 2000;
-/** How many interaction frames wait at once; past it the oldest is sent without waiting. */
+/** How many interaction frames, and how many bytes of them, wait at once; past either the oldest is sent without waiting. */
 const INTERACTION_PARKED_MAX = 64;
+const INTERACTION_PARKED_MAX_BYTES = 1024 * 1024;
 const INTERACTION_FRAMES = new Set(['interaction_requested', 'interaction_resolved', 'interaction_invalidated']);
 const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
@@ -134,7 +135,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** The head the browser was last sent: the pending interactions it shows are what the browser's reducer takes from it. */
   let servedHead: JournalHead | undefined;
   /** Interaction frames of the Controller that wait for the served head to agree, in the order they arrived. */
-  const parkedInteractions: Array<{ raw: string; requestId: string; present: boolean; expired: boolean; timer: unknown }> = [];
+  const parkedInteractions: Array<{ raw: string; bytes: number; requestId: string; present: boolean; expired: boolean; timer: unknown }> = [];
   /** Messages for the Controller stream that wait for it to open. */
   const held: Array<{ raw: string; bytes: number; requestId?: string }> = [];
   /** Requests to acquire control that name the pending revision and wait for the Controller's own. */
@@ -232,10 +233,13 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** A frame that says a question was asked waits for a head that lists it; one that says it ended waits for a head that does not. */
   function holdInteractionFrame(raw: string, type: string, payload: { requestId?: unknown; request?: { requestId?: unknown } } | undefined): void {
     const requestId = type === 'interaction_requested' ? payload?.request?.requestId : payload?.requestId;
+    if (isPhase('closed')) return;
     if (typeof requestId !== 'string') { sendRaw(raw); return; }
-    const item = { raw, requestId, present: type === 'interaction_requested', expired: false, timer: undefined as unknown };
+    const bytes = encoder.encode(raw).byteLength;
+    const item = { raw, bytes, requestId, present: type === 'interaction_requested', expired: false, timer: undefined as unknown };
     if (parkedInteractions.length === 0 && headAgrees(item)) { sendRaw(raw); return; }
-    if (parkedInteractions.length >= INTERACTION_PARKED_MAX) {
+    while (parkedInteractions.length > 0
+      && (parkedInteractions.length >= INTERACTION_PARKED_MAX || parkedInteractions.reduce((sum, parked) => sum + parked.bytes, bytes) > INTERACTION_PARKED_MAX_BYTES)) {
       const oldest = parkedInteractions.shift()!;
       scheduler.clearTimeout(oldest.timer);
       sendRaw(oldest.raw);

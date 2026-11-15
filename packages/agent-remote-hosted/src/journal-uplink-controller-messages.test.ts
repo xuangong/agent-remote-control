@@ -56,6 +56,18 @@ describe('the Controller\'s unserve and request refusals', () => {
     expect(published).toEqual([]);
   });
 
+  it('ignores an unserve for a session this connection never opened, whoever published its head', async () => {
+    const { journals, connection, open } = fixture();
+    const generation = await open();
+    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [{ sequence: 1, op: 'head', head: { snapshot, observedAt: 5 } }] }));
+    const published: string[] = [];
+    const other = createJournalConnection({ hostId: HOST, journals, current: () => true, send: () => undefined,
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined }, published: sessionKey => { published.push(sessionKey); } });
+    await other.receive(wire({ type: 'journal_unserve', sessionKey: SESSION, generation }));
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(published).toEqual([]);
+  });
+
   it('rejects a pending fill or older-history request at once when the Controller refuses it', async () => {
     const { connection, sent } = fixture();
     const fill = connection.requestFill(SESSION, ['m1']);

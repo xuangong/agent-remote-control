@@ -39,6 +39,8 @@ import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FE
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { createHostJournals } from './host-journals.js';
 import { createJournalConnection, isJournalHostMessage, type JournalConnection } from './journal-uplink.js';
+import { createHostStreamOpener, type HostStreamEntry } from './journal-host-stream.js';
+import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
 
 type SharedCreation = { subject: string; operationId: string; fingerprint: string; reservation: ReturnType<HostSharing['reserve']> };
 type RpcResponse = { status: number; body: string; requestId?: string };
@@ -75,7 +77,7 @@ type Host = {
   ready?: boolean; credentialRotation?: boolean; gatewayKeyRequested?: boolean; issueCredential?(): Promise<void>;
   id: string; installationId: string; name: string; providers: ProviderDescriptor[]; legacyDsh: boolean; generation: number; socket?: RelaySocket;
   pending: Map<string, { resolve(value: RpcResponse): void; reject(error: Error): void; timer: unknown; method: 'GET' | 'POST'; path: string; diagnostic: boolean; startedAt: number }>;
-  streams: Map<string, { publicAgentId: string; runtimeAgentId: string; socket: RelaySocket; subject?: string; authorized?(): boolean; ready: boolean; buffered: string[]; timer?: unknown }>;
+  streams: Map<string, HostStreamEntry>;
 };
 type Binding = { hostId: string; providerId: string; nativeSessionId: string; agentId: string; generation: number;
   creatorSubject?: string; parentNativeSessionId?: string; sourceRelation?: SourceRelation; recovery?: Promise<void> };
@@ -756,6 +758,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!connection) throw new BrokerError(501, 'journal_unavailable', 'The Controller on this Host does not publish journals.');
     return connection;
   };
+  /** Serves the reads of sessions that have a journal head from their journals; see journal-sessions.ts. */
+  const journalSessions = journals && createJournalSessions({
+    journals, scheduler,
+    requestFill: async (hostId, sessionKey, itemKeys) => requireJournal(hostId).requestFill(sessionKey, itemKeys),
+    requestOlder: async (hostId, sessionKey, limit) => requireJournal(hostId).requestOlder(sessionKey, limit),
+  });
   function send(host: Host, message: RemoteHostUplinkMessage) {
     assertHostCurrent(host);
     if (host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
@@ -854,11 +862,13 @@ export function createHostBroker(options: HostBrokerOptions) {
       const journalHost = host;
       host.journal ??= journalRequested && journals
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
-          send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }) })
+          send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }),
+          published: (sessionKey, result) => journalSessions?.published(journalHost.id, sessionKey, result) })
         : undefined;
       send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(host.journal ? { journal: 1 as const } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
+      journalSessions?.hostReturned(host.id);
       host.hostStatus = statusRequested ? true : undefined;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
       notifySessionStates();
@@ -1008,7 +1018,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         if (pending) { clearTimeout(pending.timer); host.pending.delete(message.requestId); if (!pending.diagnostic && message.status>=400) diagnostic(host, {event:'rpc_failed',requestId:message.requestId,operation:diagnosticOperation(pending.path),status:message.status,durationMs:Math.max(0,now()-pending.startedAt)}); pending.resolve(message); }
       } else if (message.type === 'stream_opened') {
         const stream = host.streams.get(message.streamId);
-        if (stream && stream.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) { clearTimeout(stream.timer); if(!stream.ready)diagnostic(host,{event:'stream_ready',streamId:message.streamId}); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; }
+        if (stream && stream.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) { clearTimeout(stream.timer); if(!stream.ready)diagnostic(host,{event:'stream_ready',streamId:message.streamId}); stream.ready = true; for (const buffered of stream.buffered) send(host, { uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: buffered }); stream.buffered = []; stream.onReady?.(); }
       } else if (message.type === 'stream_message') {
         const stream = host.streams.get(message.streamId);
         if (stream?.socket.readyState === RELAY_SOCKET_OPEN && stream.authorized?.() !== false) {
@@ -2089,6 +2099,37 @@ export function createHostBroker(options: HostBrokerOptions) {
       return true;
     };
   }
+  /**
+   * A browser stream whose session is read from its journal. Reads never touch the Controller; the Controller stream for
+   * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
+   * disconnects apply to it like to any other stream.
+   */
+  function acceptJournalServed(host: Host, binding: Binding, context: BrokerRequestContext) {
+    const subject = principal(context);
+    return { accept(client: RelaySocket) {
+      if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
+      track(client);
+      const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
+      expire(client, expiry);
+      if (client.readyState !== RELAY_SOCKET_OPEN) return;
+      client.onError(() => undefined);
+      const admit = admitClientMessages(client, context, subject, expiry);
+      const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
+      const stream = journalSessions!.attach({
+        hostId: host.id, sessionKey: journalSessionKey(binding.providerId, binding.nativeSessionId), publicAgentId: binding.agentId, client,
+        hostStreams: createHostStreamOpener({
+          streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
+          authorized: () => { const end = expiry(); return end === undefined || end > now(); },
+          recover: () => recoverBinding(host, binding),
+          capacity: () => host.streams.size >= HOST_STREAM_LIMIT ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
+          write: message => send(host, message), scheduler, openTimeoutMs: options.rpcTimeoutMs ?? 30_000,
+          diagnostic: details => diagnostic(host, details),
+        }),
+      });
+      client.onMessage((raw, binary) => { if (admit(raw, binary)) stream.receive(raw); });
+      client.onClose(() => stream.close());
+    } };
+  }
   async function upgrade(request: Request, context: BrokerRequestContext, url: URL) {
     assertAvailable();
     if (url.pathname === '/ws/remote-host') {
@@ -2105,6 +2146,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
     const binding = match && bindings.get(match[1]!);
     if (!binding || !sessionAllowed(binding, principal(context)) || !await permitted(context) || request.headers.get('origin') !== origin) return rejectUpgrade(403);
+    // Authorization above is the same for both modes. A session with a journal head is read from it, whether or not its Host is online.
+    const journalHost = journalSessions && hosts.get(binding.hostId);
+    if (journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId))) return acceptJournalServed(journalHost, binding, context);
     let host: Host;
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); }
     catch (error) {

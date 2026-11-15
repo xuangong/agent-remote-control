@@ -2307,7 +2307,7 @@ git commit -m "feat(hosted): serve a session's reads from its journal" -m "Co-Au
 - Create: `packages/agent-remote-hosted/src/broker-journal-sessions.test.ts`
 - Modify: `packages/agent-remote-hosted/src/broker.ts`
 
-The tests run a real broker over the in-memory socket transport with a fake Controller that opens and publishes a journal, answers the background Controller stream, and answers fills and older-history requests; one test goes through `acceptSessionChannel` as the browser channel does. `src/test-utils` is excluded from the build by the package's `tsconfig.json`.
+The tests run a real broker over the in-memory socket transport with a fake Controller that opens and publishes a journal, answers the background Controller stream (or its attach with a chosen status and body), and answers fills and older-history requests; the fixture also takes broker options (`ownerSubject`, `userStreamCount`) and a change to the saved state (to share the Host); one test goes through `acceptSessionChannel` as the browser channel does. `src/test-utils` is excluded from the build by the package's `tsconfig.json`.
 
 - [ ] **Step 1: Write the fixture.** `packages/agent-remote-hosted/src/test-utils/journal-session-fixture.ts`:
 
@@ -2315,7 +2315,7 @@ The tests run a real broker over the in-memory socket transport with a fake Cont
 import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 
-import { createHostBroker, type BrokerRequestContext, type RelaySocket, type RemoteHostBrokerState } from '../index.js';
+import { createHostBroker, type BrokerRequestContext, type HostBrokerOptions, type RelaySocket, type RemoteHostBrokerState } from '../index.js';
 
 export type Wire = Record<string, any>;
 export const HOST_ID = 'host';
@@ -2357,17 +2357,17 @@ export async function until<T>(read: () => T | undefined, label: string): Promis
 
 export function socketPair(closers: Array<() => void | Promise<void>>) {
   class Socket implements RelaySocket {
-    readyState = 1; bufferedAmount = 0; closeCode?: number; peer!: Socket;
+    readyState = 1; bufferedAmount = 0; closeCode?: number; closeReason?: string; peer!: Socket;
     messages = new Set<(data: string, binary: boolean) => void | Promise<void>>(); closes = new Set<() => void>();
     send(data: string) {
       if (this.readyState !== 1) throw new Error('Socket is closed');
       queueMicrotask(() => { if (this.peer.readyState === 1) for (const listener of this.peer.messages) listener(data, false); });
     }
-    close(code?: number) {
+    close(code?: number, reason?: string) {
       if (this.readyState !== 1) return;
-      this.readyState = 3; this.closeCode = code;
+      this.readyState = 3; this.closeCode = code; this.closeReason = reason;
       for (const listener of this.closes) listener();
-      this.peer.close(code);
+      this.peer.close(code, reason);
     }
     onMessage(listener: (data: string, binary: boolean) => void | Promise<void>) { this.messages.add(listener); return () => { this.messages.delete(listener); }; }
     onClose(listener: () => void) { this.closes.add(listener); return () => { this.closes.delete(listener); }; }
@@ -2404,16 +2404,25 @@ export async function seedJournal(store: MemoryJournalStore, options: { head?: b
   await store.apply(journal.takeChanges()!);
 }
 
-export async function startRelay(options: { requestTimeoutMs?: number; seed?(store: MemoryJournalStore): Promise<void> } = {}) {
+export interface RelayOptions {
+  requestTimeoutMs?: number;
+  seed?(store: MemoryJournalStore): Promise<void>;
+  /** Broker options that tests vary, such as `ownerSubject` and `userStreamCount`. */
+  broker?: Partial<Pick<HostBrokerOptions, 'ownerSubject' | 'userStreamCount'>>;
+  /** Changes the saved state the broker starts from, for example to share the Host with another user. */
+  state?(saved: RemoteHostBrokerState): RemoteHostBrokerState;
+}
+
+export async function startRelay(options: RelayOptions = {}) {
   const closers: Array<() => void | Promise<void>> = [];
   const store = new MemoryJournalStore();
   await options.seed?.(store);
-  const broker = createHostBroker({ origin: 'https://relay.example', initialState: savedState(), now: () => 10_000, rpcTimeoutMs: 1000,
-    journals: store, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000 });
+  const broker = createHostBroker({ origin: 'https://relay.example', initialState: options.state ? options.state(savedState()) : savedState(), now: () => 10_000, rpcTimeoutMs: 1000,
+    journals: store, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000, ...options.broker });
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1`. It answers the attach of the session and the streams the Relay opens. */
-  async function connectController(behavior: { answerStreams?: boolean } = {}) {
+  async function connectController(behavior: { answerStreams?: boolean; attach?: { status: number; body: unknown } } = {}) {
     const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?journal=1', { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
@@ -2430,7 +2439,7 @@ export async function startRelay(options: { requestTimeoutMs?: number; seed?(sto
       const message = JSON.parse(data);
       if (message.type === 'rpc_request' && message.path === '/remote/attach') {
         attaches.push(message);
-        send({ type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify({ agentId: PUBLIC_ID, nativeSessionId: 'native-session' }) });
+        send({ type: 'rpc_response', requestId: message.requestId, status: behavior.attach?.status ?? 200, body: JSON.stringify(behavior.attach?.body ?? { agentId: PUBLIC_ID, nativeSessionId: 'native-session' }) });
       } else if (message.type === 'stream_open') {
         streams.push({ streamId: message.streamId, received: [] });
         if (behavior.answerStreams !== false) acceptStream(message.streamId);
@@ -2490,7 +2499,7 @@ export async function startRelay(options: { requestTimeoutMs?: number; seed?(sto
 - [ ] **Step 2: Write the failing tests.** `packages/agent-remote-hosted/src/broker-journal-sessions.test.ts`:
 
 ```ts
-import { acceptSessionChannel, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { acceptSessionChannel, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE } from '@orchardworks/agent-remote-protocol';
 import { afterEach, expect, it } from 'vitest';
 
 import { collect, DIGEST, PUBLIC_ID, row, seedJournal, SESSION_KEY, sleep, snapshot, socketPair, startRelay, STORE_KEY, until, type Wire } from './test-utils/journal-session-fixture.js';
@@ -2510,7 +2519,7 @@ const texts = (page: Wire) => page.payload.entries.map((entry: Wire) => entry.it
 const tail = (requestId: string) => ({ type: 'timeline_request', payload: { requestId, agentId: PUBLIC_ID, direction: 'tail', limit: 100 } });
 
 /** A Controller that opened the session's journal and published two complete rows and a head. */
-async function publishedController(r: Relay, behavior: { answerStreams?: boolean } = {}) {
+async function publishedController(r: Relay, behavior: Parameters<Relay['connectController']>[0] = {}) {
   const controller = await r.connectController(behavior);
   const opened = await controller.open();
   await controller.publish([
@@ -2743,6 +2752,105 @@ it('answers a session channel subscription from the journal', async () => {
   const page = await inbox.take(item => item.type === 'message' && item.message.type === 'timeline_page', 'page');
   expect(texts(page.message)).toEqual(['Hello']);
 });
+
+/** Waits for the Relay's Controller stream of a browser stream to be open and negotiated. */
+async function negotiatedControllerStream(controller: Awaited<ReturnType<Relay['connectController']>>) {
+  const stream = await until(() => controller.streams[0], 'the Controller stream');
+  await until(() => stream.received.some(message => message.type === 'negotiate') ? true : undefined, 'the Relay\'s negotiation');
+  return stream;
+}
+
+const acquire = (requestId: string) => ({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId, revision: 'relay-pending', action: 'acquire' } });
+
+it('answers an acquire with the pending state while the Host is offline, and closes the stream for the Host\'s return', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  browser.send(acquire('control-1'));
+  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'pending control state')).toMatchObject({
+    payload: { agentId: PUBLIC_ID, revision: 'relay-pending', access: 'read_only', available: false },
+  });
+  await sleep(30);
+  expect(browser.pair.server.readyState).toBe(1);
+  await r.connectController();
+  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close when the Host returns');
+  expect(browser.pair.server.closeCode).toBe(1012);
+  expect(browser.pair.server.closeReason).toBe('Remote Host reconnected');
+});
+
+it('shows the native owner in the pending control state and keeps serving reads', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const nativeOwner = { kind: 'native_cli', generation: '11111111-1111-4111-8111-111111111111' };
+  await r.connectController({ attach: { status: 409, body: { code: 'native_session_owned', nativeOwner } } });
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  browser.send(acquire('control-1'));
+  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'pending control state')).toMatchObject({
+    payload: { revision: 'relay-pending', access: 'read_only', available: false, nativeOwner },
+  });
+  browser.send(tail('page-1'));
+  expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello']);
+  expect(browser.pair.server.readyState).toBe(1);
+});
+
+it('closes the stream with the capacity code when the account has no stream slot for the Controller stream', async () => {
+  const r = await relay({ seed: store => seedJournal(store), broker: { userStreamCount: () => 64 } });
+  const controller = await r.connectController();
+  const browser = await r.openBrowser({ principalSubject: () => 'alice' });
+  browser.send({ type: 'negotiate' });
+  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
+  expect(browser.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
+  expect(browser.pair.server.closeReason).toBe('Remote stream capacity reached');
+  expect(controller.streams).toEqual([]);
+});
+
+it('closes the stream when the Host disconnects, and serves a new stream from the journal at once', async () => {
+  const r = await relay();
+  const { controller } = await publishedController(r);
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  await negotiatedControllerStream(controller);
+  controller.disconnect();
+  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
+  expect(browser.pair.server.closeCode).toBe(1012);
+  const next = await r.openBrowser();
+  next.send({ type: 'negotiate' });
+  await next.take(message => message.type === 'agent_snapshot', 'Snapshot');
+  next.send(tail('page-1'));
+  expect(texts(await next.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello', 'World']);
+});
+
+it('closes the Controller stream and the browser stream of a user whose share is revoked', async () => {
+  const r = await relay({
+    seed: store => seedJournal(store),
+    broker: { ownerSubject: 'alice' },
+    state: saved => ({ ...saved,
+      bindings: saved.bindings.map(binding => ({ ...binding, creatorSubject: 'bob' })),
+      sharing: { grants: [{ hostId: 'host', subject: 'bob', label: 'Bob', sessionLimit: 1, revoked: false }], reservations: [] } }),
+  });
+  const controller = await r.connectController();
+  const browser = await r.openBrowser({ principalSubject: () => 'bob' });
+  await subscribed(browser);
+  const stream = await negotiatedControllerStream(controller);
+  await r.broker.manageShares('alice', 'host', 'revoke-share', 'bob');
+  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
+  expect(browser.pair.server.closeCode).toBe(1008);
+  await controller.inbox.take(message => message.type === 'stream_close' && message.streamId === stream.streamId && message.code === 1008, 'stream_close');
+  await sleep(30);
+  expect(controller.inbox.all.filter(message => message.type === 'stream_close' && message.streamId === stream.streamId)).toHaveLength(1);
+});
+
+it('never opens a Controller stream for an activity observer', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const controller = await r.connectController();
+  const observer = await r.openBrowser();
+  observer.send({ type: 'negotiate', observation: 'activity' });
+  await observer.take(message => message.type === 'agent_activity', 'activity');
+  await sleep(50);
+  expect(controller.streams).toEqual([]);
+  expect(controller.inbox.all.some(message => message.type === 'stream_open')).toBe(false);
+  expect(controller.attaches).toEqual([]);
+});
 ```
 
 - [ ] **Step 3: Run them and see them fail.**
@@ -2857,15 +2965,21 @@ and `    let host: Host;` add:
     if (journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId))) return acceptJournalServed(journalHost, binding, context);
 ```
 
+(h) In `register`'s `registered()`, right after `host.ready = true;` add:
+
+```ts
+      journalSessions?.hostReturned(host.id);
+```
+
 - [ ] **Step 5: Run the new tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/broker-journal-sessions.test.ts --testTimeout=10000`
-Expected: PASS, 14 tests.
+Expected: PASS, 20 tests.
 
 - [ ] **Step 6: Run the suites around the changed code.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/broker.test.ts src/broker-journals.test.ts src/broker-heartbeat.test.ts src/session-security.test.ts src/stream-preemption.test.ts src/gateway.test.ts src/journal-host-stream.test.ts src/journal-session-stream.test.ts src/journal-uplink.test.ts src/host-journals.test.ts --testTimeout=10000`
-Expected: PASS for all files. The broker, heartbeat, security, preemption and gateway suites are the crude-mode guard: none of their sessions has a journal head, so none of them reaches `acceptJournalServed`.
+Expected: PASS for all files (236 tests). The broker, heartbeat, security, preemption and gateway suites are the crude-mode guard: none of their sessions has a journal head, so none of them reaches `acceptJournalServed`.
 
 - [ ] **Step 7: Typecheck.**
 

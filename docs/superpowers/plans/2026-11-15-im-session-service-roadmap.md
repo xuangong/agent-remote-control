@@ -31,6 +31,7 @@ Every plan follows the repository rules in `AGENTS.md`:
     - at most 2 HTTP requests on a return while sockets are alive (today 13 to 14);
     - no "Opening session" frame on an open or a return;
     - no re-keyed rows after a Controller restart.
+- **P3: preemption skips streams that hold no Controller stream.** Stream preemption (`packages/agent-remote-hosted/src/stream-preemption.ts`) can pick a journal-served view as its victim, although pausing it frees no slot. This applies to views waiting for an offline Host, views refused for a reason retrying cannot change, and activity observers. An activity observer that opens also makes room (`gateway.ts` ~1040) although it never needs a slot. Preemption should count and pause only streams that hold a Controller stream; P3's retirement of the live budget for journal-served sessions supersedes it.
 - **P1-B2 and P1-D: no holes in a client's window.** The client loads older history from its first entry's `seqStart` (`packages/agent-remote-web/src/client/remote-session-client.ts:372`). A correction, or any update to an item older than what a subscriber holds, must not leave the client holding an isolated old entry. If it did, the next older page would skip everything in between. Two ways to avoid it:
   - the Relay sends such updates only to subscribers whose window covers the item;
   - the client folds them in without moving its older boundary.

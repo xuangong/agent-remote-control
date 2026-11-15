@@ -219,6 +219,7 @@ Finalized items are stable, however: record and message ids, call ids, native it
   - The adapter computes the item's digest over its canonical normalized content, with the same function live and on reread.
   - The completion row carries the digest, and the Host partition stores it in the index.
   - An item interrupted mid-stream stays `open`.
+  - A content row for a `complete` item reopens it: the item is `open` again and loses its digest until it completes again.
 - **Corrections.** The Controller publishes a **correction** row with the full content when a reread finds an `open` item, or a `complete` item whose digest differs. The projector uses it as the item's content and counts the earlier rows as contributors.
 - **Echoes.** A user message's item key is its native identity, never the `operationId`.
   - The Controller attaches the `operationId` as `clientMessageId` when it publishes the echo.
@@ -242,7 +243,7 @@ After every open, the Controller reconciles the history it read with the journal
    - An `open` item, or a `complete` item whose digest differs, gets a correction.
    - An identical item is skipped.
    - Live-only items are left out of the comparison.
-6. **Replace only on a genuine rewrite.** An item known inside the window but missing from the reread, or a change of order inside the window, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. In every other case the epoch continues.
+6. **Replace only on a genuine rewrite.** An item known inside the window but missing from the reread, or a change of order inside the window, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. Live-only items carry over into the new epoch, each placed after the item that preceded it, because nothing else can rebuild them. In every other case the epoch continues.
 7. **Close a gap.** If the anchor is not in the journal, more than one page of activity went unobserved. The Controller reads further back through native history until it reaches a known item, within a bound. Past the bound it publishes a replacement.
 
 A provider `timeline_replacement` whose reread only adds items continues the epoch instead of replacing it. Prompt edit and fork already create a new native session in every provider, and therefore a new journal. They are not rewrites.

@@ -66,17 +66,30 @@ describe('the running size of a journal', () => {
     expectSizeToHold(journal, 'append after replace');
   });
 
-  it('counts UTF-8 bytes, three for a Chinese character and four for an emoji', () => {
-    const ascii = openJournal();
-    ascii.journal.append(ascii.publish(), text('m1', 'd1', 'a'.repeat(300)));
-    const chinese = openJournal();
-    chinese.journal.append(chinese.publish(), text('m1', 'd1', '字'.repeat(300)));
-    const emoji = openJournal();
-    emoji.journal.append(emoji.publish(), text('m1', 'd1', '😀'.repeat(300)));
-    expect(chinese.journal.residentBytes() - ascii.journal.residentBytes()).toBe(600);
-    expect(emoji.journal.residentBytes() - ascii.journal.residentBytes()).toBe(900);
-    expectSizeToHold(chinese.journal, 'chinese');
-    expectSizeToHold(emoji.journal, 'emoji');
+  it('counts UTF-8 bytes: two for an accented or Cyrillic letter, three for a Chinese character and four for an emoji', () => {
+    const sized = (chunk: string) => {
+      const { journal, publish } = openJournal();
+      journal.append(publish(), text('m1', 'd1', chunk));
+      expectSizeToHold(journal, chunk.slice(0, 2));
+      return journal.residentBytes();
+    };
+    const ascii = sized('a'.repeat(300));
+    expect(sized('é'.repeat(300)) - ascii).toBe(300);
+    expect(sized('ж'.repeat(300)) - ascii).toBe(300);
+    expect(sized('字'.repeat(300)) - ascii).toBe(600);
+    expect(sized('😀'.repeat(300)) - ascii).toBe(900);
+  });
+
+  it('counts the non-ASCII text of a head in UTF-8 bytes', () => {
+    const sized = (id: string) => {
+      const { journal, publish } = openJournal();
+      journal.setHead(publish(), { snapshot: { ...snapshot, id }, observedAt: 1 });
+      expectSizeToHold(journal, `head ${id}`);
+      return journal.residentBytes();
+    };
+    const ascii = sized('a'.repeat(100));
+    expect(sized('字'.repeat(100)) - ascii).toBe(200);
+    expect(sized('é'.repeat(100)) - ascii).toBe(100);
   });
 
   it.each([1, 2, 3, 4, 5, 6])('equals a full recomputation through a random run of operations (seed %i)', seed => {
@@ -126,5 +139,22 @@ describe('dropping live-only items', () => {
     journal.append(publish(), live('open', 'second'));
     expect(journal.state().items.find(item => item.itemKey === 'open')?.body?.item).toMatchObject({ text: 'first second' });
     expectSizeToHold(journal, 'after dropping around an open item');
+  });
+
+  it.each([[1, ['s1', 's2', 's3']], [2, ['s1', 's2']], [3, ['s1']], [4, []]])('with %i kept, drops exactly the oldest complete ones needed and none that is open', (keep, dropped) => {
+    const { journal, publish } = openJournal();
+    const live = (key: string): JournalRowInput => ({ ...text(key, `s-${key}`, key), liveOnly: true });
+    journal.append(publish(), live('s1'));
+    journal.seal(publish(), 's1');
+    journal.append(publish(), live('open'));
+    journal.append(publish(), live('s2'));
+    journal.seal(publish(), 's2');
+    journal.append(publish(), live('s3'));
+    journal.seal(publish(), 's3');
+    expect(journal.liveOnlyCount).toBe(4);
+    expect(journal.dropOldestLiveOnly(keep)).toEqual(dropped);
+    expect(journal.has('open')).toBe(true);
+    expect(journal.liveOnlyCount).toBe(4 - dropped.length);
+    expectSizeToHold(journal, `keep ${keep}`);
   });
 });

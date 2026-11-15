@@ -197,7 +197,7 @@ Add `'journal_index_page'` to the `RemoteHostUplinkBrokerMessage` extract, after
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol exec vitest run src/remote-host-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run typecheck` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS for all (58 tests in `remote-host-journal.test.ts`, 411 in the package; the hosted suite still passes, 790 tests, against the rebuilt `dist`). Then run `pnpm compatibility:update` and `pnpm compatibility:check`, and commit `packages/agent-remote-lab/compatibility.json` with the schema change. (`scripts/compatibility.mjs` skips `node_modules` at any depth, so a Vitest cache written by a run from a subdirectory cannot enter the digest.) If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
+Expected: PASS for all (58 tests in `remote-host-journal.test.ts`, 411 in the package; the hosted suite still passes, 790 tests, against the rebuilt `dist`). Then run `pnpm compatibility:update` and `pnpm compatibility:check`, and commit `packages/agent-remote-lab/compatibility.json` with the schema change. (`scripts/compatibility.mjs` skips `node_modules` at any depth and drops git-ignored files at any depth with one batched `git check-ignore`, so a Vitest cache or a nested `.DS_Store` cannot enter the digest.) If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
 
 - [ ] **Step 5: Commit.**
 
@@ -216,6 +216,9 @@ git commit -m "feat(protocol): pull the journal index page by page and refuse a 
 - Modify: `packages/agent-remote-journal/src/session-journal.ts`
 - Create: `packages/agent-remote-journal/src/journal-bytes.test.ts`
 - Create: `packages/agent-remote-journal/src/journal-size-invariant.test.ts`
+- Create: `packages/agent-remote-journal/src/utf8-size.ts`
+- Create: `packages/agent-remote-journal/src/utf8-size.test.ts`
+- Modify: `packages/agent-remote-journal/src/index.ts`
 - Modify: `packages/agent-remote-journal/src/journal-store.test.ts`
 
 - [ ] **Step 1: Write the failing tests.** Create `packages/agent-remote-journal/src/journal-bytes.test.ts`:
@@ -401,17 +404,30 @@ describe('the running size of a journal', () => {
     expectSizeToHold(journal, 'append after replace');
   });
 
-  it('counts UTF-8 bytes, three for a Chinese character and four for an emoji', () => {
-    const ascii = openJournal();
-    ascii.journal.append(ascii.publish(), text('m1', 'd1', 'a'.repeat(300)));
-    const chinese = openJournal();
-    chinese.journal.append(chinese.publish(), text('m1', 'd1', '字'.repeat(300)));
-    const emoji = openJournal();
-    emoji.journal.append(emoji.publish(), text('m1', 'd1', '😀'.repeat(300)));
-    expect(chinese.journal.residentBytes() - ascii.journal.residentBytes()).toBe(600);
-    expect(emoji.journal.residentBytes() - ascii.journal.residentBytes()).toBe(900);
-    expectSizeToHold(chinese.journal, 'chinese');
-    expectSizeToHold(emoji.journal, 'emoji');
+  it('counts UTF-8 bytes: two for an accented or Cyrillic letter, three for a Chinese character and four for an emoji', () => {
+    const sized = (chunk: string) => {
+      const { journal, publish } = openJournal();
+      journal.append(publish(), text('m1', 'd1', chunk));
+      expectSizeToHold(journal, chunk.slice(0, 2));
+      return journal.residentBytes();
+    };
+    const ascii = sized('a'.repeat(300));
+    expect(sized('é'.repeat(300)) - ascii).toBe(300);
+    expect(sized('ж'.repeat(300)) - ascii).toBe(300);
+    expect(sized('字'.repeat(300)) - ascii).toBe(600);
+    expect(sized('😀'.repeat(300)) - ascii).toBe(900);
+  });
+
+  it('counts the non-ASCII text of a head in UTF-8 bytes', () => {
+    const sized = (id: string) => {
+      const { journal, publish } = openJournal();
+      journal.setHead(publish(), { snapshot: { ...snapshot, id }, observedAt: 1 });
+      expectSizeToHold(journal, `head ${id}`);
+      return journal.residentBytes();
+    };
+    const ascii = sized('a'.repeat(100));
+    expect(sized('字'.repeat(100)) - ascii).toBe(200);
+    expect(sized('é'.repeat(100)) - ascii).toBe(100);
   });
 
   it.each([1, 2, 3, 4, 5, 6])('equals a full recomputation through a random run of operations (seed %i)', seed => {
@@ -461,6 +477,23 @@ describe('dropping live-only items', () => {
     journal.append(publish(), live('open', 'second'));
     expect(journal.state().items.find(item => item.itemKey === 'open')?.body?.item).toMatchObject({ text: 'first second' });
     expectSizeToHold(journal, 'after dropping around an open item');
+  });
+
+  it.each([[1, ['s1', 's2', 's3']], [2, ['s1', 's2']], [3, ['s1']], [4, []]])('with %i kept, drops exactly the oldest complete ones needed and none that is open', (keep, dropped) => {
+    const { journal, publish } = openJournal();
+    const live = (key: string): JournalRowInput => ({ ...text(key, `s-${key}`, key), liveOnly: true });
+    journal.append(publish(), live('s1'));
+    journal.seal(publish(), 's1');
+    journal.append(publish(), live('open'));
+    journal.append(publish(), live('s2'));
+    journal.seal(publish(), 's2');
+    journal.append(publish(), live('s3'));
+    journal.seal(publish(), 's3');
+    expect(journal.liveOnlyCount).toBe(4);
+    expect(journal.dropOldestLiveOnly(keep)).toEqual(dropped);
+    expect(journal.has('open')).toBe(true);
+    expect(journal.liveOnlyCount).toBe(4 - dropped.length);
+    expectSizeToHold(journal, `keep ${keep}`);
   });
 });
 ```
@@ -592,11 +625,26 @@ export class MemoryJournalStore implements JournalStore {
 
 - [ ] **Step 4: Implement the journal changes.** In `packages/agent-remote-journal/src/session-journal.ts`:
 
-(a0) Add this helper before the class (and its doc comment):
+(a0) Create `packages/agent-remote-journal/src/utf8-size.ts`, export `utf8ByteLength` from `index.ts` (`export { utf8ByteLength } from './utf8-size.js';`; the hosted service measures entries in the same units), and import it in `session-journal.ts`:
 
 ```ts
-/** The UTF-8 size of a string, counted without encoding it. */
-function utf8Length(text: string): number {
+const encoder = new TextEncoder();
+
+/** The size of a string in UTF-8 bytes. A lone surrogate counts as the three bytes of the replacement character, as `TextEncoder` encodes it. */
+export function utf8ByteLength(text: string): number {
+  return encoder.encode(text).byteLength;
+}
+```
+
+With its test `packages/agent-remote-journal/src/utf8-size.test.ts`:
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+import { utf8ByteLength } from './utf8-size.js';
+
+/** Counts by code point, the way UTF-8 does; a lone surrogate counts as the three bytes of U+FFFD. */
+function oracle(text: string): number {
   let bytes = 0;
   for (let at = 0; at < text.length; at++) {
     const code = text.charCodeAt(at);
@@ -607,6 +655,28 @@ function utf8Length(text: string): number {
   }
   return bytes;
 }
+
+describe('utf8ByteLength', () => {
+  it('counts each width, including lone surrogates', () => {
+    expect(utf8ByteLength('')).toBe(0);
+    expect(utf8ByteLength('a')).toBe(1);
+    expect(utf8ByteLength('é')).toBe(2);
+    expect(utf8ByteLength('字')).toBe(3);
+    expect(utf8ByteLength('😀')).toBe(4);
+    expect(utf8ByteLength('\ud800')).toBe(3);
+    expect(utf8ByteLength('\udc00x')).toBe(4);
+  });
+
+  it('agrees with a count by code point over random strings', () => {
+    let state = 12345;
+    const random = (limit: number) => { state = (Math.imul(state ^ (state >>> 15), 2_246_822_519) + 1_013_904_223) >>> 0; return state % limit; };
+    const units = [0x41, 0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xe000, 0xffff];
+    for (let round = 0; round < 500; round++) {
+      const text = String.fromCharCode(...Array.from({ length: random(40) }, () => (random(3) === 0 ? random(0x10000) : units[random(units.length)]!)));
+      expect(utf8ByteLength(text), JSON.stringify(text)).toBe(oracle(text));
+    }
+  });
+});
 ```
 
 (a) Add fields after `protected replaced = false;`:
@@ -696,12 +766,12 @@ function utf8Length(text: string): number {
     for (const key of this.unmeasured) {
       const item = this.byKey.get(key);
       const before = this.sizes.get(key) ?? 0;
-      const size = item ? utf8Length(JSON.stringify(item)) : 0;
+      const size = item ? utf8ByteLength(JSON.stringify(item)) : 0;
       if (item) this.sizes.set(key, size); else this.sizes.delete(key);
       this.sizedTotal += size - before;
     }
     this.unmeasured.clear();
-    return this.sizedTotal + utf8Length(JSON.stringify(this.meta));
+    return this.sizedTotal + utf8ByteLength(JSON.stringify(this.meta));
   }
 
   /** The estimated size of the live-only items, which a replacement carries over. */
@@ -737,7 +807,7 @@ function utf8Length(text: string): number {
 - [ ] **Step 5: Run the tests and see them pass, then typecheck and rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal run test` then `pnpm --filter @orchardworks/agent-remote-journal run typecheck` then `pnpm --filter @orchardworks/agent-remote-journal run build`
-Expected: PASS for all three (160 tests in 13 files). Then run the hosted suite against the rebuilt `dist` (`pnpm --filter @orchardworks/agent-remote-hosted exec vitest run --testTimeout=20000`, 790 tests), and `pnpm compatibility:update` then `pnpm compatibility:check`: the digest covers the journal sources, so commit `packages/agent-remote-lab/compatibility.json` with this task.
+Expected: PASS for all three (167 tests in 14 files). Then run the hosted suite against the rebuilt `dist` (`pnpm --filter @orchardworks/agent-remote-hosted exec vitest run --testTimeout=20000`, 790 tests), and `pnpm compatibility:update` then `pnpm compatibility:check`: the digest covers the journal sources, so commit `packages/agent-remote-lab/compatibility.json` with this task.
 
 - [ ] **Step 6: Commit.**
 

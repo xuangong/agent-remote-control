@@ -7,6 +7,7 @@ import {
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
 import { evictableItems } from './retention.js';
 import { replacementOrder } from './replacement.js';
+import { utf8ByteLength } from './utf8-size.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError,
   JournalStaleRevisionError, JournalUnknownItemError,
@@ -16,19 +17,6 @@ import {
 
 /** How long a retired epoch is remembered, for diagnostics only. */
 export const RETIRED_EPOCH_MS = 7 * 24 * 60 * 60 * 1000;
-
-/** The UTF-8 size of a string, counted without encoding it. */
-function utf8Length(text: string): number {
-  let bytes = 0;
-  for (let at = 0; at < text.length; at++) {
-    const code = text.charCodeAt(at);
-    if (code < 0x80) bytes += 1;
-    else if (code < 0x800) bytes += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && at + 1 < text.length && (text.charCodeAt(at + 1) & 0xfc00) === 0xdc00) { bytes += 4; at += 1; }
-    else bytes += 3;
-  }
-  return bytes;
-}
 
 /**
  * The journal of one session: epochs and dense sequences assigned here, one record per item, and the one publisher
@@ -103,12 +91,12 @@ export class SessionJournal {
     for (const key of this.unmeasured) {
       const item = this.byKey.get(key);
       const before = this.sizes.get(key) ?? 0;
-      const size = item ? utf8Length(JSON.stringify(item)) : 0;
+      const size = item ? utf8ByteLength(JSON.stringify(item)) : 0;
       if (item) this.sizes.set(key, size); else this.sizes.delete(key);
       this.sizedTotal += size - before;
     }
     this.unmeasured.clear();
-    return this.sizedTotal + utf8Length(JSON.stringify(this.meta));
+    return this.sizedTotal + utf8ByteLength(JSON.stringify(this.meta));
   }
 
   /** The estimated size of the live-only items, which a replacement carries over. */

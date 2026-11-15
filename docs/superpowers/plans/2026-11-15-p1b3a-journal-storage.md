@@ -3336,131 +3336,44 @@ git commit -m "feat(hosted): bound the journal service, take a quota-refused ses
 - Modify: `packages/agent-remote-lab/package.json`, `pnpm-lock.yaml`
 - Create: `packages/agent-remote-lab/scripts/journal-benchmark.mjs`
 
-The benchmark runs the real path: `createHostJournals` over `SqlJournalStore` over `node:sqlite`, with 2 KiB bodies. The binding is synchronous, so what the Relay can afford is an event-loop stall. Thresholds: a `publish()` of one realistic batch (128 items, 256 entries) on a 10,000-item journal in at most 60 ms at the 95th percentile; a cold `status()` (load and parse) of that journal in at most 800 ms; a cold `status()` of a 30,000-item journal with every body resident (about 80 MB, the worst case) in at most 1,500 ms. The script lives in the Lab because it needs both the hosted package and the store, and neither the Controller nor the hosted package may depend on the store.
+The benchmark runs the real path: `createHostJournals` over `SqlJournalStore` over `node:sqlite`, with the default limits and retention (the realistic journals are built by publications, so eviction keeps them as a Relay would). The binding is synchronous, so what the Relay can afford is an event-loop stall. Rows are realistic: five items per turn (a short ask, a 3 KB answer, a 20-40 KB command output, an 18 KB Chinese tool output, a Chinese answer), every 66th item live-only. Thresholds (p95, stated in the plan before the work): a `publish()` of one realistic batch (128 items, 256 entries) on a 10,000-item journal in at most 60 ms; a cold `status()` (load and parse) of that journal in at most 800 ms; a cold `status()` of a 30,000-item journal with every 2 KiB body resident (about 80 MB, the worst case) in at most 1,500 ms. The script also reports, without a threshold, what the reviews flagged at 100,000 items: `windowStart` and `retainedFrom` per publication, `carriedOnReplace` per replace, a cold load, `open` and all `indexPage` pages, fills (with the page read in the same step), and a replacement. The script lives in the Lab because it needs both the hosted package and the store, and neither the Controller nor the hosted package may depend on the store.
 
-- [ ] **Step 1: Add the dependency.** In `packages/agent-remote-lab/package.json`, add to `dependencies`, after `"@orchardworks/agent-remote-hosted": "workspace:*",`:
+- [x] **Step 1: Add the dependencies.** In `packages/agent-remote-lab/package.json`, `dependencies` gains `"@orchardworks/agent-remote-journal": "workspace:*"` (the script times the journal core's methods inside the service's calls) and `"@orchardworks/agent-remote-journal-sqlite": "workspace:*"`, after `"@orchardworks/agent-remote-hosted": "workspace:*",`, and `scripts` gains `"benchmark:journals": "node scripts/journal-benchmark.mjs"`. `pnpm install --offline` rewrites the whole lockfile's resolution lines (a different registry mirror), so edit the two importer entries of `packages/agent-remote-lab` in `pnpm-lock.yaml` by hand and verify with `pnpm install --frozen-lockfile --prefer-offline`.
 
-```json
-    "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
-```
+- [x] **Step 2: The script** is `packages/agent-remote-lab/scripts/journal-benchmark.mjs`. It has its own deadline (`JOURNAL_BENCHMARK_DEADLINE_MS`, default 270,000 ms), prints one line per measurement (`n`, `p50`, `p95`, `max`; `ok` or `FAIL` for the three thresholds and for the two that the plan sets, `info` for the rest) and exits 1 when a threshold fails.
 
-and to `scripts`, after `"test:conformance": ...`:
+- [x] **Step 3: Build what the script imports and run it on both Node versions.**
 
-```json
-    "benchmark:journals": "node scripts/journal-benchmark.mjs",
-```
+Run: `for p in agent-remote-protocol agent-remote-journal agent-remote-journal-sqlite agent-remote-hosted; do pnpm --filter @orchardworks/$p run build; done`, then from `packages/agent-remote-lab`: `node scripts/journal-benchmark.mjs` (default Node 26) and `PATH=/opt/homebrew/opt/node@22/bin:$PATH node scripts/journal-benchmark.mjs` (Node 22.23.2), each with a Bash `timeout` of 300000. A run takes about 45 s.
 
-Run: `pnpm install --offline` (or `pnpm install` if the offline store lacks something)
-Expected: the Lab links the store package; `pnpm-lock.yaml` changes by that link only.
+- [x] **Step 4: Decide.** Measured on an Apple M4 (macOS), Node 26.8.1 and 22.23.2, `node:sqlite` with WAL and `synchronous = FULL`. **All three thresholds pass on both Node versions: `node:sqlite` is the binding (Decision 1).** Milliseconds; 5-7 cold samples, so p95 is the worst sample; the cold loads read a warm file and SQLite cache.
 
-- [ ] **Step 2: Write the script.** `packages/agent-remote-lab/scripts/journal-benchmark.mjs`:
+| Measurement | Threshold | Node 26 p50 / p95 | Node 22 p50 / p95 |
+|---|---|---|---|
+| `publish` of 128 items (256 entries) on 10k items | p95 <= 60 | 9.6 / 19.2 | 17.4 / 27.0 |
+| cold `status` of 10k items | p95 <= 800 | 82 / 89 | 102 / 114 |
+| cold `status` of 30k items, 2 KiB bodies, all resident | p95 <= 1,500 | 241 / 255 | 400 / 407 |
+| cold `status` of 8k realistic items, all resident (about 90 MB) | none | 178 / 181 | 419 / 422 |
+| `publish` of 4 items on 10k items | none | 0.7 / 1.2 | 0.9 / 1.5 |
+| `publish` of 128 items on 96k-100k items | none | 21.6 / 30.8 | 28.2 / 38.1 |
+| `publish` of 4 items on 100k items | none | 11.7 / 13.7 | 10.5 / 12.3 |
+| cold `status` of 100k items (333 MB database, bodies of the latest turns resident) | none | 647 / 741 | 645 / 676 |
+| cold `open` of 100k items (load, first page) | none | 610 | 651 |
+| `indexPage`, 50 pages of 2,000 (each; all pages together) | none | 0.0 / 0.1 (0.2 total) | 0.0 / 0.1 (0.7 total) |
+| `fill` of 64 bodies with the page read, 120 fills, the last 20 over the session cap | none | 6.1 / 24.5 (max 66) | 9.9 / 29.3 (max 76) |
+| replace with 400 items on 100k items, 1,516 live-only items carried (realistic, once) | none | 309 | 419 |
+| the same on 99k light rows, 5 samples | none | 207 / 218 | 206 / 209 |
 
-```js
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+Costs inside a publication at 100k items (measured in the service's own calls; p50): `windowStart` (with `retainedFrom`) 5.6-6.9 ms, `evictRange` 1.8-2.3 ms, `dropOldestLiveOnly` 1.7-2.7 ms, together about 10 ms of the 10-12 ms of a four-item publication, and none of it needs the store. They grow with the number of items and are invisible at 10k (a four-item publication costs 0.7 ms there). Inside a replace at 100k items: `carriedOnReplace` runs twice (admission and `replace`), 15-46 ms each (p50 of one run); the rest of the 200-420 ms is the store removing 100k rows. Loading 100k items: the store read is 290-480 ms, the first `residentBytes` measure 65-150 ms and the first `index()` 17-21 ms.
 
-import { createHostJournals } from '@orchardworks/agent-remote-hosted';
-import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
-import { openNodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
-
-const THRESHOLDS = { publishP95Ms: 60, coldStatusMs: 800, largeColdStatusMs: 1500 };
-const BODY = 'x'.repeat(2048);
-const HOST = 'host-1';
-const OPEN = { maxIndexItems: 1_000_000, pageItems: 2000 };
-const WORST_CASE = { limits: { sessionBytes: 2 ** 30, hostBytes: 2 ** 40 }, retention: { turns: 1_000_000 } };
-
-const row = (itemKey, turn) => ({
-  itemKey, providerId: 'codex', sourceKey: `${itemKey}:0`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
-  item: { type: 'assistant_message', text: BODY, messageId: itemKey },
-});
-
-/** Publishes `count` complete items as batches of 128 items (256 entries), the size of a Controller's publication. */
-async function populate(journals, session, count) {
-  const opened = await journals.open(HOST, session, 'controller-1', OPEN);
-  let sequence = opened.watermark;
-  for (let first = 0; first < count; first += 128) {
-    const entries = [];
-    for (let n = first; n < Math.min(first + 128, count); n++) {
-      entries.push({ sequence: ++sequence, op: 'append', row: row(`item-${n}`, Math.floor(n / 4)) });
-      entries.push({ sequence: ++sequence, op: 'complete', itemKey: `item-${n}`, digest: `digest-${n}` });
-    }
-    const result = await journals.publish(HOST, session, opened.generation, entries);
-    if (result.refusal) throw new Error(`The journal refused the benchmark data: ${result.refusal.reason}`);
-  }
-  return { generation: opened.generation, sequence };
-}
-
-async function timed(work) {
-  const start = performance.now();
-  const value = await work();
-  return { ms: performance.now() - start, value };
-}
-
-const percentile = (values, fraction) => [...values].sort((left, right) => left - right)[Math.min(values.length - 1, Math.floor(values.length * fraction))];
-
-const directory = await mkdtemp(join(tmpdir(), 'arc-journal-benchmark-'));
-const database = await openNodeJournalDatabase(join(directory, 'journals.sqlite'));
-const store = new SqlJournalStore(database);
-const results = {};
-try {
-  const journals = createHostJournals({ store, now: Date.now });
-  const state = await populate(journals, 'codex:publish', 10_000);
-  const rounds = [];
-  let sequence = state.sequence;
-  for (let round = 0; round < 50; round++) {
-    const entries = [];
-    for (let n = 0; n < 128; n++) {
-      const itemKey = `new-${round}-${n}`;
-      entries.push({ sequence: ++sequence, op: 'append', row: row(itemKey, 5_000 + round) });
-      entries.push({ sequence: ++sequence, op: 'complete', itemKey, digest: `digest-${itemKey}` });
-    }
-    const published = await timed(() => journals.publish(HOST, 'codex:publish', state.generation, entries));
-    if (published.value.refusal) throw new Error(`Refused: ${published.value.refusal.reason}`);
-    rounds.push(published.ms);
-  }
-  results.publishP95Ms = percentile(rounds, 0.95);
-
-  const cold = createHostJournals({ store, now: Date.now });
-  results.coldStatusMs = (await timed(() => cold.status(HOST, 'codex:publish'))).ms;
-
-  const worst = createHostJournals({ store, now: Date.now, ...WORST_CASE });
-  await populate(worst, 'codex:large', 30_000);
-  const coldLarge = createHostJournals({ store, now: Date.now, ...WORST_CASE });
-  const loaded = await timed(() => coldLarge.status(HOST, 'codex:large'));
-  if (!loaded.value) throw new Error('The large journal was not found.');
-  results.largeColdStatusMs = loaded.ms;
-} finally {
-  database.close();
-  await rm(directory, { recursive: true, force: true });
-}
-
-console.log(`node ${process.version}`);
-let failed = false;
-for (const [name, limit] of Object.entries(THRESHOLDS)) {
-  const ok = results[name] <= limit;
-  if (!ok) failed = true;
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: ${results[name].toFixed(1)} (limit ${limit})`);
-}
-process.exitCode = failed ? 1 : 0;
-```
-
-- [ ] **Step 3: Build what the script imports and run it on both Node versions.**
-
-Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite run build` then `pnpm --filter @orchardworks/agent-remote-lab run benchmark:journals` (Bash `timeout` 600000)
-Expected: three `ok` lines and exit code 0 on the default Node (26).
-
-Run: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-lab run benchmark:journals` (Bash `timeout` 600000)
-Expected: three `ok` lines and exit code 0 on Node 22.23.2.
-
-- [ ] **Step 4: Decide.** If both runs pass, `node:sqlite` is the binding (Decision 1); copy the two result blocks into the commit message below. **If any threshold fails on either Node, stop and report the numbers to the owner.** Do not continue the plan and do not change the binding.
-
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
-git add packages/agent-remote-lab/package.json pnpm-lock.yaml packages/agent-remote-lab/scripts/journal-benchmark.mjs
-git commit -m "test(lab): measure the journal service over SQLite on realistic journals" -m "Measured on Node 22.23.2 and 26: <paste the two result blocks here>" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+git add packages/agent-remote-lab/package.json packages/agent-remote-lab/compatibility.json pnpm-lock.yaml packages/agent-remote-lab/scripts/journal-benchmark.mjs docs/superpowers/plans/2026-11-15-p1b3a-journal-storage.md
+git commit -m "test(lab): measure the journal service over SQLite on realistic journals" -m "Measured on an Apple M4, Node 22.23.2 and 26.8.1: publish of 128 items on 10k items p95 27.0 / 19.2 ms (limit 60), cold status of 10k items p95 114 / 89 ms (limit 800), cold status of 30k resident items p95 407 / 255 ms (limit 1,500). node:sqlite stays the binding." -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+**Notes carried to Task 6 onward and to P1-C.** The per-publication scans of the journal core (`retainedFrom`, `evictRange`, `dropOldestLiveOnly`) are linear in the item count and cost about 10 ms per publication at 100,000 items; they can be made incremental (walk the window back from the end, bisect `evictRange` on `seqStart`, skip `dropOldestLiveOnly` while the live-only count is within the cap). A replace at 100,000 items stalls the loop for 200-420 ms; the Controller replaces with a window, so this is the cost of leaving a 100,000-item journal, not of normal use.
 
 ---
 

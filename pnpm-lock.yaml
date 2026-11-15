@@ -491,6 +491,12 @@ importers:
       '@orchardworks/agent-remote-hosted':
         specifier: workspace:*
         version: link:../agent-remote-hosted
+      '@orchardworks/agent-remote-journal':
+        specifier: workspace:*
+        version: link:../agent-remote-journal
+      '@orchardworks/agent-remote-journal-sqlite':
+        specifier: workspace:*
+        version: link:../agent-remote-journal-sqlite
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "test": "vitest run --testTimeout=10000 --maxWorkers=50% --exclude '**/*.local.test.ts' --exclude '**/*.local.test.tsx'",
-    "test:conformance": "node scripts/run-relay-conformance.mjs"
+    "test:conformance": "node scripts/run-relay-conformance.mjs",
+    "benchmark:journals": "node scripts/journal-benchmark.mjs"
   },
   "dependencies": {
     "@orchardworks/dsh": "workspace:*",
@@ -20,6 +21,8 @@
     "@orchardworks/agent-provider-dsh": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-journal": "workspace:*",
+    "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-remote-relay": "workspace:*",
     "@orchardworks/agent-remote-web": "workspace:*",

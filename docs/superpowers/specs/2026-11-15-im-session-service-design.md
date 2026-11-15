@@ -22,16 +22,16 @@ An IM experience in which no user action waits on the network. Content appears a
 
 ### Experience targets
 
-These are proposals. Phase P0 measures today's values and confirms each number before implementation starts.
+P0 measured today's values on the local instance ([baselines](../plans/2026-11-15-p0-baselines.md)) and the targets below take its findings into account. Loopback hides network cost, so every timed target is checked twice: at 4x CPU slowdown, and with an emulated round trip of 100 ms between the browser and the Relay. Counted conditions (labels seen, blank frames, requests made, rows re-keyed) are checked in deterministic tests. Clock thresholds are checked only by the measurement runner.
 
 | # | Target |
 |---|---|
-| T1 | A conversation opened before on this device shows its content from the device store within 100 ms (p95) of mounting, with no blank or loading state. |
-| T2 | A conversation with a journal that this device has never opened shows journal content within 500 ms (p50) and 1.5 s (p95), without reaching the Controller. A journal exists once the session was opened on any device, or was active, after smart mode began. |
-| T3 | Returning to a page after any time hidden shows no blocking state. Content is current within 1 s (p95) when the device can reach the Relay. |
-| T4 | Connection and runtime state never disable the composer; only business reasons do (read-only access, an ended session, a terminal in control). A message shows as sending within 50 ms. A resident session accepts it within 1 s (p95); a released one within the provider's measured wake time plus 1 s. |
-| T5 | In smart mode no per-session connection label appears (Opening session, Reconnecting, Synchronizing, Restoring, Checking access). One indicator shows the device's own link to the Relay. |
-| T6 | A Controller restart or a runtime release never resets a client's conversation, unless the native history was genuinely rewritten. |
+| T1 | A conversation opened before on this device shows its content from the device store within 100 ms (p95) of mounting the conversation, at 4x CPU slowdown. No frame shows a blank timeline or a loading label. |
+| T2 | A conversation with a journal that this device has never opened shows journal content within 500 ms (p50) and 1.5 s (p95) of the open request, without reaching the Controller. Client CPU before the request is not counted. Today's Controller-served open is the control group. A journal exists once the session was opened on any device, or was active, after smart mode began. |
+| T3 | Returning to a page after any time hidden shows no blocking state. Content is current within 1 s (p95) when the device can reach the Relay. A return issues at most 2 HTTP requests while the device's sockets are alive (today: 13 to 14). |
+| T4 | Connection and runtime state never disable the composer; only business reasons do (read-only access, an ended session, a terminal in control). A message shows as sending within 100 ms at 4x CPU slowdown, and the editor keeps its focus and content while sending. A resident session accepts it within 1 s (p95); a released one within the provider's measured wake time plus 1 s. |
+| T5 | In smart mode no per-session connection label appears (Opening session, Reconnecting, Synchronizing, Restoring, Checking access, Awaiting Agent, Start with a Provider). One indicator shows the device's own link to the Relay. |
+| T6 | A Controller restart or a runtime release never resets a client's conversation, unless the native history was genuinely rewritten. Not resetting means: no frame without rows, no label, and unchanged items keep their rendered rows (today a restart rebuilds every row and cycles labels for 2.5 to 3.8 s). |
 
 ## Principles
 

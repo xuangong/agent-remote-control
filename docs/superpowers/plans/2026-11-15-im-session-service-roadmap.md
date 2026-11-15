@@ -5,7 +5,7 @@ This roadmap orders the plans that implement [the design](../specs/2026-11-15-im
 | Order | Plan | Scope | Gate before the next plan |
 |---|---|---|---|
 | 1 | P1-A Journal core | A new `@orchardworks/agent-remote-journal` package. It holds stable epochs and sequences, the item index (skeleton), corrections, replacement, prepends, eviction and fill, pages, reconcile planning, item digests and a store port. The projector's row merge is exported from `agent-remote-relay` for reuse. | Package tests pass; `agent-remote-relay` tests unchanged and passing. |
-| 2 | P0 Baselines | Local measurements on `pnpm local`: open to content, return to ready after hidden time and after a runtime release, switch time, request counts per open and per return. Results go into the plan. | Numbers recorded. |
+| 2 | P0 Baselines | Local measurements on `pnpm local`: open to content, return to ready after hidden time and after a runtime release, switch time, request counts per open and per return. Results go into the plan. | Numbers recorded. Done: [baselines](2026-11-15-p0-baselines.md); the design's targets were revised from them. |
 | 3 | P1-B Relay journals | The Host journal service in `agent-remote-hosted` behind the store port. Uplink publishing: claim, publish, acknowledge, index, fill and prepend. Journal-served session reads for smart Hosts behind opt-in flags. A Node SQLite store. A Cloudflare journal object reached by RPC from `primary`. | Real-transport tests against the in-process hosted Relay; conformance unchanged for crude Hosts. |
 | 4 | P1-C Controller publisher | Item keys and digests from the Controller's rows; completion and sealing; claim and fencing; reconcile on every open; fills and older history; backfill through read-only history; read-only observation of terminal-driven sessions, provider by provider. | Continuity fixtures pass per provider; `pnpm local` shows no reset after a runtime release. |
 | 5 | P1-D Client | The IndexedDB device store; journal-served reading; one-step replacement; local verification. | T1, T2 and T6 measured against the P0 baselines. |
@@ -24,6 +24,13 @@ Every plan follows the repository rules in `AGENTS.md`:
 
 ## Notes carried to later plans
 
+- **P1-D: measure under latency, against the same runner.**
+  - P0's numbers are a loopback floor. P1-D re-runs `packages/agent-remote-lab/performance/local-baselines.mjs` at 4x CPU slowdown and with an emulated 100 ms round trip between the browser and the Relay. Both builds run under the same conditions: today's path is the control group.
+  - The runner gains that latency option first, as a delaying proxy in front of the instance, so that WebSocket frames are delayed too, not only HTTP.
+  - The counted budgets come from P0:
+    - at most 2 HTTP requests on a return while sockets are alive (today 13 to 14);
+    - no "Opening session" frame on an open or a return;
+    - no re-keyed rows after a Controller restart.
 - **P1-B2 and P1-D: no holes in a client's window.** The client loads older history from its first entry's `seqStart` (`packages/agent-remote-web/src/client/remote-session-client.ts:372`). A correction, or any update to an item older than what a subscriber holds, must not leave the client holding an isolated old entry. If it did, the next older page would skip everything in between. Two ways to avoid it:
   - the Relay sends such updates only to subscribers whose window covers the item;
   - the client folds them in without moving its older boundary.

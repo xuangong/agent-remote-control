@@ -13,4 +13,16 @@ describe('itemDigest', () => {
   it('changes with the content', async () => {
     expect(await itemDigest({ type: 'reasoning', text: 'a' })).not.toBe(await itemDigest({ type: 'reasoning', text: 'b' }));
   });
+
+  it('ignores background outcomes that merge in later', async () => {
+    const item = { type: 'assistant_message' as const, text: 'Hello', messageId: 'message-1' };
+    const withBackground = { ...item, background: { id: 'review-1', kind: 'review' as const, status: 'visible' as const } };
+    expect(await itemDigest(withBackground)).toBe(await itemDigest(item));
+  });
+
+  it('is the same for nested objects listing the same keys in a different order', async () => {
+    const first = await itemDigest({ type: 'tool_call', callId: 'call-1', name: 'shell', status: 'completed', error: null, detail: { type: 'shell', command: 'ls', cwd: '/tmp' } });
+    const second = await itemDigest({ type: 'tool_call', callId: 'call-1', name: 'shell', status: 'completed', error: null, detail: { cwd: '/tmp', command: 'ls', type: 'shell' } });
+    expect(first).toBe(second);
+  });
 });

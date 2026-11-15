@@ -441,9 +441,6 @@ importers:
 
   packages/agent-remote-journal:
     dependencies:
-      '@orchardworks/agent-provider-sdk':
-        specifier: workspace:*
-        version: link:../agent-provider-sdk
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
@@ -451,9 +448,6 @@ importers:
         specifier: workspace:*
         version: link:../agent-remote-relay
     devDependencies:
-      '@types/node':
-        specifier: 24.13.3
-        version: 24.13.3
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

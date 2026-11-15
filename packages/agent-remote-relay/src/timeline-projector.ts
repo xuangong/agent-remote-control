@@ -219,7 +219,7 @@ function includeCollapse(collapsed: TimelineCollapse[], collapse: TimelineCollap
   if (!collapsed.includes(collapse)) collapsed.push(collapse);
 }
 
-function includeResources(
+export function includeResources(
   resources: ProjectedTimelineEntry['resources'],
   additions: CanonicalTimelineRow['resources'],
 ): void {

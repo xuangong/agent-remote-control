@@ -1,3 +1,4 @@
+import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { bodyFromRow, itemEntry, mergeResources, stampRow } from './journal-items.js';
@@ -23,7 +24,7 @@ describe('journal items', () => {
   });
 
   it('merges resources without duplicates', () => {
-    const binding = { locator: 'file:a', resourceId: 'r1', state: 'available' } as never;
+    const binding: ResourceBinding = { locator: 'file:a', resourceId: 'r1', status: 'available' };
     expect(mergeResources([binding], [binding])).toHaveLength(1);
   });
 });

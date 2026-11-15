@@ -1,5 +1,5 @@
 import type { ProjectedTimelineEntry, ResourceBinding } from '@orchardworks/agent-remote-protocol';
-import { entryFromRow, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { includeResources, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import { JournalBodyMissingError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
 
@@ -19,7 +19,7 @@ export function canonicalRow(row: JournalRow): CanonicalTimelineRow {
     ...(row.nativeRevision === undefined ? {} : { nativeRevision: row.nativeRevision }),
     occurredAt: row.occurredAt, timestamp: row.timestamp,
     ...(row.turnId === undefined ? {} : { turnId: row.turnId }),
-    item: row.item as CanonicalTimelineRow['item'], resources: row.resources,
+    item: row.item, resources: row.resources,
   };
 }
 
@@ -41,15 +41,14 @@ export function entryBody(entry: ProjectedTimelineEntry): JournalBody {
 
 /** The body of a complete item read again from native history, for a fill. */
 export function bodyFromRow(input: JournalRowInput): JournalBody {
-  return entryBody(entryFromRow(canonicalRow(stampRow('fill', 0, input))));
+  return {
+    item: structuredClone(input.item), timestamp: new Date(input.occurredAt).toISOString(),
+    collapsed: [], resources: structuredClone(input.resources ?? []),
+  };
 }
 
 export function mergeResources(current: readonly ResourceBinding[], additions: readonly ResourceBinding[]): ResourceBinding[] {
   const merged = structuredClone([...current]);
-  for (const addition of additions) {
-    if (!merged.some(({ locator, resourceId }) => locator === addition.locator && resourceId === addition.resourceId)) {
-      merged.push(structuredClone(addition));
-    }
-  }
+  includeResources(merged, [...additions]);
   return merged;
 }

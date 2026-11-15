@@ -1,6 +1,6 @@
 import type { AgentTimelineItem, ResourceBinding, TimelineCollapse, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
 
-/** One row a Controller publishes: today's timeline row plus the native identity of the item it belongs to. */
+/** One row a Controller publishes: a timeline row (`TimelineRowInput` in agent-remote-relay) plus the native identity of the item it belongs to. */
 export interface JournalRowInput {
   itemKey: string;
   providerId: string;

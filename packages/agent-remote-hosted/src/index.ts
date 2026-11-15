@@ -1,5 +1,5 @@
 export { createHostBroker, type HostBrokerOptions, type RemoteHostBrokerState } from './broker.js';
-export { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalFilled, type JournalOpened, type JournalOpenRefused, type JournalPublished, type JournalRefusal } from './host-journals.js';
+export { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalRefusal } from './host-journals.js';
 export { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 export { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN,
   type BrokerRequestContext, type BrokerScheduler, type RelaySocket, type RelaySocketClose } from './transport.js';

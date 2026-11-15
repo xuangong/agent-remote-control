@@ -18,7 +18,7 @@ export interface JournalOpened {
 }
 
 /** The journal could not be opened without claiming a generation nobody could be told about. */
-export interface JournalOpenRefused {
+export interface JournalOpenRefusal {
   refused: 'index_too_large';
 }
 
@@ -56,7 +56,7 @@ export interface HostJournals {
    * Claims the session's journal for a publisher, creating it when needed, and fences every older generation.
    * `fits` says whether the reply for this index and epoch can be sent; when it cannot, nothing is claimed.
    */
-  open(hostId: string, sessionKey: string, publisherId: string, fits: (index: JournalIndexEntry[], epoch: string) => boolean): Promise<JournalOpened | JournalOpenRefused>;
+  open(hostId: string, sessionKey: string, publisherId: string, fits: (index: JournalIndexEntry[], epoch: string) => boolean): Promise<JournalOpened | JournalOpenRefusal>;
   /** Applies entries in order and stores the changes before returning. */
   publish(hostId: string, sessionKey: string, generation: number, entries: readonly JournalPublishEntry[]): Promise<JournalPublished>;
   /** Puts bodies the Host read again back into the journal. */
@@ -134,7 +134,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   }
 
   return {
-    open: (hostId, sessionKey, publisherId, fits) => serialized<JournalOpened | JournalOpenRefused>(hostId, async () => {
+    open: (hostId, sessionKey, publisherId, fits) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       const journal = (await load(hostId, sessionKey, true))!;
       const index = journal.index();
       if (!fits(index, journal.epoch)) return { refused: 'index_too_large' };

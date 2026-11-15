@@ -1,5 +1,5 @@
 import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
-import { decodeRemoteHostUplinkMessage, JOURNAL_INDEX_MAX_ITEMS } from '@orchardworks/agent-remote-protocol';
+import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage, JOURNAL_INDEX_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { createHostJournals, type HostJournals } from './host-journals.js';
@@ -110,6 +110,92 @@ describe('a journal connection', () => {
     await f.publish([{ sequence: 1, op: 'seal', itemKey: 'm1' }]);
     expect(f.sent).toEqual([]);
     expect(diagnostics).toEqual([expect.stringContaining('journal_ack')]);
+  });
+
+  it('refuses an open whose reply fits only with small numbers, without claiming', async () => {
+    const reply = (generation: number, watermark: number, index: unknown[]) =>
+      ({ uplinkVersion: 2, type: 'journal_opened', requestId: 'open-1', sessionKey: SESSION, generation, watermark, epoch: 'e', index }) as never;
+    const entry = (at: number, keyLength: number) => ({ itemKey: `${at}-`.padEnd(keyLength, 'k'), seqStart: at, seqEnd: at, state: 'complete' as const, liveOnly: false, revision: 1, resident: true });
+    const target = JOURNAL_MESSAGE_MAX_BYTES - 5;
+    const size = (index: unknown[]) => Buffer.byteLength(JSON.stringify(reply(1, 0, index)));
+    const perEntry = size([entry(0, 4000), entry(1, 4000)]) - size([entry(0, 4000)]);
+    const index = Array.from({ length: Math.floor((target - size([])) / perEntry) - 4 }, (_, at) => entry(at, 4000));
+    while (target - size(index) > 8000) index.push(entry(index.length, 4000));
+    // Two padding entries bring the reply with small numbers to exactly five bytes under the limit.
+    index.push(entry(index.length, 1));
+    index[index.length - 1] = entry(index.length - 1, Math.floor((target - size(index)) / 2));
+    const last = index.length;
+    index.push(entry(last, `${last}-`.length));
+    index[last] = entry(last, `${last}-`.length + target - size(index));
+    expect(encodeRemoteHostUplinkMessage(reply(1, 0, index)).status).toBe('ok');
+    expect(encodeRemoteHostUplinkMessage(reply(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, index)).status).toBe('rejected');
+    const store = new MemoryJournalStore();
+    const base = createHostJournals({ store, now: () => 1 });
+    const probing: HostJournals = { ...base, open: async (hostId, sessionKey, publisherId, fits) => base.open(hostId, sessionKey, publisherId, (_index, epoch) => fits(index as never, epoch)) };
+    const f = fixture({ journals: probing });
+    expect(await f.open()).toMatchObject({ type: 'journal_refused', reason: 'invalid' });
+    expect(await store.load(`host-1:${SESSION}`)).toBeUndefined();
+  });
+
+  it('clears an opened session when a later open is refused', async () => {
+    const store = new MemoryJournalStore();
+    const base = createHostJournals({ store, now: () => 1 });
+    let calls = 0;
+    const journals: HostJournals = { ...base, open: (hostId, sessionKey, publisherId, fits) => base.open(hostId, sessionKey, publisherId, ++calls === 1 ? fits : () => false) };
+    const f = fixture({ journals });
+    await f.open();
+    expect(await f.open()).toMatchObject({ type: 'journal_refused' });
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
+    expect((await store.load(`host-1:${SESSION}`))?.items).toEqual([]);
+  });
+
+  it('refuses the publication of a connection that a newer open fenced, without acknowledging it', async () => {
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const older = fixture({ journals });
+    const newer = fixture({ journals });
+    await older.open();
+    await newer.open();
+    older.sent.length = 0;
+    await older.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(older.sent).toEqual([expect.objectContaining({ type: 'journal_refused', generation: 1, reason: 'fenced', sequence: 1 })]);
+  });
+
+  it('keeps a fill pending until the journal applied the answer', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let fills = 0;
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals: HostJournals = { ...base, fill: async () => { fills += 1; await gate; return { filled: ['m1'], mismatched: [], unknown: [] }; } };
+    const f = fixture({ journals });
+    const first = f.connection.requestFill(SESSION, ['m1']);
+    const requestId = requestIdOf(f.sent, 'journal_fill_request');
+    const answer = wire({ type: 'journal_fill', requestId, sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] });
+    const applying = f.connection.receive(answer);
+    await expect(f.connection.requestFill(SESSION, ['m2'])).rejects.toMatchObject({ code: 'in_flight' });
+    await f.connection.receive(answer);
+    expect(fills).toBe(1);
+    release();
+    await applying;
+    await expect(first).resolves.toEqual({ filled: ['m1'], mismatched: [], unknown: [] });
+    expect(f.timers.size).toBe(0);
+    const second = f.connection.requestFill(SESSION, ['m2']);
+    f.connection.close();
+    await expect(second).rejects.toMatchObject({ code: 'closed' });
+  });
+
+  it('fails a fill that is being applied when the connection closes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals: HostJournals = { ...base, fill: async () => { await gate; return { filled: ['m1'], mismatched: [], unknown: [] }; } };
+    const f = fixture({ journals });
+    const first = f.connection.requestFill(SESSION, ['m1']);
+    const applying = f.connection.receive(wire({ type: 'journal_fill', requestId: requestIdOf(f.sent, 'journal_fill_request'), sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] }));
+    f.connection.close();
+    await expect(first).rejects.toMatchObject({ code: 'closed' });
+    release();
+    await applying;
   });
 
   it('sends nothing once the uplink connection is no longer current', async () => {

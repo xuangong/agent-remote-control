@@ -50,7 +50,9 @@ export interface JournalConnection {
   close(): void;
 }
 
-type Pending = { kind: 'fill' | 'older'; sessionKey: string; itemKeys: ReadonlySet<string>; resolve(value: never): void; reject(error: Error): void; timer: unknown };
+type PendingFill = { kind: 'fill'; itemKeys: ReadonlySet<string>; applying: boolean; resolve(value: JournalFilled): void };
+type PendingOlder = { kind: 'older'; resolve(value: { olderAvailable: boolean }): void };
+type Pending = (PendingFill | PendingOlder) & { sessionKey: string; reject(error: Error): void; timer: unknown };
 
 /**
  * One uplink connection's side of the journals: it runs the Host's publications through the journal service, tells the
@@ -77,7 +79,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
   const refuse = (sessionKey: string, generation: number, sequence: number, reason: JournalRefusalReason, itemKey?: string) =>
     send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_refused', sessionKey, generation, sequence, reason, ...(itemKey === undefined ? {} : { itemKey }) });
 
-  function request<T>(kind: Pending['kind'], sessionKey: string, itemKeys: readonly string[], message: (requestId: string) => RemoteHostUplinkMessage): Promise<T> {
+  function request<T>(kind: Pending['kind'], sessionKey: string, message: (requestId: string) => RemoteHostUplinkMessage, track: (resolve: (value: T) => void) => PendingFill | PendingOlder): Promise<T> {
     if (!options.current()) return Promise.reject(new JournalRequestError('unavailable', 'The Host connection is not current.'));
     if (pending.size >= JOURNAL_REQUEST_LIMIT) return Promise.reject(new JournalRequestError('busy', 'Too many pending journal requests.'));
     if ([...pending.values()].some(item => item.kind === kind && item.sessionKey === sessionKey)) {
@@ -91,7 +93,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
         pending.delete(requestId);
         reject(new JournalRequestError('timeout', 'The Host did not answer the journal request before the Relay deadline.'));
       }, timeoutMs);
-      pending.set(requestId, { kind, sessionKey, itemKeys: new Set(itemKeys), resolve: resolve as (value: never) => void, reject, timer });
+      pending.set(requestId, { ...track(resolve), sessionKey, reject, timer });
       try { options.send(body); }
       catch (error) {
         scheduler.clearTimeout(timer);
@@ -101,13 +103,14 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
     });
   }
 
-  /** The pending request this answer belongs to, taken out of the map; undefined when the Relay asked for no such thing. */
-  function answered(requestId: string, kind: Pending['kind'], sessionKey: string): Pending | undefined {
+  /** The pending request of this kind and session that an answer belongs to; undefined when the Relay asked for no such thing. */
+  function pendingFor<K extends Pending['kind']>(requestId: string, kind: K, sessionKey: string): Extract<Pending, { kind: K }> | undefined {
     const found = pending.get(requestId);
-    if (!found || found.kind !== kind || found.sessionKey !== sessionKey) return undefined;
+    return found && found.kind === kind && found.sessionKey === sessionKey ? found as Extract<Pending, { kind: K }> : undefined;
+  }
+  function settle(requestId: string, found: Pending): void {
     pending.delete(requestId);
     scheduler.clearTimeout(found.timer);
-    return found;
   }
 
   return {
@@ -117,7 +120,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           const { sessionKey, requestId } = message;
           const reply = (generation: number, watermark: number, epoch: string, index: JournalIndexEntry[]): RemoteHostUplinkMessage =>
             ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_opened', requestId, sessionKey, generation, watermark, epoch, index });
-          const result = await journals.open(hostId, sessionKey, message.publisherId, (index, epoch) => encodes(reply(1, 0, epoch, index)));
+          const result = await journals.open(hostId, sessionKey, message.publisherId, (index, epoch) => encodes(reply(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER, epoch, index)));
           if (!options.current()) return;
           if ('refused' in result) {
             opened.delete(sessionKey);
@@ -146,14 +149,27 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           return;
         }
         case 'journal_fill': {
-          const found = answered(message.requestId, 'fill', message.sessionKey);
-          if (!found) return;
-          try { found.resolve(await journals.fill(hostId, message.sessionKey, message.items.filter(({ row }) => found.itemKeys.has(row.itemKey))) as never); }
-          catch (error) { found.reject(error instanceof Error ? error : new Error('The journal could not take the bodies.')); }
+          const { requestId } = message;
+          const found = pendingFor(requestId, 'fill', message.sessionKey);
+          if (!found || found.applying) return;
+          found.applying = true;
+          try {
+            const filled = await journals.fill(hostId, message.sessionKey, message.items.filter(({ row }) => found.itemKeys.has(row.itemKey)));
+            if (pending.get(requestId) !== found) return;
+            settle(requestId, found);
+            found.resolve(filled);
+          } catch (error) {
+            if (pending.get(requestId) !== found) return;
+            settle(requestId, found);
+            found.reject(error instanceof Error ? error : new Error('The journal could not take the bodies.'));
+          }
           return;
         }
         case 'journal_older_done': {
-          answered(message.requestId, 'older', message.sessionKey)?.resolve({ olderAvailable: message.olderAvailable } as never);
+          const found = pendingFor(message.requestId, 'older', message.sessionKey);
+          if (!found) return;
+          settle(message.requestId, found);
+          found.resolve({ olderAvailable: message.olderAvailable });
           return;
         }
       }
@@ -163,14 +179,16 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
       if (itemKeys.length < 1 || itemKeys.length > JOURNAL_FILL_MAX_ITEMS || new Set(itemKeys).size !== itemKeys.length) {
         return Promise.reject(new JournalRequestError('invalid', `A fill asks for 1 to ${JOURNAL_FILL_MAX_ITEMS} distinct items.`));
       }
-      return request<JournalFilled>('fill', sessionKey, itemKeys, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill_request', requestId, sessionKey, itemKeys: [...itemKeys] }));
+      return request<JournalFilled>('fill', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill_request', requestId, sessionKey, itemKeys: [...itemKeys] }),
+        resolve => ({ kind: 'fill', itemKeys: new Set(itemKeys), applying: false, resolve }));
     },
 
     requestOlder(sessionKey, limit) {
       if (!Number.isInteger(limit) || limit < 1 || limit > JOURNAL_OLDER_MAX_LIMIT) {
         return Promise.reject(new JournalRequestError('invalid', `An older-history read asks for 1 to ${JOURNAL_OLDER_MAX_LIMIT} items.`));
       }
-      return request<{ olderAvailable: boolean }>('older', sessionKey, [], requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, limit }));
+      return request<{ olderAvailable: boolean }>('older', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, limit }),
+        resolve => ({ kind: 'older', resolve }));
     },
 
     close() {

@@ -145,7 +145,7 @@ describe('createHostJournals', () => {
     hold = true;
     let settled = false;
     const published = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]).then(result => { settled = true; return result; });
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await new Promise(resolve => setImmediate(resolve));
     expect(settled).toBe(false);
     expect((await memory.load(KEY))?.items).toEqual([]);
     release();
@@ -213,5 +213,49 @@ describe('createHostJournals', () => {
     expect(tail?.kind).toBe('page');
     if (tail?.kind === 'page') expect(tail.page.payload.entries).toHaveLength(1);
     expect(await journals.page(HOST, 'codex:none', PAGE, false)).toBeUndefined();
+  });
+
+  it('drops the cached journal and propagates an unexpected error, leaving the stored state', async () => {
+    const store = new MemoryJournalStore();
+    const seeded = SessionJournal.create(KEY);
+    seeded.claim('controller-1');
+    (seeded as unknown as { meta: { minSeq: number } }).meta.minSeq = Number.MIN_SAFE_INTEGER + 1;
+    await store.apply(seeded.takeChanges()!);
+    const { journals } = fixture(store);
+    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
+    expect(opened).toMatchObject({ generation: 2, watermark: 0 });
+    await expect(journals.publish(HOST, SESSION, 2, [
+      append(1, 'm1', 'Hello'),
+      { sequence: 2, op: 'prepend', items: [{ row: row('o1', 'a'), digest: 'd1' }, { row: row('o2', 'b'), digest: 'd2' }] },
+    ])).rejects.toThrow();
+    const saved = await store.load(KEY);
+    expect(saved?.items).toEqual([]);
+    expect(saved?.meta.publisher?.watermark).toBe(0);
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 3, watermark: 0, index: [] });
+  });
+
+  it('runs the calls queued behind one that failed', async () => {
+    const memory = new MemoryJournalStore();
+    let failures = 1;
+    const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+      apply: async changes => { if (failures-- > 0) throw new Error('disk full'); await memory.apply(changes); } };
+    const { journals } = fixture(store);
+    const first = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
+    const second = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
+    await expect(first).rejects.toThrow('disk full');
+    expect(await second).toMatchObject({ generation: 1 });
+  });
+
+  it('does not let one Host waiting on its store hold up another Host', async () => {
+    const memory = new MemoryJournalStore();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+      apply: async changes => { if (changes.meta.sessionKey.startsWith(`${HOST}:`)) await gate; await memory.apply(changes); } };
+    const { journals } = fixture(store);
+    const blocked = journals.open(HOST, SESSION, 'controller-1', fitsAlways);
+    expect(await openSession(journals, 'host-2', SESSION, 'controller-2')).toMatchObject({ generation: 1 });
+    release();
+    expect(await blocked).toMatchObject({ generation: 1 });
   });
 });

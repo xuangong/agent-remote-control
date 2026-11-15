@@ -26,20 +26,21 @@
    - A head goes before queued prepends, which can be long.
    - Messages are cut at 4 MiB and 256 entries, measured as the uplink encodes them.
 6. **Failures.**
-   - A per-item refusal (`unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`) skips that item; the entries after it are sent again.
+   - A per-item refusal (`unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`) skips that item. A refused entry never consumes its sequence, so the publisher renumbers the entries that follow it, starting at the refused sequence; entries it had already sent after it were refused as `sequence_gap` and are sent again under their new numbers. A refusal that names no item, and a `sequence_gap` that follows no per-item refusal, reopen the session.
    - Any other failure (a `stale_revision` included), a missing acknowledgement after 30 seconds, a held-event overflow and a lost connection reopen the session with exponential backoff (250 ms up to 30 s), which resets only after a minute of sustained publishing.
    - Quota windows are 2,000, 200 and 20 items; `forceReplace` clears when the replacement is acknowledged; a refusal of the narrowest window stops the session.
    - `incomplete` forces a replacement without narrowing the window, then the head; a Relay that keeps saying it ends the session. Three replacements in a row (not counting forced ones) also end it.
 7. **The attention cursor travels as an item key.** The head names `attentionItemKey`; the journal translates it into `{ epoch, seq }` of that item, or its latest cursor when none is named. The Controller cannot know the journal's epoch.
 8. **Amendments are `outcome` and `rebind`.** `outcome` (stored; from `background_activity_updated`) and `rebind` (stored; a resource-binding replacement) are applied in place and sent to journal-served clients as the frames the session wire sends today. There are no `event` entries: heads carry what `turn_*`, `usage_updated` and `runtime_updated` change, and `runtime_updated` published as an event would undo the Relay's `restoring` override.
 9. **The Relay holds interaction frames until the served head agrees.** A Controller's `interaction_requested`, `interaction_resolved` and `interaction_invalidated` frames wait for the head last sent to that browser (at most 2 seconds, at most 64 frames), because a head that arrives later through the journal would otherwise drop a new question or bring back a resolved one.
-10. **The grant is versioned.** The Controller asks for `journal=2` and the Relay acknowledges `registered.journal: 2` only when it understands the new entries and messages. A Relay that grants only 1 gets no journal publishing from this Controller; no released Controller asks for 1.
+10. **The grant is versioned and enforced per connection.** The Controller asks for `journal=1` or `journal=2`. The broker acknowledges `registered.journal: 2` only when the Controller asked for 2 and `HostJournals.capabilities(hostId)` reports 2 (landed in P1-B3b); it acknowledges 1 when the Controller asked for 1, and when it asked for 2 of a service that reports only 1. A connection granted 1 that sends an entry or message that needs grant 2 (`rebind`, `outcome`, a `correct` without a digest, a `replace` or `prepend` item without one, a head with `attentionItemKey`, `journal_unserve`, `journal_request_refused`) is closed with 1008: that is a protocol violation, and refusing it entry by entry would loop. A Relay that grants only 1 gets no journal publishing from this Controller; no released Controller asks for 1.
 11. **`journal_unserve { sessionKey, generation }` is sent on every terminal stop** (the journal cannot be opened for good, the head cannot be put on the wire, the quota is exhausted, replacements loop, the Relay keeps calling the journal incomplete). `generation` is required; the Relay ignores an older one and closes the session's journal-served streams so their clients read through the Controller. A refused open needs no unserve: the Relay already unserves on `index_too_large` and drops the opened state on any refused open.
 12. **`journal_request_refused` answers fill and older-history requests** for sessions the publisher does not follow (`not_followed`) or has not opened yet (`not_ready`), so the Relay rejects them at once instead of at its 15 second deadline.
 13. **Resource ids are stable.** A settled resource gets an HMAC-SHA-256 id under a secret persisted in the Controller's state directory, from its agent, locator and content, so a journal row's binding still names a readable resource after a restart.
 14. **The core accepts appends to evicted `tool_call` and `todo` items**, whose rows replace the item's content; the item becomes resident and open, keeping its resources, collapse marks, time and background. It does not accept them for `compaction`: that merge spreads fields, so a late row would lose the fields it omits and break the digest.
-15. **A reset open is the way out of an oversized index.** At 100,000 items `open` refuses with `index_too_large` and takes the session out of serving, so the publisher could never replace the journal. The publisher then opens again with `reset: true`: the Relay claims the journal without its index, clears its head, marks it incomplete, and accepts nothing but a replacement that fits (then the head) until one is stored. Serving resumes as it does after a quota refusal.
+15. **A reset open is the way out of an oversized index.** At 100,000 items `open` refuses with `index_too_large` and takes the session out of serving, so the publisher could never replace the journal. The publisher then opens again with `reset: true`: the Relay claims the journal without its index, clears its head, marks it incomplete, and refuses every entry except a first `replace` that fits (the head follows only after it) until one is stored. Serving resumes as it does after a quota refusal.
 16. **The Controller advertises diagnostic delivery version 4.** Journal diagnostics (`journal_open_refused`, `journal_publication_refused`, `journal_row_rejected`, `journal_message_unencodable`, `journal_session_restarted`, `journal_replacement_published`, `journal_quota_window`, `journal_session_stopped`, `journal_session_unserved`) carry the provider id and at most a short reason, never content; the Relay's journal events (`journal_store_failed`, `journal_fanout_failed`, `journal_quota_exceeded`, `journal_live_only_dropped`) join the delivered set.
+17. **A missing identity is a contract breach.** A journal-capable provider's observation without `itemIdentity` (a timeline observation, or an `interaction_resolved` one), or one whose key starts with `controller:`, is a defect of the adapter, not something the Controller papers over. The agent manager tells its journal tap (`identityMissing`); the publisher stops the session with `journal_session_stopped` (reason `identity_missing`, provider id only), sends `journal_unserve`, and publishes nothing more of it until the next connection. The `controller:` key prefix is reserved for items the Controller makes itself; a provider-supplied key never starts with it. Adapters set `completes` on history observations themselves, interaction items included; the Controller never infers completion.
 
 Also decided here: taps are not viewers (the publisher follows the manager through `subscribeJournal`, which does not count in `canReleaseIdle`; an idle session is released after what is queued has been published); the `alias` entry exists but the operation queue of P2 produces it; and the Controller bundle includes the pure-TypeScript journal package (`scripts/build-agent-host.mjs` bundles every workspace dependency; it uses `crypto.subtle`, global in Node 22), so no native module or `node:sqlite` enters the Controller.
 
@@ -1120,7 +1121,7 @@ git commit -m "feat(journal): apply amendments in place, keep open corrections o
 Jobs in `agent-remote-hosted`:
 
 - The Host journal service applies `rebind` and `outcome` entries and lists what subscribers hear (`rebound`, `outcome`); it takes a session out of serving when the Controller says so (`journal_unserve`); and its live-only cap now counts prepended items.
-- The connection adapter applies `journal_unserve`, rejects the Relay's pending fill or older-history request at once when the Controller answers `journal_request_refused`, and the broker grants journals at level 2 to a Controller that asks for `journal=2`.
+- The connection adapter applies `journal_unserve`, rejects the Relay's pending fill or older-history request at once when the Controller answers `journal_request_refused`, and the broker grants journals per connection: at level 2 only to a Controller that asks for `journal=2` of a service whose `capabilities(hostId)` reports 2, at level 1 to one that asks for 1. A grant-1 connection that sends a grant-2 entry or message is closed with 1008.
 - A journal-served browser stream sends amendments as the frames today's session wire sends (`timeline_resource_binding_replaced` and a non-timeline `agent_stream` for a background outcome).
 - A journal-served browser stream forwards the Controller's `interaction_requested`, `interaction_resolved` and `interaction_invalidated` frames only once the head it last sent to that browser agrees with them. Otherwise an older head, which arrives through the journal after a frame that came straight from the Controller, makes the client drop a new question or bring back a resolved one (the client's reducer takes the pending interactions of the latest Snapshot). A frame waits at most two seconds and at most 64 frames wait.
 
@@ -1134,7 +1135,7 @@ Jobs in `agent-remote-hosted`:
 - Create: `packages/agent-remote-hosted/src/journal-session-stream-amendments.test.ts`
 - Create: `packages/agent-remote-hosted/src/broker-journal-grant.test.ts`
 
-This task expects P1-B2 and P1-B3a to have landed completely (the bounded service with `unserve`, `served` and `indexPage`, the connection adapter's pulled index pages, and the journal-served gate of P1-B3a Task 6 whose `published` handler closes the streams of a session whose publication reports `unserved`). It changes only the `JournalLiveEvent` type, `HostJournals.unserve`, the `apply` function and the `liveOnlyChanged` line of `publish` in `host-journals.ts`; `JournalHostMessage`, `receive` and `JournalRequestError` in `journal-uplink.ts`; `register`, the Host record and the `journal` query in `broker.ts`; and the `deliver`, `hostFrame`, `negotiate`, `refreshHead` and `shutdown` functions of `journal-session-stream.ts`.
+This task expects P1-B2 and P1-B3a to have landed completely (the bounded service with `unserve`, `served` and `indexPage`, the connection adapter's pulled index pages, and the journal-served gate of P1-B3a Task 6 whose `published` handler closes the streams of a session whose publication reports `unserved`). It changes only the `JournalLiveEvent` type, `HostJournals.unserve`, the `apply` function, the `admission` function and the `liveOnlyChanged` line of `publish` in `host-journals.ts`, and it removes the grant-1 guard Task 2 added there (`GrantOneEntry`, `requireGrantOneEntry` and its call in `publish`); `JournalHostMessage`, `receive` and `JournalRequestError` in `journal-uplink.ts`; `register`, `registered`, the message handler (where it checks the grant before `host.journal.receive`), the Host record and the `journal` query in `broker.ts`; and the `deliver`, `hostFrame`, `negotiate`, `refreshHead` and `shutdown` functions of `journal-session-stream.ts`.
 
 - [ ] **Step 1: Write the failing service test.** Create `packages/agent-remote-hosted/src/host-journals-amendments.test.ts`. It seeds the store with a claimed journal, so it does not depend on how `open` is called:
 
@@ -1209,6 +1210,24 @@ describe('amendments published to a journal', () => {
     expect(result.refusal).toEqual({ sequence: 2, reason: 'stale_revision', itemKey: 'a' });
     expect(result.watermark).toBe(1);
     expect(result.events.map(event => event.kind)).toEqual(['row']);
+  });
+
+  it('accepts the entries after a refused one when they are sent again under the refused entry\'s number, and does not take them for a duplicate', async () => {
+    const { store, journals } = await seeded();
+    const result = await journals.publish(HOST, SESSION, 1, [
+      { sequence: 1, op: 'append', row: row('a', 'Alpha') },
+      { sequence: 2, op: 'correct', row: row('b', 'Ghost'), expectedRevision: 1 },
+      { sequence: 3, op: 'append', row: row('c', 'Gamma') },
+    ]);
+    expect(result.refusal).toEqual({ sequence: 2, reason: 'unknown_item', itemKey: 'b' });
+    expect(result.watermark).toBe(1);
+    // The entry that followed was not applied, and the refused sequence is still free.
+    expect((await journals.publish(HOST, SESSION, 1, [{ sequence: 3, op: 'append', row: row('c', 'Gamma') }])).refusal).toEqual({ sequence: 3, reason: 'sequence_gap' });
+    const again = await journals.publish(HOST, SESSION, 1, [{ sequence: 2, op: 'append', row: row('c', 'Gamma') }]);
+    expect(again.refusal).toBeUndefined();
+    expect(again.watermark).toBe(2);
+    expect(again.events.map(event => event.kind)).toEqual(['row']);
+    expect((await store.load(KEY))?.items.map(item => item.itemKey)).toEqual(['a', 'c']);
   });
 
   it('takes a replacement whose last item is still open, without a digest', async () => {
@@ -1321,6 +1340,22 @@ describe('opening a journal without its index', () => {
     expect(journals.served(HOST, SESSION)).toBe(true);
     const again = await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2 }) as JournalOpened;
     expect(again.index.map(entry => entry.itemKey)).toEqual(['m3']);
+  });
+
+  it('refuses every entry but a replacement while the journal waits for one', async () => {
+    const { journals } = await overlarge();
+    const opened = await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2, reset: true }) as JournalOpened;
+    const next = opened.watermark + 1;
+    const binding = { locator: 'docs/plan.md', resourceId: 'resource-1', status: 'pending' as const };
+    const refused: JournalPublishEntry[] = [
+      complete(next, 'm1'), { sequence: next, op: 'seal', itemKey: 'm1' }, { sequence: next, op: 'alias', itemKey: 'm1', clientMessageId: 'operation-1' },
+      { sequence: next, op: 'correct', row: row('m1', 'm1'), digest: 'digest-m1', expectedRevision: 1 },
+      { sequence: next, op: 'prepend', items: [{ row: row('m0', 'm0'), digest: 'digest-m0' }] },
+      { sequence: next, op: 'rebind', itemKey: 'm1', previous: binding, replacement: { ...binding, status: 'available' } },
+      { sequence: next, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 },
+    ];
+    for (const entry of refused) expect((await journals.publish(HOST, SESSION, 2, [entry])).refusal).toEqual({ sequence: next, reason: 'incomplete' });
+    expect((await journals.publish(HOST, SESSION, 2, [{ sequence: next, op: 'replace', items: [{ row: row('m3', 'm3'), digest: 'digest-m3' }] }])).refusal).toBeUndefined();
   });
 
   it('keeps the journal out of serving across a restart of the Relay until a replacement is stored', async () => {
@@ -1523,6 +1558,23 @@ The open that resets claims the journal without its index and marks it incomplet
       const index = journal.index();
 ```
 
+The journal that is missing rows takes a replacement before anything else, and a `rebind` counts against the quota like the other entries that carry content. The head check moves up and covers every entry but a replacement:
+
+<!-- edit: packages/agent-remote-hosted/src/host-journals.ts -->
+<!-- old -->
+```ts
+      if (entry.op === 'head') {
+        if (journal.incomplete) throw new JournalIncompleteRefused();
+        return;
+      }
+```
+<!-- new -->
+```ts
+      // A journal that is missing rows takes a replacement before anything else, the head included.
+      if (entry.op !== 'replace' && journal.incomplete) throw new JournalIncompleteRefused();
+      if (entry.op === 'head') return;
+```
+
 <!-- edit: packages/agent-remote-hosted/src/host-journals.ts -->
 <!-- old -->
 ```ts
@@ -1530,10 +1582,58 @@ The open that resets claims the journal without its index and marks it incomplet
 ```
 <!-- new -->
 ```ts
-      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend') return;
-      // A journal that is missing rows takes a replacement before any row.
-      if (journal.incomplete) throw new JournalIncompleteRefused();
+      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend' && entry.op !== 'rebind') return;
 ```
+
+Take the grant-1 guard of Task 2 out, and let the entry types be the wire's own:
+
+<!-- edit: packages/agent-remote-hosted/src/host-journals.ts -->
+<!-- old -->
+```ts
+/** The entries a grant 1 Controller sends: every item and correction is complete, and a head names no attention item. */
+type GrantOneEntry = Exclude<JournalPublishEntry, { op: 'rebind' | 'outcome' }> extends infer Entry
+  ? Entry extends { op: 'correct' } ? Entry & { digest: string }
+    : Entry extends { op: 'replace' | 'prepend' } ? Omit<Entry, 'items'> & { items: CompleteItemInput[] }
+    : Entry
+  : never;
+
+```
+<!-- new -->
+```ts
+```
+
+<!-- edit: packages/agent-remote-hosted/src/host-journals.ts -->
+<!-- old -->
+```ts
+  /**
+   * A Controller holding grant 1 sends complete items only. Entries that need grant 2 (amendments, open items, attention
+   * item keys) are refused as invalid publications, so no journal ever holds what this Relay cannot serve.
+   */
+  function requireGrantOneEntry(entry: JournalPublishEntry): asserts entry is GrantOneEntry {
+    const needsGrantTwo = entry.op === 'rebind' || entry.op === 'outcome'
+      || (entry.op === 'correct' && entry.digest === undefined)
+      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
+      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined);
+    if (needsGrantTwo) throw new JournalInvalidPublicationError(entry.sequence);
+  }
+
+```
+<!-- new -->
+```ts
+```
+
+<!-- edit: packages/agent-remote-hosted/src/host-journals.ts -->
+<!-- old -->
+```ts
+            requireGrantOneEntry(entry);
+            if (fresh) admit(entry);
+```
+<!-- new -->
+```ts
+            if (fresh) admit(entry);
+```
+
+`admission` and `apply` take `JournalPublishEntry` again, and `CompleteItemInput` is imported only if the fill path still uses it. The grant is enforced per connection in the broker (Step 11), where a violation closes the connection instead of refusing entries one by one.
 
 - [ ] **Step 4: Run the service test and see it pass.**
 
@@ -1748,13 +1848,14 @@ import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createHostBroker } from './index.js';
-import { collect, socketPair } from './test-utils/journal-session-fixture.js';
+import { createHostJournals, type HostJournals } from './host-journals.js';
+import { collect, socketPair, until } from './test-utils/journal-session-fixture.js';
 
 const closers: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
 
-async function registered(query: string, journals: MemoryJournalStore | undefined): Promise<Record<string, unknown>> {
-  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, ...(journals ? { journals } : {}) });
+async function connected(query: string, journals: MemoryJournalStore | undefined, journalService?: HostJournals) {
+  const broker = createHostBroker({ origin: 'https://relay.example', rpcTimeoutMs: 1000, ...(journalService ? { journalService } : journals ? { journals } : {}) });
   closers.push(() => broker.close());
   const pairing = await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', body: '{}' }));
   const { key } = await pairing!.json();
@@ -1764,8 +1865,12 @@ async function registered(query: string, journals: MemoryJournalStore | undefine
   const inbox = collect(pair.native);
   prepared.accept(pair.server);
   pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
-  return inbox.take(message => message.type === 'registered', 'registered');
+  const registered = await inbox.take(message => message.type === 'registered', 'registered');
+  return { pair, inbox, registered };
 }
+
+const registered = async (query: string, journals: MemoryJournalStore | undefined, journalService?: HostJournals): Promise<Record<string, unknown>> =>
+  (await connected(query, journals, journalService)).registered;
 
 describe('the journal grant', () => {
   it('is acknowledged at level 2 for a Controller that asks for 2', async () => {
@@ -1777,6 +1882,25 @@ describe('the journal grant', () => {
     expect((await registered('', new MemoryJournalStore())).journal).toBeUndefined();
   });
 
+  it('grants level 1 to a Controller that asks for 2 of a journal service that reports only 1', async () => {
+    const service = { ...createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), capabilities: async () => ({ journal: 1 as const }) };
+    expect((await registered('?journal=2', undefined, service)).journal).toBe(1);
+  });
+
+  it('closes, with 1008, a connection granted 1 that sends what needs 2, and keeps one granted 2', async () => {
+    const row = { itemKey: 'a', providerId: 'codex', sourceKey: 'a:1', occurredAt: 1, item: { type: 'assistant_message', text: 'Hi', messageId: 'a' } };
+    const open = { uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' };
+    const entries = [{ sequence: 1, op: 'append', row }, { sequence: 2, op: 'rebind', itemKey: 'a', previous: { locator: 'x', resourceId: 'r1', status: 'pending' }, replacement: { locator: 'x', resourceId: 'r2', status: 'available' } }];
+    for (const [query, closed] of [['?journal=1', 1008], ['?journal=2', undefined]] as const) {
+      const { pair, inbox } = await connected(query);
+      pair.native.send(JSON.stringify(open));
+      const opened = await inbox.take(message => message.type === 'journal_opened', 'journal_opened');
+      pair.native.send(JSON.stringify({ uplinkVersion: 2, type: 'journal_publish', sessionKey: 'codex:thread-1', generation: opened.generation, entries }));
+      if (closed) await until(() => pair.native.closeCode === closed || undefined, 'the connection to close');
+      else { await inbox.take(message => message.type === 'journal_ack', 'journal_ack'); expect(pair.native.closeCode).toBeUndefined(); }
+    }
+  });
+
   it('is never acknowledged by a Relay without a journal store', async () => {
     expect((await registered('?journal=2', undefined)).journal).toBeUndefined();
   });
@@ -1786,7 +1910,7 @@ describe('the journal grant', () => {
 - [ ] **Step 10: Run it and see it fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/broker-journal-grant.test.ts --testTimeout=10000`
-Expected: FAIL (`journal=2` is not understood, so no grant at all).
+Expected: FAIL (`journal=2` is not understood, so no grant at all; a grant-1 connection is not closed for a grant-2 entry; a service that reports 1 still gets 2).
 
 - [ ] **Step 11: Implement the grant.** In `packages/agent-remote-hosted/src/broker.ts`, the Host remembers the level it granted:
 
@@ -1812,6 +1936,38 @@ outboxRequested = false, journalRequested = false) {
 outboxRequested = false, journalRequested: 0 | 1 | 2 = 0) {
 ```
 
+The level is settled once, before the journal connection is made. `registered` already resumes itself after a wait (the pending deletion), so it does the same for the capability read:
+
+<!-- edit: packages/agent-remote-hosted/src/broker.ts -->
+<!-- old -->
+```ts
+    let pendingDeletionHandled = false;
+```
+<!-- new -->
+```ts
+    let pendingDeletionHandled = false;
+    /** The journal level this connection is granted; known once the service has told what it supports. */
+    let journalLevel: 0 | 1 | 2 | undefined = journals && journalRequested ? (journalRequested === 2 ? undefined : 1) : 0;
+```
+
+<!-- edit: packages/agent-remote-hosted/src/broker.ts -->
+<!-- old -->
+```ts
+      host.tunnelToken ??= randomBytes(32).toString('base64url');
+      const journalHost = host;
+```
+<!-- new -->
+```ts
+      if (journalLevel === undefined) {
+        // A Controller that asked for 2 gets it only from a service that reports 2.
+        const ownHost = host.id;
+        void journals!.capabilities(ownHost).then(capabilities => capabilities.journal, () => 1 as const).then(level => { journalLevel = level >= 2 ? 2 : 1; registered(); });
+        return;
+      }
+      host.tunnelToken ??= randomBytes(32).toString('base64url');
+      const journalHost = host;
+```
+
 <!-- edit: packages/agent-remote-hosted/src/broker.ts -->
 <!-- old -->
 ```ts
@@ -1819,7 +1975,7 @@ outboxRequested = false, journalRequested: 0 | 1 | 2 = 0) {
 ```
 <!-- new -->
 ```ts
-      if (journalRequested && journals && !host.journal) host.journalGrant = journalRequested;
+      if (journalLevel && journals && !host.journal) host.journalGrant = journalLevel;
       host.journal ??= journalRequested && journals
 ```
 
@@ -1832,6 +1988,21 @@ outboxRequested = false, journalRequested: 0 | 1 | 2 = 0) {
 ```ts
 ...(host.journal ? { journal: host.journalGrant ?? 1 } : {}),
 ```
+
+A connection granted 1 never sends grant-2 entries or messages. When one does, it is closed, as every other protocol violation of the uplink is. The check sits next to the existing journal gate of the message handler:
+
+<!-- edit: packages/agent-remote-hosted/src/broker.ts -->
+<!-- old -->
+```ts
+        if (!host.journal) return closeConnection(1008, 'Journals were not acknowledged');
+```
+<!-- new -->
+```ts
+        if (!host.journal) return closeConnection(1008, 'Journals were not acknowledged');
+        if (host.journalGrant !== 2 && needsJournalGrantTwo(message)) return closeConnection(1008, 'Journal grant 2 was not acknowledged');
+```
+
+`needsJournalGrantTwo` is a pure function in `journal-uplink.ts` (exported with `isJournalHostMessage`): true for `journal_unserve`, `journal_request_refused`, a `journal_open` with `reset`, and a `journal_publish` with a `rebind` or `outcome` entry, a `correct` without a digest, a `replace` or `prepend` item without a digest, or a head with `attentionItemKey`. `JournalHostMessage` gains `journal_unserve` and `journal_request_refused`.
 
 <!-- edit: packages/agent-remote-hosted/src/broker.ts -->
 <!-- old -->
@@ -2279,7 +2450,7 @@ class Stream implements AsyncIterable<ProviderStreamItem> {
   }
 }
 
-interface Options { older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
+interface Options { journalContract?: boolean; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
 
 function session(stream: Stream, options: Options = {}): AgentSession {
   const runtime: AgentRuntimeInfo = { providerId: 'fake', sessionId: 'session-1', status: 'idle', persistence: { providerId: 'fake', sessionId: 'session-1', opaque: 'resume-1' } };
@@ -2302,7 +2473,7 @@ const observation = (sourceKey: string, text: string, key: string, extra: Partia
 });
 
 async function attach(stream: Stream, options: Options = {}) {
-  const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'fake', displayName: 'Fake' }, epoch: 'epoch-1', session: session(stream, options) });
+  const manager = await AgentManager.attach({ agentId: 'agent-1', provider: { providerId: 'fake', displayName: 'Fake' }, epoch: 'epoch-1', session: session(stream, options), ...(options.journalContract ? { journalContract: true } : {}) });
   return manager;
 }
 
@@ -2385,6 +2556,53 @@ describe('the journal tap of an agent manager', () => {
     const [first] = manager.itemRows('controller:stream:1');
     expect(first && rowItemKey(first)).toBe('controller:stream:1');
     expect(manager.attentionItemKey()).toBe('m2');
+    await manager.close();
+  });
+
+  it('tells the tap once when a journal-capable provider emits an observation without identity, or a key of the Controller\'s own prefix', async () => {
+    for (const breach of [{ itemIdentity: undefined }, { itemIdentity: { key: 'controller:m1' } }, { delivery: 'history' as const, itemIdentity: undefined }]) {
+      const stream = new Stream();
+      stream.push({ type: 'history_boundary' });
+      const manager = await attach(stream, { journalContract: true });
+      await manager.ready;
+      let told = 0;
+      manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+      stream.push(observation('stream:1', 'Hi', 'm1', breach));
+      stream.push(observation('stream:2', 'Again', 'm2', { itemIdentity: undefined }));
+      await flush();
+      expect(told).toBe(1);
+      await manager.close();
+    }
+  });
+
+  it('tells a tap that an interaction was resolved without identity, and accepts one that carries it', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream, { journalContract: true });
+    await manager.ready;
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    const resolved = { type: 'observation' as const, sourceKey: 'stream:1', occurredAt: 1, delivery: 'live' as const,
+      event: { type: 'interaction_resolved' as const, provider: 'fake', requestId: 'q1', response: { kind: 'question' as const, answers: [] } } };
+    stream.push({ ...resolved, itemIdentity: { key: 'question:q1', completes: true } });
+    await flush();
+    expect(told).toBe(0);
+    stream.push({ ...resolved, sourceKey: 'stream:2' });
+    await flush();
+    expect(told).toBe(1);
+    await manager.close();
+  });
+
+  it('does not tell a tap about a provider that does not declare journal support', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream);
+    await manager.ready;
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    stream.push({ ...observation('stream:1', 'Hi', 'm1'), itemIdentity: undefined });
+    await flush();
+    expect(told).toBe(0);
     await manager.close();
   });
 
@@ -2653,6 +2871,8 @@ export interface AgentJournalTap {
   event(event: AgentManagerEvent): void;
   /** The manager closed; no more events follow. */
   closed(): void;
+  /** A journal-capable provider broke the identity contract: an observation without `itemIdentity`, or with a key of the reserved `controller:` prefix. Told once per manager. */
+  identityMissing?(): void;
 }
 
 export interface AgentJournalSubscription {
@@ -2832,6 +3052,67 @@ Reading an older page is shared by a browser's request and the journal:
   attentionItemKey(): string | undefined {
     return this.attentionCursor.epoch === this.timeline.epoch ? this.timeline.itemKeyAt(this.attentionCursor.seq) : undefined;
   }
+```
+
+A manager made for a journal-capable provider checks the identity contract on every timeline observation and every `interaction_resolved` observation, and tells its taps once when it is broken. The adapter's declaration reaches it as `journalContract`:
+
+<!-- edit: packages/agent-remote-relay/src/agent-manager.ts -->
+<!-- old -->
+```ts
+export interface AgentManagerAttachOptions {
+```
+<!-- new -->
+```ts
+export interface AgentManagerAttachOptions {
+  /** The provider declares `journal`: its observations carry item identities, and a missing one is told to the journal taps. */
+  journalContract?: true;
+```
+
+<!-- edit: packages/agent-remote-relay/src/agent-manager.ts -->
+<!-- old -->
+```ts
+        provider: options.adapter.descriptor,
+        session,
+```
+<!-- new -->
+```ts
+        provider: options.adapter.descriptor,
+        session,
+        ...(supportsJournal(options.adapter) ? { journalContract: true as const } : {}),
+```
+
+The check itself is one private method, called with every observation at the top of the manager's observation handler, before the observation is turned into a row (the row keeps the `controller:` key of its source, which only matters to a provider that does not declare journal support):
+
+```ts
+  private identityBroken = false;
+
+  /** A journal-capable provider owes an identity to every timeline observation and every `interaction_resolved` one. */
+  private checkIdentity(observation: ProviderObservation): void {
+    if (!this.journalContract || this.identityBroken) return;
+    const event = observation.event;
+    if (event.type !== 'timeline' && event.type !== 'interaction_resolved') return;
+    const key = observation.itemIdentity?.key;
+    if (key !== undefined && key.length > 0 && key.length <= 4096 && !key.startsWith('controller:')) return;
+    this.identityBroken = true;
+    for (const tap of [...this.taps]) {
+      try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ }
+    }
+  }
+```
+
+`agent-manager.ts` imports `supportsJournal` from `@orchardworks/agent-provider-sdk`. The manager keeps the option in `private readonly journalContract: boolean`, set from `options.journalContract === true` where the other attach options are stored. A tap that subscribes after the breach is told at once:
+
+<!-- edit: packages/agent-remote-relay/src/agent-manager.ts -->
+<!-- old -->
+```ts
+    this.taps.add(tap);
+    return { rows: this.timelineRows(), snapshot: this.snapshot(), release: () => { this.taps.delete(tap); } };
+```
+<!-- new -->
+```ts
+    this.taps.add(tap);
+    if (this.identityBroken) queueMicrotask(() => { try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ } });
+    return { rows: this.timelineRows(), snapshot: this.snapshot(), release: () => { this.taps.delete(tap); } };
 ```
 
 Taps hear every event and are told when the manager closes:
@@ -3345,7 +3626,7 @@ git commit -m "feat(relay): give a settled resource an id that is stable for its
 
 ### Task 7: The Host uplink client asks for the journal grant and hands journal messages to the publisher
 
-`agent-remote-relay` cannot depend on the journal package (the journal depends on it), so the client only carries the messages: it asks the Relay for journals, tells its owner when the connection may write them, and hands every journal message of the Relay to its owner. The publisher in `agent-host` (Tasks 8 and 9) is the owner.
+`agent-remote-relay` cannot depend on the journal package (the journal depends on it), so the client only carries the messages (and keeps its test that a Controller granted 1, or not at all, is handed no writer and publishes nothing): it asks the Relay for journals, tells its owner when the connection may write them, and hands every journal message of the Relay to its owner. The publisher in `agent-host` (Tasks 8 and 9) is the owner.
 
 **Files:**
 - Modify: `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts`
@@ -4202,7 +4483,7 @@ How one session publishes, which the code below follows:
 1. **Open.** The publication follows the agent manager (a tap that is not a viewer), so the timeline it reads and the events after it join without a gap. It sends `journal_open`, takes the first page of the item index and pulls the rest with `journal_index_request` while `indexAfter` is present. Events of the manager wait.
 2. **Reconcile.** It reads the timeline again as items and calls `planPublication` against the index (Task 8). A `gap` means none of the reread is in the journal: it reads older native history through the manager, at most `gapReadsMax` pages, and replaces when it still finds nothing. It publishes the plan's operations in messages that fit the wire, and ends with the head. A replacement is followed by opening again, which adds the older items as older history.
 3. **Live.** It publishes what the manager emits. Rows of the same item that follow each other merge; a completion carries the digest of the whole item; an item that is still open stays open. Messages go out one per session at a time: the next waits for the Relay's acknowledgement, because the Relay acknowledges only what its store holds. Messages of all sessions share a budget of bytes and messages in flight, so the uplink writer, which closes the connection when its queue fills, never overflows.
-4. **Recover.** Any refusal, a timeout or a lost connection opens the session again and reconciles from the manager's timeline, which is the Controller's source of truth. A `quota_exceeded` refusal replaces with narrower windows; when the narrowest is refused the session stops with a diagnostic. An `incomplete` refusal replaces again with the same window, then sends the head. An open refused with `index_too_large` is repeated once with `reset: true`, whose first publication is a replacement that fits; any other refused open ends the session's publishing until the next connection.
+4. **Recover.** A refusal that names an item (and only that kind) skips the item and renumbers what follows it from the refused sequence, because a refused entry never consumes its sequence. Any other refusal, a `sequence_gap` among them, a timeout or a lost connection opens the session again and reconciles from the manager's timeline, which is the Controller's source of truth. A `quota_exceeded` refusal replaces with narrower windows; when the narrowest is refused the session stops with a diagnostic. An `incomplete` refusal replaces again with the same window, then sends the head. An open refused with `index_too_large` is repeated once with `reset: true`, whose first publication is a replacement that fits; any other refused open ends the session's publishing until the next connection.
 
 Heads: the head is the manager's Snapshot, taken when a batch is drained, so it never claims more than the rows before it. A head whose pending interactions changed is published at once instead of after the batch window.
 
@@ -4289,9 +4570,9 @@ export function item(delivery: 'history' | 'live', key: string, text: string, op
 
 export const boundary = (olderCursor?: string): ProviderStreamItem => ({ type: 'history_boundary', ...(olderCursor === undefined ? {} : { olderCursor }) });
 
-/** An agent manager over a scripted session, ready after its history boundary. */
+/** An agent manager over a scripted session, ready after its history boundary. It checks the identity contract, as the manager of a journal-capable provider does. */
 export async function attachScripted(session: ScriptedSession, agentId = 'agent-1', options: { resourceIdKey?: string } = {}): Promise<AgentManager> {
-  const manager = await AgentManager.attach({ agentId, provider: { providerId: session.providerId, displayName: 'Fake' }, epoch: `epoch-${agentId}`, session, ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }) });
+  const manager = await AgentManager.attach({ agentId, provider: { providerId: session.providerId, displayName: 'Fake' }, epoch: `epoch-${agentId}`, session, journalContract: true, ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }) });
   await manager.ready;
   return manager;
 }
@@ -4436,10 +4717,23 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
         ...((options.staleFirstPage ? requests - 1 : requests) < (options.pages ?? []).length ? { indexAfter: page.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
     } else if (message.type === 'journal_publish') {
       const last = message.entries.at(-1).sequence as number;
+      // As the journal does: a publication starts exactly after the watermark, and a refused entry consumes no sequence.
+      if (message.entries[0].sequence !== applied + 1) {
+        refusedAt.push(Date.now());
+        send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence: message.entries[0].sequence, reason: 'sequence_gap' });
+        return;
+      }
       const answer: Answer = {
         ack: () => { apply(message.entries); applied = last; send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: message.generation, watermark: last, cursor: { epoch: 'epoch-1', seq: last } }); },
         refuse: (reason, itemKey, sequence = message.entries[0].sequence) => { refusedAt.push(Date.now()); send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage); },
         ignore: () => undefined,
+      };
+      const refuse = answer.refuse;
+      answer.refuse = (reason, itemKey, sequence = message.entries[0].sequence) => {
+        // The entries before the refused one are stored; the refused one and those after it are not, and `applied` stops before it.
+        const before = message.entries.filter((entry: Wire) => entry.sequence < sequence);
+        if (itemKey !== undefined && before.length > 0) { apply(before); applied = sequence - 1; }
+        refuse(reason, itemKey, sequence);
       };
       if (options.onPublish) options.onPublish(message, answer); else answer.ack();
     }
@@ -4724,6 +5018,47 @@ describe('recovering', () => {
     expect(relay.opens()).toBe(3);
     expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
     expect(diagnostics.find(entry => entry.event === 'journal_quota_window')).toMatchObject({ reason: '3' });
+  });
+
+  it('stops publishing, unserves the session and records the breach when the provider emits an observation without identity', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, {}, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.ops().includes('head'), 'the first head');
+    session.push({ ...item('live', 'm2', 'No identity', { completes: true }), itemIdentity: undefined });
+    await until(() => relay.written.some(message => message.type === 'journal_unserve'), 'the unserve');
+    expect(relay.written.find(message => message.type === 'journal_unserve')).toMatchObject({ sessionKey: 'fake:thread-1', generation: 1 });
+    expect(diagnostics).toContainEqual({ event: 'journal_session_stopped', providerId: 'fake', reason: 'identity_missing' });
+    const published = relay.written.filter(message => message.type === 'journal_publish').length;
+    session.push(item('live', 'm3', 'Later', { completes: true }));
+    await settle(60);
+    expect(relay.written.filter(message => message.type === 'journal_publish')).toHaveLength(published);
+    expect(relay.opens()).toBe(1);
+  });
+
+  it('opens again when the Relay answers sequence_gap, which no per-item refusal explains', async () => {
+    const diagnostics: Wire[] = [];
+    let gaps = 0;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (gaps === 0 && message.entries.some((entry: Wire) => entry.op === 'append')) { gaps += 1; answer.refuse('sequence_gap'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 25 }, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.ops().includes('head'), 'the first head');
+    const opens = relay.opens();
+    session.push(item('live', 'm2', 'Next', { completes: true }));
+    await until(() => relay.opens() === opens + 1 && relay.model().some(entry => entry.itemKey === 'm2'), 'the journal to be opened again and to hold the item');
+    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'sequence_gap' });
+  });
+
+  it('stops a session whose provider uses the key prefix reserved for the Controller', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, [item('history', 'controller:m1', 'Hello')]);
+    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop');
+    expect(diagnostics).toContainEqual({ event: 'journal_session_stopped', providerId: 'fake', reason: 'identity_missing' });
   });
 
   it('leaves out an item the Relay refuses for its own sake, sends the rest again numbered from the refused entry, and does not open again', async () => {
@@ -5511,7 +5846,7 @@ export class SessionPublication {
 
   /** `freeSlot` gives back the place among the sessions that open at once, as soon as the item index has been read. */
   private async reconcile(token: number, freeSlot: () => void): Promise<void> {
-    const subscription = this.source.subscribeJournal({ event: event => this.onEvent(token, event), closed: () => this.onClosed(token) });
+    const subscription = this.source.subscribeJournal({ event: event => this.onEvent(token, event), closed: () => this.onClosed(token), identityMissing: () => this.onIdentityMissing(token) });
     this.subscription = subscription;
     const opened = await this.open(token);
     freeSlot();
@@ -5786,6 +6121,11 @@ export class SessionPublication {
 
   private onClosed(token: number): void {
     if (token === this.cycle) this.stop();
+  }
+
+  /** The provider broke the identity contract: the journal would hold keys no reread can match, so it is not kept at all. */
+  private onIdentityMissing(token: number): void {
+    if (token === this.cycle) this.giveUp('identity_missing');
   }
 
   private apply(event: AgentManagerEvent): void {
@@ -6903,7 +7243,7 @@ A Controller with at least one journal-capable provider asks for `journal=2` whe
 - **Amendments.** `rebind` replaces a resource binding in place and `outcome` applies a background outcome in place; both are stored, and the Relay sends them to journal-served clients as `timeline_resource_binding_replaced` and as an `agent_stream` frame without an epoch. Each reconcile says the outcome of every background in its window again. The other runtime events of the session wire (`thread_started`, `turn_*`, `usage_updated`, `runtime_updated`) change the Snapshot, which the head carries, so they are not published. Resource ids are keyed hashes of agent, locator and content, stable across restarts, so a row's binding still names a readable resource.
 - **Head.** The head is the Snapshot, taken when a batch is drained. `attentionItemKey` names the item the Controller's attention cursor points at, and the journal serves that item's cursor in its own epoch and sequence. A head whose pending interactions changed is published at once, and the Relay forwards a Controller's interaction frame to a journal-served browser only after the head it last sent agrees with the frame.
 - **Requests of the Relay.** `journal_fill_request` is answered with `journal_fill` from the Controller's timeline, reading older native history when the items are not in it. `journal_older_request` is answered with a prepend and then `journal_older_done`. A request for a session the Controller does not follow, or has not opened yet, is answered at once with `journal_request_refused`.
-- **Failures.** A refusal, a missing acknowledgement (30 seconds) or a lost connection opens the session again, with a backoff that starts over after a minute of publishing. A refusal about one item (`unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`) leaves that item out and sends the rest again without opening. `quota_exceeded` replaces with the newest 2,000, 200 and then 20 items. `incomplete` (a head sent while the journal is missing rows) replaces again with the same window and then sends the head. A row or item the wire refuses is dropped with a `journal_row_rejected` diagnostic and does not stop the session. A session that cannot be kept current (its head cannot be published, the Relay keeps calling the journal incomplete, the narrowest quota window is refused, three replacements in a row) is stopped and `journal_unserve` tells the Relay to clear the head, so browsers read the session through the Controller again. A refused open needs no unserve: the Relay takes the session out of serving itself, and the Controller stops publishing it until the next connection.
+- **Failures.** A refusal, a missing acknowledgement (30 seconds) or a lost connection opens the session again, with a backoff that starts over after a minute of publishing. A refusal about one item (`unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`) leaves that item out and sends the rest again, renumbered from the refused sequence (a refused entry never consumes its sequence), without opening; a refusal that names no item, and a `sequence_gap` of its own, open again. A provider observation without `itemIdentity` stops the session (`journal_session_stopped`, reason `identity_missing`) and unserves it. `quota_exceeded` replaces with the newest 2,000, 200 and then 20 items. `incomplete` (a head sent while the journal is missing rows) replaces again with the same window and then sends the head. A row or item the wire refuses is dropped with a `journal_row_rejected` diagnostic and does not stop the session. A session that cannot be kept current (its head cannot be published, the Relay keeps calling the journal incomplete, the narrowest quota window is refused, three replacements in a row) is stopped and `journal_unserve` tells the Relay to clear the head, so browsers read the session through the Controller again. A refused open needs no unserve: the Relay takes the session out of serving itself, and the Controller stops publishing it until the next connection.
 
 A Controller that advertises diagnostic delivery 4 receives the Relay's journal diagnostics. A Relay without the journal grant, or a Controller without a capable provider, leaves the session on forwarding.
 

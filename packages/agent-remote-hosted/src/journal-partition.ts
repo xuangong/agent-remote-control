@@ -1,7 +1,7 @@
 import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 
-import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
+import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalCapabilities, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
 import { JournalHeadIndex } from './journal-head-index.js';
 
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
@@ -21,8 +21,10 @@ export interface JournalPartitionRead {
  * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
  * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
  *
- * The Relay and the partitions Worker deploy separately, so either may be one version ahead of the other during a rollout:
- * a method is only ever added, never changed or removed, and a Relay that calls a method deploys after the partitions Worker that has it.
+ * The Relay and the partitions Worker deploy separately. The partitions Worker is always deployed first. The methods and
+ * the fields of their arguments and results are never changed or removed, only added, and an added field is optional.
+ * A Relay asks `capabilities` once per partition and grants nothing the partition did not report; a partition that has no
+ * such method is a version-1 partition. `journal-partition.contract.json` records the calls and replies of every method.
  */
 export interface JournalPartitionApi {
   open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
@@ -35,6 +37,8 @@ export interface JournalPartitionApi {
   /** The Host's sessions that have a head. */
   servedSessions(hostId: string): Promise<string[]>;
   deleteHost(hostId: string): Promise<void>;
+  /** What this partition can serve. A partition of an earlier version has no such method. */
+  capabilities(hostId: string): Promise<JournalCapabilities>;
 }
 
 /**
@@ -90,12 +94,19 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
     status: (hostId, sessionKey) => journals.status(hostId, sessionKey),
     servedSessions: hostId => journals.servedSessions(hostId),
     deleteHost: hostId => journals.deleteHost(hostId),
+    capabilities: hostId => journals.capabilities(hostId),
   };
 }
+
+/** What a partition that has no `capabilities` method can serve. */
+const VERSION_ONE_PARTITION: JournalCapabilities = { journal: 1 };
+/** How long a failed `capabilities` call is remembered; an answer is remembered for the life of the proxy. */
+const CAPABILITIES_RETRY_MS = 30_000;
 
 export interface PartitionJournalsOptions {
   /** The partition of a Host: a Durable Object stub. */
   partition(hostId: string): JournalPartitionApi;
+  now?(): number;
 }
 
 /**
@@ -106,6 +117,8 @@ export interface PartitionJournalsOptions {
  */
 export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
   const { partition } = options;
+  const now = options.now ?? Date.now;
+  const capabilitiesOf = new Map<string, { capabilities: JournalCapabilities; failedAt?: number }>();
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
@@ -181,6 +194,20 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     page: (hostId, sessionKey, request, olderBeyondJournal) => serialized(hostId, () => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal)),
 
     status: (hostId, sessionKey) => serialized(hostId, () => partition(hostId).status(hostId, sessionKey)),
+
+    async capabilities(hostId) {
+      const known = capabilitiesOf.get(hostId);
+      if (known && (known.failedAt === undefined || now() - known.failedAt < CAPABILITIES_RETRY_MS)) return { ...known.capabilities };
+      try {
+        const capabilities = await partition(hostId).capabilities(hostId);
+        capabilitiesOf.set(hostId, { capabilities });
+        return { ...capabilities };
+      } catch {
+        // An error is what a partition without the method answers: grant nothing it may not know.
+        capabilitiesOf.set(hostId, { capabilities: VERSION_ONE_PARTITION, failedAt: now() });
+        return { ...VERSION_ONE_PARTITION };
+      }
+    },
 
     async forget() { /* The partition owns its cache. */ },
 

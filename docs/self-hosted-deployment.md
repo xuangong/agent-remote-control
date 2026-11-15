@@ -146,27 +146,15 @@ pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
 pnpm --filter @orchardworks/agent-remote-cloudflare run build
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
-  --config ../../deploy/self-hosted/wrangler.journals.jsonc --dry-run
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc --dry-run
 
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
   AGENT_REMOTE_SIGNING_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
   AGENT_REMOTE_GOOGLE_CLIENT_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
-# The partitions Worker first: the Relay's JOURNALS binding names it.
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
-  --config ../../deploy/self-hosted/wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc
 ```
-
-There are two Workers: the Relay (`wrangler.jsonc`) and the journal partitions Worker
-(`wrangler.journals.jsonc`, default name `my-agent-remote-journals`). The Relay binds the
-partitions as `JOURNALS` through `script_name`, so deploy the partitions Worker, with its
-migration, before the Relay, and keep both names in step if you rename them. The partitions
-Worker has no routes and no variables and answers no request. Journals stay off until you set
-`AGENT_REMOTE_JOURNALS` (see Session journals).
 
 Wrangler prompts for your own Cloudflare authentication and secret values. The
 Google secret command is needed only in Google mode. Keep secrets out of `vars`.
@@ -266,13 +254,33 @@ the state directory, so the backup rules below cover it; copy it only while the 
 
 On Cloudflare Workers the journals live in one Durable Object per Host (`JournalPartition`, bound as `JOURNALS`), in a
 Worker of its own, not in the main Relay object: they do not count toward its state bound, and a busy partition cannot
-reset the Relay's connections. The partitions Worker and the `JOURNALS` binding are in the shipped configurations; a
-deployment that already runs adds both to its own files, deploys the partitions Worker first and the Relay second, and only
-then sets the variable `AGENT_REMOTE_JOURNALS` to `1`. Without the binding or the variable, no Controller is granted
-journals. The two Workers deploy separately, so during a rollout either may be one version ahead: the calls between them
-only ever gain methods, so a newer Relay works with the previous partitions Worker and the reverse, as long as the
-partitions Worker is deployed first when a release adds a method. A partition keeps at most 2 journals (20 MiB estimated)
+reset the Relay's connections. The default Relay configuration has neither the binding nor the variable and deploys as it
+always did; see [Enabling journals on Workers](#enabling-journals-on-workers) for the steps and their order. Without the
+binding or the variable, no Controller is granted journals. A partition keeps at most 2 journals (20 MiB estimated)
 in memory, refuses growth of a session past 12 MiB, and stores at most 1 GiB per Host. Revoking a Host empties its partition.
+
+### Enabling journals on Workers
+
+The default `wrangler.jsonc` deploys exactly as before: it has no journal binding and no journal variable, so deploying it
+never needs the partitions Worker. To turn journals on, follow these steps in this order:
+
+1. Deploy the partitions Worker with its migration: `wrangler deploy --config ../../deploy/self-hosted/wrangler.journals.jsonc`
+   (name `my-agent-remote-journals`; no routes, no variables, no secrets, and it answers no request).
+2. Switch the Relay to `deploy/self-hosted/wrangler.journals-enabled.jsonc`: your Relay configuration plus the
+   `JOURNALS` binding (`script_name` names the partitions Worker; keep both names in step if you rename them). If you
+   edited `wrangler.jsonc`, make the same edits there, then add the binding to it:
+   `{ "name": "JOURNALS", "class_name": "JournalPartition", "script_name": "my-agent-remote-journals" }`.
+3. Set the variable `AGENT_REMOTE_JOURNALS` to `1` (the journals-enabled file sets it; with your own file, add it to `vars`).
+4. Deploy the Relay: `wrangler deploy --config ../../deploy/self-hosted/wrangler.journals-enabled.jsonc`.
+
+Dry-run each file first with `wrangler deploy --dry-run --config <file>`. With the variable set but no `JOURNALS`
+binding, the Relay does not fail: it logs `Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS
+binding` and runs without journals.
+
+Rollout rule: always deploy the partitions Worker first. Between the Relay and the partitions Worker, existing methods and
+fields never change, and anything new is added as an optional field or a new method. The Relay asks each partition for its
+`capabilities` once, grants Controllers no more than the partition reports, and treats a partition that does not answer
+(an older one) as the earliest version, so a newer Relay never relies on a method an older partitions Worker lacks.
 
 ## Persistence, backups and upgrades
 

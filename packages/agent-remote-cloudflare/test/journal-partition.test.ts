@@ -188,3 +188,18 @@ test('grants no journals when the Worker has the binding but the variable is not
   expect(host.registered).toMatchObject({ type: 'registered' });
   expect(host.registered).not.toHaveProperty('journal');
 }, 60_000);
+
+test('runs without journals and logs a configuration error when the variable is set but the Worker has no JOURNALS binding', async () => {
+  const f = await fixture({ journals: { withoutBinding: true } });
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered' });
+  expect(host.registered).not.toHaveProperty('journal');
+  expect(f.runtimeErrors).toContain('AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding');
+}, 60_000);
+
+test('reports its capabilities through Durable Object RPC', async () => {
+  const f = await fixture({ journals: {} });
+  expect(await call(f, 'host-1', 'capabilities', 'host-1')).toEqual({ journal: 2 });
+}, 60_000);

@@ -110,6 +110,14 @@ describe('createHostJournals', () => {
     }
   });
 
+  it('refuses an operation it does not know instead of skipping it, and the watermark stays before it', async () => {
+    const { journals } = fixture();
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    const result = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), { sequence: 2, op: 'from-a-newer-version' } as unknown as JournalPublishEntry, append(3, 'm2', 'World')]);
+    expect(result).toMatchObject({ watermark: 1, refusal: { sequence: 2, reason: 'invalid' } });
+    expect((await journals.page(HOST, SESSION, { requestId: 'p', agentId: 'a', direction: 'tail', limit: 10 }, false))).toMatchObject({ page: { payload: { entries: [{ item: { text: 'Hello' } }] } } });
+  });
+
   it('refuses an append to an item whose body was evicted', async () => {
     const store = new MemoryJournalStore();
     const seeded = SessionJournal.create(KEY);

@@ -1,0 +1,463 @@
+[
+  {
+    "method": "capabilities",
+    "args": [
+      "host-1"
+    ],
+    "reply": {
+      "journal": 2
+    }
+  },
+  {
+    "method": "open",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      "controller-1",
+      {
+        "maxIndexItems": 100,
+        "pageItems": 2
+      }
+    ],
+    "reply": {
+      "generation": 1,
+      "watermark": 0,
+      "epoch": "<epoch>",
+      "index": [],
+      "more": false
+    }
+  },
+  {
+    "method": "publish",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      1,
+      [
+        {
+          "sequence": 1,
+          "op": "append",
+          "row": {
+            "itemKey": "m1",
+            "providerId": "codex",
+            "sourceKey": "m1:5",
+            "occurredAt": 1725000000000,
+            "turnId": "turn-1",
+            "item": {
+              "type": "assistant_message",
+              "text": "Hello",
+              "messageId": "m1"
+            }
+          }
+        },
+        {
+          "sequence": 2,
+          "op": "complete",
+          "itemKey": "m1",
+          "digest": "digest-m1"
+        },
+        {
+          "sequence": 3,
+          "op": "head",
+          "head": {
+            "snapshot": {
+              "id": "session-1",
+              "providerId": "codex",
+              "createdAt": "2026-11-15T00:00:00.000Z",
+              "updatedAt": "2026-11-15T00:00:01.000Z",
+              "status": "idle",
+              "activeTurn": null,
+              "capabilities": {
+                "history": true,
+                "sendMessage": true,
+                "steer": true,
+                "cancel": true,
+                "readResource": true,
+                "interactions": {
+                  "question": true,
+                  "planApproval": true,
+                  "toolApproval": true
+                }
+              },
+              "pendingInteractions": [],
+              "runtimeInfo": {
+                "providerId": "codex",
+                "sessionId": "session-1",
+                "status": "idle"
+              }
+            },
+            "observedAt": 5
+          }
+        }
+      ]
+    ],
+    "reply": {
+      "events": [
+        {
+          "kind": "row",
+          "row": {
+            "epoch": "<epoch>",
+            "seq": 1,
+            "itemKey": "m1",
+            "providerId": "codex",
+            "sourceKey": "m1:5",
+            "occurredAt": 1725000000000,
+            "timestamp": "2024-08-30T06:40:00.000Z",
+            "turnId": "turn-1",
+            "item": {
+              "type": "assistant_message",
+              "text": "Hello",
+              "messageId": "m1"
+            },
+            "resources": []
+          }
+        },
+        {
+          "kind": "head",
+          "head": {
+            "snapshot": {
+              "id": "session-1",
+              "providerId": "codex",
+              "createdAt": "2026-11-15T00:00:00.000Z",
+              "updatedAt": "2026-11-15T00:00:01.000Z",
+              "status": "idle",
+              "activeTurn": null,
+              "capabilities": {
+                "history": true,
+                "sendMessage": true,
+                "steer": true,
+                "cancel": true,
+                "readResource": true,
+                "interactions": {
+                  "question": true,
+                  "planApproval": true,
+                  "toolApproval": true
+                }
+              },
+              "pendingInteractions": [],
+              "runtimeInfo": {
+                "providerId": "codex",
+                "sessionId": "session-1",
+                "status": "idle"
+              }
+            },
+            "observedAt": 5
+          }
+        }
+      ],
+      "watermark": 3,
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 1
+      },
+      "hasHead": true
+    }
+  },
+  {
+    "method": "publish",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      1,
+      [
+        {
+          "sequence": 9,
+          "op": "complete",
+          "itemKey": "m1",
+          "digest": "digest-m1"
+        }
+      ]
+    ],
+    "reply": {
+      "events": [],
+      "watermark": 3,
+      "refusal": {
+        "sequence": 9,
+        "reason": "sequence_gap"
+      },
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 1
+      },
+      "hasHead": true
+    }
+  },
+  {
+    "method": "indexPage",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      "<epoch>",
+      0,
+      10
+    ],
+    "reply": [
+      {
+        "itemKey": "m1",
+        "seqStart": 1,
+        "seqEnd": 1,
+        "state": "complete",
+        "digest": "digest-m1",
+        "liveOnly": false,
+        "revision": 2,
+        "resident": true
+      }
+    ]
+  },
+  {
+    "method": "page",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      {
+        "requestId": "p",
+        "agentId": "a",
+        "direction": "tail",
+        "limit": 10
+      },
+      false
+    ],
+    "reply": {
+      "kind": "page",
+      "page": {
+        "protocolVersion": "1.8.0",
+        "type": "timeline_page",
+        "payload": {
+          "requestId": "p",
+          "agentId": "a",
+          "direction": "tail",
+          "epoch": "<epoch>",
+          "reset": false,
+          "staleCursor": false,
+          "gap": false,
+          "error": null,
+          "window": {
+            "minSeq": 1,
+            "maxSeq": 1,
+            "nextSeq": 2
+          },
+          "startCursor": {
+            "epoch": "<epoch>",
+            "seq": 1
+          },
+          "endCursor": {
+            "epoch": "<epoch>",
+            "seq": 1
+          },
+          "hasOlder": false,
+          "hasNewer": false,
+          "entries": [
+            {
+              "providerId": "codex",
+              "item": {
+                "type": "assistant_message",
+                "text": "Hello",
+                "messageId": "m1"
+              },
+              "turnId": "turn-1",
+              "timestamp": "2024-08-30T06:40:00.000Z",
+              "seqStart": 1,
+              "seqEnd": 1,
+              "sourceSeqRanges": [
+                {
+                  "startSeq": 1,
+                  "endSeq": 1
+                }
+              ],
+              "collapsed": [],
+              "resources": []
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "method": "status",
+    "args": [
+      "host-1",
+      "codex:thread-1"
+    ],
+    "reply": {
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 1
+      },
+      "head": {
+        "snapshot": {
+          "id": "session-1",
+          "providerId": "codex",
+          "createdAt": "2026-11-15T00:00:00.000Z",
+          "updatedAt": "2026-11-15T00:00:01.000Z",
+          "status": "idle",
+          "activeTurn": null,
+          "capabilities": {
+            "history": true,
+            "sendMessage": true,
+            "steer": true,
+            "cancel": true,
+            "readResource": true,
+            "interactions": {
+              "question": true,
+              "planApproval": true,
+              "toolApproval": true
+            }
+          },
+          "pendingInteractions": [],
+          "runtimeInfo": {
+            "providerId": "codex",
+            "sessionId": "session-1",
+            "status": "idle"
+          }
+        },
+        "observedAt": 5
+      }
+    }
+  },
+  {
+    "method": "fill",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      [
+        {
+          "row": {
+            "itemKey": "m1",
+            "providerId": "codex",
+            "sourceKey": "m1:5",
+            "occurredAt": 1725000000000,
+            "turnId": "turn-1",
+            "item": {
+              "type": "assistant_message",
+              "text": "Hello",
+              "messageId": "m1"
+            }
+          },
+          "digest": "digest-m1"
+        }
+      ],
+      {
+        "request": {
+          "requestId": "p",
+          "agentId": "a",
+          "direction": "tail",
+          "limit": 10
+        },
+        "olderBeyondJournal": true
+      }
+    ],
+    "reply": {
+      "filled": [
+        "m1"
+      ],
+      "mismatched": [],
+      "unknown": [],
+      "page": {
+        "kind": "page",
+        "page": {
+          "protocolVersion": "1.8.0",
+          "type": "timeline_page",
+          "payload": {
+            "requestId": "p",
+            "agentId": "a",
+            "direction": "tail",
+            "epoch": "<epoch>",
+            "reset": false,
+            "staleCursor": false,
+            "gap": false,
+            "error": null,
+            "window": {
+              "minSeq": 1,
+              "maxSeq": 1,
+              "nextSeq": 2
+            },
+            "startCursor": {
+              "epoch": "<epoch>",
+              "seq": 1
+            },
+            "endCursor": {
+              "epoch": "<epoch>",
+              "seq": 1
+            },
+            "hasOlder": true,
+            "hasNewer": false,
+            "entries": [
+              {
+                "providerId": "codex",
+                "item": {
+                  "type": "assistant_message",
+                  "text": "Hello",
+                  "messageId": "m1"
+                },
+                "turnId": "turn-1",
+                "timestamp": "2024-08-30T06:40:00.000Z",
+                "seqStart": 1,
+                "seqEnd": 1,
+                "sourceSeqRanges": [
+                  {
+                    "startSeq": 1,
+                    "endSeq": 1
+                  }
+                ],
+                "collapsed": [],
+                "resources": []
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "method": "fill",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      [],
+      null
+    ],
+    "reply": {
+      "filled": [],
+      "mismatched": [],
+      "unknown": []
+    }
+  },
+  {
+    "method": "servedSessions",
+    "args": [
+      "host-1"
+    ],
+    "reply": [
+      "codex:thread-1"
+    ]
+  },
+  {
+    "method": "deleteHost",
+    "args": [
+      "host-1"
+    ],
+    "reply": null
+  },
+  {
+    "method": "servedSessions",
+    "args": [
+      "host-1"
+    ],
+    "reply": []
+  },
+  {
+    "method": "page",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      {
+        "requestId": "p",
+        "agentId": "a",
+        "direction": "tail",
+        "limit": 10
+      },
+      false
+    ],
+    "reply": null
+  }
+]

@@ -1,0 +1,60 @@
+{
+  // The Relay configuration with the journal partitions on. Use it only after the partitions Worker
+  // (wrangler.journals.jsonc) is deployed; keep it identical to wrangler.jsonc apart from the JOURNALS binding and the
+  // AGENT_REMOTE_JOURNALS variable (a test checks this).
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "agent-remote-control",
+  "main": "../../dist/cloudflare/worker.js",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "agents.xianliao.de5.net",
+      "custom_domain": true
+    },
+    {
+      "pattern": "*.agents.xianliao.de5.net/*",
+      "zone_name": "xianliao.de5.net"
+    }
+  ],
+  "assets": {
+    "directory": "../../dist/relay/web",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "version_metadata": {
+    "binding": "CF_VERSION_METADATA"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY",
+        "class_name": "RelayObject"
+      },
+      {
+        "name": "JOURNALS",
+        "class_name": "JournalPartition",
+        "script_name": "agent-remote-control-journals"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayObject"
+      ]
+    }
+  ],
+  "vars": {
+    "AGENT_REMOTE_AUTH_PROVIDER": "mainsite",
+    "AGENT_REMOTE_RELAY_URL": "https://agents.xianliao.de5.net",
+    "AGENT_REMOTE_ISSUER": "https://token.xianliao.de5.net",
+    "AGENT_REMOTE_PREVIEW_DOMAIN": "agents.xianliao.de5.net",
+    "AGENT_REMOTE_JOURNALS": "1"
+  }
+}

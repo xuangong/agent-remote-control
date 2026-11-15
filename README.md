@@ -353,6 +353,10 @@ Use Node.js 22+ and pnpm **10.34.5**, and your own Cloudflare account. Edit
   section. The template starts in Google mode; for main-site login, remove the Google
   settings and add your `AGENT_REMOTE_ISSUER`.
 - Keep `RELAY`, `RelayObject`, asset bindings and migration definitions intact.
+- Session journals are off and need nothing else. To turn them on, follow
+  [Enabling journals on Workers](docs/self-hosted-deployment.md#enabling-journals-on-workers):
+  deploy the partitions Worker (`deploy/self-hosted/wrangler.journals.jsonc`) first, then the Relay with
+  `wrangler.journals-enabled.jsonc`, which adds the `JOURNALS` binding and `AGENT_REMOTE_JOURNALS=1`.
 
 Do **not** use `packages/agent-remote-cloudflare/wrangler.jsonc` for a private
 deployment: it contains this project's production Worker name and domains.

@@ -24,12 +24,13 @@ These are not stated in the design or the brief.
    - *Value size:* every stored value is split into 256 KiB chunks by `SqlJournalStore` (far below the Durable Object limit on one SQLite value).
    - *RPC payload (32 MiB per message):* a publication is at most 8 MiB (`JOURNAL_MESSAGE_MAX_BYTES`) and a fill at most 8 MiB. A page or fill reply is measured by `estimateCloneBytes`, a walk over the reply that counts every string at two bytes per character (an upper bound of the V8 clone) and copies nothing, and is answered again with half the limit until it fits 24 MiB. The index in an `open` reply is its first page of at most 2,000 entries (about 18.3 MiB at the longest keys when they hold two-byte characters); the Controller pulls the rest with `indexPage`, one page per call.
 5. **`primary` keeps the head index.** `createPartitionJournals` holds a `JournalHeadIndex` per Relay start. A Host's sessions are loaded with one `servedSessions` RPC when the first browser stream for the Host needs the answer (P1-B3a: shared by concurrent opens, outside the Host's queue, the gate waits at most 2 s) and kept current from the `hasHead` of each publication result and from deletions. The Host's epoch in the proxy rises only when the index loses a session (an unserve, an open or publication that cleared a head, a failed publication) and when a deletion starts and ends; adding a head only adds to what a load reads, so back-to-back publications cannot starve a load. A load read across a loss is discarded and read again; a stream that finds no head calls `unserve`. After `primary` restarts the index starts empty and loads again.
-6. **Off by default.** The proxy exists only when the Worker has the `JOURNALS` binding and the variable `AGENT_REMOTE_JOURNALS` is `1`. No repository configuration sets the variable, so production and every existing deployment keep granting no journals until the Controller publisher (P1-C) lands. The binding and the migration `v2` ship in all three wrangler configurations; a deployment that has not copied them stays off.
+6. **Off by default.** The proxy exists only when the Worker has the `JOURNALS` binding and the variable `AGENT_REMOTE_JOURNALS` is `1`. No repository configuration sets the variable, so production and every existing deployment keep granting no journals until the Controller publisher (P1-C) lands. The default Relay configurations (`wrangler.jsonc` and `deploy/self-hosted/wrangler.jsonc`) have no `JOURNALS` binding and no variable, so today's deploys do not change and never need the partitions Worker (Cloudflare checks a Durable Object binding at upload). Enabling journals is an operator procedure: deploy the partitions Worker with its migration; deploy the Relay with the binding and `AGENT_REMOTE_JOURNALS=1` (the shipped `wrangler.journals-enabled.jsonc` files, kept identical to the defaults apart from those two by a test). With the variable set but no binding, `primary` logs a configuration error and runs without journals.
 7. **Retention is the publish-time rule.** The partition evicts bodies outside the latest 50 turns after each publication, as the service does everywhere. It has no sweep and no alarm; use-based windows are P3.
 8. **Deleting a Host empties its object's tables** (`deletePrefix`). The object stays with its empty schema; a Durable Object cannot be destroyed from the Worker, and `storage.deleteAll()` would remove the schema under a running store. A revoke records the deletion in `journalDeletions` (P1-B3a) and the broker retries it until the partition confirms.
 9. **The deletion cap stays 4 per Relay.** Each partition runs one Host, so its own semaphore never limits anything. The proxy in `primary` holds the semaphore (`HOST_DELETIONS_AT_ONCE`, exported by `host-journals.ts`) around each `deleteHost`, outside the Host's queue as the service does, so the broker's four-worker pool and any other caller together start at most four partition deletions at once.
 10. **A publication must continue the watermark.** The journal core refuses a non-duplicate publication whose sequence is not `watermark + 1` with `JournalSequenceGapError` (the service answers it with its own refusal reason `sequence_gap`, which a publisher must never skip, and the publisher must open the journal again). The sequence is checked before quota admission, so a gap that is also over quota is a gap, and a gap never fences the generation or marks the journal incomplete. A failed entry never advances the watermark, so every later entry of that generation is a gap, also after a partition reset: the watermark is stored. This is why a publication pipelined behind a failed one cannot be applied with a gap. A publisher that skips a refused entry must still consume its sequence number (P1-C).
-11. **`primary`'s state is untouched.** No journal data enters `RelayObject`'s storage, so its 16 MiB bound and its full-state validation are unaffected. A test asserts that `primary` has no `journal` tables.
+11. **The Relay and the partitions Worker negotiate.** The partitions Worker is always deployed first. The contract only changes by adding methods and optional fields. `JournalPartitionApi.capabilities()` returns `{ journal: 2 }`; `createPartitionJournals` asks once per partition (an answer for the life of the proxy, an error for 30 s) and counts an error, which is what a partition without the method answers, as `{ journal: 1 }`. `HostJournals.capabilities(hostId)` exposes it, so the broker grants `journal: 2` only when the partition reports it (P1-C1 Task 4 wires the grant). `apply` refuses an operation it does not know as `invalid`, so an older partition never skips one. `journal-partition.contract.json` records the arguments and the reply of every method, and a test replays it.
+12. **`primary`'s state is untouched.** No journal data enters `RelayObject`'s storage, so its 16 MiB bound and its full-state validation are unaffected. A test asserts that `primary` has no `journal` tables.
 
 ---
 
@@ -49,7 +50,8 @@ These are not stated in the design or the brief.
 | `packages/agent-remote-cloudflare/package.json`, `pnpm-lock.yaml` | Modify: dependency on the store package. |
 | `packages/agent-remote-cloudflare/test/fixture.ts` | Modify: the partition binding, test class and routes. |
 | `packages/agent-remote-cloudflare/test/journal-partition.test.ts` | New: Miniflare tests of the object and of `primary` with journals on. |
-| `packages/agent-remote-cloudflare/wrangler.jsonc`, `deploy/self-hosted/wrangler.jsonc`, `scripts/relay-workers-local.mjs` | Modify: binding and migration `v2`. |
+| `packages/agent-remote-cloudflare/wrangler.journals.jsonc`, `wrangler.journals-enabled.jsonc`, `deploy/self-hosted/wrangler.journals.jsonc`, `wrangler.journals-enabled.jsonc` | New: the partitions Worker, and the Relay with the binding and the variable. The default Relay configurations are unchanged. |
+| `scripts/relay-workers-local.mjs`, `compose.yaml` | Modify: start both Workers when `AGENT_REMOTE_JOURNALS=1`; pass the variable through. |
 | `docs/self-hosted-deployment.md` | Modify: the Workers settings of the journal section. |
 
 ---
@@ -72,6 +74,7 @@ import { serialize } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
+import recorded from './journal-partition.contract.json' with { type: 'json' };
 import { createHostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
 import { createPartitionJournals, estimateCloneBytes, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
 
@@ -97,7 +100,7 @@ function overRpc(api: JournalPartitionApi): JournalPartitionApi {
   const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
   return {
     open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status),
-    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost),
+    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost), capabilities: wrap(api.capabilities),
   };
 }
 
@@ -320,7 +323,7 @@ describe('the journals of primary over journal partitions', () => {
     const first = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'one'), append(2, 'm2', 'two')]);
     const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'three')]);
     await expect(first).rejects.toThrow('reset');
-    expect((await second).refusal).toEqual({ sequence: 3, reason: 'invalid' });
+    expect((await second).refusal).toEqual({ sequence: 3, reason: 'sequence_gap' });
     expect((await memory.catalog.list('')).length).toBe(1);
     expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 0 } });
     const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
@@ -379,6 +382,49 @@ describe('the journals of primary over journal partitions', () => {
     await Promise.all(deletions);
     expect({ started, peak, running }).toEqual({ started: 7, peak: 4, running: 0 });
   }, DEADLINE_MS);
+});
+
+describe('the partition contract across a rollout', () => {
+  type Step = { method: keyof JournalPartitionApi; args: unknown[]; reply: unknown };
+  const steps = recorded as Step[];
+  const masked = (value: unknown, epoch: string) => JSON.parse(JSON.stringify(value ?? null).replaceAll(epoch || '\u0000', '<epoch>').replace(/"protocolVersion":"[^"]*"/g, '"protocolVersion":"<version>"'));
+
+  it('answers every recorded call with the recorded reply shape, so a change to an argument or a result fails here', async () => {
+    const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 })));
+    const methods = new Set(steps.map(step => step.method));
+    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'indexPage', 'open', 'page', 'publish', 'servedSessions', 'status']);
+    let epoch = '';
+    for (const step of steps) {
+      const args = step.args.map(arg => (arg === '<epoch>' ? epoch : arg === null ? undefined : arg));
+      const reply = await (api[step.method] as (...call: unknown[]) => Promise<unknown>)(...args);
+      if (step.method === 'open') epoch = (reply as { epoch: string }).epoch;
+      expect(masked(reply, epoch), `${step.method} ${JSON.stringify(step.args).slice(0, 80)}`).toEqual(masked(step.reply, '<epoch>'));
+    }
+  });
+
+  it('covers every method of the contract', () => {
+    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    expect(Object.keys(api).sort()).toEqual([...new Set(steps.map(step => step.method))].sort());
+  });
+
+  it('reads the capabilities of a partition once, and counts a partition without the method as version 1', async () => {
+    let asked = 0;
+    const fresh = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const current = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { asked++; return fresh.capabilities(host); } }) });
+    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
+    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
+    expect(asked).toBe(1);
+
+    let clock = 0, failures = 0;
+    const { capabilities: _missing, ...older } = fresh;
+    const previous = createPartitionJournals({ now: () => clock, partition: () => ({ ...older, capabilities: async () => { failures++; throw new TypeError('The RPC receiver does not implement the method "capabilities".'); } }) });
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(failures).toBe(1);
+    clock = 31_000;
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(failures).toBe(2);
+  });
 });
 
 describe('estimateCloneBytes', () => {
@@ -453,7 +499,7 @@ Expected: FAIL (`./journal-partition.js` does not exist).
 import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 
-import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
+import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalCapabilities, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
 import { JournalHeadIndex } from './journal-head-index.js';
 
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
@@ -472,6 +518,11 @@ export interface JournalPartitionRead {
 /**
  * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
  * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
+ *
+ * The Relay and the partitions Worker deploy separately. The partitions Worker is always deployed first. The methods and
+ * the fields of their arguments and results are never changed or removed, only added, and an added field is optional.
+ * A Relay asks `capabilities` once per partition and grants nothing the partition did not report; a partition that has no
+ * such method is a version-1 partition. `journal-partition.contract.json` records the calls and replies of every method.
  */
 export interface JournalPartitionApi {
   open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
@@ -484,6 +535,8 @@ export interface JournalPartitionApi {
   /** The Host's sessions that have a head. */
   servedSessions(hostId: string): Promise<string[]>;
   deleteHost(hostId: string): Promise<void>;
+  /** What this partition can serve. A partition of an earlier version has no such method. */
+  capabilities(hostId: string): Promise<JournalCapabilities>;
 }
 
 /**
@@ -539,12 +592,19 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
     status: (hostId, sessionKey) => journals.status(hostId, sessionKey),
     servedSessions: hostId => journals.servedSessions(hostId),
     deleteHost: hostId => journals.deleteHost(hostId),
+    capabilities: hostId => journals.capabilities(hostId),
   };
 }
+
+/** What a partition that has no `capabilities` method can serve. */
+const VERSION_ONE_PARTITION: JournalCapabilities = { journal: 1 };
+/** How long a failed `capabilities` call is remembered; an answer is remembered for the life of the proxy. */
+const CAPABILITIES_RETRY_MS = 30_000;
 
 export interface PartitionJournalsOptions {
   /** The partition of a Host: a Durable Object stub. */
   partition(hostId: string): JournalPartitionApi;
+  now?(): number;
 }
 
 /**
@@ -555,6 +615,8 @@ export interface PartitionJournalsOptions {
  */
 export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
   const { partition } = options;
+  const now = options.now ?? Date.now;
+  const capabilitiesOf = new Map<string, { capabilities: JournalCapabilities; failedAt?: number }>();
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
@@ -630,6 +692,20 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     page: (hostId, sessionKey, request, olderBeyondJournal) => serialized(hostId, () => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal)),
 
     status: (hostId, sessionKey) => serialized(hostId, () => partition(hostId).status(hostId, sessionKey)),
+
+    async capabilities(hostId) {
+      const known = capabilitiesOf.get(hostId);
+      if (known && (known.failedAt === undefined || now() - known.failedAt < CAPABILITIES_RETRY_MS)) return { ...known.capabilities };
+      try {
+        const capabilities = await partition(hostId).capabilities(hostId);
+        capabilitiesOf.set(hostId, { capabilities });
+        return { ...capabilities };
+      } catch {
+        // An error is what a partition without the method answers: grant nothing it may not know.
+        capabilitiesOf.set(hostId, { capabilities: VERSION_ONE_PARTITION, failedAt: now() });
+        return { ...VERSION_ONE_PARTITION };
+      }
+    },
 
     async forget() { /* The partition owns its cache. */ },
 
@@ -709,7 +785,7 @@ Expected: the Cloudflare package links the store package; `pnpm-lock.yaml` chang
 ```ts
 import { expect, test } from 'vitest';
 
-import { fixture } from './fixture.js';
+import { fixture, send } from './fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const SESSION = 'codex:thread-1';
@@ -920,6 +996,7 @@ export class JournalPartition extends DurableObject<unknown> implements JournalP
   status(...args: Parameters<JournalPartitionApi['status']>) { return this.api.status(...args); }
   servedSessions(...args: Parameters<JournalPartitionApi['servedSessions']>) { return this.api.servedSessions(...args); }
   deleteHost(...args: Parameters<JournalPartitionApi['deleteHost']>) { return this.api.deleteHost(...args); }
+  capabilities(...args: Parameters<JournalPartitionApi['capabilities']>) { return this.api.capabilities(...args); }
 }
 ```
 
@@ -955,16 +1032,15 @@ git commit -m "feat(cloudflare): a journal partition Durable Object over the SQL
 ### Task 3: `primary` reaches the partitions; configuration and documentation
 
 **Files:**
-- Modify: `packages/agent-remote-cloudflare/src/relay-object.ts`
-- Modify: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`
-- Modify: `packages/agent-remote-hosted/src/journal-partition.ts`, `journal-partition.test.ts` (the rollout rule and its test)
-- Modify: `packages/agent-remote-cloudflare/scripts/build.mjs`, `package.json` (a second bundle, `deploy:dry-run` for both Workers)
-- Create: `packages/agent-remote-cloudflare/wrangler.journals.jsonc`
-- Modify: `packages/agent-remote-cloudflare/wrangler.jsonc`
-- Create: `deploy/self-hosted/wrangler.journals.jsonc`
-- Modify: `deploy/self-hosted/wrangler.jsonc`
-- Modify: `scripts/relay-workers-local.mjs`
-- Modify: `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md`, `packages/agent-remote-cloudflare/README.md`
+- Modify: `packages/agent-remote-cloudflare/src/relay-object.ts` (the proxy, and the configuration error)
+- Modify: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, `fixture.ts`
+- Create: `packages/agent-remote-cloudflare/test/wrangler-configs.test.ts`
+- Modify: `packages/agent-remote-hosted/src/host-journals.ts`, `journal-partition.ts`, their tests, `index.ts`; create `journal-partition.contract.json` (capabilities, the unknown-operation refusal, the recorded contract)
+- Modify: `packages/agent-remote-cloudflare/scripts/build.mjs`, `package.json`
+- Create: `packages/agent-remote-cloudflare/wrangler.journals.jsonc`, `wrangler.journals-enabled.jsonc`
+- Create: `deploy/self-hosted/wrangler.journals.jsonc`, `wrangler.journals-enabled.jsonc`
+- Modify: `scripts/relay-workers-local.mjs`, `compose.yaml`
+- Modify: `docs/self-hosted-deployment.md`, `README.md`, `docs/current/agent-remote/deployment.md`, `packages/agent-remote-cloudflare/README.md`
 
 - [x] **Step 1: Write the failing test of the whole path.** Append to `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, and change its second import line from `import { fixture } from './fixture.js';` to `import { fixture, send } from './fixture.js';`:
 
@@ -1026,6 +1102,21 @@ test('grants no journals when the Worker has the binding but the variable is not
   expect(host.registered).toMatchObject({ type: 'registered' });
   expect(host.registered).not.toHaveProperty('journal');
 }, 60_000);
+
+test('runs without journals and logs a configuration error when the variable is set but the Worker has no JOURNALS binding', async () => {
+  const f = await fixture({ journals: { withoutBinding: true } });
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered' });
+  expect(host.registered).not.toHaveProperty('journal');
+  expect(f.runtimeErrors).toContain('AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding');
+}, 60_000);
+
+test('reports its capabilities through Durable Object RPC', async () => {
+  const f = await fixture({ journals: {} });
+  expect(await call(f, 'host-1', 'capabilities', 'host-1')).toEqual({ journal: 2 });
+}, 60_000);
 ```
 
 - [x] **Step 2: Run the tests and see them fail.**
@@ -1053,7 +1144,11 @@ In `RelayEnvironment`, after `CF_VERSION_METADATA?: { id: string };` add
 In `initialize`, immediately before `    this.core = createHostedRelay({ ...auth, `, add
 
 ```ts
-    const partitions = this.env.AGENT_REMOTE_JOURNALS === '1' ? this.env.JOURNALS : undefined;
+    const journalsWanted = this.env.AGENT_REMOTE_JOURNALS === '1';
+    const partitions = journalsWanted ? this.env.JOURNALS : undefined;
+    if (journalsWanted && !partitions) {
+      console.error('Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding. The Relay runs without journals; deploy the journal partitions Worker and add the binding (see the deployment guide), or unset the variable.');
+    }
     const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
 ```
 
@@ -1062,38 +1157,38 @@ and change `    this.core = createHostedRelay({ ...auth, ` to `    this.core = c
 - [x] **Step 4: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
-Expected: PASS for all tests in the file (11). The whole Cloudflare suite then has 230 tests, the hosted suite 943, the journal suite 178, the protocol suite 414.
+Expected: PASS for all tests in the file (13). The whole Cloudflare suite then has 230 tests, the hosted suite 943, the journal suite 178, the protocol suite 414.
 
 - [x] **Step 5: Typecheck and run the whole Cloudflare suite.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck` then `pnpm test:cloudflare` (Bash `timeout` 600000)
 Expected: PASS. The added Durable Object binding must not change any existing test.
 
-- [x] **Step 6: Give the partitions their own Worker and bind it from the Relay.**
+- [x] **Step 6: Give the partitions their own Worker; the default Relay configurations stay as they are.**
 
-`packages/agent-remote-cloudflare/scripts/build.mjs` bundles two entries into `dist/cloudflare`: `worker: 'src/worker.ts'` and `journals: 'src/journal-worker.ts'` (`entryPoints` as an object, `outdir: '../../dist/cloudflare'`). The package script `deploy:dry-run` runs `wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run`.
+`packages/agent-remote-cloudflare/scripts/build.mjs` bundles two entries into `dist/cloudflare`: `worker: 'src/worker.ts'` and `journals: 'src/journal-worker.ts'`. The package script `deploy:dry-run` dry-runs the partitions configuration, the default Relay and the journals-enabled Relay.
 
-New `packages/agent-remote-cloudflare/wrangler.journals.jsonc` (name `agent-remote-control-journals`, `main` `../../dist/cloudflare/journals.js`, the same compatibility date and flags, `workers_dev` and `preview_urls` off, no routes, no assets, no variables, a `JOURNALS` binding of class `JournalPartition`, migration `v1` with `new_sqlite_classes: ["JournalPartition"]`) and new `deploy/self-hosted/wrangler.journals.jsonc` (the same, name `my-agent-remote-journals`, `main` `../../dist/cloudflare/journals.js`).
+New `wrangler.journals.jsonc` (name `agent-remote-control-journals`, `main` `../../dist/cloudflare/journals.js`, the same compatibility date and flags, no routes, assets, variables or secrets, a `JOURNALS` binding of class `JournalPartition`, migration `v1` with `new_sqlite_classes: ["JournalPartition"]`) and `deploy/self-hosted/wrangler.journals.jsonc` (name `my-agent-remote-journals`).
 
-In `packages/agent-remote-cloudflare/wrangler.jsonc` and `deploy/self-hosted/wrangler.jsonc` add to `durable_objects.bindings` `{ "name": "JOURNALS", "class_name": "JournalPartition", "script_name": "agent-remote-control-journals" }` (self-hosted: `my-agent-remote-journals`). The Relay configurations get no migration for the class: the partitions Worker owns it.
+New `wrangler.journals-enabled.jsonc` next to each default Relay configuration: the Relay configuration plus `{ "name": "JOURNALS", "class_name": "JournalPartition", "script_name": "<partitions Worker>" }` and the variable `AGENT_REMOTE_JOURNALS: "1"`, with no Relay migration for the class. `test/wrangler-configs.test.ts` asserts that the default Relay configurations have no journal binding, variable or migration, that each enabled file equals its default plus those two, and that the partitions configurations own the class and its migration.
 
-`scripts/relay-workers-local.mjs` writes a second configuration, `wrangler.journals.local.json` (name `agent-remote-local-journals`, `main` `./journals.js`, the binding and migration `v1`), binds `JOURNALS` in the Relay's configuration with `script_name: 'agent-remote-local-journals'`, passes `AGENT_REMOTE_JOURNALS` through when the environment sets it, and starts `wrangler dev --config wrangler.local.json --config wrangler.journals.local.json`. The Docker `workers` image already copies `dist/cloudflare`, which now holds both bundles.
+`primary` (`relay-object.ts`): with `AGENT_REMOTE_JOURNALS=1` but no `JOURNALS` binding it logs `Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding ...` and runs without journals (a Miniflare test registers a Host and checks that no journal is granted and the error is logged).
 
-No configuration sets `AGENT_REMOTE_JOURNALS`, so journals stay off everywhere.
+`scripts/relay-workers-local.mjs` starts both Workers only when `AGENT_REMOTE_JOURNALS=1`: it binds `JOURNALS` in the Relay's configuration and writes the partitions configuration to the subdirectory `journals/`, so that Worker never reads the Relay's `.dev.vars` and its signing secret. Otherwise it starts the Relay alone, as before. `compose.yaml` passes `AGENT_REMOTE_JOURNALS` through.
 
-**Deploy order and rollout.** The partitions Worker, with its migration, deploys first, because the Relay's `JOURNALS` binding names it. `JournalPartitionApi` only ever gains methods: existing methods keep their names, argument lists and result shapes, so a newer Relay works with the previous partitions Worker and the reverse during a rollout, and a Relay that calls a new method deploys after a partitions Worker that has it. `journal-partition.test.ts` fixes the method list and arities so that a change must be deliberate. There is no CI workflow or script in the repository that deploys the Relay Worker (the two Controller workflows publish releases); the deploy commands live in `docs/self-hosted-deployment.md`, `docs/current/agent-remote/deployment.md` and the package README, and all three now deploy the partitions Worker first. `scripts/gateway-relay-test-runtime.mjs` starts a Workers Relay for tests with journals off and without the binding; it stays as it is.
+**Enabling journals (the operator procedure).** 1. Deploy the partitions Worker with its migration. 2. Deploy the Relay with the binding and `AGENT_REMOTE_JOURNALS=1`: use the `wrangler.journals-enabled.jsonc` file, or add the binding and the variable to your own file. 3. Dry-run each file first. Always deploy the partitions Worker first; the Relay asks each partition for its capabilities, so a newer Relay never relies on a method an older partitions Worker lacks. There is no CI workflow or script in the repository that deploys the Relay Worker (the two Controller workflows publish releases); the deploy commands live in `docs/self-hosted-deployment.md`, the root `README.md`, `docs/current/agent-remote/deployment.md` and the package README. `scripts/gateway-relay-test-runtime.mjs` starts a Workers Relay for tests with journals off and without the binding; it stays as it is.
 
 - [x] **Step 7: Validate the configurations with dry runs.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second), then for each of `wrangler.journals.jsonc`, `wrangler.jsonc`, `../../deploy/self-hosted/wrangler.journals.jsonc`, `../../deploy/self-hosted/wrangler.jsonc`: `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config <file> --outdir /tmp/arc-dry-<n>` (Bash `timeout` 300000; wrangler runs in the package directory, so run the paths as shown). Never deploy.
-Expected: each succeeds. The partitions configurations list `env.JOURNALS (JournalPartition)`; the Relay configurations list `env.RELAY (RelayObject)` and `env.JOURNALS (JournalPartition, defined in <partitions Worker>)`. Then `rm -rf /tmp/arc-dry-*`.
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second), then for each of the six files (`wrangler.jsonc`, `wrangler.journals.jsonc`, `wrangler.journals-enabled.jsonc` and the three under `../../deploy/self-hosted/`): `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config <file> --outdir /tmp/arc-dry-<n>` (Bash `timeout` 300000). Never deploy.
+Expected: each succeeds. The default Relay files list `env.RELAY` only; the enabled files list `env.RELAY`, `env.JOURNALS (JournalPartition, defined in <partitions Worker>)` and `env.AGENT_REMOTE_JOURNALS ("1")`; the partitions files list `env.JOURNALS (JournalPartition)`. Then `rm -rf /tmp/arc-dry-*`.
 
-Run `scripts/relay-workers-local.mjs` once with a stub `wrangler` on `PATH` to read the configurations and arguments it writes, then start the real `wrangler dev` with both configurations on a free port and `--persist-to` a temporary directory: `/health` answers 200 and the log lists both Workers' bindings.
+Run `scripts/relay-workers-local.mjs` with a stub `wrangler` on `PATH`, once without and once with `AGENT_REMOTE_JOURNALS=1`, to read the arguments and files it writes (one configuration, then two with `journals/wrangler.json` and no `.dev.vars` beside it). With the variable set, start the real `wrangler dev` with both configurations on a free port and `--persist-to` a temporary directory: `/health` answers 200 and the log lists the bindings of both Workers; the partitions Worker has no `AGENT_REMOTE_SIGNING_SECRET`.
 
 Run: `node --test --test-timeout=60000 scripts/relay-local.test.mjs`
 Expected: PASS.
 
-- [x] **Step 8: Document the Workers settings.** `docs/self-hosted-deployment.md`: the Workers commands dry-run and deploy both configurations, partitions first, with a paragraph that explains the two Workers; the `AGENT_REMOTE_JOURNALS=1` row covers Workers; the journals section gains a Workers paragraph (a partition per Host in a Worker of its own, deploy order, the add-only rollout rule, 2 journals and 20 MiB in memory, 12 MiB per session, 1 GiB per Host, revoking empties a partition). `docs/current/agent-remote/deployment.md` and the package README deploy the partitions Worker first. The text is in the files.
+- [x] **Step 8: Document the Workers settings.** `docs/self-hosted-deployment.md` gains "Enabling journals on Workers" (the four steps above, the configuration error, the rollout rule); its journals section covers Workers and links to it. The root `README.md` deploy section and `docs/current/agent-remote/deployment.md` carry the same procedure, and the package README names the bundles. Remove any claim that a newer Relay works with an older partitions Worker without the capability check. The text is in the files.
 
 Run: `pnpm lint:docs`
 Expected: PASS.
@@ -1138,7 +1233,7 @@ git add packages/agent-remote-lab/compatibility.json
 git commit -m "chore: update the compatibility manifest for the journal partition" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
-- [x] **Step 5: Verify on the local instance.** `pnpm local` runs the Node Relay, which this plan changes only by adding the `journalService` option it does not use, so this step proves the Node Relay and its crude read and send path are unaffected; the Workers path is proved by the Miniflare tests and the dry runs above, and was not run in a Workers runtime on this machine. Follow `.agents/skills/prepare-arc-local/SKILL.md`. Read `references/lifecycle.md#before-restarting-a-running-instance` first; if this checkout's instance runs or waits on a session this task did not start, stop and ask the user before `up`.
+- [x] **Step 5: Verify on the local instance.** `pnpm local` runs the Node Relay, which this plan changes only by adding the `journalService` option it does not use, so this step proves the Node Relay and its crude read and send path are unaffected; the Workers path is proved by the Miniflare tests, the dry runs and a real `wrangler dev` run of both Workers above (not the Docker `workers` image). Follow `.agents/skills/prepare-arc-local/SKILL.md`. Read `references/lifecycle.md#before-restarting-a-running-instance` first; if this checkout's instance runs or waits on a session this task did not start, stop and ask the user before `up`.
 
 Run from the worktree: `pnpm local up` (Bash `timeout` 600000)
 Expected: it builds, starts the instance, prints the status and exits 0.
@@ -1170,9 +1265,9 @@ Run: `pnpm local down` when nobody needs the instance.
 
 ## Open risks
 
-- **Not run in workerd outside Miniflare.** The Workers runtime of `pnpm local` (Docker, `relay:local --runtime workers`) was not exercised; the dry runs validate the bindings and the migration only.
+- **Not run in the Docker Workers image.** `wrangler dev` with both configurations ran on this machine and the Miniflare tests drive the cross-Worker calls; the Docker `workers` image (`relay:local --runtime workers`) was not exercised, and nothing was deployed.
 - **The size estimate versus a 128 MB isolate.** The estimate counts UTF-8 bytes and heap use is up to twice that, plus transient buffers while a journal loads. The partition's bounds (2 journals, 20 MiB cache, 12 MiB per session) are conservative guesses; load a 12 MiB journal in the Miniflare fixture and watch memory before raising them, and revisit with the P0 numbers.
 - **RPC reply bound.** The page loop halves the limit until the estimated clone size fits 24 MiB; a single item above that (an item folded from many deltas) cannot be split and would fail the RPC. A journal message is at most 8 MiB, so one row cannot reach it, but many deltas of one item could.
 - **One extra hop.** Every browser read of a journal-served session costs a Durable Object RPC from `primary` (`status`, `page`), and every publication one more; P4 moves sockets next to the partitions.
 - **Deletion after a restart of `primary`.** The proxy's queue orders calls within one `primary` lifetime. A revoke records the Host in `journalDeletions` (P1-B3a), and the broker retries it at start and on every Host registration, so a deletion the partition did not confirm is not lost.
-- **An exported but unconfigured class.** A deployment that deploys the new Worker without the `v2` migration works (journals off); one that sets `AGENT_REMOTE_JOURNALS=1` without the binding also works (journals off).
+- **The binding without the partitions Worker.** Cloudflare checks the binding at upload, so a Relay configuration with the `JOURNALS` binding cannot be deployed before the partitions Worker exists; the default configurations carry no binding. A Relay with `AGENT_REMOTE_JOURNALS=1` and no binding logs a configuration error and runs without journals.

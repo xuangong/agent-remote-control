@@ -4,6 +4,7 @@ import { serialize } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
+import recorded from './journal-partition.contract.json' with { type: 'json' };
 import { createHostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
 import { createPartitionJournals, estimateCloneBytes, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
 
@@ -29,7 +30,7 @@ function overRpc(api: JournalPartitionApi): JournalPartitionApi {
   const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
   return {
     open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status),
-    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost),
+    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost), capabilities: wrap(api.capabilities),
   };
 }
 
@@ -314,11 +315,45 @@ describe('the journals of primary over journal partitions', () => {
 });
 
 describe('the partition contract across a rollout', () => {
-  it('keeps every method and its arity, so a Relay and a partitions Worker of different versions still understand each other', () => {
-    // Adding a method is compatible; changing or removing one below is not: update this list only by adding.
+  type Step = { method: keyof JournalPartitionApi; args: unknown[]; reply: unknown };
+  const steps = recorded as Step[];
+  const masked = (value: unknown, epoch: string) => JSON.parse(JSON.stringify(value ?? null).replaceAll(epoch || '\u0000', '<epoch>').replace(/"protocolVersion":"[^"]*"/g, '"protocolVersion":"<version>"'));
+
+  it('answers every recorded call with the recorded reply shape, so a change to an argument or a result fails here', async () => {
+    const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 })));
+    const methods = new Set(steps.map(step => step.method));
+    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'indexPage', 'open', 'page', 'publish', 'servedSessions', 'status']);
+    let epoch = '';
+    for (const step of steps) {
+      const args = step.args.map(arg => (arg === '<epoch>' ? epoch : arg === null ? undefined : arg));
+      const reply = await (api[step.method] as (...call: unknown[]) => Promise<unknown>)(...args);
+      if (step.method === 'open') epoch = (reply as { epoch: string }).epoch;
+      expect(masked(reply, epoch), `${step.method} ${JSON.stringify(step.args).slice(0, 80)}`).toEqual(masked(step.reply, '<epoch>'));
+    }
+  });
+
+  it('covers every method of the contract', () => {
     const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
-    const arities = Object.fromEntries(Object.entries(api).map(([name, method]) => [name, method.length]));
-    expect(arities).toMatchObject({ open: 4, indexPage: 5, publish: 4, fill: 4, page: 4, status: 2, servedSessions: 1, deleteHost: 1 });
+    expect(Object.keys(api).sort()).toEqual([...new Set(steps.map(step => step.method))].sort());
+  });
+
+  it('reads the capabilities of a partition once, and counts a partition without the method as version 1', async () => {
+    let asked = 0;
+    const fresh = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const current = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { asked++; return fresh.capabilities(host); } }) });
+    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
+    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
+    expect(asked).toBe(1);
+
+    let clock = 0, failures = 0;
+    const { capabilities: _missing, ...older } = fresh;
+    const previous = createPartitionJournals({ now: () => clock, partition: () => ({ ...older, capabilities: async () => { failures++; throw new TypeError('The RPC receiver does not implement the method "capabilities".'); } }) });
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(failures).toBe(1);
+    clock = 31_000;
+    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
+    expect(failures).toBe(2);
   });
 });
 

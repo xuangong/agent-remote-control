@@ -47,4 +47,5 @@ export class JournalPartition extends DurableObject<unknown> implements JournalP
   status(...args: Parameters<JournalPartitionApi['status']>) { return this.api.status(...args); }
   servedSessions(...args: Parameters<JournalPartitionApi['servedSessions']>) { return this.api.servedSessions(...args); }
   deleteHost(...args: Parameters<JournalPartitionApi['deleteHost']>) { return this.api.deleteHost(...args); }
+  capabilities(...args: Parameters<JournalPartitionApi['capabilities']>) { return this.api.capabilities(...args); }
 }

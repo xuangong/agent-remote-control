@@ -7,6 +7,14 @@ import { JOURNAL_INDEX_MAX_ITEMS, type CompleteItemInput, type JournalPublishEnt
 
 import { JournalHeadIndex } from './journal-head-index.js';
 
+/** What a journal service can serve. `journal` is the highest grant it supports; a Controller is granted no more than this. */
+export interface JournalCapabilities {
+  journal: 1 | 2;
+}
+
+/** The capabilities of the journal service in this build. */
+export const JOURNAL_CAPABILITIES: JournalCapabilities = { journal: 2 };
+
 /** Journals kept in memory, for the whole Relay. */
 const CACHE_MAX_JOURNALS = 64;
 /** The estimated size of the journals kept in memory, for the whole Relay. */
@@ -165,6 +173,8 @@ export interface HostJournals {
    * read through the Controller instead of looping. A later publication that sets a head serves it again.
    */
   unserve(hostId: string, sessionKey: string): void;
+  /** What the service behind the Host's journals can serve; the broker grants no more than `journal`. */
+  capabilities(hostId: string): Promise<JournalCapabilities>;
   /** Deletes every journal of the Host; at most four Hosts are deleted at once across the service. */
   deleteHost(hostId: string): Promise<void>;
 }
@@ -444,6 +454,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         if (journal.publisher?.watermark !== before && head) published.events.push({ kind: 'head', head });
         break;
       }
+      // An operation this service does not know is refused, never skipped: skipping it would advance the watermark and lose it.
+      default: throw new JournalInvalidPublicationError((entry as { sequence: number }).sequence);
     }
   }
 
@@ -616,6 +628,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     forget: hostId => serialized<void>(hostId, async () => {
       for (const [key, entry] of cache) if (entry.hostId === hostId) drop(key);
     }),
+
+    capabilities: async () => ({ ...JOURNAL_CAPABILITIES }),
 
     served: (hostId, sessionKey) => heads.served(hostId, sessionKey),
 

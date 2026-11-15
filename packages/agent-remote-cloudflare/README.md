@@ -21,7 +21,7 @@ pnpm test:cloudflare
 pnpm --filter @orchardworks/agent-remote-cloudflare deploy:dry-run
 ```
 
-The Relay bundle is `dist/cloudflare/worker.js`; the journal partitions Worker (`wrangler.journals.jsonc`, deployed before the Relay) is `dist/cloudflare/journals.js`; Controller assets are `dist/relay/web`.
+The Relay bundle is `dist/cloudflare/worker.js`; the journal partitions Worker (`wrangler.journals.jsonc`, deployed before a Relay that enables journals with `wrangler.journals-enabled.jsonc`) is `dist/cloudflare/journals.js`; Controller assets are `dist/relay/web`.
 The Worker adds the hosted authentication marker and CSP to the index and rejects
 HTML fallback responses beneath `/assets/`. Local process and Docker entry points
 are documented in the repository deployment guide and generate loopback origins

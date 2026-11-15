@@ -66,7 +66,6 @@ Build from the Agents worktree with Node 22+ and pnpm 10:
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
 pnpm --filter @orchardworks/agent-remote-cloudflare run build
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run
 ```
 
@@ -80,15 +79,25 @@ and deploy using the respective project workflows. For Agents:
 
 ```sh
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put AGENT_REMOTE_SIGNING_SECRET
-# The journal partitions Worker first: the Relay's JOURNALS binding names it.
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --config wrangler.journals.jsonc
 pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy
 ```
 
-The partitions Worker (`agent-remote-control-journals`, `wrangler.journals.jsonc`) holds the session journals, one
-`JournalPartition` Durable Object per Host. It has no routes and no variables. Journals stay off until the Relay has
-`AGENT_REMOTE_JOURNALS=1`, which no configuration sets. Their calls between the two Workers only gain methods, so a
-newer Relay and an older partitions Worker (or the reverse) work together during a rollout.
+This deploy does not change while journals are off: `wrangler.jsonc` has no journal binding and no journal variable, so
+it never needs the partitions Worker. To enable journals (the Workers worker `agent-remote-control-journals` holds them,
+one `JournalPartition` Durable Object per Host), in this order:
+
+1. Dry-run, then deploy the partitions Worker with its migration:
+   `wrangler deploy --dry-run --config wrangler.journals.jsonc`, then `wrangler deploy --config wrangler.journals.jsonc`.
+   It has no routes, no variables and no secrets.
+2. Dry-run the Relay with the binding: `wrangler deploy --dry-run --config wrangler.journals-enabled.jsonc`. That file is
+   `wrangler.jsonc` plus the `JOURNALS` binding (`script_name` `agent-remote-control-journals`) and the variable
+   `AGENT_REMOTE_JOURNALS=1`; a test keeps it identical to `wrangler.jsonc` apart from those two.
+3. Deploy the Relay with it: `wrangler deploy --config wrangler.journals-enabled.jsonc`.
+
+Always deploy the partitions Worker first. Calls between the Workers never change an existing method or field; new ones are
+optional or new, and the Relay asks each partition for its `capabilities` and grants nothing it does not report (an
+older partition without the method counts as the earliest version). With the variable set but no binding the Relay logs
+a configuration error and runs without journals.
 
 Gateway keeps its existing route and resources; set its secret using Wrangler
 from `vnext/apps/platform-cloudflare`. Deploy the reviewed Gateway integration

@@ -56,7 +56,11 @@ export class RelayObject {
         await this.context.storage.setAlarm(Date.now() + 60_000);
       },
     };
-    const partitions = this.env.AGENT_REMOTE_JOURNALS === '1' ? this.env.JOURNALS : undefined;
+    const journalsWanted = this.env.AGENT_REMOTE_JOURNALS === '1';
+    const partitions = journalsWanted ? this.env.JOURNALS : undefined;
+    if (journalsWanted && !partitions) {
+      console.error('Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding. The Relay runs without journals; deploy the journal partitions Worker and add the binding (see the deployment guide), or unset the variable.');
+    }
     const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
     this.core = createHostedRelay({ ...auth, ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),

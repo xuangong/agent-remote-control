@@ -40,7 +40,8 @@ export interface JournalConnectionOptions {
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
-   * fenced publication. It must be synchronous: the connection does not wait for it. A failure is reported through
+   * fenced publication. It is also called, with no events, for an open the journal refused after taking the session out of
+   * serving (`unserved`), so the broker stops the session's journal-served streams for both. It must be synchronous: the connection does not wait for it. A failure is reported through
    * `diagnostic` and changes nothing.
    */
   published?(sessionKey: string, result: JournalPublished): void;
@@ -130,6 +131,11 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           const { sessionKey, requestId } = message;
           const result = await journals.open(hostId, sessionKey, message.publisherId,
             { maxIndexItems: JOURNAL_INDEX_MAX_ITEMS, pageItems: JOURNAL_INDEX_PAGE_MAX_ITEMS, allowed: () => options.current() });
+          if ('refused' in result && result.unserved) {
+            // The refusal took the session out of serving, as a quota refusal of a publication does: the broker is told the same way.
+            try { options.published?.(sessionKey, { events: [], watermark: 0, unserved: true }); }
+            catch { options.diagnostic?.('journal_fanout_failed'); }
+          }
           if (!options.current()) return;
           if ('refused' in result) {
             opened.delete(sessionKey);

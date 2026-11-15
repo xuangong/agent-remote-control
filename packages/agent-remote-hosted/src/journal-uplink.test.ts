@@ -326,6 +326,29 @@ describe('a journal connection', () => {
     expect(seen).toEqual(['page-1', true]);
   });
 
+  it('passes on to the broker an open refusal that took the session out of serving, as it does for a publication, even after the connection ended', async () => {
+    const reported: Array<{ sessionKey: string; unserved?: true; events: number }> = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large', unserved: true }) };
+    const f = fixture({ journals: refusing, published: (sessionKey, result) => reported.push({ sessionKey, unserved: result.unserved, events: result.events.length }) });
+    expect(await f.open()).toMatchObject({ type: 'journal_open_refused', reason: 'index_too_large' });
+    expect(reported).toEqual([{ sessionKey: SESSION, unserved: true, events: 0 }]);
+    f.endConnection();
+    f.sent.length = 0;
+    await f.connection.receive(wire({ type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' }));
+    expect(f.sent).toEqual([]);
+    expect(reported).toHaveLength(2);
+  });
+
+  it('does not report an open refusal that left a session serving as unserved', async () => {
+    const reported: unknown[] = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large' }) };
+    const f = fixture({ journals: refusing, published: (_sessionKey, result) => reported.push(result) });
+    await f.open();
+    expect(reported).toEqual([]);
+  });
+
   it('reports a quota refusal even when the connection is no longer current, because the journal already left serving', async () => {
     const events: string[] = [];
     const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { sessionItems: 0 } });

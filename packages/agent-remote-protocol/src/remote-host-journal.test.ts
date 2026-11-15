@@ -39,6 +39,7 @@ const valid: Array<Record<string, unknown>> = [
   message({ type: 'journal_index_page', requestId: 'index-2', sessionKey: SESSION, index: [] }),
   message({ type: 'journal_index_page', requestId: 'index-3', sessionKey: SESSION, index: [indexEntry, { ...indexEntry, itemKey: 'item-2', seqStart: 4, seqEnd: 4 }], indexAfter: 4 }),
   message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 4, reason: 'quota_exceeded', itemKey: 'item-1' }),
+  message({ type: 'journal_refused', sessionKey: SESSION, generation: 2, sequence: 3, reason: 'incomplete' }),
   message({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'index_too_large' }),
   message({ type: 'journal_open_refused', requestId: 'open-2', sessionKey: SESSION, reason: 'invalid' }),
   message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 8, cursor: { epoch: 'epoch-1', seq: 4 } }),

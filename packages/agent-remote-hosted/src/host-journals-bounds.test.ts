@@ -282,12 +282,39 @@ describe('a quota refusal and the live-only cap', () => {
     expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm1', 'more')])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
   });
 
+  it('refuses the head of an incomplete journal on its own, without fencing the reopened generation, and accepts the replacement that follows', async () => {
+    const { journals, store } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    const restarted = createHostJournals({ store, now: () => 1_000 });
+    expect((await open(restarted, HOST, SESSION)).generation).toBe(2);
+    const early = await restarted.publish(HOST, SESSION, 2, [head(3)]);
+    expect(early.refusal).toEqual({ sequence: 3, reason: 'incomplete' });
+    expect(early.unserved).toBeUndefined();
+    expect(restarted.served(HOST, SESSION)).toBe(false);
+    const rebuilt = await restarted.publish(HOST, SESSION, 2, [{ sequence: 3, op: 'replace', items: [{ row: rowOf('m1', 'a'), digest: 'digest-m1' }] }, head(4)]);
+    expect(rebuilt.refusal).toBeUndefined();
+    expect(rebuilt.hasHead).toBe(true);
+    expect(restarted.served(HOST, SESSION)).toBe(true);
+  });
+
+  it('forgets the fence of a deleted Host, so the fresh generation 1 of the same Host id publishes', async () => {
+    const { journals } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(2, 'm2', 'b')])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+    await journals.deleteHost(HOST);
+    expect((await open(journals, HOST, SESSION)).generation).toBe(1);
+    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')])).refusal).toBeUndefined();
+  });
+
   it('does not serve a journal that lost a row before it had a head, until a replacement rebuilds it', async () => {
     const { journals } = fixture({ limits: { sessionItems: 1 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b')]);
     await open(journals, HOST, SESSION);
-    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'incomplete' });
     expect(journals.served(HOST, SESSION)).toBe(false);
   });
 
@@ -401,6 +428,20 @@ describe('retention across fills and reloads', () => {
     await journals.publish(HOST, SESSION, 1, Array.from({ length: 150 }, (_, at) => withoutTurn(at * 2 + 1, at)).flatMap((entry, at) => [entry, complete(at * 2 + 2, `m${at}`)]));
     expect((await resident(store)).every(([, body]) => body)).toBe(true);
     expect((await journals.page(HOST, SESSION, { ...request, limit: 100 }, false))?.kind).toBe('page');
+  });
+});
+
+describe('retention and replacement', () => {
+  it('measures the window again in a new epoch and evicts everything outside it, including a body that was filled back', async () => {
+    const { journals, store } = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(journals, HOST, SESSION);
+    const turn = (sequence: number, n: number): JournalPublishEntry[] => [append(sequence, `m${n}`, `text ${n}`, n), complete(sequence + 1, `m${n}`)];
+    await journals.publish(HOST, SESSION, 1, [...turn(1, 1), ...turn(3, 2), ...turn(5, 3)]);
+    await journals.fill(HOST, SESSION, [{ row: rowOf('m1', 'text 1', 1), digest: 'digest-m1' }]);
+    expect(await resident(store)).toEqual([['m1', true], ['m2', false], ['m3', true]]);
+    const items = [1, 2, 3, 4].map(n => ({ row: rowOf(`m${n}`, `text ${n}`, n), digest: `digest-m${n}` }));
+    await journals.publish(HOST, SESSION, 1, [{ sequence: 7, op: 'replace', items }]);
+    expect(await resident(store)).toEqual([['m1', false], ['m2', false], ['m3', false], ['m4', true]]);
   });
 });
 

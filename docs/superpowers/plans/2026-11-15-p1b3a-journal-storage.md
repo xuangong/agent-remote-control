@@ -22,7 +22,7 @@
 6. **The switch is a field of the Host record.** `smartReading?: string[]` (provider ids, sorted, 1 to 64) is saved with the Host, kept in memory in the broker, and changed with `PUT /v1/remote/hosts/:id/smart-reading` by the account owner (`requireOwner`), inside `commit`. **The default is off for every provider**: reads go to the Controller as today, while journals may be written in shadow. A Host revoked and paired again is a new Host record without the field. The switch is checked before the head index. Turning a provider off closes that Host's and provider's journal-served browser streams with 1012, so their clients reconnect in crude mode.
 7. **Gating is in memory.** The service keeps `served(hostId, sessionKey)`, a synchronous answer from an index of sessions that have a head; `undefined` means the Host was never loaded. Node loads every Host from SQLite at startup (`loadAllServed`). A Host not yet loaded (one that registers later) is loaded by `servedSessions(hostId)`. That load runs **outside the Host's journal queue**, once per Host however many opens ask (the sessions object shares the in-flight promise), and the gate waits for it at most 2 s on the broker's scheduler, then serves crude. A load reads at most three times: the Host's epoch is raised by every change of its head index (publications, `unserve`) and by its deletion, and a listing read across a change is discarded. A journal-served stream that finds no head although the index said it had one calls `unserve` before it closes with 1012, so the client's reconnect goes crude instead of looping.
 8. **The cache is bounded by count and size.** Defaults: 64 journals and 128 MiB (estimated) for the whole Relay. After each call the least recently used journals are dropped until the cache is within its bounds, never the one the call used. Every call stores its changes before it returns, so dropping loses nothing.
-9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. The refused row is missing, so the journal is marked `incomplete` (persisted with its meta) and the publisher generation that was refused publishes nothing more (every later publication of it is refused with `quota_exceeded`). Serving resumes only after the publisher opens again (a new generation), a replacement that fits is applied (it clears `incomplete`), and a head follows; a head while the journal is incomplete is refused. A growing entry is checked against the room the session has (its own limit, or what the Host quota leaves after the Host's other sessions): an entry larger than the room is refused at once, otherwise bodies are evicted first. A replacement is admitted by its own size plus exactly what it carries over, which is the live-only items and the open items it seals (`carriedOnReplace`). An `open` refused with `index_too_large` also takes a served session out of serving (the publisher is locked out, so the journal would go stale). Beyond 2,000 live-only items the oldest complete ones are removed (item and body; an item still open is never removed, so the count can stay above the cap while open items exceed it) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
+9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. The refused row is missing, so the journal is marked `incomplete` (persisted with its meta) and the publisher generation that was refused publishes nothing more (every later publication of it is refused with `quota_exceeded`). Serving resumes only after the publisher opens again (a new generation), a replacement that fits is applied (it clears `incomplete`), and a head follows. A head while the journal is incomplete is refused on its own with the refusal reason `incomplete` and does not fence the generation, so the replacement that follows is accepted; only a real quota refusal fences, and a Host's deletion clears the fences because generations restart at 1. A growing entry is checked against the room the session has (its own limit, or what the Host quota leaves after the Host's other sessions): an entry larger than the room is refused at once, otherwise bodies are evicted first. A replacement is admitted by its own size plus exactly what it carries over, which is the live-only items and the open items it seals (`carriedOnReplace`). An `open` refused with `index_too_large` also takes a served session out of serving (the publisher is locked out, so the journal would go stale); the uplink reports it to the broker through the `published` callback with an empty result and `unserved`, so streams close for both. Beyond 2,000 live-only items the oldest complete ones are removed (item and body; an item still open is never removed, so the count can stay above the cap while open items exceed it) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
 10. **Retention is one rule: a window of the latest turns and items.** The window is the latest 50 turns (`retention.turns`) or the latest 200 items (`retention.minItems`), whichever reaches further back; an item without a turn counts as a turn, so the default 100-entry tail never needs a fill. After each publication, inside the Host's queue, only the bodies that left the window since the last eviction are evicted (the service keeps the window start per loaded journal and measures it afresh when a journal is loaded, evicting nothing for that), so a body filled back stays until a limit needs room; the cap-driven path in a fill evicts everything outside the window once. Live-only and digest-less items are never evicted. A fill and the page read for the reader that asked for it happen in one Host-queue entry (`fill(..., read)`), so no publication comes between them. Use-based windows are deferred (see "Notes for the roadmap").
 11. **Fills respect the limits.** A fill puts back only the bodies that fit the session limit, the Host quota and the cache bound; the rest stay missing (`skipped`), and the reader's existing handling of a body that cannot be filled applies.
 12. **Deletion is durable.** Revoking a Host records its id in `journalDeletions` of the broker state in the same commit as the revoke. The deletion then runs in the Host's journal queue (so it is ordered against a concurrent publish), and when the store confirms, a second commit removes the id. Pending deletions are retried at broker start and whenever a Host registers. `open` re-checks inside the queue that its connection is still current, so a revoked Host cannot recreate a journal. A Host restored through the recovery flow keeps its old id: its own pending deletion runs, and is waited for, before the Relay sends `registered`, and a Host whose deletion failed gets no journal grant until a later run confirms it, so a retry can never delete journals it created. There is no separate binding-removal path in the broker today (only revoke), so no per-session deletion is built. A Controller can open a journal for a session that has no binding; the per-Host quota bounds it. Journals require durable Relay state: `createHostedRelay` refuses `journals` or `journalService` without `storage`, so an ephemeral account cannot orphan journals.
@@ -1693,12 +1693,39 @@ describe('a quota refusal and the live-only cap', () => {
     expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm1', 'more')])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
   });
 
+  it('refuses the head of an incomplete journal on its own, without fencing the reopened generation, and accepts the replacement that follows', async () => {
+    const { journals, store } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    const restarted = createHostJournals({ store, now: () => 1_000 });
+    expect((await open(restarted, HOST, SESSION)).generation).toBe(2);
+    const early = await restarted.publish(HOST, SESSION, 2, [head(3)]);
+    expect(early.refusal).toEqual({ sequence: 3, reason: 'incomplete' });
+    expect(early.unserved).toBeUndefined();
+    expect(restarted.served(HOST, SESSION)).toBe(false);
+    const rebuilt = await restarted.publish(HOST, SESSION, 2, [{ sequence: 3, op: 'replace', items: [{ row: rowOf('m1', 'a'), digest: 'digest-m1' }] }, head(4)]);
+    expect(rebuilt.refusal).toBeUndefined();
+    expect(rebuilt.hasHead).toBe(true);
+    expect(restarted.served(HOST, SESSION)).toBe(true);
+  });
+
+  it('forgets the fence of a deleted Host, so the fresh generation 1 of the same Host id publishes', async () => {
+    const { journals } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(2, 'm2', 'b')])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+    await journals.deleteHost(HOST);
+    expect((await open(journals, HOST, SESSION)).generation).toBe(1);
+    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')])).refusal).toBeUndefined();
+  });
+
   it('does not serve a journal that lost a row before it had a head, until a replacement rebuilds it', async () => {
     const { journals } = fixture({ limits: { sessionItems: 1 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b')]);
     await open(journals, HOST, SESSION);
-    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'incomplete' });
     expect(journals.served(HOST, SESSION)).toBe(false);
   });
 
@@ -1812,6 +1839,20 @@ describe('retention across fills and reloads', () => {
     await journals.publish(HOST, SESSION, 1, Array.from({ length: 150 }, (_, at) => withoutTurn(at * 2 + 1, at)).flatMap((entry, at) => [entry, complete(at * 2 + 2, `m${at}`)]));
     expect((await resident(store)).every(([, body]) => body)).toBe(true);
     expect((await journals.page(HOST, SESSION, { ...request, limit: 100 }, false))?.kind).toBe('page');
+  });
+});
+
+describe('retention and replacement', () => {
+  it('measures the window again in a new epoch and evicts everything outside it, including a body that was filled back', async () => {
+    const { journals, store } = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(journals, HOST, SESSION);
+    const turn = (sequence: number, n: number): JournalPublishEntry[] => [append(sequence, `m${n}`, `text ${n}`, n), complete(sequence + 1, `m${n}`)];
+    await journals.publish(HOST, SESSION, 1, [...turn(1, 1), ...turn(3, 2), ...turn(5, 3)]);
+    await journals.fill(HOST, SESSION, [{ row: rowOf('m1', 'text 1', 1), digest: 'digest-m1' }]);
+    expect(await resident(store)).toEqual([['m1', true], ['m2', false], ['m3', true]]);
+    const items = [1, 2, 3, 4].map(n => ({ row: rowOf(`m${n}`, `text ${n}`, n), digest: `digest-m${n}` }));
+    await journals.publish(HOST, SESSION, 1, [{ sequence: 7, op: 'replace', items }]);
+    expect(await resident(store)).toEqual([['m1', false], ['m2', false], ['m3', false], ['m4', true]]);
   });
 });
 
@@ -2221,6 +2262,29 @@ Replace the test `refuses an open whose reply fits only with small numbers, with
 Add, before `fails a fill that is being applied when the connection closes`:
 
 ```ts
+  it('passes on to the broker an open refusal that took the session out of serving, as it does for a publication, even after the connection ended', async () => {
+    const reported: Array<{ sessionKey: string; unserved?: true; events: number }> = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large', unserved: true }) };
+    const f = fixture({ journals: refusing, published: (sessionKey, result) => reported.push({ sessionKey, unserved: result.unserved, events: result.events.length }) });
+    expect(await f.open()).toMatchObject({ type: 'journal_open_refused', reason: 'index_too_large' });
+    expect(reported).toEqual([{ sessionKey: SESSION, unserved: true, events: 0 }]);
+    f.endConnection();
+    f.sent.length = 0;
+    await f.connection.receive(wire({ type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' }));
+    expect(f.sent).toEqual([]);
+    expect(reported).toHaveLength(2);
+  });
+
+  it('does not report an open refusal that left a session serving as unserved', async () => {
+    const reported: unknown[] = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large' }) };
+    const f = fixture({ journals: refusing, published: (_sessionKey, result) => reported.push(result) });
+    await f.open();
+    expect(reported).toEqual([]);
+  });
+
   it('hands the page read of a fill request to the journal, and resolves with the page it read in the same step', async () => {
     const seen: unknown[] = [];
     const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
@@ -2310,7 +2374,7 @@ and change the `parseRelayDiagnosticBatch` line to `const batch = parseRelayDiag
 In `packages/agent-remote-protocol/src/remote-host-journal.ts`, in `JournalOpened`, change `index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS })` to `index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_PAGE_MAX_ITEMS })`.
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS, 412 tests (the new invalid-list case fails first). Rebuilding makes the hosted tests below use the narrowed schema.
+Expected: PASS, 413 tests (the invalid-list case and, later, the `incomplete` refusal reason fail first). The refusal reasons also list `incomplete` (`JOURNAL_REFUSAL_REASONS` in `remote-host-journal.ts`, with a valid-message case in its test). Rebuilding makes the hosted tests below use the narrowed schema.
 
 - [ ] **Step 4: Run the tests and see them fail.**
 
@@ -2561,9 +2625,17 @@ export interface HostJournals {
 
 /** A growing entry the journal's limits do not allow. */
 class JournalQuotaRefused extends Error {
-  constructor(readonly limit: 'items' | 'session' | 'host' | 'incomplete') {
+  constructor(readonly limit: 'items' | 'session' | 'host') {
     super(`The journal is over its ${limit} limit.`);
     this.name = 'JournalQuotaRefused';
+  }
+}
+
+/** A head published while the journal is missing rows: it is refused on its own, and the publisher is not fenced. */
+class JournalIncompleteRefused extends Error {
+  constructor() {
+    super('The journal is missing rows until a replacement rebuilds it.');
+    this.name = 'JournalIncompleteRefused';
   }
 }
 
@@ -2600,7 +2672,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const chains = new Map<string, Promise<void>>();
   /** Sessions whose last publication failed to apply or store: nothing more is accepted until the session is opened again. */
   const needsReopen = new Set<string>();
-  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. */
+  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. A new generation is not fenced; a Host's deletion clears its fences, because generations restart at 1. */
   const quotaFenced = new Map<string, number>();
   const heads = new JournalHeadIndex();
   const hostsLoaded = new Set<string>();
@@ -2741,7 +2813,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     let size: number | undefined;
     return entry => {
       if (entry.op === 'head') {
-        if (journal.incomplete) throw new JournalQuotaRefused('incomplete');
+        if (journal.incomplete) throw new JournalIncompleteRefused();
         return;
       }
       if (entry.op === 'replace') {
@@ -2803,6 +2875,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   /** The refusal for an error the journal raises on purpose; undefined for an unexpected one. */
   function refusalOf(error: unknown, sequence: number): JournalRefusal | undefined {
     if (error instanceof JournalQuotaRefused) return { sequence, reason: 'quota_exceeded' };
+    if (error instanceof JournalIncompleteRefused) return { sequence, reason: 'incomplete' };
     if (error instanceof JournalFencedError) return { sequence, reason: 'fenced' };
     if (error instanceof JournalStaleRevisionError) return { sequence, reason: 'stale_revision', itemKey: error.itemKey };
     if (error instanceof JournalUnknownItemError) return { sequence, reason: 'unknown_item', itemKey: error.itemKey };
@@ -2840,7 +2913,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const { generation, watermark } = journal.claim(publisherId);
       const bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
       needsReopen.delete(key);
-      quotaFenced.delete(key);
       account(hostId, sessionKey, bytes);
       remember(hostId, sessionKey, journal, bytes);
       trimCache(key);
@@ -2999,6 +3071,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const known = [...(usage.get(hostId)?.sessions.keys() ?? [])];
       for (const key of [...cache.keys()]) if (key.startsWith(prefix)) drop(key);
       for (const key of [...needsReopen]) if (key.startsWith(prefix)) needsReopen.delete(key);
+      for (const key of [...quotaFenced.keys()]) if (key.startsWith(prefix)) quotaFenced.delete(key);
       if (store.catalog) await store.catalog.deletePrefix(prefix);
       else for (const sessionKey of known) await store.delete(storeKey(hostId, sessionKey));
       heads.clearHost(hostId);
@@ -3241,12 +3314,12 @@ In `packages/agent-remote-hosted/src/index.ts`, add `type JournalOpenOptions` to
 - [ ] **Step 8: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/host-journals-bounds.test.ts src/journal-index-pages.test.ts src/host-journals.test.ts src/journal-uplink.test.ts src/broker-journals.test.ts src/relay-diagnostics.test.ts --testTimeout=10000`
-Expected: PASS, 6 files and 132 tests. Live-only items are closed (completed) in the tests before they are dropped: the core removes only complete live-only items, so the service runs the cap after `complete` as well as after an append of a live-only row, a seal and a replacement. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
+Expected: PASS, 6 files and 137 tests. Live-only items are closed (completed) in the tests before they are dropped: the core removes only complete live-only items, so the service runs the cap after `complete` as well as after an append of a live-only row, a seal and a replacement. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
 
 - [ ] **Step 9: Run the whole package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all: 66 files and 849 tests in hosted (790 before this task). The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
+Expected: PASS for all: 66 files and 854 tests in hosted (790 before this task). The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
 
 - [ ] **Step 10: Commit.**
 

@@ -167,9 +167,17 @@ export interface HostJournals {
 
 /** A growing entry the journal's limits do not allow. */
 class JournalQuotaRefused extends Error {
-  constructor(readonly limit: 'items' | 'session' | 'host' | 'incomplete') {
+  constructor(readonly limit: 'items' | 'session' | 'host') {
     super(`The journal is over its ${limit} limit.`);
     this.name = 'JournalQuotaRefused';
+  }
+}
+
+/** A head published while the journal is missing rows: it is refused on its own, and the publisher is not fenced. */
+class JournalIncompleteRefused extends Error {
+  constructor() {
+    super('The journal is missing rows until a replacement rebuilds it.');
+    this.name = 'JournalIncompleteRefused';
   }
 }
 
@@ -206,7 +214,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const chains = new Map<string, Promise<void>>();
   /** Sessions whose last publication failed to apply or store: nothing more is accepted until the session is opened again. */
   const needsReopen = new Set<string>();
-  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. */
+  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. A new generation is not fenced; a Host's deletion clears its fences, because generations restart at 1. */
   const quotaFenced = new Map<string, number>();
   const heads = new JournalHeadIndex();
   const hostsLoaded = new Set<string>();
@@ -347,7 +355,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     let size: number | undefined;
     return entry => {
       if (entry.op === 'head') {
-        if (journal.incomplete) throw new JournalQuotaRefused('incomplete');
+        if (journal.incomplete) throw new JournalIncompleteRefused();
         return;
       }
       if (entry.op === 'replace') {
@@ -409,6 +417,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   /** The refusal for an error the journal raises on purpose; undefined for an unexpected one. */
   function refusalOf(error: unknown, sequence: number): JournalRefusal | undefined {
     if (error instanceof JournalQuotaRefused) return { sequence, reason: 'quota_exceeded' };
+    if (error instanceof JournalIncompleteRefused) return { sequence, reason: 'incomplete' };
     if (error instanceof JournalFencedError) return { sequence, reason: 'fenced' };
     if (error instanceof JournalStaleRevisionError) return { sequence, reason: 'stale_revision', itemKey: error.itemKey };
     if (error instanceof JournalUnknownItemError) return { sequence, reason: 'unknown_item', itemKey: error.itemKey };
@@ -446,7 +455,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const { generation, watermark } = journal.claim(publisherId);
       const bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
       needsReopen.delete(key);
-      quotaFenced.delete(key);
       account(hostId, sessionKey, bytes);
       remember(hostId, sessionKey, journal, bytes);
       trimCache(key);
@@ -605,6 +613,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const known = [...(usage.get(hostId)?.sessions.keys() ?? [])];
       for (const key of [...cache.keys()]) if (key.startsWith(prefix)) drop(key);
       for (const key of [...needsReopen]) if (key.startsWith(prefix)) needsReopen.delete(key);
+      for (const key of [...quotaFenced.keys()]) if (key.startsWith(prefix)) quotaFenced.delete(key);
       if (store.catalog) await store.catalog.deletePrefix(prefix);
       else for (const sessionKey of known) await store.delete(storeKey(hostId, sessionKey));
       heads.clearHost(hostId);

@@ -42,7 +42,7 @@ Confirmed by the owner on 2026-11-15.
 3. **Scheduling is invisible to clients.** The Relay and the Controller decide which runtimes stay resident. Clients see business states only: what the agent is doing and what happened to their operations.
 4. **Clients are the source of demand.** Only a client knows what the person is doing: typing, looking, about to open. Clients report it and the scheduler decides.
 5. **The Relay is the hub and may store content.** It keeps each session's journal and the operation queue, and it aggregates demand.
-6. **One client contract, two server modes.** The same client protocol works against today's forwarding ("crude" mode) and the new service ("smart" mode). The mode is chosen per Host and per provider on that Host, and smart mode can be switched off the same way.
+6. **One client contract, two server modes.** The same client protocol works against today's forwarding ("crude" mode) and the new service ("smart" mode). The mode is chosen per Host and per provider on that Host, and smart mode can be switched off the same way. Crude mode is a transition and rollback path; it is removed once every Controller has been updated.
 7. **Automation is a client.** Gateway automation, the command line, Teams, TPM and agents operate sessions through the same operation queue and events.
 8. **The conversation is the agent session** (the IM gateway principle). A journal is a copy that can be rebuilt from native history. The Relay never authors a second conversation.
 9. **Today's topology is not a constraint.** The Relay may be partitioned differently and may use new middleware wherever the design needs it.
@@ -339,7 +339,7 @@ One queue serves every requester. It replaces four mechanisms: the Relay outbox,
 | Field | Meaning |
 |---|---|
 | `operationId` | Supplied by the requester; the idempotency key. |
-| Requester | Kind (`user`, `session`, `automation`) and identity, plus the account it acts for. |
+| Requester | Kind (`user`, `session`, `automation`, `external`) and identity, plus the account it acts for. |
 | Target | The public session. It is resolved through successions at delivery time. |
 | Kind and payload | `send_message`, `steer`, `cancel`, `interaction_response`, `set_session_setting`, `set_planning`, `team_message` or `tpm_intent`. Text is bounded; attachments travel as blob references. |
 | Delivery | `immediate`: start when idle, steer when active.<br>`next_turn`: only where the provider has a native follow-up queue.<br>`later`: today's outbox rule. A new turn when idle. While a turn runs, the next turn where the provider has a native follow-up queue; otherwise the message waits, shown as waiting for the current turn. It never steers. |
@@ -357,7 +357,7 @@ One queue serves every requester. It replaces four mechanisms: the Relay outbox,
 6. **Settle.** The outcome is `accepted` with the native disposition, `rejected`, or `unknown`. After a Controller restart:
    - a `sending` receipt settles `unknown`, and the operation is never sent again;
    - a `claimed` receipt, or no receipt, returns the operation to `queued`, because the native call is made only after a durable `sending` receipt.
-7. **Echo.** The Controller sets `clientMessageId` to the `operationId` on the `user_message` row it publishes for that input. Clients then match the echo exactly instead of comparing text.
+7. **Echo.** On the `user_message` row it publishes for that input, the Controller sets `clientMessageId` to the `operationId` and records the requester as the sender. Clients then match the echo exactly instead of comparing text. Both fields travel behind the opt-in flag; clients without it receive the row without them.
 
 **Cancel and retry.**
 
@@ -404,15 +404,19 @@ Each event carries a cursor, so tabs and devices can drop duplicates. Clients re
 
 ### Requesters
 
-- **`user`.** An account acting through a browser or the command line.
-- **`session`.** An agent session acting through its session token or tools.
+- **`user`.** A person acting through a browser or the command line.
+- **`session`.** An agent session acting through its session token or tools, including one agent writing to another through the gateway.
   - It submits through its own Controller, which authenticates the token and stamps the session's identity. The Relay trusts a Host only for its own sessions.
   - The target's Host partition refuses a session that answers its own request or loosens its own permissions. It checks at submission and again at delivery.
-- **`automation`.** A gateway rule or a system actor (Team, TPM, Call for support) acting for an account, within a scope the owner granted.
+- **`automation`.** A gateway rule or a system actor (Team, TPM, Call for support, a scheduled task kept by the gateway), acting for an account within a scope the owner granted.
+- **`external`.** An outside system calling a webhook, for example a scheduler or CI.
+  - Each integration has its own credential, which the owner creates and can revoke.
+  - The credential is limited to chosen sessions or bots and to chosen operation kinds, and it is rate-limited.
+  - The webhook ingress is built with the automation API (P5). The queue and the sender display support this kind from P2.
 
 Owner-only operations, and the recent sign-in rule for permission settings (`packages/agent-remote-hosted/src/broker.ts:1946-1948,2085`), are checked at submission from the requester's grant.
 
-Every operation, and every echo it produces, records its requester. The conversation can therefore show who sent a message.
+**Who sent it.** Every operation records its requester, and the Controller copies it onto the echo. Every device therefore shows each message's sender: the person, which agent, which automation or scheduled task, which integration. Input typed in a terminal is shown as coming from the terminal. The owner decided on 2026-11-15 that senders are shown, because messages come from more than the owner.
 
 ### Moving the existing queues
 
@@ -508,6 +512,7 @@ The largest resource savings come from Claude and Copilot. Resident budgets and 
   - Accepted.
   - Not delivered, with the reason and Send again.
   - Check delivery, when the outcome is unknown.
+- **Per message.** Its sender, as recorded by the operation queue (see Requesters).
 - **Device connection.** One indicator shows the device's own link to the Relay.
 - **Composer.** It is enabled except for business reasons: read-only access, an ended or failed session, or a session in use in a terminal (with take-over).
 
@@ -524,12 +529,19 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 ## Compatibility and rollout
 
 - **Mode selection.** Controllers declare `journal`, `operations` and `residency` when they register. The Relay serves a Host, and each provider on it, in smart mode only when the Controller declares them for that provider.
-- **Clients.** Clients opt in on the sync channel. Old clients get today's messages, with conservative runtime state.
+- **Clients.** Clients opt in on the sync channel. Old clients get today's messages, with conservative runtime state. Web clients reload into each new deployment (`packages/agent-remote-lab/src/deployment-update.ts`), so old clients exist only briefly.
+- **Compatibility lasts through an upgrade, not across versions.** The owner decided this on 2026-11-15. Each change to the Controller contract ships in three steps:
+  1. The Relay and clients work with both old and new Controllers.
+  2. The owner is told explicitly to update every Controller, through owner-confirmed updates.
+  3. Once the owner confirms, the next release removes the old path.
+
+  Mixed versions are not supported beyond that window.
 - **Protocol version.** The session protocol stays at `1.8.0` with opt-in flags for as long as possible. A version change follows `docs/protocol-upgrade-runbook.md`.
 - **Rollout order.**
   1. The Relay, writing journals in shadow. Journals are written alongside today's Controller-served reads, and sampled pages are compared. Smart reading turns on for a provider only after a soak period with no unexplained difference.
   2. Controllers, through owner-confirmed updates.
   3. Clients.
+  4. The owner is asked to update every Controller. After the owner confirms, the transitional paths are removed.
 - **Switching off.**
   - Smart reading can be switched off per Host and provider; journals then serve only as caches.
   - The operation queue keeps working as long as the Controller supports it.
@@ -574,10 +586,10 @@ Each phase has its own plan and ships on its own. Long-conversation rendering ca
 |---|---|---|
 | P0 | Measurements, confirmed targets, and a cost estimate from row rates | Numbers to hold the design to |
 | P1 Instant reading | **Relay:** the Host partition with journals, serving Snapshot, pages and live rows.<br>**Controller:** publishing with item keys, digests, fencing, reconcile and backfill.<br>**Client:** the device store and journal-served reading.<br>Smart reading turns on for a provider only when all three have shipped and its shadow comparison passes. | T1, T2, T6 |
-| P2 Sending never blocks | The operation queue with requesters, preconditions, receipts and events; moving the outbox, Team and TPM queues; the composer always enabled; business-state presentation; the per-session attach and control loops removed for journal-served sessions | T4, T5 |
+| P2 Sending never blocks | The operation queue with requesters, preconditions, receipts and events; moving the outbox, Team and TPM queues; senders shown on messages; the composer always enabled; business-state presentation; the per-session attach and control loops removed for journal-served sessions | T4, T5 |
 | P3 Smart residency | Demand leases and Controller residency, including release for Claude and Copilot; the live budget retired for journal-served sessions, while stream limits stay for live-only paths | T3 with resource control |
 | P4 Partitioned Relay | Uplinks and sync channels moved to Host and account partitions | Isolation and scale |
-| P5 Automation API | An automation API on the operation queue and events | Gateway automation |
+| P5 Automation API | The automation API on the operation queue and events: gateway rules, scheduled tasks, and webhook ingress for external systems | Gateway automation |
 
 Until P4, `primary` still carries every socket. From P1 on, journals and queues live outside its state, so its 16 MiB bound no longer grows with conversations.
 
@@ -601,7 +613,7 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 | Sessions driven from a terminal are not observed | Journals are marked behind; catalog confirmations detect activity and trigger a reconcile when there is demand. Tailing native transcripts is an open question. |
 | Storage grows without limit | The journal is a working set. Bodies outside the resident window are evicted and filled again from the Host; safety caps and quotas stop runaway growth; P0 measures real sizes first. |
 | Older content is unreadable while the Host is offline | The resident window and the device store cover normal reading. P0 sizes the window from how far back people read, and the reader sees the Host being offline as a fact. |
-| Two server modes double the test matrix | One client suite runs against both; crude mode is retired after a support window. |
+| Two server modes double the test matrix | One client suite runs against both. Crude mode is removed once the owner confirms every Controller is updated. |
 | Old clients act on stale state | They see conservative runtime state, and their subscription wakes the runtime as it does today. |
 | Authorization drifts between partitions (P4) | The control plane pushes a revocation to the partitions before acknowledging it. Partitions check grants again on every subscription and every submission. |
 | One busy Host overloads its partition, or outgrows one object's storage | Batching and coalescing bound writes; per-session budgets, a per-Host quota, chunked rows and blob offload bound storage. P0 measures both, and a busy Host can later be split by session. |
@@ -624,8 +636,6 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 ### Open questions for the owner
 
 1. **Terminal sessions.** Should adapters tail native transcripts (Claude JSONL, Codex rollout files) so journals stay current while a native CLI has control?
-2. **Support window.** How long does crude mode stay available for old Controllers and old clients?
-3. **Requester display.** Should each message show who sent it: the person, which agent, which automation?
 
 ## Documents to update during implementation
 

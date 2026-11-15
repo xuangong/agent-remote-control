@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { projectTimelinePage, projectTimelineRows } from './timeline-projector.js';
+import { entryFromRow, mergeRowIntoEntry, projectTimelinePage, projectTimelineRows, type CanonicalTimelineRow } from './timeline-projector.js';
 import { TimelineStore } from './timeline-store.js';
 
 describe('projectTimelineRows', () => {
@@ -278,4 +278,20 @@ it('preserves background outcomes through text projection and separates unannota
   expect(entries[0]?.item).toMatchObject({ text: 'Checking unchanged', background: { status: 'silent' } });
   append('Failed ', 'failed'); append('late silent', 'silent');
   expect(projectTimelineRows(store.rows()).at(-1)?.item.background?.status).toBe('failed');
+});
+
+describe('mergeRowIntoEntry', () => {
+  const row = (seq: number, text: string): CanonicalTimelineRow => ({
+    epoch: 'epoch-1', seq, providerId: 'codex', sourceKey: `delta:${seq}`, occurredAt: 1_725_000_000_000 + seq,
+    timestamp: new Date(1_725_000_000_000 + seq).toISOString(), turnId: 'turn-1',
+    item: { type: 'assistant_message', text, messageId: 'message-1' }, resources: [],
+  });
+
+  it('folds a row into its entry exactly as pages project rows', () => {
+    const rows = [row(1, 'Hel'), row(2, 'lo'), row(3, '!')];
+    const entry = entryFromRow(rows[0]!);
+    mergeRowIntoEntry(entry, rows[1]!);
+    mergeRowIntoEntry(entry, rows[2]!);
+    expect(entry).toEqual(projectTimelineRows(rows)[0]);
+  });
 });

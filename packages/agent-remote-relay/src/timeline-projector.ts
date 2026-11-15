@@ -10,6 +10,8 @@ import { PROTOCOL_VERSION, mergeBackgroundActivity } from '@orchardworks/agent-r
 
 import { TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 
+export type { CanonicalTimelineRow } from './timeline-store.js';
+
 export interface TimelinePageRequest {
   requestId: string;
   agentId: string;
@@ -27,35 +29,35 @@ export function projectTimelineRows(rows: readonly CanonicalTimelineRow[]): Proj
   const entries: ProjectedTimelineEntry[] = [];
   for (const row of rows) {
     const match = findProjection(entries, row);
-    if (match === undefined) {
-      entries.push(entryFromRow(row));
-      continue;
-    }
-
-    const entry = entries[match] as ProjectedTimelineEntry;
-    const previousBackground = entry.item.background;
-    entry.seqEnd = row.seq;
-    entry.sourceSeqRanges = includeSequence(entry.sourceSeqRanges, row.seq);
-    includeResources(entry.resources, row.resources);
-    if (row.item.background) entry.item.background = structuredClone(mergeBackgroundActivity(entry.item.background, row.item.background));
-    if (row.item.type === 'assistant_message' && entry.item.type === 'assistant_message') {
-      entry.item.text += row.item.text;
-      includeCollapse(entry.collapsed, 'assistant_merge');
-    } else if (row.item.type === 'reasoning' && entry.item.type === 'reasoning') {
-      entry.item.text += row.item.text;
-      includeCollapse(entry.collapsed, 'reasoning_merge');
-    } else if (row.item.type === 'tool_call') {
-      entry.item = structuredClone(row.item);
-      if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
-      includeCollapse(entry.collapsed, 'tool_lifecycle');
-    } else if (row.item.type === 'compaction' && entry.item.type === 'compaction') {
-      entry.item = { ...entry.item, ...row.item };
-    } else if (row.item.type === 'todo') {
-      entry.item = structuredClone(row.item);
-      if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
-    }
+    if (match === undefined) entries.push(entryFromRow(row));
+    else mergeRowIntoEntry(entries[match] as ProjectedTimelineEntry, row);
   }
   return entries;
+}
+
+/** Folds one row into the entry it continues, exactly as pages project rows. */
+export function mergeRowIntoEntry(entry: ProjectedTimelineEntry, row: CanonicalTimelineRow): void {
+  const previousBackground = entry.item.background;
+  entry.seqEnd = row.seq;
+  entry.sourceSeqRanges = includeSequence(entry.sourceSeqRanges, row.seq);
+  includeResources(entry.resources, row.resources);
+  if (row.item.background) entry.item.background = structuredClone(mergeBackgroundActivity(entry.item.background, row.item.background));
+  if (row.item.type === 'assistant_message' && entry.item.type === 'assistant_message') {
+    entry.item.text += row.item.text;
+    includeCollapse(entry.collapsed, 'assistant_merge');
+  } else if (row.item.type === 'reasoning' && entry.item.type === 'reasoning') {
+    entry.item.text += row.item.text;
+    includeCollapse(entry.collapsed, 'reasoning_merge');
+  } else if (row.item.type === 'tool_call') {
+    entry.item = structuredClone(row.item);
+    if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
+    includeCollapse(entry.collapsed, 'tool_lifecycle');
+  } else if (row.item.type === 'compaction' && entry.item.type === 'compaction') {
+    entry.item = { ...entry.item, ...row.item };
+  } else if (row.item.type === 'todo') {
+    entry.item = structuredClone(row.item);
+    if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
+  }
 }
 
 export function projectTimelinePage(store: TimelineStore, request: TimelinePageRequest): HistoryPage {
@@ -148,7 +150,7 @@ function page(
   };
 }
 
-function entryFromRow(row: CanonicalTimelineRow): ProjectedTimelineEntry {
+export function entryFromRow(row: CanonicalTimelineRow): ProjectedTimelineEntry {
   return {
     providerId: row.providerId,
     item: structuredClone(row.item),
@@ -205,7 +207,7 @@ function sameContext(entry: ProjectedTimelineEntry, row: CanonicalTimelineRow): 
   return entry.providerId === row.providerId && entry.turnId === row.turnId && entry.item.background?.id === row.item.background?.id;
 }
 
-function includeSequence(ranges: readonly TimelineSeqRange[], sequence: number): TimelineSeqRange[] {
+export function includeSequence(ranges: readonly TimelineSeqRange[], sequence: number): TimelineSeqRange[] {
   const next: TimelineSeqRange[] = ranges.map((range) => ({ ...range }));
   const last = next.at(-1);
   if (last && last.endSeq + 1 === sequence) last.endSeq = sequence;

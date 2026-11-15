@@ -11,6 +11,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./timeline-projection": {
+      "types": "./dist/timeline-projector.d.ts",
+      "import": "./dist/timeline-projector.js"
     }
   },
   "types": "./dist/index.d.ts",

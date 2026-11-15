@@ -5,7 +5,6 @@ import type {
 /** The wire shapes the journal consumes and produces; the Host uplink carries them unchanged. */
 export type { CompleteItemInput, JournalHead, JournalIndexEntry, JournalRowInput };
 
-
 /** A row stamped with the journal's epoch and sequence; what subscribers receive live. */
 export interface JournalRow {
   epoch: string;
@@ -72,6 +71,8 @@ export interface JournalMeta {
   /** The lowest sequence in use; older rows are prepended below it. */
   minSeq: number;
   publisher: JournalPublisher | null;
+  /** The last revision given to any item; revisions never repeat within the journal. */
+  lastRevision: number;
   /** Absent until the Controller publishes its first Snapshot. */
   head?: JournalHead;
   retiredEpochs: { epoch: string; retiredAt: number }[];

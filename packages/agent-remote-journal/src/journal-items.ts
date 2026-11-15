@@ -1,4 +1,5 @@
 import type { AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry, ResourceBinding, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
+import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
 import { includeResources, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import { JournalBodyMissingError, JournalInvalidRowError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
@@ -77,9 +78,9 @@ export function knownFields(item: JournalItem): KnownFields {
   };
 }
 
-/** Writes what is known about an item into new content of it: the alias into a user message, a background the content lacks. */
+/** Writes what is known about an item into new content of it: the alias into a user message, a background merged so that a finished outcome never regresses. */
 export function carryKnownFields(content: AgentTimelineItem, known: KnownFields): void {
-  if (content.background === undefined && known.background) content.background = structuredClone(known.background);
+  if (known.background) content.background = structuredClone(content.background ? mergeBackgroundActivity(known.background, content.background) : known.background);
   if (known.clientMessageId !== undefined && content.type === 'user_message') content.clientMessageId = known.clientMessageId;
 }
 

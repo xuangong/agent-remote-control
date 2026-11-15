@@ -6,7 +6,7 @@ import { expectNoChange, openJournal, PUBLISHER, scribble, text } from './journa
 import { planReconcile } from './reconcile.js';
 import { SessionJournal } from './session-journal.js';
 import {
-  JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, type JournalPublication, type JournalRowInput,
+  JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, type JournalHead, type JournalPublication, type JournalRowInput,
 } from './types.js';
 
 describe('appending at scale', () => {
@@ -44,6 +44,17 @@ describe('appending at scale', () => {
     expect(first?.sourceSeqRanges).toEqual([{ startSeq: 1, endSeq: 1 }, { startSeq: 3, endSeq: 3 }]);
     expect(first?.body?.item).toMatchObject({ status: 'completed' });
     expect(first?.body?.collapsed).toEqual(['tool_lifecycle']);
+  });
+});
+
+describe('a row that cannot be copied or merged', () => {
+  it('changes nothing when appended to an existing item', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'Hel'));
+    expectNoChange(journal, () => journal.append(publish(), { ...text('m1', 'd2', 'lo'), sourceKey: (() => 0) as never }), Error);
+    expectNoChange(journal, () => journal.append(publish(), { ...text('m1', 'd2', 'lo'), resources: {} as never }), Error);
+    expect(journal.append(publish(), text('m1', 'd3', 'lo'))?.seq).toBe(2);
+    expect(journal.state().items[0]?.body?.item).toMatchObject({ text: 'Hello' });
   });
 });
 
@@ -163,6 +174,14 @@ describe('a store that replays the changes', () => {
     let publisherId = PUBLISHER;
     let { generation, watermark: sequence } = journal.claim(publisherId);
     const store = new MemoryJournalStore();
+    const snapshotAt = (observedAt: number): JournalHead => ({
+      observedAt,
+      snapshot: {
+        id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null,
+        capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+        pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' },
+      },
+    });
     const keys = ['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'u0', 'u1'];
     const row = (key: string, chunk: string, turn: string): JournalRowInput => key.startsWith('u')
       ? { itemKey: key, providerId: 'codex', sourceKey: `${key}-${chunk}`, occurredAt: 1_725_000_000_000, turnId: turn, item: { type: 'user_message', text: chunk } }
@@ -174,7 +193,7 @@ describe('a store that replays the changes', () => {
       const publication = (): JournalPublication => ({ publisherId, generation, sequence: random() < 0.05 ? Math.max(1, sequence - 1) : ++sequence });
       const key = pick(keys);
       const turn = pick(['turn-1', 'turn-2', 'turn-3']);
-      const operation = pick(['append', 'append', 'append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale']);
+      const operation = pick(['append', 'append', 'append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']);
       counts.set(operation, (counts.get(operation) ?? 0) + 1);
       try {
         switch (operation) {
@@ -196,6 +215,7 @@ describe('a store that replays the changes', () => {
             break;
           }
           case 'claim': publisherId = random() < 0.8 ? PUBLISHER : 'controller-2'; ({ generation, watermark: sequence } = journal.claim(publisherId)); break;
+          case 'head': journal.setHead(publication(), snapshotAt(stamp++)); break;
           default: journal.append({ publisherId, generation: generation - 1, sequence: 1 }, row(key, 'stale', turn));
         }
       } catch (error) {
@@ -208,7 +228,7 @@ describe('a store that replays the changes', () => {
     }
     const changes = journal.takeChanges();
     if (changes) await store.apply(changes);
-    for (const operation of ['append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale']) expect(counts.get(operation)).toBeGreaterThan(20);
+    for (const operation of ['append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']) expect(counts.get(operation)).toBeGreaterThan(20);
     expect(new SessionJournal((await store.load(journal.sessionKey))!).state()).toEqual(journal.state());
   });
 });

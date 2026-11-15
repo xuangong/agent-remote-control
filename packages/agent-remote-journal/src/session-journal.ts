@@ -30,7 +30,7 @@ export class SessionJournal {
   protected replaced = false;
 
   static create(sessionKey: string, epoch: string = crypto.randomUUID()): SessionJournal {
-    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null, retiredEpochs: [] }, items: [] });
+    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null, lastRevision: 0, retiredEpochs: [] }, items: [] });
     journal.metaDirty = true;
     return journal;
   }
@@ -38,6 +38,9 @@ export class SessionJournal {
   constructor(state: JournalState) {
     this.meta = structuredClone(state.meta);
     this.items = structuredClone(state.items).sort((left, right) => left.seqStart - right.seqStart);
+    let newest = this.meta.lastRevision ?? 0;
+    for (const { revision } of this.items) if (revision > newest) newest = revision;
+    this.meta.lastRevision = newest;
     for (const item of this.items) this.byKey.set(item.itemKey, item);
   }
 
@@ -78,21 +81,22 @@ export class SessionJournal {
       const opened = this.openItem(structuredClone(row), input.liveOnly === true);
       this.advance(publication);
       this.meta.nextSeq += 1;
+      opened.revision = this.nextRevision();
       this.insertLast(opened);
       return row;
     }
     const body = existing.body as JournalBody;
     const entry = residentEntry(existing);
+    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
     this.advance(publication);
     this.meta.nextSeq += 1;
-    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
     body.item = entry.item;
     existing.seqEnd = row.seq;
     extendSequenceRanges(existing.sourceSeqRanges, row.seq);
     if (input.liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
-    existing.revision += 1;
+    existing.revision = this.nextRevision();
     this.dirty.add(existing.itemKey);
     return row;
   }
@@ -104,7 +108,7 @@ export class SessionJournal {
     this.advance(publication);
     item.state = 'complete';
     item.digest = digest;
-    item.revision += 1;
+    item.revision = this.nextRevision();
     this.dirty.add(itemKey);
   }
 
@@ -117,7 +121,7 @@ export class SessionJournal {
     item.state = 'complete';
     item.liveOnly = true;
     delete item.digest;
-    item.revision += 1;
+    item.revision = this.nextRevision();
     this.dirty.add(itemKey);
   }
 
@@ -128,7 +132,7 @@ export class SessionJournal {
     this.advance(publication);
     item.clientMessageId = clientMessageId;
     if (item.body?.item.type === 'user_message') item.body.item.clientMessageId = clientMessageId;
-    item.revision += 1;
+    item.revision = this.nextRevision();
     this.dirty.add(itemKey);
   }
 
@@ -163,7 +167,7 @@ export class SessionJournal {
     item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
     item.state = 'complete';
     item.digest = digest;
-    item.revision += 1;
+    item.revision = this.nextRevision();
     this.dirty.add(item.itemKey);
     return row;
   }
@@ -176,13 +180,16 @@ export class SessionJournal {
     if (this.duplicate(publication)) return this.meta.epoch;
     this.requireDistinct(items);
     const epoch = crypto.randomUUID();
-    let newestRevision = 0;
-    for (const { revision } of this.items) if (revision > newestRevision) newestRevision = revision;
+    const resealed = new Set<JournalItem>();
     const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
       const seq = offset + 1;
-      if (entry.kind === 'carried') return { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
+      if (entry.kind === 'carried') {
+        const carried = { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
+        if (entry.item !== this.byKey.get(entry.item.itemKey)) resealed.add(carried);
+        return carried;
+      }
       const item = this.completeItem(epoch, entry.complete, seq, this.byKey.get(entry.complete.row.itemKey));
-      item.revision = newestRevision + 1;
+      resealed.add(item);
       return item;
     });
     this.advance(publication);
@@ -197,7 +204,10 @@ export class SessionJournal {
     this.byKey.clear();
     this.dirty.clear();
     this.replaced = true;
-    for (const item of next) this.insertLast(item);
+    for (const item of next) {
+      if (resealed.has(item)) item.revision = this.nextRevision();
+      this.insertLast(item);
+    }
     return epoch;
   }
 
@@ -220,6 +230,7 @@ export class SessionJournal {
     this.items.length = 0;
     for (const item of merged) this.items.push(item);
     for (const item of created) {
+      item.revision = this.nextRevision();
       this.byKey.set(item.itemKey, item);
       this.dirty.add(item.itemKey);
     }
@@ -267,9 +278,10 @@ export class SessionJournal {
     const keys = evictableItems(this.items, keepLatestTurns);
     for (const key of keys) {
       const item = this.require(key);
-      if (item.body?.item.background) item.background = structuredClone(item.body.item.background);
+      const body = item.body as JournalBody;
+      if (body.item.background) item.background = structuredClone(body.item.background);
       else delete item.background;
-      if (item.body) item.keptBody = { timestamp: item.body.timestamp, collapsed: [...item.body.collapsed], resources: structuredClone(item.body.resources) };
+      item.keptBody = { timestamp: body.timestamp, collapsed: [...body.collapsed], resources: structuredClone(body.resources) };
       item.body = null;
       this.dirty.add(key);
     }
@@ -323,6 +335,11 @@ export class SessionJournal {
     return publication.sequence <= publisher.watermark;
   }
 
+  protected nextRevision(): number {
+    this.meta.lastRevision += 1;
+    return this.meta.lastRevision;
+  }
+
   protected advance(publication: JournalPublication): void {
     (this.meta.publisher as NonNullable<JournalMeta['publisher']>).watermark = publication.sequence;
     this.metaDirty = true;
@@ -339,7 +356,7 @@ export class SessionJournal {
     return {
       itemKey: row.itemKey, providerId: row.providerId, ...(row.turnId === undefined ? {} : { turnId: row.turnId }),
       seqStart: row.seq, seqEnd: row.seq, sourceSeqRanges: entry.sourceSeqRanges,
-      state: 'open', liveOnly, revision: 1, body: entryBody(entry),
+      state: 'open', liveOnly, revision: 0, body: entryBody(entry),
     };
   }
 

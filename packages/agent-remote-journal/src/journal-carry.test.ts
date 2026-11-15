@@ -119,3 +119,60 @@ describe('eviction and fill', () => {
     expect(before.kind === 'page' && before.page.payload.entries[0]).toMatchObject({ collapsed: ['assistant_merge'] });
   });
 });
+
+describe('backgrounds on fill', () => {
+  const callWith = (status: 'pending' | 'visible', id = 'review-1') => call({ background: { id, kind: 'review' as const, status } });
+  const evicted = () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), callWith('visible'));
+    journal.complete(publish(), 'c1', 'dc');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    journal.evict(1);
+    return journal;
+  };
+
+  it('never regresses a finished outcome the item kept', () => {
+    const journal = evicted();
+    journal.fill('c1', bodyFromRow(callWith('pending')), 'dc');
+    expect(journal.state().items[0]?.body?.item).toMatchObject({ background: { id: 'review-1', status: 'visible' } });
+  });
+
+  it('lets a different background win', () => {
+    const journal = evicted();
+    journal.fill('c1', bodyFromRow(callWith('pending', 'review-2')), 'dc');
+    expect(journal.state().items[0]?.body?.item).toMatchObject({ background: { id: 'review-2', status: 'pending' } });
+  });
+});
+
+describe('one revision counter', () => {
+  const complete = (key: string) => ({ row: text(key, `h-${key}`, key), digest: `digest-${key}` });
+
+  it('never reuses a revision for a key that a replacement dropped and a prepend brought back', () => {
+    const { journal, publish } = openJournal();
+    journal.prepend(publish(), [complete('m1')]);
+    const old = journal.index()[0]!.revision;
+    journal.replace(publish(), [], 0);
+    journal.prepend(publish(), [complete('m1')]);
+    expect(journal.index()[0]!.revision).toBeGreaterThan(old);
+    expectNoChange(journal, () => journal.correct(publish(), text('m1', 'h2', 'two'), 'd2', old), JournalStaleRevisionError);
+  });
+
+  it('does not restart at 1 when a replacement fills an emptied journal', () => {
+    const { journal, publish } = openJournal();
+    journal.prepend(publish(), [complete('m1')]);
+    journal.replace(publish(), [], 0);
+    journal.replace(publish(), [complete('m1')], 0);
+    expect(journal.index()[0]!.revision).toBeGreaterThan(1);
+  });
+
+  it('continues from the highest revision of a stored state that has no counter', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'one'));
+    journal.complete(publish(), 'm1', 'digest-1');
+    const state = journal.state();
+    delete (state.meta as { lastRevision?: number }).lastRevision;
+    const restored = new SessionJournal(state);
+    restored.alias({ publisherId: 'controller-1', generation: 1, sequence: 99 }, 'm1', 'client-1');
+    expect(restored.index()[0]!.revision).toBe(journal.index()[0]!.revision + 1);
+  });
+});

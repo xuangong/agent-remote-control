@@ -106,4 +106,10 @@ describe('planReconcile', () => {
     expect(planReconcile(index, [{ itemKey: 'x', digest: 'dx' }, { itemKey: 's', digest: 'ds' }, { itemKey: 'b', digest: 'db' }]))
       .toEqual({ kind: 'replace', reason: 'inserted' });
   });
+
+  it('prepends older items before a journal of only relay-only items', () => {
+    const index = [entry('u1', undefined, { liveOnly: true })];
+    expect(planReconcile(index, [{ itemKey: 'u0', digest: 'd0' }, { itemKey: 'u1', digest: 'd1' }, { itemKey: 'm1', digest: 'dm' }]))
+      .toEqual({ kind: 'continue', prepend: ['u0'], append: ['m1'], correct: ['u1'], abandon: [] });
+  });
 });

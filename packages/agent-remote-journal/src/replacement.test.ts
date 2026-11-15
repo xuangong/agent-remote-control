@@ -49,4 +49,10 @@ describe('replacementOrder carried open items', () => {
     expect((carried as { item: JournalItem }).item.digest).toBeUndefined();
     expect(open).toMatchObject({ state: 'open', liveOnly: false });
   });
+
+  it('carries an open live-only item as it is, still open', () => {
+    const open = { ...old('x~'), liveOnly: true };
+    const [carried] = replacementOrder([open], []);
+    expect(carried).toMatchObject({ kind: 'carried', item: { itemKey: 'x', state: 'open', liveOnly: true } });
+  });
 });

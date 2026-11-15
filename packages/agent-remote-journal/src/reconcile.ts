@@ -20,7 +20,7 @@ export type ReconcilePlan =
  * without non-live-only items is walked from the start. When the reread starts with items the journal does not know
  * and every journal item before its first known item is live-only, those leading items are older history and are
  * returned in `prepend`, oldest first; any other known item after unknown ones means native history was rewritten
- * (`replace`), and no known item at all is a `gap`.
+ * (`replace`), and no known item at all is a `gap` unless the journal holds only live-only items, which is walked from the start.
  *
  * Journal items passed over inside the window, or left after its last match, are ignored when live-only, abandoned
  * when open (native history never kept them), ignored when complete without a digest, and otherwise mean a complete
@@ -40,14 +40,17 @@ export function planReconcile(index: readonly JournalIndexEntry[], reread: reado
   let walkFrom = 0;
   let next = 0;
   const firstJournalItem = index.findIndex(({ liveOnly }) => !liveOnly);
-  if (reread.length > 0 && firstJournalItem >= 0 && !position.has((reread[0] as ReconcileCandidate).itemKey)) {
-    const firstKnown = reread.findIndex(({ itemKey }) => position.has(itemKey));
-    if (firstKnown < 0) return { kind: 'gap' };
-    const firstKnownAt = position.get((reread[firstKnown] as ReconcileCandidate).itemKey) as number;
-    if (index.slice(0, firstKnownAt).some(({ liveOnly }) => !liveOnly)) return { kind: 'replace', reason: 'inserted' };
-    for (const { itemKey } of reread.slice(0, firstKnown)) prepend.push(itemKey);
-    walkFrom = firstKnown;
-    next = firstKnownAt;
+  const firstKnown = reread.findIndex(({ itemKey }) => position.has(itemKey));
+  if (reread.length > 0 && firstKnown !== 0) {
+    if (firstKnown < 0) {
+      if (firstJournalItem >= 0) return { kind: 'gap' };
+    } else {
+      const firstKnownAt = position.get((reread[firstKnown] as ReconcileCandidate).itemKey) as number;
+      if (index.slice(0, firstKnownAt).some(({ liveOnly }) => !liveOnly)) return { kind: 'replace', reason: 'inserted' };
+      for (const { itemKey } of reread.slice(0, firstKnown)) prepend.push(itemKey);
+      walkFrom = firstKnown;
+      next = firstKnownAt;
+    }
   } else if (reread.length > 0 && firstJournalItem >= 0) {
     next = position.get((reread[0] as ReconcileCandidate).itemKey) as number;
   }

@@ -4,11 +4,11 @@ export type ReplacementEntry =
   | { kind: 'reread'; complete: CompleteItemInput }
   | { kind: 'carried'; item: JournalItem };
 
-/** An item that native history lacks, closed: it is relay-only and keeps what was received. */
+/** An open item that native history lacks, closed: it is relay-only and keeps what was received. Other items stay as they are. */
 function sealedCopy(item: JournalItem): JournalItem {
-  if (item.state === 'complete') return item;
+  if (item.state !== 'open' || item.liveOnly) return item;
   const { digest: _digest, ...rest } = item;
-  return { ...rest, state: 'complete', liveOnly: true, revision: item.revision + 1 };
+  return { ...rest, state: 'complete', liveOnly: true };
 }
 
 /**

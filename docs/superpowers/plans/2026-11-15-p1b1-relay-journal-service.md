@@ -26,6 +26,14 @@
 
 ---
 
+**Amendments after the P1-A final review** (they override the code below where they differ):
+
+- The journal throws `JournalInvalidRowError` and `JournalInvalidPublicationError` instead of a bare `RangeError`; `refusalOf` maps both to `invalid`, as above.
+- An unexpected error while applying a publication drops the cached journal before it propagates, as above, so a half-applied publication is never acknowledged.
+- `open` must not claim a generation that cannot be sent. Its signature is `open(hostId, sessionKey, publisherId, fits)`. The adapter (Task 4) supplies `fits(index, epoch)`, which encodes the `journal_opened` reply with `encodeRemoteHostUplinkMessage` and checks the result. When the reply would not fit, `open` returns a refusal (`{ refused: 'index_too_large' }`) without claiming, and the adapter answers the Controller with `journal_refused` (reason `invalid`) and leaves the session unopened.
+- Every journal message the adapter sends is validated with `encodeRemoteHostUplinkMessage` before `send`. A failure is logged as a diagnostic and treated like a refusal. It never reaches the Controller as an unencodable frame.
+- Revisions come from one counter for the whole journal (`JournalMeta.lastRevision`). The head type and the journal's input types are the protocol's wire types, re-exported by the journal.
+
 ## File structure
 
 | File | Responsibility |
@@ -807,7 +815,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     if (error instanceof JournalBodyMissingError) return { sequence, reason: 'body_missing', itemKey: error.itemKey };
     if (error instanceof JournalItemTypeChangedError) return { sequence, reason: 'type_changed', itemKey: error.itemKey };
     if (error instanceof JournalDuplicateItemError) return { sequence, reason: 'duplicate_item', itemKey: error.itemKey };
-    if (error instanceof RangeError) return { sequence, reason: 'invalid' };
+    if (error instanceof JournalInvalidRowError) return { sequence, reason: 'invalid', itemKey: error.itemKey };
+    if (error instanceof JournalInvalidPublicationError) return { sequence, reason: 'invalid' };
     return undefined;
   }
 
@@ -828,7 +837,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         try { apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published); }
         catch (error) {
           const refusal = refusalOf(error, entry.sequence);
-          if (!refusal) throw error;
+          if (!refusal) { cache.get(hostId)?.delete(sessionKey); throw error; }
           published.refusal = refusal;
           break;
         }

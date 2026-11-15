@@ -378,6 +378,8 @@ describe('the partition contract across a rollout', () => {
     let broken = true;
     const journals = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { if (broken) throw new Error('The Durable Object is overloaded.'); return fresh.capabilities(host); } }) });
     await expect(journals.capabilities(HOST)).rejects.toThrow('overloaded');
+    const otherMethod = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async () => { throw new TypeError('The RPC receiver does not implement the method "open".'); } }) });
+    await expect(otherMethod.capabilities(HOST)).rejects.toThrow('"open"');
     broken = false;
     expect(await journals.capabilities(HOST)).toEqual({ journal: 2 });
   });

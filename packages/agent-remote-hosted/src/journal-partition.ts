@@ -101,9 +101,9 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
   };
 }
 
-/** Whether an RPC error says the receiver has no such method, as a partition of an earlier version answers for `capabilities`. */
+/** Whether an RPC error says the receiver has no `capabilities` method, as workerd words it for a partition of an earlier version. Only that error: any other failure is not an answer. */
 function isMissingMethod(error: unknown): boolean {
-  return error instanceof Error && /does not implement the method/i.test(error.message);
+  return error instanceof Error && /does not implement the method "capabilities"/.test(error.message);
 }
 
 /** What a partition that has no `capabilities` method can serve. */

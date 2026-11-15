@@ -25,7 +25,7 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true } } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true } } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
   closers.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
@@ -117,6 +117,9 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
         }
       }
       import { durableObjectJournalDatabase } from './src/journal-sql-database.ts';
+      import { DurableObject } from 'cloudflare:workers';
+      // A partition of an earlier version: it has no \`capabilities\` method.
+      export class OlderJournalPartition extends DurableObject { async servedSessions() { return []; } }
       export default { fetch() { return new Response(null, { status: 404 }); } };
     `, resolveDir: process.cwd(), sourcefile: 'journals-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
@@ -136,7 +139,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const googleCodes = new Map<string, { nonce: string; challenge: string; redirect: string }>();
   async function start() {
     mf = new Miniflare({ handleRuntimeStdio: (_stdout, stderr) => { stderr.on('data', chunk => { runtimeErrors.push(String(chunk)); }); }, durableObjectsPersist: join(directory, 'state'), workers: [{ name: 'relay', modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
       bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
@@ -186,7 +189,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
         return Response.json({ active: true, subject, authenticatedAt, expiresAt: Date.now() + 3_600_000, validUntil: Date.now() + leaseMs });
       },
     }, { name: 'journals', modules: true, script: journalsScript, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
-      durableObjects: { JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } },
+      durableObjects: { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } },
       bindings: options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {} }] });
     await mf.ready;
   }

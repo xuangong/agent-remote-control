@@ -132,8 +132,8 @@ test('keeps two journals in memory by default and reads a third one that was dro
 }, 60_000);
 
 /** A Controller connected for journals: it registers (rotating its pairing key into a device credential on the first connection) and keeps what the Relay sends. */
-async function journalHost(f: Fixture, key: string) {
-  const socket = await f.upgrade('/ws/remote-host?journal=1', { authorization: `Bearer ${key}` });
+async function journalHost(f: Fixture, key: string, level: 1 | 2 = 1) {
+  const socket = await f.upgrade(`/ws/remote-host?journal=${level}`, { authorization: `Bearer ${key}` });
   const inbox: Array<Record<string, any>> = [];
   socket.addEventListener('message', message => { inbox.push(JSON.parse(String(message.data))); });
   const take = async (...types: string[]): Promise<Record<string, any>> => {
@@ -213,4 +213,14 @@ test('takes a session out of serving at the Controller\'s word, in the object th
   expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 1)).toMatchObject({ unserved: true, hasHead: false, watermark: 2 });
   expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
   expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { ...LIMITS, reset: true })).toMatchObject({ generation: 2, index: [], more: false });
+}, 60_000);
+
+test('recognises an older partition that has no capabilities method, and grants such a Controller level 1', async () => {
+  const f = await fixture({ journals: { olderPartition: true } });
+  const missing = await call(f, 'host-1', 'capabilities', 'host-1').then(() => undefined, error => String(error.message));
+  expect(missing).toBe('TypeError: The RPC receiver does not implement the method "capabilities".');
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key, 2);
+  expect(host.registered).toMatchObject({ type: 'registered', journal: 1 });
 }, 60_000);

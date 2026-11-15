@@ -37,7 +37,7 @@ import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type BrokerScheduler, type RelaySocket } from './transport.js';
 import { isSuccessionCapacityError, remainingAssociationRevisions, SUCCESSION_FEATURE_BYTES } from './succession-capacity.js';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
-import { createHostJournals } from './host-journals.js';
+import { createHostJournals, type JournalReadRequest } from './host-journals.js';
 import { createJournalConnection, isJournalHostMessage, type JournalConnection } from './journal-uplink.js';
 import { createHostStreamOpener, type HostStreamEntry } from './journal-host-stream.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
@@ -761,7 +761,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   /** Serves the reads of sessions that have a journal head from their journals; see journal-sessions.ts. */
   const journalSessions = journals && createJournalSessions({
     journals, scheduler,
-    requestFill: async (hostId, sessionKey, itemKeys) => requireJournal(hostId).requestFill(sessionKey, itemKeys),
+    requestFill: async (hostId, sessionKey, itemKeys, read) => requireJournal(hostId).requestFill(sessionKey, itemKeys, read),
     requestOlder: async (hostId, sessionKey, limit) => requireJournal(hostId).requestOlder(sessionKey, limit),
   });
   function send(host: Host, message: RemoteHostUplinkMessage) {
@@ -2259,7 +2259,7 @@ export function createHostBroker(options: HostBrokerOptions) {
      * accepted; rejects with a JournalRequestError (timeout, in_flight, busy, closed) or a BrokerError for an offline Host.
      * The caller authorizes the read this serves.
      */
-    async requestFill(hostId: string, sessionKey: string, itemKeys: string[]) { return requireJournal(hostId).requestFill(sessionKey, itemKeys); },
+    async requestFill(hostId: string, sessionKey: string, itemKeys: string[], read?: JournalReadRequest) { return requireJournal(hostId).requestFill(sessionKey, itemKeys, read); },
     /** Asks a connected Host's Controller to read older history and publish it as prepended items. */
     async requestOlder(hostId: string, sessionKey: string, limit: number) { return requireJournal(hostId).requestOlder(sessionKey, limit); },
     tunnelHost: (token: string) => [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token)?.id,

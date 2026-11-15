@@ -5,7 +5,7 @@ import {
   canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, mergeResources, residentEntry, stampRow,
 } from './journal-items.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
-import { evictableItems } from './retention.js';
+import { evictable, retainedFrom } from './retention.js';
 import { replacementOrder } from './replacement.js';
 import { utf8ByteLength } from './utf8-size.js';
 import {
@@ -35,6 +35,12 @@ export class SessionJournal {
   protected readonly sizes = new Map<string, number>();
   protected sizedTotal = 0;
   protected readonly unmeasured = new Set<string>();
+  /** The live-only items, and the measured size of each with a running total. */
+  protected readonly liveOnlyKeys = new Set<string>();
+  protected readonly liveOnlySizes = new Map<string, number>();
+  protected liveOnlyTotal = 0;
+  /** The index as last built; dropped whenever an item changes. */
+  protected indexSnapshot: readonly JournalIndexEntry[] | undefined;
 
   static create(sessionKey: string, epoch: string = crypto.randomUUID()): SessionJournal {
     const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null, lastRevision: 0, retiredEpochs: [] }, items: [] });
@@ -49,7 +55,10 @@ export class SessionJournal {
     for (const { revision } of this.items) if (revision > newest) newest = revision;
     this.meta.lastRevision = newest;
     for (const item of this.items) this.byKey.set(item.itemKey, item);
-    for (const item of this.items) this.unmeasured.add(item.itemKey);
+    for (const item of this.items) {
+      this.unmeasured.add(item.itemKey);
+      if (item.liveOnly) this.liveOnlyKeys.add(item.itemKey);
+    }
   }
 
   get sessionKey(): string { return this.meta.sessionKey; }
@@ -76,12 +85,20 @@ export class SessionJournal {
     this.metaDirty = true;
   }
 
-  /** How many live-only items the journal holds. */
-  get liveOnlyCount(): number {
-    let count = 0;
-    for (const item of this.items) if (item.liveOnly) count += 1;
-    return count;
+  /** Whether a refused publication left rows missing: such a journal must not be served until a replacement rebuilds it. */
+  get incomplete(): boolean { return this.meta.incomplete === true; }
+
+  /** Records that rows of this journal are missing, and takes it out of serving until a replacement. */
+  markIncomplete(): void {
+    this.meta.incomplete = true;
+    this.metaDirty = true;
   }
+
+  /** How many live-only items the journal holds. */
+  get liveOnlyCount(): number { return this.liveOnlyKeys.size; }
+
+  /** Whether the item's body is in memory; false for an evicted or unknown item. */
+  resident(itemKey: string): boolean { return this.byKey.get(itemKey)?.body != null; }
 
   /**
    * An estimate of what the journal holds: the size of its meta and of each item record as stored, in UTF-8 bytes of JSON.
@@ -94,6 +111,9 @@ export class SessionJournal {
       const size = item ? utf8ByteLength(JSON.stringify(item)) : 0;
       if (item) this.sizes.set(key, size); else this.sizes.delete(key);
       this.sizedTotal += size - before;
+      this.liveOnlyTotal -= this.liveOnlySizes.get(key) ?? 0;
+      this.liveOnlySizes.delete(key);
+      if (item?.liveOnly) { this.liveOnlySizes.set(key, size); this.liveOnlyTotal += size; }
     }
     this.unmeasured.clear();
     return this.sizedTotal + utf8ByteLength(JSON.stringify(this.meta));
@@ -102,9 +122,21 @@ export class SessionJournal {
   /** The estimated size of the live-only items, which a replacement carries over. */
   liveOnlyBytes(): number {
     this.residentBytes();
-    let total = 0;
-    for (const item of this.items) if (item.liveOnly) total += this.sizes.get(item.itemKey) ?? 0;
-    return total;
+    return this.liveOnlyTotal;
+  }
+
+  /**
+   * What a replacement by `reread` would carry over: the live-only items and the open items it seals, with their count and
+   * estimated size. A replacement is admitted by its own size plus this.
+   */
+  carriedOnReplace(reread: readonly CompleteItemInput[]): { count: number; bytes: number } {
+    let count = 0, bytes = 0;
+    for (const entry of replacementOrder(this.items, reread)) {
+      if (entry.kind !== 'carried') continue;
+      count += 1;
+      bytes += utf8ByteLength(JSON.stringify(entry.item));
+    }
+    return { count, bytes };
   }
 
   /**
@@ -124,7 +156,9 @@ export class SessionJournal {
       this.dirty.delete(key);
       this.removedKeys.add(key);
       this.unmeasured.add(key);
+      this.liveOnlyKeys.delete(key);
     }
+    this.indexSnapshot = undefined;
     return [...doomed];
   }
 
@@ -280,8 +314,13 @@ export class SessionJournal {
     this.sizes.clear();
     this.sizedTotal = 0;
     this.unmeasured.clear();
+    this.indexSnapshot = undefined;
+    this.liveOnlyKeys.clear();
+    this.liveOnlySizes.clear();
+    this.liveOnlyTotal = 0;
     this.removedKeys.clear();
     this.replaced = true;
+    delete this.meta.incomplete;
     for (const item of next) {
       if (resealed.has(item)) item.revision = this.nextRevision();
       this.insertLast(item);
@@ -313,6 +352,7 @@ export class SessionJournal {
       this.touch(item.itemKey);
     }
     this.meta.minSeq = first;
+    this.indexSnapshot = undefined;
     return rows;
   }
 
@@ -334,13 +374,15 @@ export class SessionJournal {
     return item;
   }
 
-  index(): JournalIndexEntry[] {
-    return this.items.map(item => ({
+  /** The entries of every item in order. The array is a snapshot that stays valid until an item changes: do not modify it. */
+  index(): readonly JournalIndexEntry[] {
+    this.indexSnapshot ??= this.items.map(item => ({
       itemKey: item.itemKey, seqStart: item.seqStart, seqEnd: item.seqEnd, state: item.state,
       ...(item.digest === undefined ? {} : { digest: item.digest }), liveOnly: item.liveOnly,
       ...(item.clientMessageId === undefined ? {} : { clientMessageId: item.clientMessageId }),
       revision: item.revision, resident: item.body !== null,
     }));
+    return this.indexSnapshot;
   }
 
   /** A page of the journal; `olderBeyondJournal` says whether the Host still holds history older than the journal. */
@@ -349,19 +391,34 @@ export class SessionJournal {
   }
 
   /**
-   * Evicts the bodies of complete, non-live-only items that carry a digest, outside the latest turns. Returns the
-   * evicted item keys. The background outcome, time, collapse marks and resources of a body stay on the item.
+   * Evicts the bodies of complete, non-live-only items that carry a digest, outside the retained window: the latest
+   * `keepLatestTurns` turns or the latest `keepLatestItems` items, whichever reaches further back. Returns the evicted
+   * item keys. The background outcome, time, collapse marks and resources of a body stay on the item.
    */
-  evict(keepLatestTurns: number): string[] {
-    const keys = evictableItems(this.items, keepLatestTurns);
-    for (const key of keys) {
-      const item = this.require(key);
+  evict(keepLatestTurns: number, keepLatestItems = 0): string[] {
+    return this.evictKeys(this.items.slice(0, retainedFrom(this.items, keepLatestTurns, keepLatestItems)).filter(evictable));
+  }
+
+  /** The `seqStart` where the retained window of `evict` begins; the journal's next sequence when it holds no item. */
+  windowStart(keepLatestTurns: number, keepLatestItems = 0): number {
+    return this.items[retainedFrom(this.items, keepLatestTurns, keepLatestItems)]?.seqStart ?? this.meta.nextSeq;
+  }
+
+  /** Evicts the bodies of the items that `evict` could evict and whose `seqStart` is at least `from` and below `to`. */
+  evictRange(from: number, to: number): string[] {
+    return this.evictKeys(this.items.filter(item => item.seqStart >= from && item.seqStart < to && evictable(item)));
+  }
+
+  protected evictKeys(items: readonly JournalItem[]): string[] {
+    const keys: string[] = [];
+    for (const item of items) {
       const body = item.body as JournalBody;
       if (body.item.background) item.background = structuredClone(body.item.background);
       else delete item.background;
       item.keptBody = { timestamp: body.timestamp, collapsed: [...body.collapsed], resources: structuredClone(body.resources) };
       item.body = null;
-      this.touch(key);
+      this.touch(item.itemKey);
+      keys.push(item.itemKey);
     }
     return keys;
   }
@@ -409,6 +466,8 @@ export class SessionJournal {
   protected touch(itemKey: string): void {
     this.dirty.add(itemKey);
     this.unmeasured.add(itemKey);
+    this.indexSnapshot = undefined;
+    if (this.byKey.get(itemKey)?.liveOnly) this.liveOnlyKeys.add(itemKey); else this.liveOnlyKeys.delete(itemKey);
   }
 
   protected duplicate(publication: JournalPublication): boolean {

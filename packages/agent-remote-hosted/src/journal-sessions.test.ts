@@ -62,8 +62,8 @@ describe('the journal sessions of a Relay', () => {
         status: async () => ({ cursor: journal.cursor, head: journal.head! }),
         page: async (_host, _key, request, olderBeyondJournal) => { olderArguments.push(olderBeyondJournal); return journal.page(request, { olderBeyondJournal }); },
       },
-      requestFill: (_host, _key, keys) => new Promise(resolve => {
-        fills.push({ keys, finish: () => { for (const key of keys) journal.fill(key, bodyFromRow(row(key)), 'a'.repeat(64)); resolve({ filled: keys, mismatched: [], unknown: [] }); } });
+      requestFill: (_host, _key, keys, read) => new Promise(resolve => {
+        fills.push({ keys, finish: () => { for (const key of keys) journal.fill(key, bodyFromRow(row(key)), 'a'.repeat(64)); resolve({ filled: keys, mismatched: [], unknown: [], page: journal.page(read.request, { olderBeyondJournal: read.olderBeyondJournal() }) }); } });
       }),
       requestOlder: () => new Promise(resolve => { olderReads.push({ answer: olderAvailable => resolve({ olderAvailable }) }); }),
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },

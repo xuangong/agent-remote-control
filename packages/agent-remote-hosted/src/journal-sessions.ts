@@ -1,6 +1,6 @@
 import type { JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 
-import type { HostJournals, JournalFilled, JournalPublished } from './host-journals.js';
+import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 import type { HostStreamOpener } from './journal-host-stream.js';
 import { createJournalSessionStream, type JournalReads, type JournalSessionStream } from './journal-session-stream.js';
 import type { BrokerScheduler, RelaySocket } from './transport.js';
@@ -11,7 +11,7 @@ export const journalSessionKey = (providerId: string, nativeSessionId: string): 
 export interface JournalSessionsOptions {
   journals: Pick<HostJournals, 'status' | 'page'>;
   /** Asks the Host's Controller to read bodies again; rejects when it is offline or cannot. */
-  requestFill(hostId: string, sessionKey: string, itemKeys: string[]): Promise<JournalFilled>;
+  requestFill(hostId: string, sessionKey: string, itemKeys: string[], read: JournalReadRequest): Promise<JournalFilled>;
   /** Asks the Host's Controller to read older history and publish it; rejects when it is offline or cannot. */
   requestOlder(hostId: string, sessionKey: string, limit: number): Promise<{ olderAvailable: boolean }>;
   scheduler: BrokerScheduler;
@@ -72,11 +72,11 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
         page: (request: JournalPageRequest): Promise<JournalPageResult | undefined> => options.journals.page(hostId, sessionKey, request, !shared.olderExhausted),
-        fill(itemKeys) {
-          // One fill per session at a time, each asking for its own items.
+        fill(itemKeys, request) {
+          // One fill per session at a time, each asking for its own items. The page is read in the same step as the fill.
           shared.pending += 1;
-          const run = shared.fillTail.then(() => options.requestFill(hostId, sessionKey, itemKeys)).then(() => undefined);
-          shared.fillTail = run.catch(() => undefined);
+          const run = shared.fillTail.then(() => options.requestFill(hostId, sessionKey, itemKeys, { request, olderBeyondJournal: () => !shared.olderExhausted })).then(filled => filled.page);
+          shared.fillTail = run.then(() => undefined, () => undefined);
           return run.finally(() => { shared.pending -= 1; release(key, shared); });
         },
         older(limit) {

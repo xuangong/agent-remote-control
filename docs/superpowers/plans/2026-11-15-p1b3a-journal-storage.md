@@ -22,8 +22,8 @@
 6. **The switch is a field of the Host record.** `smartReading?: string[]` (provider ids, sorted, 1 to 64) is saved with the Host, kept in memory in the broker, and changed with `PUT /v1/remote/hosts/:id/smart-reading` by the account owner (`requireOwner`), inside `commit`. **The default is off for every provider**: reads go to the Controller as today, while journals may be written in shadow. A Host revoked and paired again is a new Host record without the field. The switch is checked before the head index. Turning a provider off closes that Host's and provider's journal-served browser streams with 1012, so their clients reconnect in crude mode.
 7. **Gating is in memory.** The service keeps `served(hostId, sessionKey)`, a synchronous answer from an index of sessions that have a head; `undefined` means the Host was never loaded. Node loads every Host from SQLite at startup (`loadAllServed`). A Host not yet loaded (one that registers later) is loaded by `servedSessions(hostId)`. That load runs **outside the Host's journal queue**, once per Host however many opens ask (the sessions object shares the in-flight promise), and the gate waits for it at most 2 s on the broker's scheduler, then serves crude. A load reads at most three times: the Host's epoch is raised by every change of its head index (publications, `unserve`) and by its deletion, and a listing read across a change is discarded. A journal-served stream that finds no head although the index said it had one calls `unserve` before it closes with 1012, so the client's reconnect goes crude instead of looping.
 8. **The cache is bounded by count and size.** Defaults: 64 journals and 128 MiB (estimated) for the whole Relay. After each call the least recently used journals are dropped until the cache is within its bounds, never the one the call used. Every call stores its changes before it returns, so dropping loses nothing.
-9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. Serving resumes when a later publication that fits sets a head. Beyond 2,000 live-only items the oldest complete ones are removed (item and body; an item still open is never removed, so the count can stay above the cap while open items exceed it) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
-10. **Retention is one rule: the latest N turns.** After each publication, inside the Host's queue, bodies outside the latest 50 turns (`retention.turns`) are evicted with the core's `evict`; live-only and digest-less items are never evicted. Use-based windows are deferred (see "Notes for the roadmap").
+9. **Safety limits refuse growth; they are not retention.** Defaults: 64 MiB per session, 100,000 items per session (`JOURNAL_INDEX_MAX_ITEMS`, also the clamp for the option), 1 GiB per Host, 2,000 live-only items per session. Limits are validated as non-negative integers. A growing entry (`append`, `correct`, `prepend`) that would pass a limit first tries to evict bodies of the session (to 5 turns, then 1, then 0, never live-only or digest-less items) and is refused with `quota_exceeded` if it still does not fit. A `replace` is admitted by its own size plus the live-only items it carries over, without shrinking first. Entries that do not grow a journal (`complete`, `seal`, `alias`, `head`) are never refused for size. **A quota refusal takes the session out of serving**: the service clears the journal's head, persisted, so the index rebuilt after a restart agrees; the publication result says `unserved`, and the broker closes the session's journal-served streams with 1012 so their clients reconnect crude. The refused row is missing, so the journal is marked `incomplete` (persisted with its meta) and the publisher generation that was refused publishes nothing more (every later publication of it is refused with `quota_exceeded`). Serving resumes only after the publisher opens again (a new generation), a replacement that fits is applied (it clears `incomplete`), and a head follows; a head while the journal is incomplete is refused. A growing entry is checked against the room the session has (its own limit, or what the Host quota leaves after the Host's other sessions): an entry larger than the room is refused at once, otherwise bodies are evicted first. A replacement is admitted by its own size plus exactly what it carries over, which is the live-only items and the open items it seals (`carriedOnReplace`). An `open` refused with `index_too_large` also takes a served session out of serving (the publisher is locked out, so the journal would go stale). Beyond 2,000 live-only items the oldest complete ones are removed (item and body; an item still open is never removed, so the count can stay above the cap while open items exceed it) and `journal_live_only_dropped` is reported; the design keeps live-only items for the life of the session up to such a cap.
+10. **Retention is one rule: a window of the latest turns and items.** The window is the latest 50 turns (`retention.turns`) or the latest 200 items (`retention.minItems`), whichever reaches further back; an item without a turn counts as a turn, so the default 100-entry tail never needs a fill. After each publication, inside the Host's queue, only the bodies that left the window since the last eviction are evicted (the service keeps the window start per loaded journal and measures it afresh when a journal is loaded, evicting nothing for that), so a body filled back stays until a limit needs room; the cap-driven path in a fill evicts everything outside the window once. Live-only and digest-less items are never evicted. A fill and the page read for the reader that asked for it happen in one Host-queue entry (`fill(..., read)`), so no publication comes between them. Use-based windows are deferred (see "Notes for the roadmap").
 11. **Fills respect the limits.** A fill puts back only the bodies that fit the session limit, the Host quota and the cache bound; the rest stay missing (`skipped`), and the reader's existing handling of a body that cannot be filled applies.
 12. **Deletion is durable.** Revoking a Host records its id in `journalDeletions` of the broker state in the same commit as the revoke. The deletion then runs in the Host's journal queue (so it is ordered against a concurrent publish), and when the store confirms, a second commit removes the id. Pending deletions are retried at broker start and whenever a Host registers. `open` re-checks inside the queue that its connection is still current, so a revoked Host cannot recreate a journal. A Host restored through the recovery flow keeps its old id: its own pending deletion runs, and is waited for, before the Relay sends `registered`, and a Host whose deletion failed gets no journal grant until a later run confirms it, so a retry can never delete journals it created. There is no separate binding-removal path in the broker today (only revoke), so no per-session deletion is built. A Controller can open a journal for a session that has no binding; the per-Host quota bounds it. Journals require durable Relay state: `createHostedRelay` refuses `journals` or `journalService` without `storage`, so an ephemeral account cannot orphan journals.
 13. **The paged index is pull-based.** `journal_opened` carries the first page and, when more follows, `indexAfter` (the `seqStart` of the last entry sent). The Controller asks for each next page with `journal_index_request { requestId, sessionKey, generation, epoch, after }` and the Relay answers with `journal_index_page { requestId, sessionKey, index, indexAfter? }`. One page is in flight at a time, so the exchange paces itself on every runtime and never reaches the uplink backpressure limit of `send` (`host_backpressure`, 16 MiB buffered). A page holds at most 2,000 entries and 1 MiB of entries; the total is at most `JOURNAL_INDEX_MAX_ITEMS`, raised to 100,000. **Compatibility:** no released Controller declares `journal=1`, so no old Controller reads these messages; `indexAfter` is absent for an index that fits one page, so a small journal's message is unchanged. The cursor is a position in one epoch of the journal: a request whose `epoch` is no longer current (a replacement happened between pages) is refused with `journal_open_refused` reason `stale_epoch`, and the Controller opens again. The `fits` callback of `HostJournals.open` becomes options.
@@ -1471,6 +1471,9 @@ describe('the journal cache', () => {
     await open(journals, HOST, 'codex:s1');
     await open(journals, HOST, 'codex:s2');
     expect(loads).toHaveLength(2);
+    expect(loads).toHaveLength(2);
+    await journals.status(HOST, 'codex:s2');
+    expect(loads).toHaveLength(2);
     await journals.status(HOST, 'codex:s1');
     expect(loads).toHaveLength(3);
   });
@@ -1482,27 +1485,35 @@ describe('the journal cache', () => {
 });
 
 describe('the safety limits', () => {
-  it('refuses a row that does not fit the session budget, still accepts completion, and evicts bodies to make room', async () => {
+  it('evicts bodies to make room for a row, and refuses a row that still does not fit', async () => {
     const { journals, store } = fixture({ limits: { sessionBytes: 3500 } });
     await open(journals, HOST, SESSION);
     const big = 'x'.repeat(2000);
-    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1)])).refusal).toBeUndefined();
-    const refused = await journals.publish(HOST, SESSION, 1, [append(2, 'm2', big, 2)]);
-    expect(refused.refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
-    expect(refused.events).toEqual([]);
-    expect((await journals.publish(HOST, SESSION, 1, [complete(2, 'm1')])).refusal).toBeUndefined();
+    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1), complete(2, 'm1')])).refusal).toBeUndefined();
     expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', big, 2)])).refusal).toBeUndefined();
     expect(await resident(store)).toEqual([['m1', false], ['m2', true]]);
+    const refused = await journals.publish(HOST, SESSION, 1, [append(4, 'm3', big, 3)]);
+    expect(refused.refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+    expect(refused.events).toEqual([]);
+  });
+
+  it('refuses an entry larger than the room before it evicts anything', async () => {
+    const { journals, store } = fixture({ limits: { sessionBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'small', 1), complete(2, 'm1'), append(3, 'm2', 'small', 2)]);
+    const refused = await journals.publish(HOST, SESSION, 1, [append(4, 'm3', 'x'.repeat(4000), 3)]);
+    expect(refused.refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+    expect(await resident(store)).toEqual([['m1', true], ['m2', true]]);
   });
 
   it('refuses a new item beyond the item limit but lets an item that exists grow', async () => {
     const { journals } = fixture({ limits: { sessionItems: 2 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b')]);
-    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'c')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
     const grown = await journals.publish(HOST, SESSION, 1, [append(3, 'm1', 'more')]);
     expect(grown.refusal).toBeUndefined();
     expect(grown.events).toHaveLength(1);
+    expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm3', 'c')])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
   });
 
   it('refuses growth of a Host over its quota without touching another Host', async () => {
@@ -1514,6 +1525,67 @@ describe('the safety limits', () => {
     expect((await journals.publish(HOST, 'codex:s1', 1, [append(1, 'm1', big)])).refusal).toBeUndefined();
     expect((await journals.publish(HOST, 'codex:s2', 1, [append(1, 'm1', big)])).refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
     expect((await journals.publish('host-2', 'codex:s1', 1, [append(1, 'm1', big)])).refusal).toBeUndefined();
+  });
+
+  it('measures appended, corrected and prepended rows in UTF-8 bytes', async () => {
+    const wide = '字'.repeat(1100);
+    const narrow = 'x'.repeat(1100);
+    const limits = { sessionBytes: 3500 };
+    const appended = fixture({ limits });
+    await open(appended.journals, HOST, SESSION);
+    expect((await appended.journals.publish(HOST, SESSION, 1, [append(1, 'm1', wide)])).refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
+    const appendedNarrow = fixture({ limits });
+    await open(appendedNarrow.journals, HOST, SESSION);
+    expect((await appendedNarrow.journals.publish(HOST, SESSION, 1, [append(1, 'm1', narrow)])).refusal).toBeUndefined();
+
+    const corrected = fixture({ limits });
+    await open(corrected.journals, HOST, SESSION);
+    await corrected.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'small'), complete(2, 'm1')]);
+    const revision = (await corrected.store.load(KEY))!.items[0]!.revision;
+    const correct = (text: string): JournalPublishEntry => ({ sequence: 3, op: 'correct', row: rowOf('m1', text), digest: 'digest-m1b', expectedRevision: revision });
+    expect((await corrected.journals.publish(HOST, SESSION, 1, [correct(wide)])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    const correctedNarrow = fixture({ limits });
+    await open(correctedNarrow.journals, HOST, SESSION);
+    await correctedNarrow.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'small'), complete(2, 'm1')]);
+    expect((await correctedNarrow.journals.publish(HOST, SESSION, 1, [correct(narrow)])).refusal).toBeUndefined();
+
+    const prepend = (text: string): JournalPublishEntry => ({ sequence: 1, op: 'prepend', items: [{ row: rowOf('m0', text, 0), digest: 'digest-m0' }] });
+    const prepended = fixture({ limits });
+    await open(prepended.journals, HOST, SESSION);
+    expect((await prepended.journals.publish(HOST, SESSION, 1, [prepend(wide)])).refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
+    const prependedNarrow = fixture({ limits });
+    await open(prependedNarrow.journals, HOST, SESSION);
+    expect((await prependedNarrow.journals.publish(HOST, SESSION, 1, [prepend(narrow)])).refusal).toBeUndefined();
+  });
+
+  it('evicts bodies of the session to make room under the Host quota before it refuses', async () => {
+    const { journals, store } = fixture({ limits: { hostBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    const big = 'x'.repeat(2000);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1), complete(2, 'm1')]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', big, 2)])).refusal).toBeUndefined();
+    expect(await resident(store)).toEqual([['m1', false], ['m2', true]]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm3', big, 3)])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+  });
+
+  it('counts the open items a replacement seals as well as the live-only items it carries', async () => {
+    const { journals } = fixture({ limits: { sessionItems: 3 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [live(1, 'l1', 'live'), append(2, 'o1', 'open', 1)]);
+    const reread = (...keys: string[]): JournalPublishEntry => ({ sequence: 3, op: 'replace', items: keys.map(key => ({ row: rowOf(key, key), digest: `digest-${key}` })) });
+    expect((await journals.publish(HOST, SESSION, 1, [reread('a', 'b')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    await open(journals, HOST, SESSION);
+    expect((await journals.publish(HOST, SESSION, 2, [reread('a')])).refusal).toBeUndefined();
+  });
+
+  it('counts the size of the open items a replacement seals', async () => {
+    const { journals } = fixture({ limits: { sessionBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'o1', 'x'.repeat(2000), 1)]);
+    const reread = (sequence: number, text: string): JournalPublishEntry => ({ sequence, op: 'replace', items: [{ row: rowOf('a', text), digest: 'digest-a' }] });
+    expect((await journals.publish(HOST, SESSION, 1, [reread(2, 'y'.repeat(1500))])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+    await open(journals, HOST, SESSION);
+    expect((await journals.publish(HOST, SESSION, 2, [reread(2, 'y'.repeat(100))])).refusal).toBeUndefined();
   });
 
   it('does not count a publication of a fenced generation against the limits', async () => {
@@ -1530,7 +1602,8 @@ describe('the safety limits', () => {
     const tooBig = await journals.publish(HOST, SESSION, 1, [{ sequence: 2, op: 'replace', items: [{ row: rowOf('m1', big), digest: 'digest-m1' }] }]);
     expect(tooBig.refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l1']);
-    const fits = await journals.publish(HOST, SESSION, 1, [{ sequence: 2, op: 'replace', items: [{ row: rowOf('m1', 'small'), digest: 'digest-m1' }] }]);
+    await open(journals, HOST, SESSION);
+    const fits = await journals.publish(HOST, SESSION, 2, [{ sequence: 2, op: 'replace', items: [{ row: rowOf('m1', 'small'), digest: 'digest-m1' }] }]);
     expect(fits.refusal).toBeUndefined();
     expect((await store.load(KEY))!.items.map(item => item.itemKey).sort()).toEqual(['l1', 'm1']);
   });
@@ -1550,6 +1623,33 @@ describe('the safety limits', () => {
     expect(await journals.indexPage(HOST, 'codex:none', first.epoch, 0, 10)).toBeUndefined();
   });
 
+  it('takes a served session out of serving when its index is over the bound, because its publisher is locked out', async () => {
+    const { journals, store } = fixture();
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b'), head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 1, pageItems: 1 })).toEqual({ refused: 'index_too_large', unserved: true });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect((await store.load(KEY))?.meta.head).toBeUndefined();
+    const restarted = createHostJournals({ store, now: () => 1_000 });
+    expect(await restarted.servedSessions(HOST)).toEqual([]);
+  });
+
+  it('answers a page of a big index from a snapshot and stays correct when the journal changes between pages', async () => {
+    const { journals } = fixture();
+    const opened = await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, Array.from({ length: 50 }, (_, at) => append(at + 1, `m${at}`, 'a', at)));
+    const seen: string[] = [];
+    let after = -Infinity;
+    for (;;) {
+      const page = (await journals.indexPage(HOST, SESSION, opened.epoch, after, 7))!;
+      if (page.length === 0) break;
+      seen.push(...page.map(entry => entry.itemKey));
+      after = page.at(-1)!.seqStart;
+    }
+    expect(seen).toEqual(Array.from({ length: 50 }, (_, at) => `m${at}`));
+  });
+
   it('refuses an index page for an epoch a replacement ended', async () => {
     const { journals } = fixture();
     const opened = await open(journals, HOST, SESSION);
@@ -1561,7 +1661,7 @@ describe('the safety limits', () => {
 });
 
 describe('a quota refusal and the live-only cap', () => {
-  it('takes the session out of serving, persisted, and serves it again when a later head is published', async () => {
+  it('takes the session out of serving, persisted, and serves it again only after a replacement and a head from a reopened publisher', async () => {
     const { journals, store } = fixture({ limits: { sessionItems: 1 } });
     await open(journals, HOST, SESSION);
     expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)])).hasHead).toBe(true);
@@ -1572,10 +1672,34 @@ describe('a quota refusal and the live-only cap', () => {
     expect((await store.load(KEY))?.meta.head).toBeUndefined();
     const restarted = createHostJournals({ store, now: () => 1_000 });
     expect(await restarted.servedSessions(HOST)).toEqual([]);
-    const resumed = await journals.publish(HOST, SESSION, 1, [head(3)]);
-    expect(resumed).toMatchObject({ hasHead: true });
-    expect(resumed.unserved).toBeUndefined();
-    expect(journals.served(HOST, SESSION)).toBe(true);
+    const reopened = await open(restarted, HOST, SESSION);
+    expect(reopened.generation).toBe(2);
+    const rebuilt = await restarted.publish(HOST, SESSION, 2, [{ sequence: 3, op: 'replace', items: [{ row: rowOf('m1', 'a'), digest: 'digest-m1' }] }, head(4)]);
+    expect(rebuilt).toMatchObject({ hasHead: true });
+    expect(rebuilt.refusal).toBeUndefined();
+    expect(rebuilt.unserved).toBeUndefined();
+    expect(restarted.served(HOST, SESSION)).toBe(true);
+  });
+
+  it('refuses everything the generation publishes after a quota refusal, so a head cannot serve a journal with a hole', async () => {
+    const { journals } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    const later = await journals.publish(HOST, SESSION, 1, [head(4)]);
+    expect(later.refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+    expect(later.hasHead).toBeUndefined();
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm1', 'more')])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+  });
+
+  it('does not serve a journal that lost a row before it had a head, until a replacement rebuilds it', async () => {
+    const { journals } = fixture({ limits: { sessionItems: 1 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b')]);
+    await open(journals, HOST, SESSION);
+    expect((await journals.publish(HOST, SESSION, 2, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    expect(journals.served(HOST, SESSION)).toBe(false);
   });
 
   it('does not report a session without a head as taken out of serving', async () => {
@@ -1607,9 +1731,9 @@ describe('a quota refusal and the live-only cap', () => {
   it('measures a replacement in UTF-8 bytes, so a three-byte character counts three times against the session budget', async () => {
     const { journals } = fixture({ limits: { sessionBytes: 3500 } });
     await open(journals, HOST, SESSION);
-    const replace = (text: string): JournalPublishEntry => ({ sequence: 1, op: 'replace', items: [{ row: rowOf('m1', text), digest: 'digest-m1' }] });
-    expect((await journals.publish(HOST, SESSION, 1, [replace('字'.repeat(1100))])).refusal).toEqual({ sequence: 1, reason: 'quota_exceeded' });
-    expect((await journals.publish(HOST, SESSION, 1, [replace('x'.repeat(1100))])).refusal).toBeUndefined();
+    const replace = (sequence: number, text: string): JournalPublishEntry => ({ sequence, op: 'replace', items: [{ row: rowOf('m1', text), digest: 'digest-m1' }] });
+    expect((await journals.publish(HOST, SESSION, 1, [replace(1, 'x'.repeat(1100))])).refusal).toBeUndefined();
+    expect((await journals.publish(HOST, SESSION, 1, [replace(2, '字'.repeat(1100))])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
   });
 });
 
@@ -1617,7 +1741,7 @@ describe('retention', () => {
   const turn = (sequence: number, n: number): JournalPublishEntry[] => [append(sequence, `m${n}`, `text ${n}`, n), complete(sequence + 1, `m${n}`)];
 
   it('evicts bodies outside the latest turns after a publication and keeps live-only items', async () => {
-    const { journals, store } = fixture({ retention: { turns: 2 } });
+    const { journals, store } = fixture({ retention: { turns: 2, minItems: 0 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [live(1, 'l0'), complete(2, 'l0'), ...turn(3, 1), ...turn(5, 2), ...turn(7, 3), ...turn(9, 4)]);
     expect(await resident(store)).toEqual([['l0', true], ['m1', false], ['m2', false], ['m3', true], ['m4', true]]);
@@ -1626,13 +1750,68 @@ describe('retention', () => {
   });
 
   it('does not evict for a publication the journal did not apply', async () => {
-    const { journals, store } = fixture({ retention: { turns: 1 } });
+    const { journals, store } = fixture({ retention: { turns: 1, minItems: 0 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [...turn(1, 1)]);
     await journals.publish(HOST, SESSION, 1, [...turn(3, 2)]);
     const before = await resident(store);
     await journals.publish(HOST, SESSION, 9, turn(5, 3));
     expect(await resident(store)).toEqual(before);
+  });
+});
+
+describe('retention across fills and reloads', () => {
+  const turn = (sequence: number, n: number): JournalPublishEntry[] => [append(sequence, `m${n}`, `text ${n}`, n), complete(sequence + 1, `m${n}`)];
+  const item = (n: number) => ({ row: rowOf(`m${n}`, `text ${n}`, n), digest: `digest-m${n}` });
+  const request = { requestId: 'page', agentId: 'agent', direction: 'tail' as const, limit: 10 };
+
+  it('keeps a body that was filled back when the next publication arrives', async () => {
+    const { journals, store } = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [...turn(1, 1), ...turn(3, 2), ...turn(5, 3)]);
+    expect(await resident(store)).toEqual([['m1', false], ['m2', false], ['m3', true]]);
+    await journals.fill(HOST, SESSION, [item(1)]);
+    await journals.publish(HOST, SESSION, 1, [head(7)]);
+    expect(await resident(store)).toEqual([['m1', true], ['m2', false], ['m3', true]]);
+    expect((await journals.page(HOST, SESSION, { ...request, limit: 3 }, false))?.kind).toBe('missing');
+    await journals.publish(HOST, SESSION, 1, turn(8, 4));
+    expect(await resident(store)).toEqual([['m1', true], ['m2', false], ['m3', false], ['m4', true]]);
+  });
+
+  it('evicts only what left the window since the last publication, so a filled body stays until a limit needs room', async () => {
+    const { journals, store } = fixture({ retention: { turns: 2, minItems: 0 }, limits: { sessionBytes: 6000 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [...turn(1, 1), ...turn(3, 2), ...turn(5, 3), ...turn(7, 4)]);
+    await journals.fill(HOST, SESSION, [item(1)]);
+    for (let n = 5; n <= 8; n++) await journals.publish(HOST, SESSION, 1, turn(n * 2 - 1, n));
+    expect((await resident(store)).filter(([, body]) => body).map(([key]) => key)).toEqual(['m1', 'm7', 'm8']);
+  });
+
+  it('measures the window again when a journal is loaded, and evicts nothing for it', async () => {
+    const first = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(first.journals, HOST, SESSION);
+    await first.journals.publish(HOST, SESSION, 1, [...turn(1, 1), ...turn(3, 2)]);
+    await first.journals.fill(HOST, SESSION, [item(1)]);
+    const reloaded = createHostJournals({ store: first.store, now: () => 1_000, retention: { turns: 1, minItems: 0 } });
+    await open(reloaded, HOST, SESSION);
+    await reloaded.publish(HOST, SESSION, 2, [head(5)]);
+    expect(await resident(first.store)).toEqual([['m1', true], ['m2', true]]);
+  });
+
+  it('keeps the latest items resident even when they are more than the turns', async () => {
+    const { journals, store } = fixture({ retention: { turns: 2, minItems: 5 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [1, 2, 3, 4, 5, 6, 7, 8].flatMap(n => turn(n * 2 - 1, n)));
+    expect((await resident(store)).filter(([, body]) => body).map(([key]) => key)).toEqual(['m4', 'm5', 'm6', 'm7', 'm8']);
+  });
+
+  it('keeps the default tail resident for items without a turn, so opening a session needs no fill', async () => {
+    const { journals, store } = fixture();
+    await open(journals, HOST, SESSION);
+    const withoutTurn = (sequence: number, n: number): JournalPublishEntry => ({ sequence, op: 'append', row: { ...rowOf(`m${n}`, `text ${n}`), turnId: undefined } });
+    await journals.publish(HOST, SESSION, 1, Array.from({ length: 150 }, (_, at) => withoutTurn(at * 2 + 1, at)).flatMap((entry, at) => [entry, complete(at * 2 + 2, `m${at}`)]));
+    expect((await resident(store)).every(([, body]) => body)).toBe(true);
+    expect((await journals.page(HOST, SESSION, { ...request, limit: 100 }, false))?.kind).toBe('page');
   });
 });
 
@@ -1651,7 +1830,7 @@ describe('filling bodies back', () => {
   });
 
   it('fills when it fits, and reports an item the journal does not have as unknown', async () => {
-    const { journals, store } = fixture({ retention: { turns: 1 } });
+    const { journals, store } = fixture({ retention: { turns: 1, minItems: 0 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1), complete(2, 'm1'), append(3, 'm2', big, 2), complete(4, 'm2')]);
     expect(await resident(store)).toEqual([['m1', false], ['m2', true]]);
@@ -1660,10 +1839,45 @@ describe('filling bodies back', () => {
     expect(await resident(store)).toEqual([['m1', true], ['m2', true]]);
   });
 
+  it('reads the page in the same step as the fill, so a publication queued behind it is not in the page', async () => {
+    const { journals } = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1), complete(2, 'm1'), append(3, 'm2', big, 2), complete(4, 'm2')]);
+    const request = { requestId: 'page', agentId: 'agent', direction: 'tail' as const, limit: 10 };
+    expect((await journals.page(HOST, SESSION, request, false))?.kind).toBe('missing');
+    const filling = journals.fill(HOST, SESSION, [item('m1', 1)], { request, olderBeyondJournal: () => false });
+    const publishing = journals.publish(HOST, SESSION, 1, [append(5, 'm3', 'later', 3)]);
+    const filled = await filling;
+    expect(filled.page?.kind).toBe('page');
+    if (filled.page?.kind === 'page') expect(JSON.stringify(filled.page.page)).not.toContain('later');
+    await publishing;
+    expect((await journals.fill(HOST, 'codex:none', [], { request, olderBeyondJournal: () => false })).page).toBeUndefined();
+  });
+
+  it('never reports a body that is already in memory as skipped', async () => {
+    const { journals } = fixture({ limits: { sessionBytes: 3500 } });
+    await open(journals, HOST, SESSION);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', big, 1)]);
+    expect(await journals.fill(HOST, SESSION, [item('m1', 1)])).toEqual({ filled: ['m1'], mismatched: [], unknown: [] });
+  });
+
+  it('does not fill past the Host quota, counting what the Host\'s other sessions hold even before any publication loaded them', async () => {
+    const seeded = fixture({ retention: { turns: 1, minItems: 0 } });
+    await open(seeded.journals, HOST, 'codex:s1');
+    await seeded.journals.publish(HOST, 'codex:s1', 1, [append(1, 'm1', big, 1)]);
+    await open(seeded.journals, HOST, 'codex:s2');
+    await seeded.journals.publish(HOST, 'codex:s2', 1, [append(1, 'm1', big, 1), complete(2, 'm1'), append(3, 'm2', 'x', 2)]);
+    expect((await seeded.store.load(`${HOST}:codex:s2`))!.items[0]!.body).toBeNull();
+    const total = (await seeded.store.catalog!.list(`${HOST}:`)).reduce((sum, listing) => sum + listing.bytes, 0);
+    const restarted = createHostJournals({ store: seeded.store, now: () => 1_000, limits: { hostBytes: total + 500 } });
+    const result = await restarted.fill(HOST, 'codex:s2', [item('m1', 1)]);
+    expect(result).toEqual({ filled: [], mismatched: [], unknown: [], skipped: ['m1'] });
+  });
+
   it('makes room by evicting bodies outside the latest turns once, so an idle session read back past the limit is not stuck', async () => {
     const text = 'x'.repeat(1500);
     const bodies = (key: string, turn: number) => ({ row: rowOf(key, text, turn), digest: `digest-${key}` });
-    const { journals, store } = fixture({ limits: { sessionBytes: 5500 }, retention: { turns: 1 } });
+    const { journals, store } = fixture({ limits: { sessionBytes: 5500 }, retention: { turns: 1, minItems: 0 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [1, 2, 3].flatMap(n => [append(n * 2 - 1, `m${n}`, text, n), complete(n * 2, `m${n}`)]));
     expect(await resident(store)).toEqual([['m1', false], ['m2', false], ['m3', true]]);
@@ -2004,6 +2218,33 @@ Replace the test `refuses an open whose reply fits only with small numbers, with
   });
 ```
 
+Add, before `fails a fill that is being applied when the connection closes`:
+
+```ts
+  it('hands the page read of a fill request to the journal, and resolves with the page it read in the same step', async () => {
+    const seen: unknown[] = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals: HostJournals = { ...base, fill: async (_host, _key, _items, read) => { seen.push(read?.request.requestId, read?.olderBeyondJournal()); return { filled: ['m1'], mismatched: [], unknown: [] }; } };
+    const f = fixture({ journals });
+    const request = { requestId: 'page-1', agentId: 'agent', direction: 'tail' as const, limit: 10 };
+    const pending = f.connection.requestFill(SESSION, ['m1'], { request, olderBeyondJournal: () => true });
+    const requestId = requestIdOf(f.sent, 'journal_fill_request');
+    await f.connection.receive(wire({ type: 'journal_fill', requestId, sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] }));
+    await expect(pending).resolves.toEqual({ filled: ['m1'], mismatched: [], unknown: [] });
+    expect(seen).toEqual(['page-1', true]);
+  });
+
+  it('reports a quota refusal even when the connection is no longer current, because the journal already left serving', async () => {
+    const events: string[] = [];
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { sessionItems: 0 } });
+    const f = fixture({ journals, diagnostic: event => events.push(event) });
+    await f.open();
+    f.endConnection();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(events).toEqual(['journal_quota_exceeded']);
+  });
+```
+
 In `clears an opened session when a later open is refused`, replace the `journals` line
 
 ```ts
@@ -2172,6 +2413,8 @@ const HOST_MAX_BYTES = 1024 * 1024 * 1024;
 const LIVE_ONLY_MAX_ITEMS = 2000;
 /** Turns whose bodies stay resident. */
 const RETAIN_TURNS = 50;
+/** Items whose bodies stay resident at least, so that the default tail of a conversation never needs a fill. */
+const RETAIN_MIN_ITEMS = 200;
 
 export interface HostJournalsOptions {
   store: JournalStore;
@@ -2180,8 +2423,11 @@ export interface HostJournalsOptions {
   cache?: { maxJournals?: number; maxBytes?: number };
   /** Safety bounds on growth. They are not the retention policy. `sessionItems` never exceeds what an index may list. */
   limits?: { sessionBytes?: number; sessionItems?: number; hostBytes?: number; liveOnlyItems?: number };
-  /** The working set: how many of the latest turns keep their bodies after a publication. */
-  retention?: { turns?: number };
+  /**
+   * The working set kept resident: the latest `turns` turns or the latest `minItems` items, whichever reaches further back.
+   * A publication evicts the bodies that left the window since the last one; bodies filled back stay until a limit needs room.
+   */
+  retention?: { turns?: number; minItems?: number };
 }
 
 export interface JournalOpenOptions {
@@ -2191,6 +2437,13 @@ export interface JournalOpenOptions {
   pageItems: number;
   /** Asked inside the Host's queue: false means the connection that asked is gone, so nothing is created or claimed. */
   allowed?(): boolean;
+}
+
+/** What a reader asks of the journal in the same step as a fill, so no publication comes between the fill and the page. */
+export interface JournalReadRequest {
+  request: JournalPageRequest;
+  /** Whether the Host may still hold history older than the journal; asked inside the Host's queue. */
+  olderBeyondJournal(): boolean;
 }
 
 export interface JournalOpened {
@@ -2206,6 +2459,8 @@ export interface JournalOpened {
 /** The journal could not be opened, and no generation was claimed. */
 export interface JournalOpenRefusal {
   refused: 'index_too_large' | 'unavailable';
+  /** The refusal took the session out of serving: its journal had a head, which is cleared, and the head index forgot the session. */
+  unserved?: true;
 }
 
 export interface JournalRefusal {
@@ -2252,6 +2507,8 @@ export interface JournalFilled {
   unknown: string[];
   /** Bodies that were not put back because the session, the Host or the cache has no room; they stay missing. */
   skipped?: string[];
+  /** The page read in the same step as the fill, when the fill was asked with a read; undefined when the session has no journal. */
+  page?: JournalPageResult;
 }
 
 /**
@@ -2262,7 +2519,8 @@ export interface JournalFilled {
 export interface HostJournals {
   /**
    * Claims the session's journal for a publisher, creating it when needed, and fences every older generation. When the
-   * index is over `options.maxIndexItems`, or `options.allowed` says the connection is gone, nothing is created or claimed.
+   * index is over `options.maxIndexItems`, or `options.allowed` says the connection is gone, nothing is claimed; an index
+   * over the bound also takes the session out of serving, because its publisher is locked out and the journal goes stale.
    */
   open(hostId: string, sessionKey: string, publisherId: string, options: JournalOpenOptions): Promise<JournalOpened | JournalOpenRefusal>;
   /**
@@ -2272,8 +2530,11 @@ export interface HostJournals {
   indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
   /** Applies entries in order and stores the changes before returning. */
   publish(hostId: string, sessionKey: string, generation: number, entries: readonly JournalPublishEntry[]): Promise<JournalPublished>;
-  /** Puts bodies the Host read again back into the journal, as far as the limits allow. */
-  fill(hostId: string, sessionKey: string, items: readonly CompleteItemInput[]): Promise<JournalFilled>;
+  /**
+   * Puts bodies the Host read again back into the journal, as far as the limits allow. With `read`, the page is read in the
+   * same step, so no publication can come between the fill and the page.
+   */
+  fill(hostId: string, sessionKey: string, items: readonly CompleteItemInput[], read?: JournalReadRequest): Promise<JournalFilled>;
   /** A page of the session's journal, or undefined when it has none. */
   page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
   /** The cursor and head of the session's journal, or undefined when it has none. */
@@ -2300,7 +2561,7 @@ export interface HostJournals {
 
 /** A growing entry the journal's limits do not allow. */
 class JournalQuotaRefused extends Error {
-  constructor(readonly limit: 'items' | 'session' | 'host') {
+  constructor(readonly limit: 'items' | 'session' | 'host' | 'incomplete') {
     super(`The journal is over its ${limit} limit.`);
     this.name = 'JournalQuotaRefused';
   }
@@ -2312,6 +2573,8 @@ function wholeNumber(name: string, value: number): number {
 }
 
 type Cached = { hostId: string; sessionKey: string; journal: SessionJournal; bytes: number };
+/** Where a journal's retained window began after its last eviction, in the epoch it was measured in. */
+type RetainedWindow = { epoch: string; start: number };
 type HostUsage = { total: number; sessions: Map<string, number> };
 
 export function createHostJournals(options: HostJournalsOptions): HostJournals {
@@ -2327,12 +2590,18 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     liveOnlyItems: wholeNumber('Journal live-only items', options.limits?.liveOnlyItems ?? LIVE_ONLY_MAX_ITEMS),
   };
   const retainTurns = wholeNumber('Journal retained turns', options.retention?.turns ?? RETAIN_TURNS);
+  const retainItems = wholeNumber('Journal retained items', options.retention?.minItems ?? RETAIN_MIN_ITEMS);
+  /** The window of each loaded journal. A journal loaded again measures its window afresh and evicts nothing. */
+  const windows = new WeakMap<SessionJournal, RetainedWindow>();
+  const windowOf = (journal: SessionJournal): RetainedWindow => ({ epoch: journal.epoch, start: journal.windowStart(retainTurns, retainItems) });
   /** Least recently used first. */
   const cache = new Map<string, Cached>();
   let cacheBytes = 0;
   const chains = new Map<string, Promise<void>>();
   /** Sessions whose last publication failed to apply or store: nothing more is accepted until the session is opened again. */
   const needsReopen = new Set<string>();
+  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. */
+  const quotaFenced = new Map<string, number>();
   const heads = new JournalHeadIndex();
   const hostsLoaded = new Set<string>();
   const usage = new Map<string, HostUsage>();
@@ -2384,6 +2653,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     const saved = await store.load(key);
     const journal = saved ? new SessionJournal(saved) : create ? SessionJournal.create(key) : undefined;
     if (journal) {
+      windows.set(journal, windowOf(journal));
       remember(hostId, sessionKey, journal);
       trimCache(key);
     }
@@ -2455,19 +2725,31 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     return size;
   }
 
+  /** The most this session may hold: its own limit, or what the Host's quota leaves after its other sessions. */
+  function roomOf(hostId: string, sessionKey: string): number {
+    const host = usage.get(hostId);
+    const others = host ? host.total - (host.sessions.get(sessionKey) ?? 0) : 0;
+    return Math.min(limits.sessionBytes, limits.hostBytes - others);
+  }
+
   /**
-   * Checks each entry that grows the journal against the limits. A replacement is admitted by its own size and the
-   * live-only items it carries over, without evicting first; the other entries may evict bodies to make room. The size is
-   * measured once and then counted up by the entries.
+   * Checks each entry that grows the journal against the limits. A replacement is admitted by its own size plus what it
+   * carries over, without evicting first; the other entries evict bodies to make room before they are refused. An entry
+   * larger than the room is refused before anything is evicted. The size is measured once and then counted up by the entries.
    */
   function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: JournalPublishEntry) => void {
     let size: number | undefined;
     return entry => {
+      if (entry.op === 'head') {
+        if (journal.incomplete) throw new JournalQuotaRefused('incomplete');
+        return;
+      }
       if (entry.op === 'replace') {
-        if (entry.items.length + journal.liveOnlyCount > limits.sessionItems) throw new JournalQuotaRefused('items');
-        const need = utf8ByteLength(JSON.stringify(entry)) + journal.liveOnlyBytes();
+        const carried = journal.carriedOnReplace(entry.items);
+        if (entry.items.length + carried.count > limits.sessionItems) throw new JournalQuotaRefused('items');
+        const need = utf8ByteLength(JSON.stringify(entry)) + carried.bytes;
         if (need > limits.sessionBytes) throw new JournalQuotaRefused('session');
-        if (!hostHasRoom(hostId, sessionKey, need)) throw new JournalQuotaRefused('host');
+        if (need > roomOf(hostId, sessionKey)) throw new JournalQuotaRefused('host');
         size = undefined;
         return;
       }
@@ -2476,12 +2758,22 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         : entry.op === 'prepend' ? journal.itemCount + entry.items.length : journal.itemCount;
       if (itemsAfter > limits.sessionItems) throw new JournalQuotaRefused('items');
       const entryBytes = utf8ByteLength(JSON.stringify(entry));
+      const room = roomOf(hostId, sessionKey);
+      if (entryBytes > room) throw new JournalQuotaRefused(room < limits.sessionBytes ? 'host' : 'session');
       size ??= journal.residentBytes();
-      if (size + entryBytes > limits.sessionBytes) size = shrink(journal, limits.sessionBytes - entryBytes);
-      if (size + entryBytes > limits.sessionBytes) throw new JournalQuotaRefused('session');
+      if (size + entryBytes > room) size = shrink(journal, room - entryBytes);
+      if (size + entryBytes > room) throw new JournalQuotaRefused(room < limits.sessionBytes ? 'host' : 'session');
       size += entryBytes;
-      if (!hostHasRoom(hostId, sessionKey, size)) throw new JournalQuotaRefused('host');
     };
+  }
+
+  /** Evicts the bodies that left the retained window since the last eviction; bodies filled back since stay. */
+  function evictLeavers(journal: SessionJournal): void {
+    const before = windows.get(journal) ?? windowOf(journal);
+    const from = before.epoch === journal.epoch ? before.start : Number.NEGATIVE_INFINITY;
+    const start = Math.max(from, journal.windowStart(retainTurns, retainItems));
+    if (start > from) journal.evictRange(from, start);
+    windows.set(journal, { epoch: journal.epoch, start });
   }
 
   function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
@@ -2534,10 +2826,21 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       };
       if (openOptions.allowed && !openOptions.allowed()) return refuse('unavailable');
       const index = journal.index();
-      if (index.length > openOptions.maxIndexItems) return refuse('index_too_large');
+      if (index.length > openOptions.maxIndexItems) {
+        if (!journal.hasHead) return refuse('index_too_large');
+        journal.clearHead();
+        const kept = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
+        account(hostId, sessionKey, kept);
+        remember(hostId, sessionKey, journal, kept);
+        heads.remove(hostId, sessionKey);
+        bump(hostId);
+        trimCache(key);
+        return { refused: 'index_too_large', unserved: true };
+      }
       const { generation, watermark } = journal.claim(publisherId);
       const bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
       needsReopen.delete(key);
+      quotaFenced.delete(key);
       account(hostId, sessionKey, bytes);
       remember(hostId, sessionKey, journal, bytes);
       trimCache(key);
@@ -2547,19 +2850,20 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     indexPage: (hostId, sessionKey, epoch, after, maxItems) => serialized<JournalIndexEntry[] | undefined>(hostId, async () => {
       const journal = await load(hostId, sessionKey, false);
       if (!journal || journal.epoch !== epoch) return undefined;
-      const page: JournalIndexEntry[] = [];
-      for (const entry of journal.index()) {
-        if (entry.seqStart <= after) continue;
-        page.push(entry);
-        if (page.length >= maxItems) break;
+      const index = journal.index();
+      let low = 0, high = index.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (index[middle]!.seqStart <= after) low = middle + 1; else high = middle;
       }
-      return page;
+      return index.slice(low, low + maxItems);
     }),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
       const fenced = (): JournalPublished => ({ events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
       const key = storeKey(hostId, sessionKey);
       if (needsReopen.has(key)) return fenced();
+      if (quotaFenced.get(key) === generation) return { events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'quota_exceeded' } };
       const published: JournalPublished = { events: [], watermark: 0 };
       let journal!: SessionJournal;
       let bytes = 0;
@@ -2570,7 +2874,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         if (!loaded || publisherId === undefined) return fenced();
         journal = loaded;
         const admit = admission(hostId, sessionKey, journal);
-        let applied = false;
         let liveOnlyChanged = false;
         for (const entry of entries) {
           const current = journal.publisher;
@@ -2579,16 +2882,20 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
             if (fresh) admit(entry);
             apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);
             if (fresh) {
-              applied = true;
               if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)) liveOnlyChanged = true;
             }
           } catch (error) {
             const refusal = refusalOf(error, entry.sequence);
             if (!refusal) throw error;
             published.refusal = refusal;
-            if (error instanceof JournalQuotaRefused && journal.hasHead) {
-              journal.clearHead();
-              published.unserved = true;
+            if (error instanceof JournalQuotaRefused) {
+              // The refused row is missing from the journal: it is not served, and this generation publishes nothing more.
+              quotaFenced.set(key, generation);
+              journal.markIncomplete();
+              if (journal.hasHead) {
+                journal.clearHead();
+                published.unserved = true;
+              }
             }
             break;
           }
@@ -2597,7 +2904,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
           const dropped = journal.dropOldestLiveOnly(limits.liveOnlyItems);
           if (dropped.length > 0) published.droppedLiveOnly = dropped.length;
         }
-        if (applied) journal.evict(retainTurns);
+        evictLeavers(journal);
         bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();
       } catch (error) {
         drop(key);
@@ -2607,30 +2914,32 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       account(hostId, sessionKey, bytes);
       remember(hostId, sessionKey, journal, bytes);
       if (journal.hasHead) heads.add(hostId, sessionKey); else heads.remove(hostId, sessionKey);
-      bump(hostId);
       trimCache(key);
       return { ...published, watermark: journal.publisher?.watermark ?? 0, cursor: journal.cursor, hasHead: journal.hasHead };
     }),
 
-    fill: (hostId, sessionKey, items) => serialized<JournalFilled>(hostId, async () => {
+    fill: (hostId, sessionKey, items, read) => serialized<JournalFilled>(hostId, async () => {
       const filled: string[] = [], mismatched: string[] = [], unknown: string[] = [], skipped: string[] = [];
+      await loadHost(hostId);
       const journal = await load(hostId, sessionKey, false);
       const fits = (journal: SessionJournal, added: number) => {
         const size = journal.residentBytes() + added;
-        return size <= Math.min(limits.sessionBytes, cacheLimits.maxBytes) && hostHasRoom(hostId, sessionKey, size);
+        return size <= Math.min(limits.sessionBytes, cacheLimits.maxBytes) && size <= roomOf(hostId, sessionKey);
       };
       let trimmed = false;
       for (const { row, digest } of items) {
         if (!journal || !journal.has(row.itemKey)) { unknown.push(row.itemKey); continue; }
-        const added = utf8ByteLength(JSON.stringify(row));
-        if (!fits(journal, added) && !trimmed) {
-          // The first body that does not fit: bodies outside the latest turns, such as ones filled earlier, make room once.
-          trimmed = true;
-          const evicted = new Set(journal.evict(retainTurns));
-          for (const key of filled.filter(filledKey => evicted.has(filledKey))) skipped.push(key);
-          for (const key of evicted) { const at = filled.indexOf(key); if (at >= 0) filled.splice(at, 1); }
+        if (!journal.resident(row.itemKey)) {
+          const added = utf8ByteLength(JSON.stringify(row));
+          if (!fits(journal, added) && !trimmed) {
+            // The first body that does not fit: bodies outside the retained window, such as ones filled earlier, make room once.
+            trimmed = true;
+            const evicted = new Set(journal.evict(retainTurns, retainItems));
+            for (const key of filled.filter(filledKey => evicted.has(filledKey))) skipped.push(key);
+            for (const key of evicted) { const at = filled.indexOf(key); if (at >= 0) filled.splice(at, 1); }
+          }
+          if (!fits(journal, added)) { skipped.push(row.itemKey); continue; }
         }
-        if (!fits(journal, added)) { skipped.push(row.itemKey); continue; }
         const outcome = journal.fill(row.itemKey, bodyFromRow(row), digest);
         (outcome === 'filled' ? filled : outcome === 'mismatch' ? mismatched : unknown).push(row.itemKey);
       }
@@ -2640,7 +2949,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         remember(hostId, sessionKey, journal, bytes);
         trimCache(storeKey(hostId, sessionKey));
       }
-      return { filled, mismatched, unknown, ...(skipped.length > 0 ? { skipped } : {}) };
+      const page = read ? journal?.page(read.request, { olderBeyondJournal: read.olderBeyondJournal() }) : undefined;
+      return { filled, mismatched, unknown, ...(skipped.length > 0 ? { skipped } : {}), ...(page ? { page } : {}) };
     }),
 
     page: (hostId, sessionKey, request, olderBeyondJournal) => serialized<JournalPageResult | undefined>(hostId, async () =>
@@ -2699,6 +3009,132 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   };
 }
 ```
+
+- [ ] **Step 6a: The journal core gains what the service needs.** In `packages/agent-remote-journal/src/` (tests in `journal-window.test.ts`, below):
+
+  - `retention.ts`: `retainedFrom(items, keepLatestTurns, keepLatestItems = 0)` is the index where the retained window starts: the latest turns or the latest items, whichever reaches further back (an item without a turn is a unit of its own); `evictable(item)`; `evictableItems` takes the item window as an optional third argument.
+  - `session-journal.ts`: `evict(turns, items = 0)`; `windowStart(turns, items = 0)` (the `seqStart` of the first retained item, or `nextSeq` when empty); `evictRange(from, to)` (evicts the evictable items whose `seqStart` is in the range); `resident(itemKey)`; `incomplete` and `markIncomplete()` (a `meta.incomplete` flag, stored with the meta and removed by `replace`); `carriedOnReplace(reread)` (count and bytes of what `replacementOrder` carries: live-only items and open items sealed); `liveOnlyCount` and `liveOnlyBytes()` are running totals; `index()` returns a snapshot that is reused until an item changes.
+  - `types.ts`: `JournalMeta.incomplete?: true`.
+
+```ts
+import { describe, expect, it } from 'vitest';
+
+import { openJournal, text } from './journal.test-fixture.js';
+import { SessionJournal } from './session-journal.js';
+
+/** `count` complete items, each its own turn unless `turn` says otherwise. */
+function completeItems(count: number, turn: (at: number) => string | undefined = at => `turn-${at}`) {
+  const { journal, publish } = openJournal();
+  for (let at = 1; at <= count; at++) {
+    const row = text(`m${at}`, `d${at}`, `text ${at}`, turn(at) ?? '');
+    journal.append(publish(), turn(at) === undefined ? { ...row, turnId: undefined } : row);
+    journal.complete(publish(), `m${at}`, `digest-${at}`);
+  }
+  return { journal, publish };
+}
+const resident = (journal: SessionJournal) => journal.index().filter(entry => entry.resident).map(entry => entry.itemKey);
+
+describe('the retained window', () => {
+  it('is the latest turns or the latest items, whichever reaches further back', () => {
+    const { journal } = completeItems(6);
+    expect(journal.evict(2, 0)).toEqual(['m1', 'm2', 'm3', 'm4']);
+    const second = completeItems(6);
+    expect(second.journal.evict(2, 4)).toEqual(['m1', 'm2']);
+    expect(resident(second.journal)).toEqual(['m3', 'm4', 'm5', 'm6']);
+    const third = completeItems(6);
+    expect(third.journal.evict(5, 2)).toEqual(['m1']);
+  });
+
+  it('counts an item without a turn as a turn of its own', () => {
+    const { journal } = completeItems(5, () => undefined);
+    expect(journal.evict(2)).toEqual(['m1', 'm2', 'm3']);
+  });
+
+  it('says where it starts, and where the next item will start when the journal is empty', () => {
+    const { journal } = completeItems(6);
+    expect(journal.windowStart(2)).toBe(5);
+    expect(journal.windowStart(2, 4)).toBe(3);
+    expect(journal.windowStart(50, 200)).toBe(1);
+    expect(openJournal().journal.windowStart(2)).toBe(1);
+  });
+
+  it('evicts only the bodies of items whose sequence is in the range it is given', () => {
+    const { journal } = completeItems(6);
+    expect(journal.evictRange(2, 4)).toEqual(['m2', 'm3']);
+    expect(journal.evictRange(2, 4)).toEqual([]);
+    expect(resident(journal)).toEqual(['m1', 'm4', 'm5', 'm6']);
+  });
+
+  it('tells whether an item body is in memory', () => {
+    const { journal } = completeItems(2);
+    journal.evict(1);
+    expect([journal.resident('m1'), journal.resident('m2'), journal.resident('nope')]).toEqual([false, true, false]);
+  });
+});
+
+describe('an incomplete journal', () => {
+  it('is marked, stored with the meta, and made whole again by a replacement', () => {
+    const { journal, publish } = completeItems(2);
+    expect(journal.incomplete).toBe(false);
+    journal.takeChanges();
+    journal.markIncomplete();
+    expect(journal.takeChanges()?.meta.incomplete).toBe(true);
+    expect(new SessionJournal(journal.state()).incomplete).toBe(true);
+    journal.replace(publish(), [], 1);
+    expect(journal.incomplete).toBe(false);
+  });
+});
+
+describe('what a replacement carries', () => {
+  it('counts the live-only items and the open items it seals, and not the items it rereads', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), { ...text('l1', 'l1', 'live', 'turn-0'), liveOnly: true });
+    journal.append(publish(), text('m1', 'd1', 'first', 'turn-1'));
+    journal.complete(publish(), 'm1', 'digest-1');
+    journal.append(publish(), text('o1', 'o1', 'still open', 'turn-2'));
+    const reread = [{ row: text('m1', 'd1', 'first', 'turn-1'), digest: 'digest-1' }];
+    const carried = journal.carriedOnReplace(reread);
+    expect(carried.count).toBe(2);
+    expect(carried.bytes).toBeGreaterThan(0);
+    expect(journal.carriedOnReplace([...reread, { row: text('o1', 'o1', 'still open', 'turn-2'), digest: 'digest-o1' }]).count).toBe(1);
+  });
+});
+
+describe('the index snapshot', () => {
+  it('is reused until an item changes, and rebuilt after any change', () => {
+    const { journal, publish } = completeItems(3);
+    const first = journal.index();
+    expect(journal.index()).toBe(first);
+    journal.evict(1);
+    const evicted = journal.index();
+    expect(evicted).not.toBe(first);
+    expect(evicted.map(entry => entry.resident)).toEqual([false, false, true]);
+    journal.append(publish(), text('m4', 'd4', 'four', 'turn-4'));
+    expect(journal.index()).toHaveLength(4);
+  });
+});
+
+describe('the live-only totals', () => {
+  it('follow items that become live-only, stop being so, or are dropped', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'first', 'turn-1'));
+    expect(journal.liveOnlyCount).toBe(0);
+    expect(journal.liveOnlyBytes()).toBe(0);
+    journal.seal(publish(), 'm1');
+    expect(journal.liveOnlyCount).toBe(1);
+    const sealedBytes = journal.liveOnlyBytes();
+    expect(sealedBytes).toBeGreaterThan(0);
+    journal.append(publish(), { ...text('l1', 'l1', 'live', 'turn-0'), liveOnly: true });
+    journal.complete(publish(), 'l1', 'digest-l1');
+    expect(journal.liveOnlyBytes()).toBeGreaterThan(sealedBytes);
+    journal.dropOldestLiveOnly(0);
+    expect(journal.liveOnlyCount).toBe(0);
+    expect(journal.liveOnlyBytes()).toBe(0);
+  });
+});
+```
+
+Run: `pnpm --filter @orchardworks/agent-remote-journal run build` then the journal suite (176 tests). Hosted imports the journal from `dist`.
 
 - [ ] **Step 7: Change the uplink.** In `packages/agent-remote-hosted/src/journal-uplink.ts`:
 
@@ -2771,10 +3207,13 @@ Replace the `journal_open` case, from `case 'journal_open': {` through its closi
         }
 ```
 
+`requestFill(sessionKey, itemKeys, read?)` takes the optional `JournalReadRequest` and keeps it on the pending fill; when the Controller's `journal_fill` arrives, `journals.fill(hostId, sessionKey, items, found.read)` reads the page in the same step as the fill, and the request resolves with it. `broker.requestFill`, the `requestFill` option of `createJournalSessions` (which passes `{ request, olderBeyondJournal: () => !shared.olderExhausted }`), `JournalReads.fill(itemKeys, request)` (it returns the page) and the stream's `servePage` (it uses the page `fill` returns instead of paging again) follow; the mocks in `journal-sessions.test.ts` and `journal-session-stream.test.ts` return the page.
+
 In the `journal_publish` case, immediately before `if (!options.current()) return;` (the one after the `stored` block), add
 
 ```ts
           if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
+          if (result.refusal?.reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
 ```
 
 and replace
@@ -2791,7 +3230,6 @@ with
 ```ts
           if (result.refusal) {
             const { sequence, reason, itemKey } = result.refusal;
-            if (reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
             refuse(sessionKey, generation, sequence, reason, itemKey);
           }
 ```
@@ -2803,12 +3241,12 @@ In `packages/agent-remote-hosted/src/index.ts`, add `type JournalOpenOptions` to
 - [ ] **Step 8: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/host-journals-bounds.test.ts src/journal-index-pages.test.ts src/host-journals.test.ts src/journal-uplink.test.ts src/broker-journals.test.ts src/relay-diagnostics.test.ts --testTimeout=10000`
-Expected: PASS, 6 files and 113 tests. Live-only items are closed (completed) in the tests before they are dropped: the core removes only complete live-only items, so the service runs the cap after `complete` as well as after an append of a live-only row, a seal and a replacement. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
+Expected: PASS, 6 files and 132 tests. Live-only items are closed (completed) in the tests before they are dropped: the core removes only complete live-only items, so the service runs the cap after `complete` as well as after an append of a live-only row, a seal and a replacement. Reading a failure: a retention test that differs usually means the latest-N units differ (the live-only `l0` forms its own unit of `turn-0` and is never evicted); a size test that differs means the entry or record sizes moved a few hundred characters, so compare the measured sizes (`residentBytes`) with the limit the test sets.
 
 - [ ] **Step 9: Run the whole package, typecheck, rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000) then `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
-Expected: PASS for all: 66 files and 830 tests in hosted (790 before this task). The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
+Expected: PASS for all: 66 files and 849 tests in hosted (790 before this task). The landed P1-B2 suites (`broker-journal-sessions.test.ts` and the rest) run here and must stay green; none of them uses the changed `open` options.
 
 - [ ] **Step 10: Commit.**
 

@@ -64,11 +64,11 @@ function fixture(options: FixtureOptions = {}) {
       if (options.pageFails) throw options.pageFails;
       return journal.page(request, { olderBeyondJournal });
     },
-    fill: async keys => {
+    fill: async (keys, request) => {
       calls.fill.push(keys);
       await options.fillGate;
-      if (options.fillBringsNothing) return;
-      for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
+      if (!options.fillBringsNothing) for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
+      return journal.page(request, { olderBeyondJournal });
     },
     older: async limit => {
       calls.older.push(limit);

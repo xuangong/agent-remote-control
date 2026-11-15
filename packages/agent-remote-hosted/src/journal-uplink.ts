@@ -5,7 +5,7 @@ import {
   type JournalRefusalReason, type RemoteHostUplinkMessage,
 } from '@orchardworks/agent-remote-protocol';
 
-import type { HostJournals, JournalFilled, JournalPublished } from './host-journals.js';
+import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 import { packIndex } from './journal-index-pages.js';
 
 /** The most requests one connection has open to its Host at a time. */
@@ -49,15 +49,18 @@ export interface JournalConnectionOptions {
 export interface JournalConnection {
   /** Handles one journal message from the Host. Calls made in order enqueue their journal work in that order. */
   receive(message: JournalHostMessage): Promise<void>;
-  /** Asks the Host's Controller to read item bodies again from native history; resolves once the journal took them. */
-  requestFill(sessionKey: string, itemKeys: readonly string[]): Promise<JournalFilled>;
+  /**
+   * Asks the Host's Controller to read item bodies again from native history; resolves once the journal took them. With
+   * `read`, the journal also reads the page in the same step as it takes the bodies, and the result carries it.
+   */
+  requestFill(sessionKey: string, itemKeys: readonly string[], read?: JournalReadRequest): Promise<JournalFilled>;
   /** Asks the Host's Controller to read older history and publish it as prepended items. */
   requestOlder(sessionKey: string, limit: number): Promise<{ olderAvailable: boolean }>;
   /** Ends the connection: pending requests fail and its sessions need opening again. */
   close(): void;
 }
 
-type PendingFill = { kind: 'fill'; itemKeys: ReadonlySet<string>; applying: boolean; resolve(value: JournalFilled): void };
+type PendingFill = { kind: 'fill'; itemKeys: ReadonlySet<string>; read?: JournalReadRequest; applying: boolean; resolve(value: JournalFilled): void };
 type PendingOlder = { kind: 'older'; resolve(value: { olderAvailable: boolean }): void };
 type Pending = (PendingFill | PendingOlder) & { sessionKey: string; reject(error: Error): void; timer: unknown };
 
@@ -172,13 +175,13 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             catch { options.diagnostic?.('journal_fanout_failed'); }
           }
           if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
+          if (result.refusal?.reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
           if (!options.current()) return;
           if (result.cursor && stored) {
             send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_ack', sessionKey, generation, watermark: result.watermark, cursor: result.cursor });
           }
           if (result.refusal) {
             const { sequence, reason, itemKey } = result.refusal;
-            if (reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
             refuse(sessionKey, generation, sequence, reason, itemKey);
           }
           return;
@@ -189,7 +192,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           if (!found || found.applying) return;
           found.applying = true;
           try {
-            const filled = await journals.fill(hostId, message.sessionKey, message.items.filter(({ row }) => found.itemKeys.has(row.itemKey)));
+            const filled = await journals.fill(hostId, message.sessionKey, message.items.filter(({ row }) => found.itemKeys.has(row.itemKey)), found.read);
             if (pending.get(requestId) !== found) return;
             settle(requestId, found);
             found.resolve(filled);
@@ -211,12 +214,12 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
       }
     },
 
-    requestFill(sessionKey, itemKeys) {
+    requestFill(sessionKey, itemKeys, read) {
       if (itemKeys.length < 1 || itemKeys.length > JOURNAL_FILL_MAX_ITEMS || new Set(itemKeys).size !== itemKeys.length) {
         return Promise.reject(new JournalRequestError('invalid', `A fill asks for 1 to ${JOURNAL_FILL_MAX_ITEMS} distinct items.`));
       }
       return request<JournalFilled>('fill', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill_request', requestId, sessionKey, itemKeys: [...itemKeys] }),
-        resolve => ({ kind: 'fill', itemKeys: new Set(itemKeys), applying: false, resolve }));
+        resolve => ({ kind: 'fill', itemKeys: new Set(itemKeys), ...(read ? { read } : {}), applying: false, resolve }));
     },
 
     requestOlder(sessionKey, limit) {

@@ -313,6 +313,29 @@ describe('a journal connection', () => {
     await expect(second).rejects.toMatchObject({ code: 'closed' });
   });
 
+  it('hands the page read of a fill request to the journal, and resolves with the page it read in the same step', async () => {
+    const seen: unknown[] = [];
+    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals: HostJournals = { ...base, fill: async (_host, _key, _items, read) => { seen.push(read?.request.requestId, read?.olderBeyondJournal()); return { filled: ['m1'], mismatched: [], unknown: [] }; } };
+    const f = fixture({ journals });
+    const request = { requestId: 'page-1', agentId: 'agent', direction: 'tail' as const, limit: 10 };
+    const pending = f.connection.requestFill(SESSION, ['m1'], { request, olderBeyondJournal: () => true });
+    const requestId = requestIdOf(f.sent, 'journal_fill_request');
+    await f.connection.receive(wire({ type: 'journal_fill', requestId, sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] }));
+    await expect(pending).resolves.toEqual({ filled: ['m1'], mismatched: [], unknown: [] });
+    expect(seen).toEqual(['page-1', true]);
+  });
+
+  it('reports a quota refusal even when the connection is no longer current, because the journal already left serving', async () => {
+    const events: string[] = [];
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { sessionItems: 0 } });
+    const f = fixture({ journals, diagnostic: event => events.push(event) });
+    await f.open();
+    f.endConnection();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(events).toEqual(['journal_quota_exceeded']);
+  });
+
   it('fails a fill that is being applied when the connection closes', async () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });

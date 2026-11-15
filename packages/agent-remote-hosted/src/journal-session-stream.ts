@@ -37,8 +37,11 @@ export interface JournalReads {
   status(): Promise<JournalStatus | undefined>;
   /** A page of the journal; the implementation says whether older history may still exist beyond it. */
   page(request: JournalPageRequest): Promise<JournalPageResult | undefined>;
-  /** Asks the Controller to read these bodies again; resolves when the journal took them, rejects when it cannot be done. */
-  fill(itemKeys: string[]): Promise<void>;
+  /**
+   * Asks the Controller to read these bodies again; resolves with the page for `request`, read by the journal in the same
+   * step as it took the bodies, and rejects when it cannot be done.
+   */
+  fill(itemKeys: string[], request: JournalPageRequest): Promise<JournalPageResult | undefined>;
   /** Asks the Controller to read up to `limit` older items and publish them; rejects when it cannot be done. */
   older(limit: number): Promise<void>;
   olderBeyondJournal(): boolean;
@@ -384,9 +387,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       let previouslyMissing = Number.POSITIVE_INFINITY;
       for (let round = 0; result?.kind === 'missing' && round < rounds && result.itemKeys.length < previouslyMissing; round++) {
         previouslyMissing = result.itemKeys.length;
-        await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
-        if (isPhase('closed')) return;
-        result = await reads.page(query);
+        result = await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS), query);
         if (isPhase('closed')) return;
       }
       if (result?.kind === 'page' && query.direction === 'before' && reachesJournalStart(result.page) && reads.olderBeyondJournal()) {

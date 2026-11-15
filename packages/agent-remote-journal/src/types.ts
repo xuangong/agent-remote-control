@@ -75,6 +75,8 @@ export interface JournalMeta {
   lastRevision: number;
   /** Absent until the Controller publishes its first Snapshot. */
   head?: JournalHead;
+  /** Set when a publication of the session was refused and its rows are missing; cleared by a replacement, which rebuilds the journal. */
+  incomplete?: true;
   retiredEpochs: { epoch: string; retiredAt: number }[];
 }
 

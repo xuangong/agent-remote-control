@@ -15,6 +15,7 @@ const PAGE_MAX_LIMIT = 500;
 const FILL_ROUNDS = 4;
 const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
+const CLOSE_REASON_MAX_BYTES = 123;
 const ACTIVITY_COALESCE_MS = 500;
 const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
@@ -149,6 +150,19 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     sendRaw(encoded.json);
   }
 
+  /** Closes the browser socket with a reason a WebSocket close frame can carry (at most 123 bytes of UTF-8); a failing close is ignored. */
+  function closeClient(code: number, reason?: string): void {
+    let fitted = '';
+    let bytes = 0;
+    for (const character of reason ?? '') {
+      bytes += encoder.encode(character).byteLength;
+      if (bytes > CLOSE_REASON_MAX_BYTES) break;
+      fitted += character;
+    }
+    try { client.close(code, fitted); }
+    catch { /* The socket is already going away. */ }
+  }
+
   function shutdown(code?: number, reason?: string): void {
     if (isPhase('closed')) return;
     phase = 'closed';
@@ -161,7 +175,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     held.length = 0;
     heldControl.length = 0;
     queued.length = 0;
-    if (code !== undefined) client.close(code, reason);
+    if (code !== undefined) closeClient(code, reason);
   }
 
   /** The Snapshot of the head. While the Controller stream is not ready, the runtime shows as not connected yet. */
@@ -285,7 +299,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       const messages = held.splice(0);
       const requests = heldControl.splice(0).map(item => item.request);
       const { status } = refusal;
-      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, refusal.message); return; }
+      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached'); return; }
       // A refusal that retrying cannot change leaves the stream reading; one that depends on the Host waits for it.
       const hopeless = status !== undefined && status >= 400 && status < 500 && status !== 408;
       const offline = refusal.code === 'host_offline';
@@ -364,17 +378,21 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     };
     try {
       let result = await reads.page(query);
+      if (isPhase('closed')) return;
       const rounds = Math.ceil(query.limit / JOURNAL_FILL_MAX_ITEMS) + 1;
       let previouslyMissing = Number.POSITIVE_INFINITY;
       for (let round = 0; result?.kind === 'missing' && round < rounds && result.itemKeys.length < previouslyMissing; round++) {
         previouslyMissing = result.itemKeys.length;
         await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
+        if (isPhase('closed')) return;
         result = await reads.page(query);
+        if (isPhase('closed')) return;
       }
       if (result?.kind === 'page' && query.direction === 'before' && reachesJournalStart(result.page) && reads.olderBeyondJournal()) {
         const served = result;
         try {
           await reads.older(Math.min(query.limit, JOURNAL_OLDER_MAX_LIMIT));
+          if (isPhase('closed')) return;
           result = (await reads.page(query)) ?? served;
         } catch { result = served; }
       }

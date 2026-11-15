@@ -994,6 +994,10 @@ interface FixtureOptions {
   pageFails?: Error;
   /** Negotiation reads the journal status, which resolves only when this promise does. */
   statusGate?: Promise<void>;
+  /** The fill waits for this promise before it brings bodies back. */
+  fillGate?: Promise<void>;
+  /** The browser socket's close throws like a WebSocket's for a reason over 123 bytes, or for every close. */
+  closeThrows?: 'long reason' | 'always';
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -1021,6 +1025,7 @@ function fixture(options: FixtureOptions = {}) {
     },
     fill: async keys => {
       calls.fill.push(keys);
+      await options.fillGate;
       if (options.fillBringsNothing) return;
       for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
     },
@@ -1034,7 +1039,10 @@ function fixture(options: FixtureOptions = {}) {
   };
   const sent: Wire[] = [];
   const closed: Array<[number | undefined, string | undefined]> = [];
-  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => {
+    if (options.closeThrows === 'always' || (options.closeThrows === 'long reason' && Buffer.byteLength(reason ?? '') > 123)) throw new RangeError('The reason must not exceed 123 bytes.');
+    closed.push([code, reason]);
+  } };
   const hostWrites: Wire[] = [];
   let sink: HostStreamSink | undefined;
   let hostClosed = false;
@@ -1319,9 +1327,23 @@ describe('the reasons a Controller stream cannot open', () => {
   const acquire = (requestId: string) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
 
   it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
-    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
+    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429), closeThrows: 'long reason' });
     f.stream.receive(negotiate);
-    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Refused: session_stream_capacity.']]));
+    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached']]));
+  });
+
+  it('cuts a close reason to 123 bytes of whole characters, and survives a socket whose close throws', async () => {
+    const long = fixture({ closeThrows: 'long reason' });
+    await long.negotiated();
+    await vi.waitFor(() => expect(long.hostWrites).toHaveLength(1));
+    long.sink().ended(1012, '\u754c'.repeat(100));
+    expect(long.closed).toHaveLength(1);
+    expect(Buffer.byteLength(long.closed[0]![1]!)).toBe(123);
+    expect(long.closed[0]![1]).toBe('\u754c'.repeat(41));
+    const broken = fixture({ closeThrows: 'always' });
+    await broken.negotiated();
+    await vi.waitFor(() => expect(broken.hostWrites).toHaveLength(1));
+    expect(() => broken.sink().ended(1012, 'Remote Host disconnected')).not.toThrow();
   });
 
   it('answers an acquire with the pending state and the native owner, refuses the rest for good, and tries again on the next message', async () => {
@@ -1386,6 +1408,19 @@ describe('the activity of an observer', () => {
     expect(f.sent).toHaveLength(count);
   });
 
+  it('sends nothing at once for a burst of rows with heads of the same status, and one update with the latest cursor after the window', async () => {
+    const f = await observer();
+    for (const key of ['m3', 'm4', 'm5']) {
+      const appended = f.appendLive(key, key);
+      const same = f.setHead('idle');
+      f.stream.deliver({ ...same, events: [...appended.events, ...same.events] });
+    }
+    expect(f.sent).toHaveLength(2);
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'idle', cursor: { epoch: f.journal.epoch, seq: 5 } });
+  });
+
   it('waits for the window when a head changes nothing the observer shows', async () => {
     const f = await observer();
     f.stream.deliver(f.setHead('idle'));
@@ -1420,6 +1455,20 @@ describe('a journal-served stream under load', () => {
     f.stream.receive(pageRequest('tail'));
     await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
     expect(f.calls.fill).toHaveLength(1);
+  });
+
+  it('asks the Controller for no more bodies once the browser has left', async () => {
+    let release!: () => void;
+    const f = fixture({ evictBodies: true, extraRows: 298, fillGate: new Promise<void>(resolve => { release = resolve; }) });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 300));
+    await vi.waitFor(() => expect(f.calls.fill).toHaveLength(1));
+    f.stream.close();
+    release();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.calls.fill).toHaveLength(1);
+    expect(f.calls.pages).toHaveLength(1);
+    expect(f.types()).not.toContain('timeline_page');
   });
 
   it('caps a requested page at 500 items', async () => {
@@ -1498,6 +1547,7 @@ const PAGE_MAX_LIMIT = 500;
 const FILL_ROUNDS = 4;
 const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
+const CLOSE_REASON_MAX_BYTES = 123;
 const ACTIVITY_COALESCE_MS = 500;
 const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
@@ -1632,6 +1682,19 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     sendRaw(encoded.json);
   }
 
+  /** Closes the browser socket with a reason a WebSocket close frame can carry (at most 123 bytes of UTF-8); a failing close is ignored. */
+  function closeClient(code: number, reason?: string): void {
+    let fitted = '';
+    let bytes = 0;
+    for (const character of reason ?? '') {
+      bytes += encoder.encode(character).byteLength;
+      if (bytes > CLOSE_REASON_MAX_BYTES) break;
+      fitted += character;
+    }
+    try { client.close(code, fitted); }
+    catch { /* The socket is already going away. */ }
+  }
+
   function shutdown(code?: number, reason?: string): void {
     if (isPhase('closed')) return;
     phase = 'closed';
@@ -1644,7 +1707,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     held.length = 0;
     heldControl.length = 0;
     queued.length = 0;
-    if (code !== undefined) client.close(code, reason);
+    if (code !== undefined) closeClient(code, reason);
   }
 
   /** The Snapshot of the head. While the Controller stream is not ready, the runtime shows as not connected yet. */
@@ -1768,7 +1831,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       const messages = held.splice(0);
       const requests = heldControl.splice(0).map(item => item.request);
       const { status } = refusal;
-      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, refusal.message); return; }
+      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached'); return; }
       // A refusal that retrying cannot change leaves the stream reading; one that depends on the Host waits for it.
       const hopeless = status !== undefined && status >= 400 && status < 500 && status !== 408;
       const offline = refusal.code === 'host_offline';
@@ -1847,17 +1910,21 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     };
     try {
       let result = await reads.page(query);
+      if (isPhase('closed')) return;
       const rounds = Math.ceil(query.limit / JOURNAL_FILL_MAX_ITEMS) + 1;
       let previouslyMissing = Number.POSITIVE_INFINITY;
       for (let round = 0; result?.kind === 'missing' && round < rounds && result.itemKeys.length < previouslyMissing; round++) {
         previouslyMissing = result.itemKeys.length;
         await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
+        if (isPhase('closed')) return;
         result = await reads.page(query);
+        if (isPhase('closed')) return;
       }
       if (result?.kind === 'page' && query.direction === 'before' && reachesJournalStart(result.page) && reads.olderBeyondJournal()) {
         const served = result;
         try {
           await reads.older(Math.min(query.limit, JOURNAL_OLDER_MAX_LIMIT));
+          if (isPhase('closed')) return;
           result = (await reads.page(query)) ?? served;
         } catch { result = served; }
       }
@@ -2088,7 +2155,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
 - [ ] **Step 5: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-session-stream.test.ts --testTimeout=10000`
-Expected: PASS, 32 tests.
+Expected: PASS, 35 tests.
 
 Then add `packages/agent-remote-hosted/src/journal-sessions.test.ts`, which checks that `hostReturned(hostId)` reaches only the streams of that Host, and the shared state of a session (chained fills, its lifetime while a fill is pending, a late older-history answer after a replacement):
 
@@ -2097,14 +2164,20 @@ import { bodyFromRow, SessionJournal } from '@orchardworks/agent-remote-journal'
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { HostStreamOpener } from './journal-host-stream.js';
+import type { HostStream, HostStreamOpener } from './journal-host-stream.js';
 import { createJournalSessions } from './journal-sessions.js';
 
 const headSnapshot = { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } } as AgentSnapshotPayload;
 
 function socket() {
   const closed: Array<[number | undefined, string | undefined]> = [];
-  return { closed, client: { readyState: 1, bufferedAmount: 0, send: () => undefined, close: (code?: number, reason?: string) => { closed.push([code, reason]); } } };
+  const sent: Array<Record<string, any>> = [];
+  const client = {
+    readyState: 1, bufferedAmount: 0,
+    send: (data: string) => { sent.push(JSON.parse(data)); },
+    close: (code?: number, reason?: string) => { closed.push([code, reason]); },
+  };
+  return { closed, sent, client };
 }
 
 describe('the journal sessions of a Relay', () => {
@@ -2158,10 +2231,8 @@ describe('the journal sessions of a Relay', () => {
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
     });
     const open = async (limit: number, direction: 'tail' | 'before' = 'tail') => {
-      const { client, closed } = socket();
-      const sent: Array<Record<string, any>> = [];
-      client.send = (data: string) => { sent.push(JSON.parse(data)); };
-      const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:thread-1', publicAgentId: 'agent', client, hostStreams: { open: () => new Promise(() => undefined) } });
+      const { client, closed, sent } = socket();
+      const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:thread-1', publicAgentId: 'agent', client, hostStreams: { open: () => new Promise<HostStream>(() => undefined) } });
       stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
       await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(3));
       stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: { requestId: `page-${limit}-${sent.length}`, agentId: 'agent', direction, limit, ...(direction === 'before' ? { cursor: { epoch: journal.epoch, seq: 1 } } : {}) } }));

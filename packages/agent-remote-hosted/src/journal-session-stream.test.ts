@@ -35,6 +35,10 @@ interface FixtureOptions {
   pageFails?: Error;
   /** Negotiation reads the journal status, which resolves only when this promise does. */
   statusGate?: Promise<void>;
+  /** The fill waits for this promise before it brings bodies back. */
+  fillGate?: Promise<void>;
+  /** The browser socket's close throws like a WebSocket's for a reason over 123 bytes, or for every close. */
+  closeThrows?: 'long reason' | 'always';
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -62,6 +66,7 @@ function fixture(options: FixtureOptions = {}) {
     },
     fill: async keys => {
       calls.fill.push(keys);
+      await options.fillGate;
       if (options.fillBringsNothing) return;
       for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
     },
@@ -75,7 +80,10 @@ function fixture(options: FixtureOptions = {}) {
   };
   const sent: Wire[] = [];
   const closed: Array<[number | undefined, string | undefined]> = [];
-  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => {
+    if (options.closeThrows === 'always' || (options.closeThrows === 'long reason' && Buffer.byteLength(reason ?? '') > 123)) throw new RangeError('The reason must not exceed 123 bytes.');
+    closed.push([code, reason]);
+  } };
   const hostWrites: Wire[] = [];
   let sink: HostStreamSink | undefined;
   let hostClosed = false;
@@ -360,9 +368,23 @@ describe('the reasons a Controller stream cannot open', () => {
   const acquire = (requestId: string) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
 
   it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
-    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
+    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429), closeThrows: 'long reason' });
     f.stream.receive(negotiate);
-    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Refused: session_stream_capacity.']]));
+    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached']]));
+  });
+
+  it('cuts a close reason to 123 bytes of whole characters, and survives a socket whose close throws', async () => {
+    const long = fixture({ closeThrows: 'long reason' });
+    await long.negotiated();
+    await vi.waitFor(() => expect(long.hostWrites).toHaveLength(1));
+    long.sink().ended(1012, '\u754c'.repeat(100));
+    expect(long.closed).toHaveLength(1);
+    expect(Buffer.byteLength(long.closed[0]![1]!)).toBe(123);
+    expect(long.closed[0]![1]).toBe('\u754c'.repeat(41));
+    const broken = fixture({ closeThrows: 'always' });
+    await broken.negotiated();
+    await vi.waitFor(() => expect(broken.hostWrites).toHaveLength(1));
+    expect(() => broken.sink().ended(1012, 'Remote Host disconnected')).not.toThrow();
   });
 
   it('answers an acquire with the pending state and the native owner, refuses the rest for good, and tries again on the next message', async () => {
@@ -427,6 +449,19 @@ describe('the activity of an observer', () => {
     expect(f.sent).toHaveLength(count);
   });
 
+  it('sends nothing at once for a burst of rows with heads of the same status, and one update with the latest cursor after the window', async () => {
+    const f = await observer();
+    for (const key of ['m3', 'm4', 'm5']) {
+      const appended = f.appendLive(key, key);
+      const same = f.setHead('idle');
+      f.stream.deliver({ ...same, events: [...appended.events, ...same.events] });
+    }
+    expect(f.sent).toHaveLength(2);
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'idle', cursor: { epoch: f.journal.epoch, seq: 5 } });
+  });
+
   it('waits for the window when a head changes nothing the observer shows', async () => {
     const f = await observer();
     f.stream.deliver(f.setHead('idle'));
@@ -461,6 +496,20 @@ describe('a journal-served stream under load', () => {
     f.stream.receive(pageRequest('tail'));
     await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
     expect(f.calls.fill).toHaveLength(1);
+  });
+
+  it('asks the Controller for no more bodies once the browser has left', async () => {
+    let release!: () => void;
+    const f = fixture({ evictBodies: true, extraRows: 298, fillGate: new Promise<void>(resolve => { release = resolve; }) });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 300));
+    await vi.waitFor(() => expect(f.calls.fill).toHaveLength(1));
+    f.stream.close();
+    release();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.calls.fill).toHaveLength(1);
+    expect(f.calls.pages).toHaveLength(1);
+    expect(f.types()).not.toContain('timeline_page');
   });
 
   it('caps a requested page at 500 items', async () => {

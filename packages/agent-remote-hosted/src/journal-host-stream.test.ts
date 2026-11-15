@@ -86,6 +86,17 @@ describe('a Controller stream', () => {
     expect(() => stream.send(cancel)).toThrow(HostStreamRefusal);
   });
 
+  it('never reports an end for a stream the browser closed, even when the broker closes its socket afterwards', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const [, entry] = [...f.streams][0]!;
+    stream.close();
+    const closes = f.written.filter(message => message.type === 'stream_close').length;
+    entry.socket.close(1008, 'Invalid Remote Host session identity');
+    expect(f.seen.ended).toEqual([]);
+    expect(f.written.filter(message => message.type === 'stream_close')).toHaveLength(closes);
+  });
+
   it('ends the stream when the Controller does not accept it in time', async () => {
     const f = fixture();
     await f.opener.open(f.sink);

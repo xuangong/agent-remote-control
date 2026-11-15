@@ -60,7 +60,8 @@
 | `packages/agent-remote-hosted/src/journal-host-stream.test.ts` | New: tests with a fake context. |
 | `packages/agent-remote-hosted/src/journal-session-stream.ts` | New: the per-browser-stream read-path protocol. |
 | `packages/agent-remote-hosted/src/journal-session-stream.test.ts` | New: tests over a real `SessionJournal` with fake sockets. |
-| `packages/agent-remote-hosted/src/journal-sessions.ts` | New: subscriber registry, shared fill and older-history state, gating. |
+| `packages/agent-remote-hosted/src/journal-sessions.ts` | New: subscriber registry, shared fill and older-history state, gating, `hostReturned`. |
+| `packages/agent-remote-hosted/src/journal-sessions.test.ts` | New: `hostReturned` reaches only the streams of one Host. |
 | `packages/agent-remote-hosted/src/broker.ts` | Modify: `admitClientMessages` extraction, gating, `acceptJournalServed`, wiring, `onReady` hook. |
 | `packages/agent-remote-hosted/src/test-utils/journal-session-fixture.ts` | New: in-memory transports, a fake Controller and a browser helper. |
 | `packages/agent-remote-hosted/src/broker-journal-sessions.test.ts` | New: end-to-end tests over the in-memory transport and the session channel. |
@@ -922,7 +923,7 @@ git commit -m "refactor(hosted): share the per-message limits and authorization 
 **Files:**
 - Create: `packages/agent-remote-hosted/src/journal-session-stream.ts`
 - Create: `packages/agent-remote-hosted/src/journal-sessions.ts`
-- Test: `packages/agent-remote-hosted/src/journal-session-stream.test.ts`
+- Test: `packages/agent-remote-hosted/src/journal-session-stream.test.ts`, `packages/agent-remote-hosted/src/journal-sessions.test.ts`
 
 `journal-session-stream.ts` is one browser stream's protocol; everything it needs from the outside comes through three small interfaces (`JournalReads`, `HostStreamOpener`, the client socket), so its tests use a real `SessionJournal` and fake sockets. `journal-sessions.ts` supplies the shared per-session state behind `JournalReads` and the subscriber registry.
 
@@ -1155,6 +1156,77 @@ describe('a journal-served session stream', () => {
     expect(f.closed).toEqual([]);
   });
 
+  const offline = () => Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' });
+  const controlRequest = (action: 'acquire' | 'take_over', requestId: string) =>
+    message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action } });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+  it('answers an acquire with the pending control state while the Host is offline, and keeps the stream open', async () => {
+    const f = fixture({ hostOpen: offline() });
+    await f.negotiated();
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
+    await settle();
+    f.stream.receive(controlRequest('acquire', 'control-1'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'session_control',
+      payload: { agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: 'control-1' } }));
+    expect(f.calls.hostOpens).toBe(2);
+    expect(f.types()).not.toContain('protocol_error');
+    f.stream.receive(sendMessage);
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_offline', recoverable: true } }));
+    expect(f.closed).toEqual([]);
+  });
+
+  it('refuses a take over while the Host is offline', async () => {
+    const f = fixture({ hostOpen: offline() });
+    await f.negotiated();
+    f.stream.receive(controlRequest('take_over', 'control-2'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
+      payload: { requestId: 'control-2', code: 'host_offline', message: 'The Remote Host is offline.', recoverable: true } }));
+  });
+
+  it('refuses an acquire when the Controller stream fails to open for another reason', async () => {
+    const f = fixture({ hostOpen: Object.assign(new Error('The session could not be attached.'), { code: 'session_attach_failed' }) });
+    await f.negotiated();
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
+    await settle();
+    f.stream.receive(controlRequest('acquire', 'control-3'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'control-3', code: 'session_attach_failed', recoverable: true } }));
+    expect(f.sent.filter(frame => frame.type === 'session_control' && frame.payload.requestId)).toEqual([]);
+    f.stream.hostReturned();
+    expect(f.closed).toEqual([]);
+  });
+
+  it('closes a stream that waits for the Host when the Host returns, and leaves every other stream alone', async () => {
+    const waiting = fixture({ hostOpen: offline() });
+    await waiting.negotiated();
+    await vi.waitFor(() => expect(waiting.calls.hostOpens).toBe(1));
+    await settle();
+    waiting.stream.hostReturned();
+    expect(waiting.closed).toEqual([[1012, 'Remote Host reconnected']]);
+    waiting.stream.hostReturned();
+    expect(waiting.closed).toHaveLength(1);
+
+    const connected = fixture();
+    await connected.negotiated();
+    await vi.waitFor(() => expect(connected.hostWrites).toHaveLength(1));
+    connected.stream.hostReturned();
+    expect(connected.closed).toEqual([]);
+
+    const observer = fixture();
+    observer.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
+    await vi.waitFor(() => expect(observer.types()).toEqual(['negotiated', 'agent_activity']));
+    observer.stream.hostReturned();
+    expect(observer.closed).toEqual([]);
+
+    const left = fixture({ hostOpen: offline() });
+    await left.negotiated();
+    await vi.waitFor(() => expect(left.calls.hostOpens).toBe(1));
+    await settle();
+    left.stream.close();
+    left.stream.hostReturned();
+    expect(left.closed).toEqual([]);
+  });
+
   it('closes the browser stream when the Controller stream ends, and the Controller stream when the browser leaves', async () => {
     const ended = fixture();
     await ended.negotiated();
@@ -1255,6 +1327,8 @@ export interface JournalSessionStream {
   deliver(result: JournalPublished): void;
   /** The browser stream ended. */
   close(): void;
+  /** The Host's Controller connected again: a stream that waits for it closes so the client reconnects and acquires control. */
+  hostReturned(): void;
 }
 
 function protocolError(code: string, message: string, recoverable: boolean, requestId?: string): ServerMessage {
@@ -1304,6 +1378,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   let stale = false;
   let hostState: 'idle' | 'opening' | 'open' = 'idle';
   let hostStream: HostStream | undefined;
+  /** The last attempt to open the Controller stream failed because the Host is offline. */
+  let waitingForHost = false;
   /** The control revision of the Controller session, once it has reported one. */
   let controlRevision: string | undefined;
   /** Messages for the Controller stream that wait for it to open. */
@@ -1425,6 +1501,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       if (isPhase('closed')) { stream.close(); return; }
       hostStream = stream;
       hostState = 'open';
+      waitingForHost = false;
       try { stream.send(NEGOTIATE_FRAME); }
       catch (error) { refuse([...held.map(item => item.requestId), ...heldControl.map(item => item.payload.requestId)], error); held.length = 0; heldBytes = 0; heldControl.length = 0; return; }
       heldBytes = 0;
@@ -1435,10 +1512,22 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       flushControl();
     }, error => {
       hostState = 'idle';
-      refuse([...held.map(item => item.requestId), ...heldControl.map(item => item.payload.requestId)], error);
-      held.length = 0;
+      const messages = held.splice(0);
+      const requests = heldControl.splice(0);
       heldBytes = 0;
-      heldControl.length = 0;
+      if (refusalOf(error).code !== 'host_offline') {
+        refuse([...messages.map(item => item.requestId), ...requests.map(item => item.payload.requestId)], error);
+        return;
+      }
+      waitingForHost = true;
+      refuse(messages.map(item => item.requestId), error);
+      for (const request of requests) {
+        if (request.payload.action === 'acquire') {
+          sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
+            agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: request.payload.requestId,
+          } });
+        } else refuse([request.payload.requestId], error);
+      }
     });
   }
 
@@ -1589,7 +1678,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (activityOnly && content && result.cursor) { activityCursor = result.cursor; scheduleActivity(); }
   }
 
-  return { receive, deliver, close: () => shutdown() };
+  function hostReturned(): void {
+    if (waitingForHost && !isPhase('closed')) shutdown(1012, 'Remote Host reconnected');
+  }
+
+  return { receive, deliver, close: () => shutdown(), hostReturned };
 }
 ```
 
@@ -1630,10 +1723,13 @@ export interface JournalSessions {
   attach(attachment: JournalSessionAttachment): JournalSessionStream;
   /** Delivers what a stored publication changed to the streams subscribed to the session. */
   published(hostId: string, sessionKey: string, result: JournalPublished): void;
+  /** The Host's Controller connected again: streams of the Host that wait for it close so their clients reconnect. */
+  hostReturned(hostId: string): void;
 }
 
 /** What the streams of one session share. */
 interface SharedSession {
+  hostId: string;
   streams: Set<JournalSessionStream>;
   /** True once a Controller said it holds no history older than the journal; reset by a replacement. */
   olderExhausted: boolean;
@@ -1653,7 +1749,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     attach(attachment) {
       const { hostId, sessionKey } = attachment;
       const key = keyOf(hostId, sessionKey);
-      const shared = sessions.get(key) ?? { streams: new Set<JournalSessionStream>(), olderExhausted: false };
+      const shared = sessions.get(key) ?? { hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false };
       sessions.set(key, shared);
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
@@ -1676,6 +1772,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
       return {
         receive: stream.receive,
         deliver: stream.deliver,
+        hostReturned: stream.hostReturned,
         close() {
           stream.close();
           shared.streams.delete(stream);
@@ -1693,6 +1790,16 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         catch { /* One stream's failure does not stop the others. */ }
       }
     },
+
+    hostReturned(hostId) {
+      for (const shared of [...sessions.values()]) {
+        if (shared.hostId !== hostId) continue;
+        for (const stream of [...shared.streams]) {
+          try { stream.hostReturned(); }
+          catch { /* One stream's failure does not stop the others. */ }
+        }
+      }
+    },
   };
 }
 ```
@@ -1700,7 +1807,52 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
 - [ ] **Step 5: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-session-stream.test.ts --testTimeout=10000`
-Expected: PASS, 14 tests.
+Expected: PASS, 18 tests.
+
+Then add `packages/agent-remote-hosted/src/journal-sessions.test.ts`, which checks that `hostReturned(hostId)` reaches only the streams of that Host:
+
+```ts
+import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
+import { describe, expect, it } from 'vitest';
+
+import type { HostStreamOpener } from './journal-host-stream.js';
+import { createJournalSessions } from './journal-sessions.js';
+
+function socket() {
+  const closed: Array<[number | undefined, string | undefined]> = [];
+  return { closed, client: { readyState: 1, bufferedAmount: 0, send: () => undefined, close: (code?: number, reason?: string) => { closed.push([code, reason]); } } };
+}
+
+describe('the journal sessions of a Relay', () => {
+  it('tells only the waiting streams of the returned Host that it is back', async () => {
+    const head = { snapshot: { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } }, observedAt: 1 };
+    const sessions = createJournalSessions({
+      journals: { status: async () => ({ cursor: { epoch: 'e', seq: 0 }, head } as never), page: async () => undefined },
+      requestFill: async () => ({}) as never,
+      requestOlder: async () => ({ olderAvailable: false }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+    });
+    const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
+    const attach = (hostId: string, sessionKey: string) => {
+      const { client, closed } = socket();
+      const stream = sessions.attach({ hostId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
+      stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+      return { stream, closed };
+    };
+    const first = attach('host-1', 'codex:a');
+    const second = attach('host-1', 'codex:b');
+    const other = attach('host-2', 'codex:a');
+    await new Promise(resolve => setTimeout(resolve, 20));
+    sessions.hostReturned('host-1');
+    expect(first.closed).toEqual([[1012, 'Remote Host reconnected']]);
+    expect(second.closed).toEqual([[1012, 'Remote Host reconnected']]);
+    expect(other.closed).toEqual([]);
+  });
+});
+```
+
+Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-sessions.test.ts --testTimeout=10000`
+Expected: PASS, 1 test.
 
 - [ ] **Step 6: Typecheck.**
 
@@ -1710,7 +1862,7 @@ Expected: exit code 0.
 - [ ] **Step 7: Commit.**
 
 ```bash
-git add packages/agent-remote-hosted/src/journal-session-stream.ts packages/agent-remote-hosted/src/journal-session-stream.test.ts packages/agent-remote-hosted/src/journal-sessions.ts
+git add packages/agent-remote-hosted/src/journal-session-stream.ts packages/agent-remote-hosted/src/journal-session-stream.test.ts packages/agent-remote-hosted/src/journal-sessions.ts packages/agent-remote-hosted/src/journal-sessions.test.ts
 git commit -m "feat(hosted): serve a session's reads from its journal" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

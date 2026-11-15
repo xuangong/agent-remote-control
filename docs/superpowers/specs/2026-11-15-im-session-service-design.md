@@ -6,7 +6,7 @@ Status: draft for the owner's review, 2026-11-15. It builds on [IM gateway: prod
 
 The owner works mostly in Edge and waits often. Switching a Window or a bot shows Opening session, Reconnecting, Synchronizing, Restoring or Checking access, and the page feels slow. The causes are in the design, not in the browser:
 
-1. **Reading is bound to the control path.** Every view attaches through the Relay to the Controller. When the runtime was released, the Controller reopens the native session before anything is shown (`packages/agent-remote-hosted/src/broker.ts:2016-2025`, `packages/agent-host/src/host.ts:899-985`). The hosted Relay stores no content by design (`docs/blueprint/agent-remote-observation.md:156-167`).
+1. **Reading is bound to the control path.** Every view attaches through the Relay to the Controller (`packages/agent-remote-hosted/src/broker.ts:1151-1251`), and snapshot and timeline reads go to the Host as well (`broker.ts:2016-2025`). When the runtime was released, the Controller reopens the native session before anything is shown (`packages/agent-host/src/host.ts:899-985`). The hosted Relay stores no content by design (`docs/blueprint/agent-remote-observation.md:156-167`).
 2. **The Controller's timeline lives in memory, one epoch per open.** Each open mints a random epoch (`packages/agent-remote-relay/src/relay.ts:133,220,281`). Codex and OpenCode runtimes are released after five idle minutes (`packages/agent-host/src/idle-sessions.ts:16`). The next open makes every client cursor stale (`packages/agent-remote-relay/src/timeline-projector.ts:70-76`), so clients empty the conversation and reload its latest 100 entries.
 3. **Browsers ration Controller streams.** An account may hold 64 streams and a Host serves 128 (`packages/agent-remote-hosted/src/broker.ts:2427-2428`). The live budget keeps the four most recent conversations plus 20 seconds (`packages/agent-remote-lab/src/live-budget.ts:7-8`). Returning to a released conversation repeats attach, negotiation, the control check and catch-up.
 4. **Hidden pages stop recovering.** A hidden page does not restore sessions (`packages/agent-remote-lab/src/session-restoration.ts`). Every reconnect returns each session to `checking` until `session_control` arrives (`packages/agent-remote-web/src/client/remote-session-client.ts:214`).
@@ -29,7 +29,7 @@ These are proposals. Phase P0 measures today's values and confirms each number b
 | T1 | A conversation opened before on this device shows its content from the device store within 100 ms (p95) of mounting, with no blank or loading state. |
 | T2 | A conversation with a journal that this device has never opened shows journal content within 500 ms (p50) and 1.5 s (p95), without reaching the Controller. A journal exists once the session was opened on any device, or was active, after smart mode began. |
 | T3 | Returning to a page after any time hidden shows no blocking state. Content is current within 1 s (p95) when the device can reach the Relay. |
-| T4 | Connection and runtime state never disable the composer. A message shows as sending within 50 ms. A resident session accepts it within 1 s (p95); a released one within the provider's measured wake time plus 1 s. |
+| T4 | Connection and runtime state never disable the composer; only business reasons do (read-only access, an ended session, a terminal in control). A message shows as sending within 50 ms. A resident session accepts it within 1 s (p95); a released one within the provider's measured wake time plus 1 s. |
 | T5 | In smart mode no per-session connection label appears (Opening session, Reconnecting, Synchronizing, Restoring, Checking access). One indicator shows the device's own link to the Relay. |
 | T6 | A Controller restart or a runtime release never resets a client's conversation, unless the native history was genuinely rewritten. |
 
@@ -67,11 +67,11 @@ These invariants are kept. Each one names the code that protects it today.
 - **One answer per interaction.** An interaction response is valid only while its request is pending, and only one response can claim it (blueprint, Typed Interactions).
 - **Safe delivery moment.** A message starts a new turn when the session is idle. It goes to the next turn only where the provider has a native follow-up queue. Remote never manufactures a queue (`packages/agent-host/src/session-outbox.ts:122`; blueprint, Composer message delivery).
 - **Successions.** Delivery follows successions to the current session (`packages/agent-host/src/session-outbox.ts:111`).
-- **Requesters.** The requester is recorded. A session cannot answer its own request or loosen its own permissions, and permission changes need a recent sign-in (`packages/agent-host/src/session-routes.ts:238,254`; `packages/agent-remote-hosted/src/broker.ts:1950`).
+- **Requesters.** The requester is recorded. A session cannot answer its own request or loosen its own permissions, and permission changes need a recent sign-in (`packages/agent-host/src/session-routes.ts:238,254`; `packages/agent-remote-hosted/src/broker.ts:1946-1948,2085`).
 
 ### Access
 
-- **Authorization before dispatch.** `sessionAllowed` admits the owner, or the creator when the reader is a share recipient; `hostAllowed` and `requireOwner` guard the rest (`packages/agent-remote-hosted/src/broker.ts:666-669`). Revoking a share closes live streams at once (`broker.ts:2318`). Commands cannot reach share recipients (`packages/agent-host/src/session-callers.ts:88-96`).
+- **Authorization before dispatch.** `sessionAllowed` admits the owner, or the creator when the reader is a share recipient; `hostAllowed` and `requireOwner` guard the rest (`packages/agent-remote-hosted/src/broker.ts:666-669`). Revoking a share closes live streams at once (`broker.ts:2318`). A share recipient's sessions are hidden from commands and hold no session credential (`packages/agent-host/src/session-callers.ts:87-97`).
 - **Native CLI control.** A session controlled by a native CLI is read-only for operators until an explicit take-over (`packages/agent-remote-relay/src/session-control.ts:34-50`).
 
 ### IM product
@@ -162,7 +162,9 @@ Considered and not chosen now: an external log or broker, such as Postgres with 
 - An external broker would add operations work for every self-hoster without adding a guarantee this design needs.
 - The ports keep it possible for a later clustered deployment.
 
-Which SQLite binding Node uses is decided in the P1 plan with a benchmark. A native module is acceptable in the Relay image; it is not acceptable in the Controller package, which ships no native binaries.
+The journal and queue logic live in a package that defines the ports and binds no storage. The Node SQLite adapter lives in its own package that only the Node Relay host depends on. The Controller depends on `agent-remote-hosted` and `agent-remote-relay`, so neither may pull in a native module. The P1 plan chooses the binding (`node:sqlite`, or a native module in the Relay image) with a benchmark.
+
+Durable Object limits apply per object: memory per isolate, storage per object, size per stored value. Journals stay within them through per-session budgets, a per-Host quota, rows chunked at the existing 256 KiB convention (`packages/agent-remote-cloudflare/src/storage.ts`) and blob offload. A Host whose content outgrows one object is later split by session.
 
 Partitioning removes today's bounds: one object for all accounts, a whole state in memory, commits serialized across accounts. Journals and queues never enter the control-plane state, so the 16 MiB bound and its full-state validation (`packages/agent-remote-hosted/src/gateway.ts:84`) no longer limit conversation content.
 
@@ -174,6 +176,8 @@ Each step is additive and reversible. A Host without smart mode keeps today's pa
    - Controller rows go to the partition, which stamps and stores them and returns them;
    - `primary` then fans them out;
    - page reads go to the partition.
+
+   Rows travel in batches, so the extra hop inside the data centre is paid per batch, not per delta.
 2. **Sockets move out.** Move each Controller's uplink to its Host partition and each device's sync channel to its account partition. `primary` becomes the control plane.
 3. **Documents move out.** Split the remaining account-scoped documents out of the control plane when their size or traffic requires it.
 
@@ -188,7 +192,8 @@ A journal belongs to one public session, that is, one binding of Host, provider 
   - The latest Snapshot the Controller published, with the time it was observed.
   - Presence, computed by the Relay: whether the Host is online, whether a runtime is resident, and who owns the native session.
 - **Amendments.** Resource-binding replacements and background outcomes are applied in place and replayed to subscribers, as today.
-- **Retired epochs.** They are kept for a bounded time after a replacement, for audit and for clients still on them.
+- **Item index.** For each item: its key, whether it is `open` or `complete`, its content digest, whether it is live-only, the `clientMessageId` alias of an echo, and its revision in the journal.
+- **Retired epochs.** They are kept for seven days after a replacement, for diagnostics only. Clients never read them; a cursor on a retired epoch is reset.
 
 Pages come from the existing projector and store. `packages/agent-remote-relay/src/timeline-projector.ts` and `timeline-store.ts` use no Node APIs and can run in a Worker, so live rows and pages keep the same granularity.
 
@@ -203,22 +208,35 @@ Finalized items are stable, however: record and message ids, call ids, native it
 
 - **Item keys.** Each adapter adds an item key to every observation. It is the native identity of the finalized item the row belongs to, and it is the same whether the item was observed live or read from history.
   - Adapters own the derivation and prove it with fixtures: record a session live, read it again, and compare the keys.
-- **Completion rows.** A completion row carries its item key and a digest of the item's full content. Providers already emit such rows: Codex `item/completed`, the final Claude record, Copilot `assistant.message`.
-- **Corrections.** Only when a reread finds different content does the Controller publish a **correction** row with the full content. The projector uses it as the item's content and counts the earlier rows as contributors.
+- **Completion and digests.** An item is `open` in the index until its completion row arrives, then `complete`. Providers already emit completion rows: Codex `item/completed`, the final Claude record, Copilot `assistant.message`.
+  - The adapter computes the item's digest over its canonical normalized content, with the same function live and on reread.
+  - The completion row carries the digest, and the Host partition stores it in the index.
+  - An item interrupted mid-stream stays `open`.
+- **Corrections.** The Controller publishes a **correction** row with the full content when a reread finds an `open` item, or a `complete` item whose digest differs. The projector uses it as the item's content and counts the earlier rows as contributors.
+- **Echoes.** A user message's item key is its native identity, never the `operationId`.
+  - The Controller attaches the `operationId` as `clientMessageId` when it publishes the echo.
+  - When the native id is not known at send time, the Controller records the alias the first time it observes the echo, and the index keeps it.
+  - A reread therefore matches the echo by its native key and adds nothing.
 - **Items without a native identity**, such as Controller-made errors, get a key that the Controller assigns and the journal keeps.
-- **Live-only items** (interaction records, Controller errors) are marked as such. A reread cannot reproduce them, so the journal holds their only copy.
+- **Live-only items.** Adapters mark the provider's live-only items (interaction records); the Controller marks its own (Controller errors). A reread cannot reproduce them, so the journal holds their only copy.
 
 ### Continuing a journal across reopens
 
 After every open, the Controller reconciles the history it read with the journal. An open is a first attach, a restart, a wake after release, or a provider refresh.
 
-1. **Read the index.** The Controller asks the Host partition for the session's item index: item keys in order, each with its content digest and whether it is live-only.
-2. **Walk the reread.**
+1. **Fence.** Each uplink connection is a new publisher generation. The Host partition accepts rows only from the current generation, so a stale connection cannot write.
+2. **Read the index.** The Controller asks the Host partition for the session's item index, with each item's revision.
+3. **Keep history before live.** The adapter already delivers the reread before its single history boundary and holds live output until after it (blueprint, Provider Contract).
+   - The Controller publishes live rows only after its reconcile is committed.
+   - A correction names the item revision it was computed against. The Host partition rejects it if the item has moved, and the Controller reads that item again.
+4. **Compare only inside the reread's window.** A reread covers all history for Claude and Copilot, but only the latest page for Codex and OpenCode. Its oldest item is the anchor. Journal items older than the anchor are outside the window and stay as they are.
+5. **Walk the window.**
    - An unknown item is appended.
-   - A known item whose digest differs gets a correction.
+   - An `open` item, or a `complete` item whose digest differs, gets a correction.
    - An identical item is skipped.
    - Live-only items are left out of the comparison.
-3. **Replace only on a genuine rewrite.** A known item that is missing from the reread, or a change of order, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. In every other case the epoch continues.
+6. **Replace only on a genuine rewrite.** An item known inside the window but missing from the reread, or a change of order inside the window, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. In every other case the epoch continues.
+7. **Close a gap.** If the anchor is not in the journal, more than one page of activity went unobserved. The Controller reads further back through native history until it reaches a known item, within a bound. Past the bound it publishes a replacement.
 
 A provider `timeline_replacement` whose reread only adds items continues the epoch instead of replacing it. Prompt edit and fork already create a new native session in every provider, and therefore a new journal. They are not rewrites.
 
@@ -236,7 +254,11 @@ Catalog confirmations reveal it. They arrive about once a minute (`packages/agen
 - the Host partition marks the journal **behind**;
 - when the session has demand, the Host partition asks the Controller to reconcile.
 
-**Backfill.** While a Controller is idle, it creates journals for its most recently active catalog sessions, within a bounded budget. This way most first opens find a journal.
+**Backfill.** While a Controller is idle, it creates journals for its most recently active catalog sessions, within a bounded budget, so most first opens find a journal.
+
+- Backfill must not start runtimes. It uses a read-only history capability that adapters offer where the native side allows it, such as reading a transcript file or a server's message list.
+- Today's SDK reads older history only through an open session (`packages/agent-provider-sdk/src/provider.ts:225`), so this is new adapter work.
+- Providers without the capability are not backfilled; their journals begin at the first open.
 
 ### Older history
 
@@ -244,28 +266,39 @@ A journal begins with the history the Controller read the first time it publishe
 
 A `before` page that reaches the journal's oldest row is answered from the journal with `hasOlder: true`. When the Host is online, the Host partition also asks the Controller to read further. The Controller publishes the result as prepended rows with negative sequences, as `TimelineStore.prepend` does today. The client shows the older region as loading inline, and nothing else waits.
 
+- One older-history read is in flight per journal at a time.
+- The Host partition stamps its rows as one atomic batch below the current oldest sequence, and the item index makes a repeated read add nothing.
+- Sequences stay dense in both directions: forward rows grow upward, prepended rows grow downward.
+
 ### Durability and fan-out
 
 A row reaches clients only after it is durable in the journal. A Controller's publication is acknowledged at the same moment.
 
 - **Batching.** The Host partition stamps and stores rows in batches. Before publishing, the Controller merges consecutive deltas of the same item over a short window, which bounds the write rate.
-- **Cloudflare.** A Durable Object's output gate already holds outgoing messages until writes are durable.
+- **Cloudflare.** A Durable Object's output gate holds its outgoing messages and RPC replies until its writes are durable. An object that receives rows forwards only what it received.
 - **Node.** Node stores the row before sending it.
 
 ### Retention and size
 
 - **Budget.** Each session journal keeps its most recent content within a size budget. Evicted rows stay recoverable from the Host as older history.
 - **Large bodies.** Row bodies above an inline threshold go to the blob store by digest, and the row references them.
+- **Live-only items** are exempt from row eviction for the life of the session, up to a per-session count cap. Beyond the cap the oldest are dropped and a diagnostic records the loss, because nothing can rebuild them.
 - **Quotas** apply per Host and per account. The P1 plan sets the defaults from P0 measurements.
 - **Deletion.** Removing a session's binding, or an account, deletes its journals and blobs.
+
+### Access
+
+- **Rules.** Reads and submissions are authorized in the Host partition with today's rules: `sessionAllowed`, `hostAllowed` and `requireOwner` (`packages/agent-remote-hosted/src/broker.ts:666-669`).
+- **Mirroring.** The control plane mirrors the bindings, creators and shares of a Host's sessions into that Host's partition.
+- **Revocation.** A revocation is applied in the Host partition before the control plane acknowledges it.
 
 ### Answering the client protocol in smart mode
 
 | Contract | In smart mode |
 |---|---|
-| `negotiate` and `negotiated` | The Relay answers. `negotiated` advertises journal support behind an opt-in flag. |
+| `negotiate` and `negotiated` | The Relay answers. Clients opt in with channel query flags, and the channel's `ready` frame confirms them, as it does today (`packages/agent-remote-protocol/src/session-channel.ts:49`). |
 | Snapshot | Sent from the journal head. With the flag it carries the observation time and whether it is live. Without the flag, `runtimeInfo.connection` reads `restoring` while no runtime is resident. Such clients then keep deferring sends as they do today, and their subscription counts as demand, so the runtime is woken. |
-| Timeline pages and live rows | Served from the journal, with journal epochs and sequences. A client without the flag never receives a correction live. The skipped sequence looks like a gap, and its `after` page replaces the overlapping live entry, which is today's recovery path. |
+| Timeline pages and live rows | Served from the journal, with journal epochs and sequences.<br>Pages carry projected entries in today's format, and a correction is folded into its item's entry, so no client meets a new row type.<br>A client without the flag does not receive corrections live. The skipped sequence reads as a gap, and its `after` page brings the corrected entry, which is today's recovery path.<br>The first time a session becomes journal-served, a client still holding the Controller's epoch is reset once. |
 | `session_control` | The Relay issues tokens at once from the last known native owner. Native-owner changes still originate at the Controller and revoke tokens. |
 | Operations | Queued at once (see Operation queue). `command_acknowledged` is still sent when the native runtime accepts. |
 | `list_commands`, `execute_command`, and resource reads not in the blob store | Forwarded to the live runtime. A released runtime is woken, and the wait shows inside the menu or the attachment, not on the conversation. |
@@ -283,7 +316,7 @@ One queue serves every requester. It replaces four mechanisms: the Relay outbox,
 | Requester | Kind (`user`, `session`, `automation`) and identity, plus the account it acts for. |
 | Target | The public session. It is resolved through successions at delivery time. |
 | Kind and payload | `send_message`, `steer`, `cancel`, `interaction_response`, `set_session_setting`, `set_planning`, `team_message` or `tpm_intent`. Text is bounded; attachments travel as blob references. |
-| Delivery | `immediate`: start when idle, steer when active.<br>`next_turn`: only where the provider has a native follow-up queue.<br>`when_idle`: a new turn when idle, never steering. |
+| Delivery | `immediate`: start when idle, steer when active.<br>`next_turn`: only where the provider has a native follow-up queue.<br>`later`: today's outbox rule. A new turn when idle. While a turn runs, the next turn where the provider has a native follow-up queue; otherwise the message waits, shown as waiting for the current turn. It never steers. |
 | Preconditions | Facts checked at delivery. For example: the interaction request is still pending, the turn named by a cancel is still active, the setting choice is still offered, the TPM work is approved and not archived. |
 | Deadline | Optional. The queue wait counts from submission. The native wait counts from dispatch, so a setting's 30-second confirmation no longer includes time spent queued. |
 | State | `queued`, `dispatching`, `accepted` (with the native disposition), `rejected` (with a reason), `unknown`, `cancelled` or `expired`. |
@@ -292,10 +325,12 @@ One queue serves every requester. It replaces four mechanisms: the Relay outbox,
 
 1. **Submit.** The Host partition authorizes the operation with the same checks as reads, validates it and stores it as `queued`. Repeating an `operationId` with the same content returns the existing record; repeating it with different content is `operation_conflict`.
 2. **Offer.** The Host partition notifies the Controller. A Controller that reconnects asks for its queue.
-3. **Claim.** The Controller claims the operation (`queued` becomes `dispatching`) and writes a durable local receipt before any native call.
-4. **Wake.** A released runtime is reopened within the provider's wake deadline. A wake that definitely fails settles `rejected`; an uncertain one settles `unknown`.
-5. **Deliver.** The preconditions are checked against the live runtime. A failing one settles `rejected` with its reason. Otherwise the native call is made according to the delivery rule.
-6. **Settle.** The outcome is `accepted` with the native disposition, `rejected`, or `unknown`. A Controller that restarts holding a `dispatching` receipt settles `unknown` and never sends again.
+3. **Claim.** The Controller claims the operation (`queued` becomes `dispatching`) and writes a local `claimed` receipt.
+4. **Wake.** A released runtime is reopened within the provider's wake deadline. No native call has been made yet, so a failed wake may be tried again within the operation's deadline. When the deadline passes, the operation settles `rejected`: it was definitely not delivered.
+5. **Deliver.** The preconditions are checked against the live runtime; a failing one settles `rejected` with its reason. Otherwise the Controller makes its receipt durable as `sending`, and only then makes the native call according to the delivery rule.
+6. **Settle.** The outcome is `accepted` with the native disposition, `rejected`, or `unknown`. After a Controller restart:
+   - a `sending` receipt settles `unknown`, and the operation is never sent again;
+   - a `claimed` receipt, or no receipt, returns the operation to `queued`, because the native call is made only after a durable `sending` receipt.
 7. **Echo.** The Controller sets `clientMessageId` to the `operationId` on the `user_message` row it publishes for that input. Clients then match the echo exactly instead of comparing text.
 
 **Cancel and retry.**
@@ -303,9 +338,21 @@ One queue serves every requester. It replaces four mechanisms: the Relay outbox,
 - The requester can cancel an operation while it is `queued`.
 - Retrying after `rejected` or `unknown` creates a new operation with a new id. Only a person, or automation that decides so explicitly, does that.
 
+**Receipts are the authority** on whether a native call may have happened.
+
+- After a Relay restore or a partition move, the Host partition asks the Controller for its receipts and corrects queue states from them.
+- Queue records and receipts are kept for 30 days after settlement. A late resubmission of the same id is answered from them instead of running again.
+
+**Successions.** If the target was succeeded before delivery, the operation records the successor it was delivered to, and the echo lands in the successor's journal.
+
+- Bot mode shows the chain as one conversation.
+- Window mode shows the operation in the original session, with a link to the successor.
+
+**Not queued.** Creating a session, Ask, Side, fork, prompt edit and Handoff stay request and response. They keep today's reserved identities and today's rule that an uncertain creation is never repeated.
+
 ### Delivery choice
 
-The composer submits `immediate` while the Host is online, so a message behaves exactly like today's send. While the Host is offline, the composer submits `when_idle`, which is today's outbox behaviour: the message never steers into a turn that started later. Either way the person sees one action, and the Host being offline is shown as a fact.
+The composer submits `immediate` while the Host is online, so a message behaves exactly like today's send. While the Host is offline, the composer submits `later`, which is today's outbox rule (`packages/agent-host/src/session-outbox.ts:122`): the message never steers into a turn that started later. Either way the person sees one action, and the Host being offline is shown as a fact.
 
 A share recipient's operation is accepted only while the Host is online, and it is never held for offline delivery. That is today's outbox rule (`packages/agent-remote-hosted/src/session-outbox.ts:44`).
 
@@ -314,7 +361,7 @@ A share recipient's operation is accepted only while the Host is online, and it 
 | Operation | Behaviour |
 |---|---|
 | `send_message`, `set_session_setting`, `set_planning`, `team_message`, `tpm_intent` | May wake a released runtime. |
-| `interaction_response`, `steer`, `cancel` | Never need to wake one. A session with a pending interaction or a running turn always stays resident. If its runtime is gone anyway, the precondition fails and the operation is rejected as stale. |
+| `interaction_response`, `steer`, `cancel` | Never need to wake one. A session with a pending interaction or a running turn always stays resident. If its runtime is gone anyway, the precondition fails and the operation is rejected as stale.<br>Stopping a turn in a session that a terminal controls is a take-over, which already interrupts running work (`packages/agent-host/src/native-owner-admission.ts`). |
 | `list_commands`, `execute_command` | Stay request and response with the live runtime; they are not queued. |
 
 ### Events
@@ -332,14 +379,18 @@ Each event carries a cursor, so tabs and devices can drop duplicates. Clients re
 ### Requesters
 
 - **`user`.** An account acting through a browser or the command line.
-- **`session`.** An agent session acting through its session token or tools. It cannot answer its own request or loosen its own permissions.
+- **`session`.** An agent session acting through its session token or tools.
+  - It submits through its own Controller, which authenticates the token and stamps the session's identity. The Relay trusts a Host only for its own sessions.
+  - The target's Host partition refuses a session that answers its own request or loosens its own permissions. It checks at submission and again at delivery.
 - **`automation`.** A gateway rule or a system actor (Team, TPM, Call for support) acting for an account, within a scope the owner granted.
+
+Owner-only operations, and the recent sign-in rule for permission settings (`packages/agent-remote-hosted/src/broker.ts:1946-1948,2085`), are checked at submission from the requester's grant.
 
 Every operation, and every echo it produces, records its requester. The conversation can therefore show who sent a message.
 
 ### Moving the existing queues
 
-- **Relay outbox.** Its entries become `send_message` operations with `when_idle`. Controllers that advertise only `outbox: 1` keep receiving them through the outbox endpoints until they update.
+- **Relay outbox.** Its entries become `send_message` operations with `later`. Controllers that advertise only `outbox: 1` keep receiving them through the outbox endpoints until they update.
 - **Team queue.** It becomes `team_message` operations. Today an acknowledgement can race the delivery; that becomes a precondition.
 - **TPM intents.** They become `tpm_intent` operations. The Controller's TPM rules evaluate their precondition at delivery.
 - **Operation cache.** Queue records and Controller receipts replace it, and both survive restarts.
@@ -366,9 +417,9 @@ Clients extend today's `intent` frame (`packages/agent-remote-protocol/src/sessi
 | `focused` | The conversation the person is looking at on a visible page. |
 | `visible` | On screen: another Window pane, or a shown bot with its conversation. |
 | `soon` | About to be opened: hovered or selected with the keyboard in a list, or chosen in the command palette. |
-| `background` | Subscribed but not shown, or on a hidden page. |
+| `background` | Subscribed but not shown, or on a hidden page. This is not demand: it only keeps the journal subscription. |
 
-The Relay derives recency from the history of levels. A hidden page lowers all its subscriptions to `background` and stays subscribed.
+The Relay derives recency from the history of levels. A hidden page lowers all its subscriptions to `background` and stays subscribed. Demand is a lease: each report expires unless renewed (proposed: 60 seconds) and ends when its channel closes, so a stale tab cannot hold a runtime.
 
 ### Aggregation
 
@@ -384,9 +435,11 @@ When the result changes, the Host partition sends it to the Controller.
 
 ### Controller policy
 
-- **Always hot:** a session with a running turn, a pending interaction, settings or commands in flight, an unresolved operation, or an active child. These are today's release guards (`canReleaseIdle`; `packages/agent-host/src/host.ts:845-852`).
+- **Always hot:** a session with a running turn, a pending interaction, settings or commands in flight, an operation in `dispatching`, or an active child. An `unknown` outcome never pins a runtime. These are today's release guards (`canReleaseIdle`; `packages/agent-host/src/host.ts:845-852`).
 - **Wake now:** a queued operation, or a cold session that becomes `composing` or `focused`.
-- **Keep warm:** sessions that are `visible` or recently focused, within a resident budget per provider. When over budget, the least demanded warm sessions are released first.
+- **Keep warm:** sessions that are `visible` or recently focused, as best effort within a resident budget per provider.
+  - The budget caps warm sessions whatever the demand; when over it, the least demanded are released first.
+  - Wakes caused by Team traffic and automation also count against a per-Host wake budget.
 - **Release:** a session with no demand, after a grace period that grows with how recently it was used. A woken session stays resident for a minimum time, so it does not thrash.
 - **Guards** carried over from today's idle release (`packages/agent-host/src/idle-sessions.ts`):
   - no releases while the uplink is down;
@@ -412,7 +465,7 @@ The largest resource savings come from Claude and Copilot. Resident budgets and 
 - **Contents.** An IndexedDB store per account and origin holds, for each session, its entries, journal epoch and cursor, head, business state, and the operations this device submitted.
 - **Writing.** It is written incrementally: only changed entries, in batches, off the rendering path. A long conversation is never rewritten for each delta.
 - **Bounds.** Session count and bytes are bounded, with least-recently-used eviction.
-- **Clearing.** It is on by default, as the owner chose. Clear cache on close clears it, and so does signing out.
+- **Clearing.** It is on by default, as proposed to the owner on 2026-11-15. Clear cache on close clears it, and so does signing out.
 - **What it replaces.** It replaces the six-session local-storage preview and backs the in-memory replica cache.
 
 ### Sync channel
@@ -448,10 +501,13 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 - **Clients.** Clients opt in on the sync channel. Old clients get today's messages, with conservative runtime state.
 - **Protocol version.** The session protocol stays at `1.8.0` with opt-in flags for as long as possible. A version change follows `docs/protocol-upgrade-runbook.md`.
 - **Rollout order.**
-  1. The Relay, writing journals in shadow.
+  1. The Relay, writing journals in shadow. Journals are written alongside today's Controller-served reads, and sampled pages are compared. Smart reading turns on for a provider only after a soak period with no unexplained difference.
   2. Controllers, through owner-confirmed updates.
   3. Clients.
-- **Switching off.** Smart mode can be switched off per Host. Journals then serve only as caches.
+- **Switching off.**
+  - Smart reading can be switched off per Host and provider; journals then serve only as caches.
+  - The operation queue keeps working as long as the Controller supports it.
+  - If a Controller is downgraded below `operations`, the Host partition settles its remaining queued operations `rejected`, meaning definitely not delivered, so they can be sent again.
 - **Contract changes.** Every contract change updates fixtures, replay behaviour, schemas and `compatibility.json` together.
 
 ## Failure handling
@@ -460,11 +516,13 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 |---|---|
 | A Relay partition restarts or is redeployed | Devices and Controllers reconnect and resume from their cursors and acknowledged positions. Nothing reloads from the start. |
 | The Controller goes offline | Journals stay readable and operations stay queued. The Host shows as offline. |
-| A wake fails | The operation settles `rejected` when the failure is definite and `unknown` when it is uncertain. The journal is unaffected. |
+| A wake fails | The wake may be tried again within the operation's deadline; after that the operation settles `rejected`, because no native call was made. The journal is unaffected. |
 | Reconcile finds a rewrite | A replacement starts a new epoch and records a diagnostic. Clients swap in one step. |
 | Publishing outpaces storage | The uplink applies backpressure per session. A row is delivered and acknowledged only once durable. |
 | A storage quota is reached | The oldest rows are evicted first, staying recoverable from the Host. A session over its own budget keeps its latest content and reports a diagnostic. |
-| A share is revoked | The recipient's subscriptions close at once and their queued operations are rejected. |
+| The Controller restarts during a wake | The operation returns to `queued` and is offered again. No native call was made. |
+| An old uplink connection keeps publishing | Its publisher generation is fenced off, and its rows are rejected. |
+| A share is revoked | The recipient's subscriptions close at once, and rows buffered for them in their account partition are dropped. Their queued operations are rejected. Their devices are told to delete that session from the device store; a device keeps what it already received, as in any messaging app. |
 | An outcome is uncertain anywhere | It stays `unknown` and is never replayed. |
 
 ## Measurement and testing
@@ -472,7 +530,7 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 - **P0 baselines.** Measure T1 to T6 as they are today, on `pnpm local` and on production pages. Also measure each provider's wake time, journal size per session, and row rates while streaming.
 - **Budgets, not clocks.** Deterministic tests guard budgets: request counts, journal row counts, render counts. They never use wall-clock thresholds. This follows the stage 6 convention.
 - **Provider continuity.** Fixtures prove that live rows and reread rows of the same native session produce the same item keys. A reconcile adds nothing to an unchanged session, and replaces only on a genuine rewrite.
-- **Exactly once.** Tests interrupt the Controller after the claim, after the receipt, and after the native send. Each case must end `unknown` with no resend.
+- **Exactly once.** Tests interrupt the Controller after the claim, during a wake, after the `sending` receipt, and after the native send. The first two must return the operation to `queued` with no native call made. The last two must end `unknown`, with no resend.
 - **Both modes.** The same client suite runs against crude and smart Hosts, over real HTTP and WebSocket transports.
 - **Scheduling.** Tests with a fake clock cover demand changes, budgets, the always-hot rules, and serialized wake and release.
 - **Soak.** The local soak (`packages/agent-remote-lab/performance/local-soak.mjs`) gains checks on journal growth and residency.
@@ -484,12 +542,14 @@ Each phase has its own plan and ships on its own. Long-conversation rendering ca
 
 | Phase | Delivers | Experience gained |
 |---|---|---|
-| P0 | Measurements and confirmed targets | Numbers to hold the design to |
-| P1 | Host partition with journals; Controller publishing with item keys, completion digests and reconcile; the Relay answering Snapshot, pages and live rows; the device store; backfill | T1, T2, T6: no reload after a runtime release |
-| P2 | The operation queue with requesters, preconditions and events; moving the outbox, Team and TPM queues; the composer always enabled; business-state presentation | T4, T5 |
-| P3 | Demand signals and Controller residency, including release for Claude and Copilot; the live budget retired | T3 with resource control |
-| P4 | Uplinks and sync channels moved to Host and account partitions | Isolation and scale |
-| P5 | An automation API on the operation queue and events | Gateway automation |
+| P0 | Measurements, confirmed targets, and a cost estimate from row rates | Numbers to hold the design to |
+| P1 Instant reading | **Relay:** the Host partition with journals, serving Snapshot, pages and live rows.<br>**Controller:** publishing with item keys, digests, fencing, reconcile and backfill.<br>**Client:** the device store and journal-served reading.<br>Smart reading turns on for a provider only when all three have shipped and its shadow comparison passes. | T1, T2, T6 |
+| P2 Sending never blocks | The operation queue with requesters, preconditions, receipts and events; moving the outbox, Team and TPM queues; the composer always enabled; business-state presentation; the per-session attach and control loops removed for journal-served sessions | T4, T5 |
+| P3 Smart residency | Demand leases and Controller residency, including release for Claude and Copilot; the live budget retired for journal-served sessions, while stream limits stay for live-only paths | T3 with resource control |
+| P4 Partitioned Relay | Uplinks and sync channels moved to Host and account partitions | Isolation and scale |
+| P5 Automation API | An automation API on the operation queue and events | Gateway automation |
+
+Until P4, `primary` still carries every socket. From P1 on, journals and queues live outside its state, so its 16 MiB bound no longer grows with conversations.
 
 Smart mode is enabled per Host and provider. A provider joins only once its continuity fixtures pass, so the sessions of one provider can stay crude while others run in smart mode.
 
@@ -500,7 +560,8 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 1. **The hosted Relay stores conversation content.** Today's blueprint keeps it free of content (`docs/blueprint/agent-remote-observation.md:156-167`). The owner decided this on 2026-11-15. It fits the blueprint's product boundary, which assigns durable timeline storage to the product service (`:274`). The IM gateway principle still holds: a journal can be rebuilt from native history.
 2. **Mutation controls are no longer disabled while disconnected** (blueprint `:223,246`). That rule prevented acting on stale state. Here the same protection comes from preconditions checked at delivery: a stale answer or a cancel aimed at a finished turn is rejected, and is never applied or reported as success.
 3. **Controller epochs no longer reach clients.** Clients see journal epochs, which change only on a genuine rewrite.
-4. **Stream rationing applies only to live-only paths.** Today's 64 and 128 stream limits and the live budget protect Controllers from readers. Readers now read journals, so the limits remain only for commands, uploads and live runtime calls.
+4. **A claimed operation without a `sending` receipt returns to the queue.** Today's outbox settles such an entry `unknown` (`packages/agent-host/src/session-outbox.ts:97-105`). Here the native call is made only after a durable `sending` receipt, so its absence proves that no call happened. A Controller restart during a slow wake then does not turn a message into Check delivery.
+5. **Stream rationing applies only to live-only paths.** Today's 64 and 128 stream limits and the live budget protect Controllers from readers. Readers now read journals, so the limits remain only for commands, uploads and live runtime calls.
 
 ### Risks and how the design meets them
 
@@ -512,7 +573,10 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 | Two server modes double the test matrix | One client suite runs against both; crude mode is retired after a support window. |
 | Old clients act on stale state | They see conservative runtime state, and their subscription wakes the runtime as it does today. |
 | Authorization drifts between partitions (P4) | The control plane pushes a revocation to the partitions before acknowledging it. Partitions check grants again on every subscription and every submission. |
-| One busy Host overloads its partition | Batching and coalescing bound writes; P0 measures the rates; a busy Host can later be split by session. |
+| One busy Host overloads its partition, or outgrows one object's storage | Batching and coalescing bound writes; per-session budgets, a per-Host quota, chunked rows and blob offload bound storage. P0 measures both, and a busy Host can later be split by session. |
+| One channel per page meets the 16-channel cap per subject (`packages/agent-remote-hosted/src/gateway.ts:1007-1011`) | P1 revisits the cap per device, since a channel no longer holds Controller streams. |
+| A backfill or a Team message wakes runtimes nobody uses | Backfill never starts a runtime; wakes from Team traffic and automation count against a per-Host wake budget. |
+| A reconcile races live output, or a partial reread looks like a rewrite | Publisher fencing, history-before-live ordering, revision-checked corrections, and comparison only inside the reread's window. |
 | Content stored on the hosted Relay raises privacy questions | Deployment documentation states what is stored and for how long; deleting a binding or an account deletes its journals and blobs; reads are authorized like streams. |
 
 ### Alternatives considered

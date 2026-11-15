@@ -7,8 +7,8 @@ import { JournalHeadIndex } from './journal-head-index.js';
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
 export const JOURNAL_PARTITION_CACHE = { maxJournals: 2, maxBytes: 20 * 1024 * 1024 } as const;
 /** The growth limits of a partition; the per-Host quota is the one of the object's SQLite storage. */
-export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 16 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } as const;
-/** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. */
+export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } as const;
+/** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. A session holds at most 12 MiB of UTF-8, so one entry at two bytes per character stays well below the message limit. */
 const REPLY_MAX_BYTES = 24 * 1024 * 1024;
 
 /** A page read in the same step as a fill. Whether the Host may hold older history is known to `primary`, so it crosses as a value. */
@@ -34,8 +34,25 @@ export interface JournalPartitionApi {
   deleteHost(hostId: string): Promise<void>;
 }
 
-/** The estimated size of a value as V8 clones it: a string with a two-byte character takes two bytes per character, so the JSON length is doubled. */
-const cloneBytes = (value: unknown): number => JSON.stringify(value).length * 2;
+/**
+ * An upper estimate of the size of a value as V8 clones it, counted without copying it: a string takes two bytes per
+ * character (its size as UTF-16, the most a clone can take), a number eight, and each value and key a few bytes of tag and length.
+ */
+export function estimateCloneBytes(value: unknown): number {
+  switch (typeof value) {
+    case 'string': return 8 + value.length * 2;
+    case 'number': case 'bigint': return 9;
+    case 'boolean': return 2;
+    case 'object': {
+      if (value === null) return 1;
+      let bytes = 8;
+      if (Array.isArray(value)) { for (const entry of value) bytes += estimateCloneBytes(entry); return bytes; }
+      for (const [key, entry] of Object.entries(value)) bytes += estimateCloneBytes(key) + estimateCloneBytes(entry);
+      return bytes;
+    }
+    default: return 1;
+  }
+}
 
 /** The partition side: adapts a journal service to the contract and keeps its replies within the RPC bound. */
 export function serveJournalPartition(journals: HostJournals, options: { replyMaxBytes?: number } = {}): JournalPartitionApi {
@@ -51,7 +68,7 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
       let limit = read.request.limit;
       // The bodies are filled once. A page that is too large is read again with fewer entries, in a step of its own;
       // bodies that were filled stay resident until a publication moves the retained window past them.
-      while (filled.page?.kind === 'page' && limit > 1 && cloneBytes(filled) > replyMaxBytes) {
+      while (filled.page?.kind === 'page' && limit > 1 && estimateCloneBytes(filled) > replyMaxBytes) {
         limit = Math.max(1, Math.floor(limit / 2));
         const { page } = await journals.fill(hostId, sessionKey, [], { request: { ...read.request, limit }, olderBeyondJournal });
         const { page: _discarded, ...rest } = filled;
@@ -63,7 +80,7 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
       let limit = request.limit;
       for (;;) {
         const result = await journals.page(hostId, sessionKey, { ...request, limit }, olderBeyondJournal);
-        if (!result || result.kind !== 'page' || limit === 1 || cloneBytes(result) <= replyMaxBytes) return result;
+        if (!result || result.kind !== 'page' || limit === 1 || estimateCloneBytes(result) <= replyMaxBytes) return result;
         limit = Math.max(1, Math.floor(limit / 2));
       }
     },
@@ -89,7 +106,7 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
-  /** Raised on every change of a Host's head index and when its deletion starts and ends, so an answer read in between is discarded. */
+  /** Raised when the head index loses a session (an unserve, an open or publication that cleared a head) and when a deletion starts and ends, so a load read in between is discarded. Adding a head never raises it. */
   const epochs = new Map<string, number>();
   const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
   let deletionsRunning = 0;
@@ -137,24 +154,30 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
       return opened;
     }),
 
-    indexPage: (hostId, sessionKey, epoch, after, maxItems) => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems),
+    indexPage: (hostId, sessionKey, epoch, after, maxItems) => serialized(hostId, () => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems)),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
       try {
         const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
         if (result.hasHead === true) heads.add(hostId, sessionKey);
         else if (result.hasHead === false) heads.remove(hostId, sessionKey);
+        // A publication that gives a head only adds to what a load reads, so it cannot make a load stale; one that took a head away can.
+        if (result.unserved) bump(hostId);
         return result;
-      } finally { bump(hostId); }
+      } catch (error) {
+        bump(hostId);
+        throw error;
+      }
     }),
 
     // Whether the Host may hold older history is asked here, in the Host's queue, as the service asks it.
     fill: (hostId, sessionKey, items, read) => serialized<JournalFilled>(hostId, () =>
       partition(hostId).fill(hostId, sessionKey, [...items], read && { request: read.request, olderBeyondJournal: read.olderBeyondJournal() })),
 
-    page: (hostId, sessionKey, request, olderBeyondJournal) => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal),
+    // Reads wait in the Host's queue behind earlier publications, as in the in-process service.
+    page: (hostId, sessionKey, request, olderBeyondJournal) => serialized(hostId, () => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal)),
 
-    status: (hostId, sessionKey) => partition(hostId).status(hostId, sessionKey),
+    status: (hostId, sessionKey) => serialized(hostId, () => partition(hostId).status(hostId, sessionKey)),
 
     async forget() { /* The partition owns its cache. */ },
 

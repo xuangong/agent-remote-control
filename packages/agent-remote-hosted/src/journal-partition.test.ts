@@ -1,9 +1,11 @@
 import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remote-journal';
 import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
+import { serialize } from 'node:v8';
+
 import { describe, expect, it } from 'vitest';
 
 import { createHostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
-import { createPartitionJournals, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
+import { createPartitionJournals, estimateCloneBytes, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -199,7 +201,7 @@ describe('the journals of primary over journal partitions', () => {
     expect(journals.served(HOST, SESSION)).toBe(false);
     // The journal is missing a row until a replacement under a new generation rebuilds it.
     const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
-    await journals.publish(HOST, SESSION, reopened.generation, [{ sequence: 7, op: 'replace', items: [{ row: rowOf('r1', 'Fresh'), digest: 'digest-r1' }] }, head(8)]);
+    await journals.publish(HOST, SESSION, reopened.generation, [{ sequence: 6, op: 'replace', items: [{ row: rowOf('r1', 'Fresh'), digest: 'digest-r1' }] }, head(7)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
   });
 
@@ -237,6 +239,57 @@ describe('the journals of primary over journal partitions', () => {
     expect(filled.page).toMatchObject({ kind: 'page', page: { payload: { entries: [{ item: { text: 'first' } }] } } });
   });
 
+  it('refuses a publication queued behind one that failed with a partition reset, instead of applying it with a gap', async () => {
+    const memory = new MemoryJournalStore();
+    const fresh = () => serveJournalPartition(createHostJournals({ store: memory, now: () => 1_000 }));
+    let current = fresh();
+    let failNext = true;
+    const journals = createPartitionJournals({ partition: () => overRpc({ ...current, publish: async (...args) => {
+      if (failNext) { failNext = false; current = fresh(); throw new Error('The Durable Object was reset.'); }
+      return current.publish(...args);
+    } }) });
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const first = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'one'), append(2, 'm2', 'two')]);
+    const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'three')]);
+    await expect(first).rejects.toThrow('reset');
+    expect((await second).refusal).toEqual({ sequence: 3, reason: 'invalid' });
+    expect((await memory.catalog.list('')).length).toBe(1);
+    expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 0 } });
+    const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
+    expect(reopened.watermark).toBe(0);
+    expect((await journals.publish(HOST, SESSION, reopened.generation, [append(1, 'm1', 'one'), append(2, 'm2', 'two'), append(3, 'm3', 'three')])).refusal).toBeUndefined();
+  });
+
+  it('answers a read after the publications made before it', async () => {
+    const { journals } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm2', 'now', 2), complete(2, 'm2')]);
+    const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
+    const older = journals.publish(HOST, SESSION, 1, [{ sequence: 3, op: 'prepend', items: [{ row: rowOf('m1', 'before', 1), digest: 'digest-m1' }] }]);
+    const page = await journals.page(HOST, SESSION, request, false);
+    const status = journals.status(HOST, SESSION);
+    const index = journals.indexPage(HOST, SESSION, (await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened).epoch, -100, 10);
+    await older;
+    expect(page).toMatchObject({ kind: 'page', page: { payload: { entries: [{ item: { text: 'before' } }, { item: { text: 'now' } }], hasOlder: false } } });
+    expect(await status).toMatchObject({ cursor: { seq: 1 } });
+    expect((await index)!.map(entry => entry.itemKey)).toEqual(['m1', 'm2']);
+  });
+
+  it('lets a head load complete between back-to-back publications', async () => {
+    const first = cluster();
+    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const writer = createPartitionJournals({ partition: first.partition });
+    await writer.open(HOST, SESSION, 'controller-1', LIMITS);
+    const release = first.holdServed();
+    const loading = writer.servedSessions(HOST);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    for (let sequence = 1; sequence <= 5; sequence++) await writer.publish(HOST, SESSION, 2, [append(sequence, `m${sequence}`, 'x', sequence)]);
+    release();
+    await loading;
+    expect(first.calls.filter(call => call === `served:${HOST}`)).toHaveLength(1);
+    expect(writer.served(HOST, SESSION)).toBe(false);
+  });
+
   it('deletes at most four Hosts at once across partitions, and later deletions wait for a slot', async () => {
     let running = 0, peak = 0, started = 0;
     let release!: () => void;
@@ -260,6 +313,17 @@ describe('the journals of primary over journal partitions', () => {
   }, DEADLINE_MS);
 });
 
+describe('estimateCloneBytes', () => {
+  it('covers what V8 serializes for strings, numbers and nesting, and counts a string at two bytes per character', () => {
+    const page = { kind: 'page', entries: [{ text: 'x'.repeat(1000), n: 1, ok: true, none: null }, { text: 'é'.repeat(500) }] };
+    expect(serialize(page).length).toBeLessThanOrEqual(estimateCloneBytes(page));
+    expect(estimateCloneBytes('x'.repeat(1000))).toBeGreaterThanOrEqual(2000);
+    expect(estimateCloneBytes('x'.repeat(1000))).toBeLessThan(2100);
+    expect(estimateCloneBytes(['a'.repeat(100), 'b'.repeat(100)])).toBeGreaterThanOrEqual(estimateCloneBytes('a'.repeat(100)) + estimateCloneBytes('b'.repeat(100)));
+    expect(estimateCloneBytes({ key: 'v'.repeat(10) })).toBeGreaterThan(estimateCloneBytes('v'.repeat(10)) + estimateCloneBytes('key'));
+  });
+});
+
 describe('serveJournalPartition', () => {
   const publishSix = (api: JournalPartitionApi) => api.publish(HOST, SESSION, 1,
     Array.from({ length: 6 }, (_, n) => [append(n * 2 + 1, `m${n}`, 'x'.repeat(2000), n), complete(n * 2 + 2, `m${n}`)]).flat());
@@ -275,6 +339,17 @@ describe('serveJournalPartition', () => {
     expect(small.length).toBeGreaterThan(0);
     expect(small.length).toBeLessThan(6);
     expect(entriesOf(await serveJournalPartition(journals).page(HOST, SESSION, tail, false))).toHaveLength(6);
+  });
+
+  it('answers a page with every entry when its estimate fits the bound exactly, and with fewer when it is one byte over', async () => {
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const open = serveJournalPartition(journals);
+    await open.open(HOST, SESSION, 'controller-1', LIMITS);
+    await publishSix(open);
+    const full = await open.page(HOST, SESSION, tail, false);
+    const size = estimateCloneBytes(full);
+    expect(entriesOf(await serveJournalPartition(journals, { replyMaxBytes: size }).page(HOST, SESSION, tail, false))).toHaveLength(6);
+    expect(entriesOf(await serveJournalPartition(journals, { replyMaxBytes: size - 1 }).page(HOST, SESSION, tail, false))).toHaveLength(3);
   });
 
   it('answers a fill whose page would pass the bound with a page of fewer entries, keeping what was filled', async () => {

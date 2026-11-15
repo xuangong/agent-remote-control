@@ -1,5 +1,5 @@
 import {
-  bodyFromRow, JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, JournalItemTypeChangedError,
+  bodyFromRow, JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, JournalItemTypeChangedError, JournalSequenceGapError,
   JournalStaleRevisionError, JournalUnknownItemError, SessionJournal, utf8ByteLength,
   type JournalHead, type JournalIndexEntry, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
@@ -41,7 +41,11 @@ export interface JournalOpenOptions {
   maxIndexItems: number;
   /** How many entries of the index the answer carries; `indexPage` reads the rest. */
   pageItems: number;
-  /** Asked inside the Host's queue: false means the connection that asked is gone, so nothing is created or claimed. */
+  /**
+   * Asked inside the Host's queue: false means the connection that asked is gone, so the open is refused. The in-process
+   * service asks again after it loads the journal, so it claims nothing; a partition proxy asks only before the call, so it
+   * guarantees that nothing is announced to a gone connection, not that nothing is claimed.
+   */
   allowed?(): boolean;
 }
 
@@ -435,6 +439,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     if (error instanceof JournalItemTypeChangedError) return { sequence, reason: 'type_changed', itemKey: error.itemKey };
     if (error instanceof JournalDuplicateItemError) return { sequence, reason: 'duplicate_item', itemKey: error.itemKey };
     if (error instanceof JournalInvalidRowError) return { sequence, reason: 'invalid', itemKey: error.itemKey };
+    // Entries before the gap were lost: the publisher must open the journal again.
+    if (error instanceof JournalSequenceGapError) return { sequence, reason: 'invalid' };
     if (error instanceof JournalInvalidPublicationError) return { sequence, reason: 'invalid' };
     return undefined;
   }

@@ -99,12 +99,13 @@ export class SessionJournal {
     this.dirty.add(itemKey);
   }
 
-  /** Closes an item that native history no longer contains, keeping what was received. */
+  /** Closes an item that native history no longer contains, keeping what was received. It has no native copy, so it is relay-only. */
   seal(publication: JournalPublication, itemKey: string): void {
     if (this.duplicate(publication)) return;
     const item = this.require(itemKey);
     this.advance(publication);
     item.state = 'complete';
+    item.liveOnly = true;
     delete item.digest;
     item.revision += 1;
     this.dirty.add(itemKey);
@@ -129,11 +130,16 @@ export class SessionJournal {
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     this.advance(publication);
     this.meta.nextSeq += 1;
-    const keptBackground = row.item.background === undefined ? item.body?.item.background : undefined;
+    const background = row.item.background ?? item.body?.item.background ?? item.background;
+    const stored = structuredClone(row.item);
+    if (background) stored.background = structuredClone(background);
+    if (item.clientMessageId !== undefined && stored.type === 'user_message') stored.clientMessageId = item.clientMessageId;
+    row.item = structuredClone(stored);
     item.body = {
-      item: { ...structuredClone(row.item), ...(keptBackground ? { background: structuredClone(keptBackground) } : {}) }, timestamp: row.timestamp,
+      item: stored, timestamp: row.timestamp,
       collapsed: item.body?.collapsed ?? [], resources: mergeResources(item.body?.resources ?? [], row.resources),
     };
+    item.liveOnly = false;
     item.seqEnd = row.seq;
     item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
     item.state = 'complete';
@@ -186,8 +192,10 @@ export class SessionJournal {
     if (!Number.isSafeInteger(first)) throw new Error('Journal history position exhausted.');
     const rows = fresh.map((complete, offset) => stampRow(this.meta.epoch, first + offset, complete.row));
     const created = fresh.map((complete, offset) => this.completeItem(this.meta.epoch, complete, first + offset));
+    const merged = created.concat(this.items);
     this.advance(publication);
-    this.items.unshift(...created);
+    this.items.length = 0;
+    for (const item of merged) this.items.push(item);
     for (const item of created) {
       this.byKey.set(item.itemKey, item);
       this.dirty.add(item.itemKey);

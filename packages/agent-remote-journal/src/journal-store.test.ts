@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { bodyFromRow } from './journal-items.js';
 import { MemoryJournalStore } from './journal-store.js';
 import { SessionJournal } from './session-journal.js';
 import { openJournal, text } from './journal.test-fixture.js';
@@ -30,5 +31,21 @@ describe('MemoryJournalStore', () => {
     expect((await store.load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m2']);
     await store.delete(journal.sessionKey);
     expect(await store.load(journal.sessionKey)).toBeUndefined();
+  });
+
+  it('restores an equivalent journal after evict, fill and prepend', async () => {
+    const store = new MemoryJournalStore();
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'first', 'turn-1'));
+    journal.complete(publish(), 'm1', 'digest-1');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    await store.apply(journal.takeChanges()!);
+    journal.evict(1);
+    journal.prepend(publish(), [{ row: text('m0', 'd0', 'zeroth', 'turn-0'), digest: 'digest-0' }]);
+    await store.apply(journal.takeChanges()!);
+    journal.fill('m1', bodyFromRow(text('m1', 'd1', 'first', 'turn-1')), 'digest-1');
+    await store.apply(journal.takeChanges()!);
+    const restored = new SessionJournal((await store.load(journal.sessionKey))!);
+    expect(restored.state()).toEqual(journal.state());
   });
 });

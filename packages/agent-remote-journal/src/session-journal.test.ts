@@ -263,4 +263,50 @@ describe('SessionJournal', () => {
     journal.correct(publish(), call({}), 'digest-2', revision);
     expect(journal.state().items[0]?.body?.item).toMatchObject({ background });
   });
+
+  it('treats a sealed item as relay-only', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'Interrupt'));
+    journal.seal(publish(), 'm1');
+    expect(journal.index()[0]).toMatchObject({ state: 'complete', liveOnly: true });
+    journal.replace(publish(), [{ row: text('m2', 'h2', 'Fresh'), digest: 'digest-2' }], 0);
+    expect(journal.index().map(({ itemKey }) => itemKey)).toEqual(['m1', 'm2']);
+  });
+
+  it('keeps background and alias through a correction of an evicted item, and returns what pages show', () => {
+    const { journal, publish } = openJournal();
+    const background = { id: 'review-1', kind: 'review' as const, status: 'visible' as const };
+    const user = { itemKey: 'u1', providerId: 'codex', sourceKey: 'u1', occurredAt: 0, turnId: 'turn-1', item: { type: 'user_message' as const, text: 'ask', background } };
+    journal.append(publish(), user);
+    journal.alias(publish(), 'u1', 'client-1');
+    journal.complete(publish(), 'u1', 'digest-1');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    expect(journal.evict(1)).toEqual(['u1']);
+    const revision = journal.index()[0]!.revision;
+    const row = journal.correct(publish(), { ...user, item: { type: 'user_message', text: 'ask!' } }, 'digest-2', revision);
+    const stored = journal.state().items[0]!;
+    expect(stored.body?.item).toMatchObject({ text: 'ask!', clientMessageId: 'client-1', background });
+    expect(row?.item).toEqual(stored.body?.item);
+    expect(stored.liveOnly).toBe(false);
+  });
+
+  it('clears the live-only mark when native history corrects an item', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('m1', 'd1', 'Interrupt'));
+    journal.seal(publish(), 'm1');
+    journal.correct(publish(), text('m1', 'h1', 'Interrupted'), 'digest-1', journal.index()[0]!.revision);
+    expect(journal.index()[0]).toMatchObject({ liveOnly: false, digest: 'digest-1' });
+  });
+
+  it('prepends 200,000 items and keeps the sequence contiguous', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), text('last', 'dl', 'last'));
+    const older = Array.from({ length: 200_000 }, (_, at) => ({ row: text(`k${at}`, `s${at}`, 'x'), digest: `d${at}` }));
+    const rows = journal.prepend(publish(), older);
+    expect(rows).toHaveLength(200_000);
+    const items = journal.state().items;
+    expect(items).toHaveLength(200_001);
+    expect(items[0]?.seqStart).toBe(1 - 200_000);
+    expect(items.every((item, at) => at === 0 || item.seqStart === (items[at - 1] as typeof item).seqEnd + 1)).toBe(true);
+  });
 });

@@ -80,6 +80,9 @@
         "packages/agent-remote-hosted/package.json",
         "packages/agent-remote-hosted/src",
         "packages/agent-remote-hosted/tsconfig.json",
+        "packages/agent-remote-journal/package.json",
+        "packages/agent-remote-journal/src",
+        "packages/agent-remote-journal/tsconfig.json",
         "packages/agent-remote-lab/README.md",
         "packages/agent-remote-lab/bundle-budget.ts",
         "packages/agent-remote-lab/e2e",
@@ -129,7 +132,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:986f645db6678b0b886e0238c57c003201ea45080dbc8141118282e90a359fa0"
+      "digest": "sha256:c9cb6669553634444d545e55396b5f9b4688b687a54728a5cc7c1887624e9274"
     }
   },
   "providers": [

@@ -16,10 +16,11 @@ export type ReconcilePlan =
  *
  * Every journal item takes part in positioning, so a reread item may match a live-only one, such as a sealed item
  * that native history now contains; a matched item is corrected when it is open, has no digest or its digest differs.
- * The reread's oldest item is the anchor (a journal without non-live-only items is walked from the start): journal items older than it are outside the window and stay. When the
- * reread starts with items the journal does not know and its first known item is the journal's first non-live-only
- * item, those leading items are older history and are returned in `prepend`, oldest first; any other known item
- * after unknown ones means native history was rewritten (`replace`), and no known item at all is a `gap`.
+ * The reread's oldest item is the anchor; journal items older than it are outside the window and stay. A journal
+ * without non-live-only items is walked from the start. When the reread starts with items the journal does not know
+ * and its first known item is the journal's first non-live-only item, those leading items are older history and are
+ * returned in `prepend`, oldest first; any other known item after unknown ones means native history was rewritten
+ * (`replace`), and no known item at all is a `gap`.
  *
  * Journal items passed over inside the window, or left after its last match, are ignored when live-only, abandoned
  * when open (native history never kept them), ignored when complete without a digest, and otherwise mean a complete

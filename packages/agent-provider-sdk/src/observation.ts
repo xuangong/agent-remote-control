@@ -122,6 +122,19 @@ export interface ProviderResourceReference {
   readLocator: string;
 }
 
+/**
+ * The native identity of the finalized item a timeline observation belongs to. Live deltas and the rows read again from
+ * native history after a reopen carry the same key for the same item, so a journal can recognize it.
+ */
+export interface ProviderItemIdentity {
+  /** At most 4096 characters. Record, message, call or part identities of the native runtime, never a source key of a delta. */
+  key: string;
+  /** This observation finishes the item. A history observation completes its item unless the native record is still being written. A provider whose last live delta carries no content emits an empty body of the same item type to say so. */
+  completes?: true;
+  /** A reread of native history cannot reproduce this item, so the journal keeps its only copy. */
+  liveOnly?: true;
+}
+
 export interface ProviderObservation {
   type: 'observation';
   sourceKey: string;
@@ -131,6 +144,8 @@ export interface ProviderObservation {
   /** History is for presentation, never proof of current execution or a callable interaction. */
   delivery: 'history' | 'live';
   event: AgentStreamEvent;
+  /** Required, by an adapter that declares `AgentProviderAdapter.journal`, on every timeline observation and on every `interaction_resolved` observation, from which the agent manager builds an interaction item. */
+  itemIdentity?: ProviderItemIdentity;
   resourceReferences?: ProviderResourceReference[];
 }
 

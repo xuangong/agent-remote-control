@@ -180,6 +180,8 @@ export function resolveAgentNativePrefixCapability(adapter: { readonly nativePre
 export interface AgentProviderAdapter {
   readonly nativePrefix?: AgentNativePrefixCapability;
   readonly nativeEvidence?: AgentProviderNativeEvidence;
+  /** Present only once continuity fixtures prove that live and reread observations share item identities. */
+  readonly journal?: import('./item-identity.js').AgentJournalCapability;
   readonly descriptor: AgentProviderDescriptor;
 
   createSession(config: AgentSessionConfig): Promise<AgentSession>;

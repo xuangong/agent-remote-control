@@ -261,6 +261,12 @@ Catalog confirmations reveal it. They arrive about once a minute (`packages/agen
 - the Host partition marks the journal **behind**;
 - when the session has demand, the Host partition asks the Controller to reconcile.
 
+**Terminal-driven sessions stay current.** The owner decided this on 2026-11-15.
+
+- The Controller observes a session that a native CLI controls without taking control. Where the provider writes a transcript, the Controller tails it (Claude JSONL, Codex rollout files). Where the native side is a shared server (Codex daemon, OpenCode server), the Controller stays subscribed as a read-only observer. It publishes what it sees into the journal.
+- Observation never writes to the native session and never contends for its ownership.
+- Until a provider supports such observation, catalog confirmations mark its journals behind and trigger a reconcile, as above.
+
 **Backfill.** While a Controller is idle, it creates journals for its most recently active catalog sessions, within a bounded budget, so most first opens find a journal.
 
 - Backfill must not start runtimes. It uses a read-only history capability that adapters offer where the native side allows it, such as reading a transcript file or a server's message list.
@@ -475,7 +481,7 @@ When the result changes, the Host partition sends it to the Controller.
   - no releases while the uplink is down;
   - wake and release are serialized per session;
   - only one reconcile runs at a time.
-- **Native CLI control:** such a session is not scheduled. Its journal is marked behind until the Controller reopens it after a take-over. A wake never bypasses take-over.
+- **Native CLI control:** the runtime of such a session is not scheduled. The Controller observes it read-only and keeps its journal current (see Knowing when a journal is behind). A wake never bypasses take-over.
 
 ### Provider work
 
@@ -485,6 +491,8 @@ When the result changes, the Host partition sends it to the Controller.
 | OpenCode (shared server) | This Controller's subscription | Already releases safely. |
 | Claude (one process per session) | The process | No release path yet; the adapter gains a safe one. |
 | Copilot (shared stdio process) | The session | No release path yet; the adapter gains a safe one. |
+
+Each adapter also gains read-only observation of sessions a native CLI controls: tailing the transcript, or subscribing as an observer.
 
 The largest resource savings come from Claude and Copilot. Resident budgets and wake deadlines per provider are set from P0 measurements.
 
@@ -585,7 +593,7 @@ Each phase has its own plan and ships on its own. Long-conversation rendering ca
 | Phase | Delivers | Experience gained |
 |---|---|---|
 | P0 | Measurements, confirmed targets, and a cost estimate from row rates | Numbers to hold the design to |
-| P1 Instant reading | **Relay:** the Host partition with journals, serving Snapshot, pages and live rows.<br>**Controller:** publishing with item keys, digests, fencing, reconcile and backfill.<br>**Client:** the device store and journal-served reading.<br>Smart reading turns on for a provider only when all three have shipped and its shadow comparison passes. | T1, T2, T6 |
+| P1 Instant reading | **Relay:** the Host partition with journals, serving Snapshot, pages and live rows.<br>**Controller:** publishing with item keys, digests, fencing, reconcile and backfill; read-only observation of terminal-driven sessions, provider by provider.<br>**Client:** the device store and journal-served reading.<br>Smart reading turns on for a provider only when all three have shipped and its shadow comparison passes. | T1, T2, T6 |
 | P2 Sending never blocks | The operation queue with requesters, preconditions, receipts and events; moving the outbox, Team and TPM queues; senders shown on messages; the composer always enabled; business-state presentation; the per-session attach and control loops removed for journal-served sessions | T4, T5 |
 | P3 Smart residency | Demand leases and Controller residency, including release for Claude and Copilot; the live budget retired for journal-served sessions, while stream limits stay for live-only paths | T3 with resource control |
 | P4 Partitioned Relay | Uplinks and sync channels moved to Host and account partitions | Isolation and scale |
@@ -610,7 +618,7 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 | Risk | Response |
 |---|---|
 | An adapter cannot produce the same item keys live and on reread | Its sessions stay crude, or replace on every reopen, which is today's behaviour; continuity fixtures gate each provider. |
-| Sessions driven from a terminal are not observed | Journals are marked behind; catalog confirmations detect activity and trigger a reconcile when there is demand. Tailing native transcripts is an open question. |
+| Observing a terminal-driven session interferes with it | Observation is read-only: it tails transcripts or subscribes as an observer, and never writes or claims ownership. Until a provider supports it, journals are marked behind and reconciled on catalog confirmations. |
 | Storage grows without limit | The journal is a working set. Bodies outside the resident window are evicted and filled again from the Host; safety caps and quotas stop runaway growth; P0 measures real sizes first. |
 | Older content is unreadable while the Host is offline | The resident window and the device store cover normal reading. P0 sizes the window from how far back people read, and the reader sees the Host being offline as a fact. |
 | Two server modes double the test matrix | One client suite runs against both. Crude mode is removed once the owner confirms every Controller is updated. |
@@ -635,7 +643,7 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 
 ### Open questions for the owner
 
-1. **Terminal sessions.** Should adapters tail native transcripts (Claude JSONL, Codex rollout files) so journals stay current while a native CLI has control?
+None are open. The owner decided retention, compatibility, sender display and terminal sessions on 2026-11-15. Each decision is recorded in its section.
 
 ## Documents to update during implementation
 

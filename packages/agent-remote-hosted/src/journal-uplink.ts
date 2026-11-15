@@ -36,10 +36,12 @@ export interface JournalConnectionOptions {
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
   /** Told when a journal message was not sent because it does not encode. */
-  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void;
+  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed'): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
-   * connection is still current: the rows are durable, so subscribers must see them. A failure here changes nothing.
+   * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
+   * fenced publication. It must be synchronous: the connection does not wait for it. A failure is reported through
+   * `diagnostic` and changes nothing.
    */
   published?(sessionKey: string, result: JournalPublished): void;
 }
@@ -143,10 +145,13 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             return;
           }
           const result = await journals.publish(hostId, sessionKey, generation, message.entries);
-          try { options.published?.(sessionKey, result); }
-          catch { /* A subscriber's failure does not undo a stored publication. */ }
+          const stored = result.cursor !== undefined && result.refusal?.reason !== 'fenced';
+          if (stored) {
+            try { options.published?.(sessionKey, result); }
+            catch { options.diagnostic?.('journal_fanout_failed'); }
+          }
           if (!options.current()) return;
-          if (result.cursor && result.refusal?.reason !== 'fenced') {
+          if (result.cursor && stored) {
             send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_ack', sessionKey, generation, watermark: result.watermark, cursor: result.cursor });
           }
           if (result.refusal) {

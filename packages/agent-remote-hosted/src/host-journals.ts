@@ -44,16 +44,12 @@ export interface JournalStatus {
 }
 
 export interface JournalPublished {
-  /** The rows the journal stamped, in order, for the subscribers that read this session. */
-  rows: JournalRow[];
   /** What live subscribers see of the publication, in order. */
   events: JournalLiveEvent[];
   /** The last publication applied; everything up to it is stored. */
   watermark: number;
   /** The journal's cursor after the publication; absent when the session has no journal. */
   cursor?: TimelineCursor;
-  /** Set when a replacement started a new epoch. */
-  replacedEpoch?: string;
   /** The first entry the journal refused; entries before it are applied and stored. */
   refusal?: JournalRefusal;
 }
@@ -125,23 +121,23 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
 
   function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
     switch (entry.op) {
-      case 'append': { const row = journal.append(publication, entry.row); if (row) { published.rows.push(row); published.events.push({ kind: 'row', row }); } break; }
+      case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row }); break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
       case 'seal': journal.seal(publication, entry.itemKey); break;
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
-      case 'correct': { const row = journal.correct(publication, entry.row, entry.digest, entry.expectedRevision); if (row) published.rows.push(row); break; }
+      case 'correct': journal.correct(publication, entry.row, entry.digest, entry.expectedRevision); break;
       case 'replace': {
         const before = journal.epoch;
         const epoch = journal.replace(publication, entry.items, now());
-        if (epoch !== before) { published.replacedEpoch = epoch; published.events.push({ kind: 'replaced', epoch }); }
+        if (epoch !== before) published.events.push({ kind: 'replaced', epoch });
         break;
       }
-      case 'prepend': published.rows.push(...journal.prepend(publication, entry.items)); break;
+      case 'prepend': journal.prepend(publication, entry.items); break;
       case 'head': {
-        const fresh = (journal.publisher?.watermark ?? 0) < entry.sequence;
+        const before = journal.publisher?.watermark;
         journal.setHead(publication, entry.head);
         const head = journal.head;
-        if (fresh && head) published.events.push({ kind: 'head', head });
+        if (journal.publisher?.watermark !== before && head) published.events.push({ kind: 'head', head });
         break;
       }
     }
@@ -172,10 +168,10 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     }),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
-      const fenced = (): JournalPublished => ({ rows: [], events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
+      const fenced = (): JournalPublished => ({ events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
       const key = storeKey(hostId, sessionKey);
       if (needsReopen.has(key)) return fenced();
-      const published: JournalPublished = { rows: [], events: [], watermark: 0 };
+      const published: JournalPublished = { events: [], watermark: 0 };
       let journal: SessionJournal | undefined;
       try {
         journal = await load(hostId, sessionKey, false);

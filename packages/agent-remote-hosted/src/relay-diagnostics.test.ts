@@ -40,9 +40,11 @@ it('keeps journal events from Controllers that do not know them', async () => {
  const { relayDiagnosticsForVersion } = await import('./relay-diagnostics.js');
  const unencodable = { ...event, event: 'journal_message_unencodable', reason: undefined };
  const failed = { ...event, event: 'journal_store_failed', reason: undefined };
+ const fanout = { ...event, event: 'journal_fanout_failed', reason: undefined };
  expect(isRelayDiagnostic(unencodable)).toBe(true);
  expect(isRelayDiagnostic(failed)).toBe(true);
- const batch = parseRelayDiagnosticBatch({ entries: [event, unencodable, failed] })!;
+ expect(isRelayDiagnostic(fanout)).toBe(true);
+ const batch = parseRelayDiagnosticBatch({ entries: [event, unencodable, failed, fanout] })!;
  expect(relayDiagnosticsForVersion(batch, 4)).toEqual(batch);
  for (const version of [1, 2, 3]) expect(relayDiagnosticsForVersion(batch, version).map(entry => entry.event)).toEqual(['host_disconnected']);
 });

@@ -1,4 +1,4 @@
-import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
+import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remote-journal';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage, JOURNAL_INDEX_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
@@ -21,7 +21,7 @@ function wire(fields: Record<string, unknown>): JournalHostMessage {
 
 type Sent = { type: string; [field: string]: unknown };
 
-function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void; published?(sessionKey: string, result: JournalPublished): void } = {}) {
+function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed'): void; published?(sessionKey: string, result: JournalPublished): void } = {}) {
   const store = new MemoryJournalStore();
   const journals = options.journals ?? createHostJournals({ store, now: () => 1_000 });
   const sent: Sent[] = [];
@@ -34,6 +34,7 @@ function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal
   });
   return {
     connection, store, sent, timers,
+    journals,
     endConnection() { live = false; },
     failSends(error: Error) { sendFailure = error; },
     expireOldestTimer() { const [id, timer] = [...timers][0]!; timers.delete(id); timer.callback(); },
@@ -47,7 +48,7 @@ function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal
 const requestIdOf = (sent: Sent[], type: string) => String(sent.find(message => message.type === type)!.requestId);
 
 describe('a journal connection', () => {
-  it('hands every stored publication to the broker, also after the connection is no longer current, but not a fenced one', async () => {
+  it('hands every stored publication to the broker, also after the connection is no longer current, but not one the connection refuses as not opened', async () => {
     const reported: Array<{ sessionKey: string; events: number; cursorSeq?: number }> = [];
     const f = fixture({ published: (sessionKey, result) => reported.push({ sessionKey, events: result.events.length, cursorSeq: result.cursor?.seq }) });
     await f.open();
@@ -57,6 +58,43 @@ describe('a journal connection', () => {
     expect(reported).toEqual([{ sessionKey: SESSION, events: 1, cursorSeq: 1 }, { sessionKey: SESSION, events: 1, cursorSeq: 2 }]);
     await f.publish([{ sequence: 3, op: 'append', row: row('m3', 'Fenced') }], 9);
     expect(reported).toHaveLength(2);
+  });
+
+  it('does not hand on a publication the journal fenced because a newer connection opened the session', async () => {
+    const store = new MemoryJournalStore();
+    const journals = createHostJournals({ store, now: () => 1_000 });
+    const reported: string[] = [];
+    const older = fixture({ journals, published: sessionKey => reported.push(sessionKey) });
+    const newer = fixture({ journals });
+    await older.open();
+    await newer.open();
+    await older.publish([{ sequence: 1, op: 'append', row: row('m1', 'Stale') }]);
+    expect(reported).toEqual([]);
+    expect(older.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
+    expect(older.sent.some(message => message.type === 'journal_ack')).toBe(false);
+  });
+
+  it('does not hand on a publication refused after a failed write until the session is opened again', async () => {
+    const memory = new MemoryJournalStore();
+    let failNext = false;
+    const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+      apply: async changes => { if (failNext) { failNext = false; throw new Error('disk full'); } await memory.apply(changes); } };
+    const reported: string[] = [];
+    const f = fixture({ journals: createHostJournals({ store, now: () => 1_000 }), published: sessionKey => reported.push(sessionKey) });
+    await f.open();
+    failNext = true;
+    await expect(f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Lost') }])).rejects.toThrow('disk full');
+    await f.publish([{ sequence: 2, op: 'append', row: row('m2', 'Refused') }]);
+    expect(reported).toEqual([]);
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
+  });
+
+  it('reports a diagnostic when handing a publication on fails', async () => {
+    const events: string[] = [];
+    const f = fixture({ published: () => { throw new Error('subscriber failed'); }, diagnostic: event => events.push(event) });
+    await f.open();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(events).toEqual(['journal_fanout_failed']);
   });
 
   it('keeps a stored publication acknowledged when the broker fails to hand it on', async () => {
@@ -122,7 +160,7 @@ describe('a journal connection', () => {
   it('does not send a message that fails to encode and reports it', async () => {
     const diagnostics: string[] = [];
     const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
-    const broken: HostJournals = { ...base, publish: async () => ({ rows: [], events: [], watermark: -1, cursor: { epoch: 'e', seq: 0 } }) };
+    const broken: HostJournals = { ...base, publish: async () => ({ events: [], watermark: -1, cursor: { epoch: 'e', seq: 0 } }) };
     const f = fixture({ journals: broken, diagnostic: message => diagnostics.push(message) });
     await f.open();
     f.sent.length = 0;

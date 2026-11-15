@@ -52,7 +52,7 @@ describe('createHostJournals', () => {
     const opened = await openSession(journals, HOST, SESSION, 'controller-1');
     const result = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hel'), append(2, 'm1', 'lo'), complete(3, 'm1'), append(4, 'm2', 'Next')]);
     expect(result.refusal).toBeUndefined();
-    expect(result.rows.map(({ itemKey, seq }) => [itemKey, seq])).toEqual([['m1', 1], ['m1', 2], ['m2', 3]]);
+    expect(result.events.map(event => event.kind === 'row' ? [event.row.itemKey, event.row.seq] : event.kind)).toEqual([['m1', 1], ['m1', 2], ['m2', 3]]);
     expect(result).toMatchObject({ watermark: 4, cursor: { epoch: opened.epoch, seq: 3 } });
     const saved = await store.load(KEY);
     expect(saved?.meta.publisher?.watermark).toBe(4);
@@ -65,7 +65,7 @@ describe('createHostJournals', () => {
     await openSession(journals, HOST, SESSION, 'controller-1');
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
     const again = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
-    expect(again).toMatchObject({ rows: [], watermark: 1, cursor: { seq: 1 } });
+    expect(again).toMatchObject({ events: [], watermark: 1, cursor: { seq: 1 } });
     expect(again.refusal).toBeUndefined();
   });
 
@@ -73,7 +73,7 @@ describe('createHostJournals', () => {
     const { journals, store } = fixture();
     await openSession(journals, HOST, SESSION, 'controller-1');
     const result = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'One'), complete(2, 'ghost'), append(3, 'm3', 'Three')]);
-    expect(result.rows.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+    expect(result.events.map(event => event.kind === 'row' ? event.row.itemKey : event.kind)).toEqual(['m1']);
     expect(result).toMatchObject({ watermark: 1, refusal: { sequence: 2, reason: 'unknown_item', itemKey: 'ghost' } });
     expect((await store.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
   });
@@ -111,10 +111,10 @@ describe('createHostJournals', () => {
     await openSession(journals, HOST, SESSION, 'controller-1');
     await openSession(journals, HOST, SESSION, 'controller-1');
     const stale = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hi')]);
-    expect(stale).toMatchObject({ rows: [], refusal: { sequence: 1, reason: 'fenced' } });
+    expect(stale).toMatchObject({ events: [], refusal: { sequence: 1, reason: 'fenced' } });
     expect((await store.load(KEY))?.items).toEqual([]);
     const unopened = await journals.publish(HOST, 'codex:unknown', 1, [append(5, 'm1', 'Hi')]);
-    expect(unopened).toEqual({ rows: [], events: [], watermark: 0, refusal: { sequence: 5, reason: 'fenced' } });
+    expect(unopened).toEqual({ events: [], watermark: 0, refusal: { sequence: 5, reason: 'fenced' } });
     expect(await store.load(`${HOST}:codex:unknown`)).toBeUndefined();
   });
 
@@ -126,9 +126,10 @@ describe('createHostJournals', () => {
       { sequence: 3, op: 'head', head: { snapshot, observedAt: 7 } },
       { sequence: 4, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] },
     ]);
-    expect(result.replacedEpoch).toBeDefined();
-    expect(result.replacedEpoch).not.toBe(opened.epoch);
-    expect(result.cursor).toEqual({ epoch: result.replacedEpoch, seq: 1 });
+    const replaced = result.events.find(event => event.kind === 'replaced');
+    expect(replaced).toBeDefined();
+    expect(replaced?.kind === 'replaced' && replaced.epoch).not.toBe(opened.epoch);
+    expect(result.cursor).toEqual({ epoch: replaced?.kind === 'replaced' ? replaced.epoch : undefined, seq: 1 });
     const saved = await store.load(KEY);
     expect(saved?.meta.head).toEqual({ snapshot, observedAt: 7 });
     expect(saved?.items.map(({ itemKey }) => itemKey)).toEqual(['x1']);
@@ -151,10 +152,46 @@ describe('createHostJournals', () => {
       { sequence: 5, op: 'correct', row: row('m1', 'Hello!'), digest: 'digest-new', expectedRevision: revision },
       { sequence: 6, op: 'prepend', items: [{ row: row('m0', 'Earlier'), digest: 'digest-m0' }] },
     ]);
-    expect(second.rows).toHaveLength(2);
     expect(second.events).toEqual([]);
     const third = await journals.publish(HOST, SESSION, 1, [{ sequence: 7, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] }]);
-    expect(third.events).toEqual([{ kind: 'replaced', epoch: third.replacedEpoch }]);
+    expect(third.events).toEqual([{ kind: 'replaced', epoch: third.cursor!.epoch }]);
+  });
+
+  it('delivers rows of both epochs around a replacement in order, and nothing for a replacement it already applied', async () => {
+    const { journals } = fixture();
+    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
+    const entries: JournalPublishEntry[] = [
+      append(1, 'm1', 'Old'), { sequence: 2, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] }, append(3, 'x2', 'New'),
+    ];
+    const result = await journals.publish(HOST, SESSION, 1, entries);
+    const epoch = result.cursor!.epoch;
+    expect(epoch).not.toBe(opened.epoch);
+    expect(result.events).toEqual([
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', epoch: opened.epoch }) },
+      { kind: 'replaced', epoch },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'x2', epoch }) },
+    ]);
+    expect((await journals.publish(HOST, SESSION, 1, entries)).events).toEqual([]);
+  });
+
+  it('reports a status that includes a publication still being stored', async () => {
+    const memory = new MemoryJournalStore();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let gated = false;
+    const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
+      apply: async changes => { if (gated) await gate; await memory.apply(changes); } };
+    const { journals } = fixture(store);
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    gated = true;
+    const publishing = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
+    let reported = false;
+    const status = journals.status(HOST, SESSION).then(value => { reported = true; return value; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(reported).toBe(false);
+    release();
+    await publishing;
+    expect((await status)?.cursor.seq).toBe(1);
   });
 
   it('does not report a head of a publication it already applied', async () => {
@@ -215,7 +252,7 @@ describe('createHostJournals', () => {
       journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'c')]),
     ]);
     expect(results.map(result => result.watermark)).toEqual([1, 2, 3]);
-    expect(results.map(result => result.rows[0]?.seq)).toEqual([1, 2, 3]);
+    expect(results.map(result => result.events[0]?.kind === 'row' ? result.events[0].row.seq : undefined)).toEqual([1, 2, 3]);
   });
 
   it('keeps the journals of different Hosts apart and survives forgetting a Host', async () => {
@@ -311,7 +348,7 @@ describe('createHostJournals', () => {
     const first = journals.publish(HOST, SESSION, 1, [append(2, 'm2', 'Lost')]);
     const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'Would skip m2')]);
     await expect(first).rejects.toThrow('disk full');
-    expect(await second).toEqual({ rows: [], events: [], watermark: 0, refusal: { sequence: 3, reason: 'fenced' } });
+    expect(await second).toEqual({ events: [], watermark: 0, refusal: { sequence: 3, reason: 'fenced' } });
     expect((await memory.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
     expect((await memory.load(KEY))?.meta.publisher?.watermark).toBe(1);
     expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1 });
@@ -338,7 +375,7 @@ describe('createHostJournals', () => {
     const first = journals.publish(HOST, SESSION, 2, [append(3, 'm3', 'Lost')]);
     const second = journals.publish(HOST, SESSION, 2, [append(4, 'm4', 'Would skip m3')]);
     await expect(first).rejects.toThrow('store unavailable');
-    expect(await second).toEqual({ rows: [], events: [], watermark: 0, refusal: { sequence: 4, reason: 'fenced' } });
+    expect(await second).toEqual({ events: [], watermark: 0, refusal: { sequence: 4, reason: 'fenced' } });
     expect((await memory.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
     expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 3, watermark: 2 });
     expect(await journals.publish(HOST, SESSION, 3, [append(3, 'm3', 'Again')])).toMatchObject({ watermark: 3 });

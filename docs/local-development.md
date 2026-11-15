@@ -281,6 +281,7 @@ Set these in the shell that runs `pnpm local`.
 | `ARC_LOCAL_READY_TIMEOUT_MS` | How long `up` waits for the site and the Controller registration, as a positive whole number of milliseconds. | `90000` |
 | `ARC_LOCAL_BIN_DIR` | Directory where `up` installs `agent-remote-controller-dev`. | `~/.local/bin` |
 | `ARC_LOCAL_WEB_DIST` | Absolute path of the website build the instance serves; `up --no-build` checks it for `index.html`. `up` does not build into it. The tests use it. | `dist/relay/web` in the checkout |
+| `ARC_LOCAL_JOURNALS` | Set to `1` before `up` to store Host session journals in `relay/journals.sqlite` of the instance. Off by default. The development Controller does not publish journals yet, so this only exercises the store, the switch and the Relay's startup. | unset |
 
 ## Shared native profiles
 

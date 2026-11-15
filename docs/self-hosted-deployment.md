@@ -231,6 +231,24 @@ add multi-site pairing. Preserve its local state and native sessions during upgr
 The diagnostic Lab uses repository-hosted installers and its actual pairing URL;
 it does not assume that the Vite origin is a hosted Relay.
 
+## Session journals (optional, off by default)
+
+A Relay can keep a working copy of each session's conversation, so a session can be read without waiting for its
+Controller. This is an opt-in feature in development: it does nothing until a Controller that publishes journals is
+installed, and nothing reads from a journal until the owner turns it on for a Host and provider.
+
+| Setting | Meaning |
+| --- | --- |
+| `AGENT_REMOTE_JOURNALS=1` | Node / Docker only. Stores journals in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`). Needs Node 22.13 or later; the image uses Node 22. Node prints one `ExperimentalWarning` for its built-in SQLite. Unset or any other value: no journals. |
+| `PUT /v1/remote/hosts/<host id>/smart-reading` with `{"providerId":"codex","enabled":true}` | The owner turns reading from journals on or off for one provider of one Host. The default is off. Turning it off closes that provider's journal-served streams so their pages reconnect and read through the Controller. `GET` on the same path lists the providers that are on. |
+
+Journals are a working set, not an archive: the native session on the Host is the ground truth. The Relay keeps the
+bodies of the latest 50 turns of a session, bounds each session, each Host and its memory, and a Controller can read
+evicted turns again from the Host. Items nothing can rebuild (live-only items) are kept, up to a cap per session. A
+session whose journal a limit refused is read through the Controller until its Controller publishes again. Revoking a
+Host deletes its journals; the Relay records the deletion with the revoke and retries it until the store confirms. The
+journal file is inside the state directory, so the backup rules below cover it; copy it only while the Relay is stopped.
+
 ## Persistence, backups and upgrades
 
 Node Compose owns a named `relay-state` volume mounted at `/data`. Keep the same

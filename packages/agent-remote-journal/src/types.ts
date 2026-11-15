@@ -86,9 +86,27 @@ export interface JournalState {
 /** What changed since changes were last taken, for a store that writes incrementally. */
 export interface JournalChanges {
   meta: JournalMeta;
+  /** Removed first, then upserted: an item may be removed and appear again. */
+  removed: string[];
   upsert: JournalItem[];
   /** True after a replacement: the store drops every item it holds for the session before the upserts. */
   replaced: boolean;
+  /** An estimate of what the journal holds, as `SessionJournal.residentBytes` measures it; the store records it per session. */
+  bytes: number;
+}
+
+/** What a store reports about one stored journal without loading it. */
+export interface JournalListing {
+  sessionKey: string;
+  hasHead: boolean;
+  /** The estimate that came with the journal's latest changes. */
+  bytes: number;
+}
+
+/** What a store can do over many journals at once, by the prefix of their keys. */
+export interface JournalCatalog {
+  list(prefix: string): Promise<JournalListing[]>;
+  deletePrefix(prefix: string): Promise<void>;
 }
 
 export class JournalFencedError extends Error {

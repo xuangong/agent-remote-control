@@ -28,6 +28,12 @@ export class SessionJournal {
   protected readonly dirty = new Set<string>();
   protected metaDirty = false;
   protected replaced = false;
+  /** Items removed since changes were last taken. */
+  protected readonly removedKeys = new Set<string>();
+  /** The measured size of each item record, a running total of them, and the items not measured since they changed. */
+  protected readonly sizes = new Map<string, number>();
+  protected sizedTotal = 0;
+  protected readonly unmeasured = new Set<string>();
 
   static create(sessionKey: string, epoch: string = crypto.randomUUID()): SessionJournal {
     const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null, lastRevision: 0, retiredEpochs: [] }, items: [] });
@@ -42,6 +48,7 @@ export class SessionJournal {
     for (const { revision } of this.items) if (revision > newest) newest = revision;
     this.meta.lastRevision = newest;
     for (const item of this.items) this.byKey.set(item.itemKey, item);
+    for (const item of this.items) this.unmeasured.add(item.itemKey);
   }
 
   get sessionKey(): string { return this.meta.sessionKey; }
@@ -53,6 +60,71 @@ export class SessionJournal {
   get head(): JournalHead | undefined { return this.meta.head === undefined ? undefined : structuredClone(this.meta.head); }
   /** The publisher that may write now: its generation and last applied publication. Null before the first claim. */
   get publisher(): JournalPublisher | null { return this.meta.publisher === null ? null : { ...this.meta.publisher }; }
+
+  /** How many items the journal holds, resident or evicted. */
+  get itemCount(): number { return this.items.length; }
+
+  has(itemKey: string): boolean { return this.byKey.has(itemKey); }
+
+  /** Whether the Controller has published a head; cheaper than reading it. */
+  get hasHead(): boolean { return this.meta.head !== undefined; }
+
+  /** Takes the journal out of serving until a later head is published. The Relay does this when a quota refuses a publication. */
+  clearHead(): void {
+    delete this.meta.head;
+    this.metaDirty = true;
+  }
+
+  /** How many live-only items the journal holds. */
+  get liveOnlyCount(): number {
+    let count = 0;
+    for (const item of this.items) if (item.liveOnly) count += 1;
+    return count;
+  }
+
+  /**
+   * An estimate of what the journal holds: the length of its meta and of each item record as stored, in JSON characters.
+   * Only items that changed since the last call are measured, so the cost follows the change, not the journal.
+   */
+  residentBytes(): number {
+    for (const key of this.unmeasured) {
+      const item = this.byKey.get(key);
+      const before = this.sizes.get(key) ?? 0;
+      const size = item ? JSON.stringify(item).length : 0;
+      if (item) this.sizes.set(key, size); else this.sizes.delete(key);
+      this.sizedTotal += size - before;
+    }
+    this.unmeasured.clear();
+    return this.sizedTotal + JSON.stringify(this.meta).length;
+  }
+
+  /** The estimated size of the live-only items, which a replacement carries over. */
+  liveOnlyBytes(): number {
+    this.residentBytes();
+    let total = 0;
+    for (const item of this.items) if (item.liveOnly) total += this.sizes.get(item.itemKey) ?? 0;
+    return total;
+  }
+
+  /**
+   * Removes the oldest live-only items beyond `keep`, skeleton and body: nothing can rebuild them, so their place in the
+   * sequence goes with them. Returns their keys.
+   */
+  dropOldestLiveOnly(keep: number): string[] {
+    const live = this.items.filter(item => item.liveOnly);
+    const doomed = new Set(live.slice(0, Math.max(0, live.length - keep)).map(item => item.itemKey));
+    if (doomed.size === 0) return [];
+    const remaining = this.items.filter(item => !doomed.has(item.itemKey));
+    this.items.length = 0;
+    for (const item of remaining) this.items.push(item);
+    for (const key of doomed) {
+      this.byKey.delete(key);
+      this.dirty.delete(key);
+      this.removedKeys.add(key);
+      this.unmeasured.add(key);
+    }
+    return [...doomed];
+  }
 
   /**
    * Registers a publisher's new uplink connection and fences off every older one. A reconnecting publisher resumes
@@ -97,7 +169,7 @@ export class SessionJournal {
     existing.state = 'open';
     delete existing.digest;
     existing.revision = this.nextRevision();
-    this.dirty.add(existing.itemKey);
+    this.touch(existing.itemKey);
     return row;
   }
 
@@ -109,7 +181,7 @@ export class SessionJournal {
     item.state = 'complete';
     item.digest = digest;
     item.revision = this.nextRevision();
-    this.dirty.add(itemKey);
+    this.touch(itemKey);
   }
 
   /** Closes an item that native history no longer contains, keeping what was received. It has no native copy, so it is relay-only. */
@@ -122,7 +194,7 @@ export class SessionJournal {
     item.liveOnly = true;
     delete item.digest;
     item.revision = this.nextRevision();
-    this.dirty.add(itemKey);
+    this.touch(itemKey);
   }
 
   /** Records which operation produced a user message, so clients match its echo exactly. */
@@ -133,7 +205,7 @@ export class SessionJournal {
     item.clientMessageId = clientMessageId;
     if (item.body?.item.type === 'user_message') item.body.item.clientMessageId = clientMessageId;
     item.revision = this.nextRevision();
-    this.dirty.add(itemKey);
+    this.touch(itemKey);
   }
 
   /** Replaces the head with the Controller's latest Snapshot. */
@@ -168,7 +240,7 @@ export class SessionJournal {
     item.state = 'complete';
     item.digest = digest;
     item.revision = this.nextRevision();
-    this.dirty.add(item.itemKey);
+    this.touch(item.itemKey);
     return row;
   }
 
@@ -203,6 +275,10 @@ export class SessionJournal {
     this.items.length = 0;
     this.byKey.clear();
     this.dirty.clear();
+    this.sizes.clear();
+    this.sizedTotal = 0;
+    this.unmeasured.clear();
+    this.removedKeys.clear();
     this.replaced = true;
     for (const item of next) {
       if (resealed.has(item)) item.revision = this.nextRevision();
@@ -232,7 +308,7 @@ export class SessionJournal {
     for (const item of created) {
       item.revision = this.nextRevision();
       this.byKey.set(item.itemKey, item);
-      this.dirty.add(item.itemKey);
+      this.touch(item.itemKey);
     }
     this.meta.minSeq = first;
     return rows;
@@ -283,7 +359,7 @@ export class SessionJournal {
       else delete item.background;
       item.keptBody = { timestamp: body.timestamp, collapsed: [...body.collapsed], resources: structuredClone(body.resources) };
       item.body = null;
-      this.dirty.add(key);
+      this.touch(key);
     }
     return keys;
   }
@@ -304,7 +380,7 @@ export class SessionJournal {
     item.body = filled;
     delete item.background;
     delete item.keptBody;
-    this.dirty.add(itemKey);
+    this.touch(itemKey);
     return 'filled';
   }
 
@@ -314,16 +390,23 @@ export class SessionJournal {
 
   /** What changed since the last call, or undefined when nothing did. */
   takeChanges(): JournalChanges | undefined {
-    if (!this.metaDirty && this.dirty.size === 0 && !this.replaced) return undefined;
+    if (!this.metaDirty && this.dirty.size === 0 && this.removedKeys.size === 0 && !this.replaced) return undefined;
     const upsert = [...this.dirty]
       .map(key => this.byKey.get(key))
       .filter((item): item is JournalItem => item !== undefined)
       .map(item => structuredClone(item));
-    const changes: JournalChanges = { meta: structuredClone(this.meta), upsert, replaced: this.replaced };
+    const changes: JournalChanges = { meta: structuredClone(this.meta), removed: [...this.removedKeys], upsert, replaced: this.replaced, bytes: this.residentBytes() };
     this.dirty.clear();
+    this.removedKeys.clear();
     this.metaDirty = false;
     this.replaced = false;
     return changes;
+  }
+
+  /** Marks an item for the store and for measuring. */
+  protected touch(itemKey: string): void {
+    this.dirty.add(itemKey);
+    this.unmeasured.add(itemKey);
   }
 
   protected duplicate(publication: JournalPublication): boolean {
@@ -363,6 +446,6 @@ export class SessionJournal {
   protected insertLast(item: JournalItem): void {
     this.items.push(item);
     this.byKey.set(item.itemKey, item);
-    this.dirty.add(item.itemKey);
+    this.touch(item.itemKey);
   }
 }

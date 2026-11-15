@@ -565,12 +565,12 @@ export class MemoryJournalStore implements JournalStore {
 - [ ] **Step 5: Run the tests and see them pass, then typecheck and rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-journal run test` then `pnpm --filter @orchardworks/agent-remote-journal run typecheck` then `pnpm --filter @orchardworks/agent-remote-journal run build`
-Expected: PASS for all three. The hosted package is rebuilt in a later task; until then its tests still use the previous `dist`.
+Expected: PASS for all three (151 tests in 12 files). Then run the hosted suite against the rebuilt `dist` (`pnpm --filter @orchardworks/agent-remote-hosted exec vitest run --testTimeout=20000`, 790 tests), and `pnpm compatibility:update` then `pnpm compatibility:check`: the digest covers the journal sources, so commit `packages/agent-remote-lab/compatibility.json` with this task.
 
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add packages/agent-remote-journal/src
+git add packages/agent-remote-journal/src packages/agent-remote-lab/compatibility.json
 git commit -m "feat(journal): measure size incrementally, drop live-only items, clear the head, and let a store list and delete by key prefix" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

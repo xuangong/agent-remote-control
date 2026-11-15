@@ -95,3 +95,14 @@ it('offers a quiet retry when an earlier session cannot be read', async () => {
   await settle();
   expect(container.textContent).toContain('Back again');
 });
+
+it('names an earlier session by its title, and only as an earlier conversation while its title is not known', async () => {
+  const f = fixture({ 'agent-past': [page('agent-past', [entry(1, 'Reply')], false)], 'agent-older': [page('agent-older', [entry(1, 'Older reply')], false)] });
+  const container = await render(view(<EarlierConversation baseUrl="http://relay/" transport={f.transport} directory={f.directory}
+    sessions={[{ ...session('past'), title: 'Plan the release' }, session('older')]} readCached={() => undefined} />));
+  await settle();
+  expect(container.querySelector('.lab-earlier-session')?.getAttribute('aria-label')).toBe('Earlier conversation: Plan the release');
+  await act(async () => container.querySelector<HTMLButtonElement>('.lab-earlier-reveal')!.click());
+  await settle();
+  expect([...container.querySelectorAll('.lab-earlier-session')].map(section => section.getAttribute('aria-label'))).toEqual(['Earlier conversation', 'Earlier conversation: Plan the release']);
+});

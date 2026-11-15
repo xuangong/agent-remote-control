@@ -17,6 +17,11 @@ export interface SessionEntry extends Partial<AgentChildSession> {
   role?: string;
 }
 export interface SessionNode { key: string; session: SessionEntry; children: SessionNode[]; placeholder?: boolean }
+/** A session's title when it is known here. Handoff history falls back to the native ID, which is never shown as a name. */
+export function knownTitle(session: Pick<SessionEntry, 'title' | 'nativeSessionId'>): string | undefined {
+  const title = session.title.trim();
+  return title && title !== session.nativeSessionId ? title : undefined;
+}
 export function sessionKey(item: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>): string {
   return JSON.stringify([item.hostId ?? 'local', item.providerId, item.nativeSessionId]);
 }

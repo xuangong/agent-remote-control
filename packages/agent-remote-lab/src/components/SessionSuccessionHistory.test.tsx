@@ -91,3 +91,14 @@ it.each(['missing-current', 'gap', 'wrong-origin', 'wrong-current', 'unrelated',
   const view = await render(<SessionSuccessionHistory navigation={value} onOpen={async () => true} />);
   expect(view.querySelector('nav')).toBeNull();
 }, 5000);
+
+it('names sessions whose titles are not known yet in words, keeping their IDs for the pointer only', async () => {
+  const untitled = (selected: string, intent?: 'history') => sessionSuccessionHistory({ scope: 'scope', replays: chain, current, selected: session(selected), intent, titles: new Map() });
+  const view = await render(<SessionSuccessionHistory navigation={untitled('C')} onOpen={async () => true} />);
+  const links = [...view.querySelectorAll('a')];
+  expect(links.map(item => item.textContent)).toEqual(['previous session', 'Earlier session']);
+  expect(links.map(item => item.title)).toEqual(['B', 'A']);
+  expect(view.querySelector('.lab-succession-history-relation')?.textContent).toBe('Continued from previous session');
+  const past = await render(<SessionSuccessionHistory navigation={untitled('A', 'history')} onOpen={async () => true} />);
+  expect(past.querySelector('.lab-succession-history-relation')?.textContent).toBe('Continued by the current session · Return to current');
+});

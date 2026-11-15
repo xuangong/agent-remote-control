@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { AgentTimeline, useAgentReplica } from '@orchardworks/agent-remote-web/react';
 import { readWorkspaceSnapshot } from '../workspace-cache.js';
-import { sessionKey, type SessionEntry } from '../session-tree.js';
+import { knownTitle, sessionKey, type SessionEntry } from '../session-tree.js';
 
 /** What reading an earlier session needs: HTTP pages only. `connect` is never called, so no stream or control is taken. */
 export type EarlierTransport = Pick<RemoteAgentTransport, 'fetchSnapshot' | 'fetchTimeline'> & Partial<Pick<RemoteAgentTransport, 'connect'>>;
@@ -42,7 +42,8 @@ function EarlierSession({ session, transport, directory, cached, onComplete }: {
     if (!read.agentId || !first || !live.timeline.epoch) return;
     replica.applyHistory(await transport.fetchTimeline(read.agentId, 'before', { epoch: live.timeline.epoch, seq: first.seqStart }, PAGE));
   }
-  return <section className="lab-earlier-session" aria-label={session.title ? `Earlier conversation: ${session.title}` : 'Earlier conversation'} data-session={key}>
+  const title = knownTitle(session);
+  return <section className="lab-earlier-session" aria-label={title ? `Earlier conversation: ${title}` : 'Earlier conversation'} data-session={key}>
     {shown ? <AgentTimeline state={readOnly(shown)} showHeader={false} interactionsReadOnly interactionDisabled
       onLoadOlder={read.state === 'ready' ? loadOlder : undefined} /> : null}
     {read.state === 'loading' && !shown ? <p className="lab-earlier-status" role="status">Loading earlier conversation…</p> : null}

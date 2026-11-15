@@ -33,10 +33,16 @@
 
 **Amendments from the plan owner** (they override the code below where they differ):
 
-- **Offline Host and session control.** While the Host is offline, a current client's automatic acquire must not send it into a reconnect loop.
-  - Before implementing Task 5, read how `packages/agent-remote-web/src/client/remote-session-client.ts` treats a refused acquire and an unanswered one.
-  - Hold the acquire, without replying, until the Controller stream is ready, if the client then stays in a stable read-only state. Refuse it only if holding would trip a client deadline.
-  - Record the choice and the evidence in the task's report.
+- **Offline Host and session control.** While the Host is offline, a current client's automatic acquire must not send it into a reconnect loop. How `packages/agent-remote-web/src/client/remote-session-client.ts` treats an acquire:
+  - It has no operation deadline of its own. But `fetchTimeline` waits for it (`controlReady`) before it clears the 20-second connection deadline. An acquire held unanswered while the Host is offline therefore makes the client reconnect every 20 seconds with a `connection_timeout` diagnostic.
+  - When it is refused with a `protocol_error` carrying its `requestId`, the client reconnects at once (`restartDisconnected`, then its normal backoff). The one exception is the code `session_control_changed`.
+  - A `session_control` frame carrying its `requestId` resolves it, whatever access the frame states. The client then reaches `ready` read-only. Until it holds a token, it refuses mutations itself (`session_read_only`).
+
+  So, in Task 5:
+  - While the Controller stream is opening, a held acquire waits as Decision 3 says.
+  - Suppose the Controller stream cannot open because the Host is offline (refusal code `host_offline`). Each held `acquire` is then answered with the Relay's pending control state, carrying its `requestId`: `read_only`, not available, revision `relay-pending`, no token. Held `take_over` requests and every other held message are refused with the recoverable `protocol_error`, as in Decision 5. While the Host stays offline, a later `acquire` naming the pending revision is answered the same way at once. The stream remembers that it is waiting for the Host.
+  - Other failures to open (`session_attach_failed`, `session_stream_capacity`, …) are refused as in Decision 5. The client reconnects with its backoff, as it does from a crude stream, and so retries until the condition clears.
+  - When the Host's Controller connects again, every journal-served stream of that Host that is waiting for it closes with 1012 `Remote Host reconnected`. The client reconnects once and acquires control over the new Controller stream. `JournalSessions.hostReturned(hostId)` does this (Task 5); the broker calls it where it sets `host.ready = true` (Task 6).
 - **Follow-ups recorded in the roadmap**, not built here:
   - Resource-binding amendments, and non-timeline `agent_stream` events, reach journal-served clients in P1-C.
   - The head's `attention.cursor` uses the journal epoch (P1-C).
@@ -2357,7 +2363,7 @@ Expected: the commit succeeds if the digest changed; if `git status` printed not
 
 **Risks the implementer should watch.**
 
-- With the Host offline a current client reads the conversation but does not reach `ready`: its automatic control acquisition is refused (`host_offline`), the client treats a failed acquire as a reason to reconnect, and the reconnect loop repeats with the client's normal backoff. P2 removes the dependency by issuing control tokens at the Relay. Until then no production path enables this (Decision 1).
+- With the Host offline a current client reads the conversation and reaches `ready` read-only. The Relay answers its automatic acquire with the pending control state; it does not refuse it (see the plan owner's amendment). The client stays read-only until the Host's Controller connects again. The Relay then closes the stream once, and the client acquires control over the new Controller stream. P2 issues control tokens at the Relay and removes that reconnect.
 - `timeline_resource_binding_replaced` and the non-timeline `agent_stream` events of the Controller are dropped (Decision 14); resource-binding amendments need a journal amendment path, which the journal package does not have yet. Carry it to the plan that adds amendments (P1-C or later).
 - The head's `attention.cursor` is served as published. The Controller must publish a head whose attention cursor refers to the journal's epoch (P1-C), or the client's unread logic compares cursors from two epochs.
 - `GET /v1/sessions/:id/snapshot` and `/timeline` still go to the Controller (Decision 13). A client that uses HTTP recovery (`timelineRecovery: 'http'`) is not served from the journal.

@@ -26,37 +26,45 @@
 
 **Files:** `src/components/WindowWorkspaces.tsx` (+ test), `src/window-outline.ts` (+ test), `src/components/window-workspaces.css`, `src/App.tsx`.
 
-- [ ] A bot's row shows its name, its role tag and its label tag (Bot mode's `.lab-bot-role` and `.lab-bot-label`). Its second line is its place (Open, Folded or Asleep), then Working, Needs you or Failed when it has one; an asleep bot shows Needs you only.
-- [ ] Sides are first-level rows (relationships are metadata, not levels). Asks stay one level in under their bot, as one line: "Ask" and its title.
-- [ ] Other views keep their title; a history view says "Earlier session".
-- [ ] Tests: role and label tags, Folded · Working, Asleep, Asleep · Needs you, a Side at the top level, an Ask under its bot.
+- [x] A bot's row shows its name, its role tag and its label tag (Bot mode's `.lab-bot-role` and `.lab-bot-label`). Its second line is its place (Open, Folded or Asleep), then Working, Needs you or Failed when it has one; an asleep bot shows Needs you only.
+- [x] Sides are first-level rows (relationships are metadata, not levels). Asks stay one level in under their bot, as one line: "Ask" and its title.
+- [x] Other views keep their title; a history view says "Earlier session".
+- [x] Tests: role and label tags, Folded · Working, Asleep, Asleep · Needs you, a Side at the top level, an Ask under its bot.
 
 ## Task 2: Windows count their bots
 
 **Files:** a new `src/window-summary.ts` (+ test), `WindowWorkspaces.tsx`, `src/App.tsx` (command palette subtitles), `src/shell/WindowToolbar.tsx` (+ test).
 
-- [ ] `windowSummary(views, folded)` returns "6 bots · 1 open" when some bots are folded or asleep, "3 bots" otherwise, "1 view" or "2 views" without bots, and "Empty" with no views.
-- [ ] Window rows show Working, Needs you or Failed before it, never Idle.
-- [ ] The toolbar shows the count beside the title, and the command palette uses the same words.
+- [x] `windowSummary(views, folded)` returns "6 bots · 1 open" when some bots are folded or asleep, "3 bots" otherwise, "1 view" or "2 views" without bots, and "Empty" with no views.
+- [x] Window rows show Working, Needs you or Failed before it, never Idle.
+- [x] The toolbar shows the count beside the title, and the command palette uses the same words.
 
 ## Task 3: The canvas
 
 **Files:** `src/components/session-dock.css`, `src/components/SessionDock.tsx` (+ test).
 
-- [ ] In a desktop Window, the rail is a grouped background with 8 px padding and gaps. Each pane is a card (`--ui-radius-pane`, `--ui-shadow-pane`). Corners are drawn by an overlay in the canvas color rather than by clipping, so menus, Info and floating Asks are never cut.
-- [ ] Resize handles sit in the gaps and show a line on hover or focus. Selection follows the card's corners.
-- [ ] Folded bots are 64 px cards; their × shows on hover or keyboard focus. Other minimized panes keep 44 px.
+- [x] In a desktop Window, the rail is a grouped background with 8 px padding and gaps. Each pane is a card (`--ui-radius-pane`, `--ui-shadow-pane`). Corners are drawn by an overlay in the canvas color rather than by clipping, so menus, Info and floating Asks are never cut.
+- [x] Resize handles sit in the gaps and show a line on hover or focus. Selection follows the card's corners.
+- [x] Folded bots are 64 px cards; their × shows on hover or keyboard focus. Other minimized panes keep 44 px.
 
 ## Task 4: The sidebar heading and pane controls
 
 **Files:** `src/App.tsx`, `src/components/SessionWindow.tsx`, e2e specs that located the old heading.
 
-- [ ] The "View · Window" row goes. With a desktop Window shown, View options sits at the start of its toolbar. Elsewhere it keeps its current slots, and the sidebar slot stays only while no toolbar is shown.
-- [ ] A pane's × (fold or close) is an icon button like the heading's other icons.
+- [x] The "View · Window" row goes. With a desktop Window shown, View options sits at the start of its toolbar. Elsewhere it keeps its current slots, and the sidebar slot stays only while no toolbar is shown.
+- [x] A pane's × (fold or close) is an icon button like the heading's other icons.
 
 ## Task 5: Check, docs and ship
 
-- [ ] Run the local instance on desktop and phone, in light and dark, against the walkthrough.
-- [ ] `pnpm verify:changed`, and the Lab e2e specs that cover Windows (window-workspaces, window-pane-lifecycle, session-view-ownership, modernization, bot-mode, cross-host) in chromium-desktop and chromium-mobile.
-- [ ] Update the guide's Window section and add roadmap row 8.
-- [ ] Merge, push and deploy the Worker (website only); record versions.
+- [x] Run the local instance on desktop and phone, in light and dark, against the walkthrough.
+- [x] The Lab e2e specs that cover Windows (window-workspaces, window-pane-lifecycle, session-view-ownership, modernization, bot-mode, cross-host) in chromium-desktop and chromium-mobile.
+- [x] Update the guide's Window section and add roadmap row 8.
+- [ ] `pnpm verify:changed`; merge, push and deploy the Worker (website only); record versions.
+
+## Findings
+
+- **The e2e sweep.** 13 Window, pane, Team and Bot mode specs ran in chromium-desktop and chromium-mobile, 264 tests. 67 failures matched a baseline run of the same specs on the code before this stage (6fbb5362): session-forks, window-pane-lifecycle, Team and others, as recorded since October. Two did not:
+  - `modernization.spec.ts:44` looked for View in the sidebar. A desktop Window now keeps it in its toolbar, and in the heading of Trace or a page while one shows, so the sidebar never gains or loses a row. The check was updated.
+  - `team.spec.ts` "Add member Browse" on mobile passed 3 of 3 alone, so it is flaky.
+- **A loading Window opened scrolled away from its selection.** Every dock brought itself into view as it mounted, so the last dock won and the first pane was cut off at the left. Now only the selected view's dock does; opening a view beside still selects and reveals it.
+- **Kept as they are:** the sidebar's Window options disclosure (the e2e reach Copy link and Agent control through it; on desktop the toolbar's ⋯ offers the same), the phone's Window layout (the walkthrough's phone scene is Bot mode) and Team's Gather button.

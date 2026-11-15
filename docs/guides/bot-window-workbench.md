@@ -16,6 +16,13 @@ Every Window is a **group**, and every current session in it is a **bot**: an or
 
 **+ New bot** starts a session in a group of its own. The group is named after the session and follows the session's title once it has one.
 
+## Window mode
+
+A Window shows its group's bots as cards side by side on a grey canvas, as wide as you make them; a folded bot is a slim card with its picture, name and role.
+- **The sidebar** lists your Windows ("5 bots · 3 open" says how many are folded or asleep) and, under **In this Window**, each bot as Bot mode shows it: its name, role and label, then **Open**, **Folded** or **Asleep**, with **Working**, **Needs you** or **Failed** when it has one. An Ask is one line under its bot.
+- **The toolbar** names the Window and what it holds. View options sits at its start.
+- **Opening a Window** shows its selected bot first.
+
 ## Working with a bot
 
 Each bot has a ⋯ menu above its conversation. On a desktop, right-click its row, or press Shift+F10 or the context menu key. The menu offers:

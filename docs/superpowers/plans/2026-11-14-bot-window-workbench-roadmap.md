@@ -25,6 +25,7 @@ Each stage ships on its own: tests first, `pnpm verify:changed` (full `pnpm veri
 | 5 | IM layer, part 2 | Shared drafts; the outbox for offline Hosts, visible and cancellable on every device | [stage 5](2026-11-14-stage-5-im-part-2.md): shipped — 5a shared drafts (main 7b120b1d, Worker 9dc163b1; rate budget fix d3943ea4, Worker bf8d68e4), 5b the outbox (main a02c4640, Worker 5374bba6, Controller 0.2.82) |
 | 6 | Performance | Measured client and server budgets: switch timing, live budget size, render cost of large groups, Relay commit and fan-out cost, bundle size; regressions guarded by tests | [stage 6](2026-11-14-stage-6-performance.md): shipped (main 28001475, Worker 2765de5d, website only) |
 | 7 | Stability | Cross-Host end-to-end coverage (two Hosts, offline Host, handoff across providers), flake removal, soak on the local instance, release notes and docs | [stage 7](2026-11-14-stage-7-stability.md): shipped (main 1cd7c724, Worker 69cc5571, website only) |
+| 8 | Window mode as designed | Added after the owner's review on 2026-11-15: the walkthrough's Window look, which stages 1-7 left out (only its behaviors shipped). In this Window lists bots with roles and Open, Folded or Asleep; Windows count bots; the panes stand as cards on a grouped canvas with slim cards for folded bots; View options at the toolbar's start; a loading Window starts at its selection | [stage 8](2026-11-15-stage-8-window-mode-design.md) |
 
 Later, outside this roadmap unless time allows: notifications without an open page (IM stage 3), group chats for Teams and stored history (IM stage 4).
 
@@ -50,7 +51,7 @@ These fill gaps the specs left open. Each is recorded where it is implemented as
 
 ## Outcome
 
-All seven stages shipped on 2026-11-14 and 2026-11-15. Production runs Worker 69cc5571 with Controller 0.2.82, which this Mac's Controller already runs. The [user guide](../../guides/bot-window-workbench.md) describes what shipped, and the [performance notes](../../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-7) hold the budgets and the soak.
+Stages 1-7 shipped on 2026-11-14 and 2026-11-15; stage 8 followed the owner's review of Window mode. Production runs Worker 69cc5571 with Controller 0.2.82, which this Mac's Controller already runs. The [user guide](../../guides/bot-window-workbench.md) describes what shipped, and the [performance notes](../../../packages/agent-remote-lab/performance/README.md#bot-and-window-workbench-stage-7) hold the budgets and the soak.
 
 What remains outside this roadmap:
 - Notifications without an open page (IM stage 3).

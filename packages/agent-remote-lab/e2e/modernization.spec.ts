@@ -53,8 +53,12 @@ test('keeps one View entry in the visible title while toggling panels and preser
     const bounds = (await trigger.boundingBox())!;
     const header = page.locator('.lab-app-bar');
     const context = page.locator('#lab-context');
+    // A desktop Window keeps View at the start of its visible title area (its toolbar, or Trace's or a page's heading);
+    // only without a Window does the sidebar have it at its top.
+    const windowToolbar = page.locator('header.lab-window-toolbar'), railHeading = context.locator('.lab-rail-heading');
     const owner = await header.isVisible() ? header
-      : testInfo.project.name === 'chromium-desktop' && await context.isVisible() ? context.locator('.lab-rail-heading')
+      : testInfo.project.name === 'chromium-desktop' && await windowToolbar.isVisible() ? windowToolbar
+      : testInfo.project.name === 'chromium-desktop' && await context.isVisible() && await railHeading.count() ? railHeading
       : testInfo.project.name === 'chromium-mobile' ? page.locator('.lab-mobile-navigation') : page.locator('.lab-main-stage');
     const region = (await owner.boundingBox())!;
     expect(bounds.x).toBeGreaterThanOrEqual(region.x);

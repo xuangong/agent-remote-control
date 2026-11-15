@@ -136,7 +136,7 @@
         "packages/codex-daemon-client/tsconfig.json",
         "packages/codex-daemon-client/tsconfig.test.json"
       ],
-      "digest": "sha256:bc31c8a0000715c43fd84a47224cc493dc7377a412ac4a61dc6ea7faf0bb73b5"
+      "digest": "sha256:4cba92324ad795cd85d25d0226bdb33b4cc8d6bf049cdf541ee5d1eee93433ad"
     }
   },
   "providers": [

@@ -11,6 +11,7 @@ import { WebSocket } from 'ws';
 import { createWindowView, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import * as hosted from '@orchardworks/agent-remote-hosted';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
+import * as sqliteNode from '@orchardworks/agent-remote-journal-sqlite/node';
 import { openNodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
 import { createDevboxServer } from './devbox.js';
 import { createGatewayRelay } from './gateway-relay.js';
@@ -20,7 +21,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.spl
 const request = (url: string, init: RequestInit = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(5000) });
 const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
 
-async function fixture(hostname = '127.0.0.1', extra: Partial<Parameters<typeof createDevboxServer>[0]> = {}) {
+async function fixture(hostname = '127.0.0.1', extra: Partial<Parameters<typeof createDevboxServer>[0]> = {}, listen = true) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-devbox-http-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const webDist = join(directory, 'web'); await mkdir(webDist);
@@ -30,9 +31,9 @@ async function fixture(hostname = '127.0.0.1', extra: Partial<Parameters<typeof 
   await new Promise<void>(resolve => probe.close(() => resolve()));
   const origin = `http://${hostname}:${port}`;
   const options = { origin, stateDir: join(directory, 'state'), webDist, ...extra };
-  let server = await createDevboxServer(options); await server.listen(port, '127.0.0.1');
+  let server = await createDevboxServer(options); if (listen) await server.listen(port, '127.0.0.1');
   cleanups.push(() => server.close());
-  return { origin, options, directory, get server() { return server; },
+  return { origin, port, options, directory, get server() { return server; },
     async restart() { await server.close(); server = await createDevboxServer(options); await server.listen(port, '127.0.0.1'); },
   };
 }
@@ -294,4 +295,77 @@ it('stores Host journals in SQLite beside the state when journals are on, and gr
 
 it('refuses journals without a state file', () => {
   expect(() => createGatewayRelay({ origin: 'http://127.0.0.1:0', issuer: 'http://127.0.0.1:0', secret: 'journal-secret-01234567890123456789', journalFile: join(tmpdir(), 'arc-never.sqlite') })).toThrow(/state file/);
+});
+
+/** Observes the journal database the Node host opens: every handle it hands out and whether it was closed. */
+function watchJournalDatabases() {
+  const handles: Array<{ closed: boolean }> = [];
+  const open = sqliteNode.openNodeJournalDatabase;
+  vi.spyOn(sqliteNode, 'openNodeJournalDatabase').mockImplementation(async file => {
+    const database = await open(file);
+    const handle = { closed: false };
+    const close = database.close.bind(database);
+    database.close = () => { handle.closed = true; close(); };
+    handles.push(handle);
+    return database;
+  });
+  return handles;
+}
+/** Wraps the journal service the Node host builds so a test can see its head index being loaded, and make that load fail. */
+function watchJournalService(failure?: Error) {
+  const loads: string[] = [];
+  const create = hosted.createHostJournals;
+  vi.spyOn(hosted, 'createHostJournals').mockImplementation(options => {
+    const service = create(options);
+    const load = service.loadAllServed.bind(service);
+    service.loadAllServed = async () => { loads.push('load'); if (failure) throw failure; await load(); };
+    return service;
+  });
+  return loads;
+}
+
+it('loads the head index of the journal store before the Relay listens', async () => {
+  const loads = watchJournalService();
+  const f = await fixture('127.0.0.1', { journals: true });
+  expect(loads).toEqual(['load']);
+  expect((await request(f.origin + '/auth/status')).status).toBe(200);
+});
+
+it('closes the journal database when the Relay stops', async () => {
+  const handles = watchJournalDatabases();
+  const f = await fixture('127.0.0.1', { journals: true });
+  expect(handles).toHaveLength(1);
+  expect(handles[0]!.closed).toBe(false);
+  await f.server.close();
+  expect(handles[0]!.closed).toBe(true);
+});
+
+it('does not listen, builds no Relay and closes the journal database when the head index cannot be loaded', async () => {
+  const handles = watchJournalDatabases();
+  watchJournalService(new Error('journal index unavailable'));
+  const create = vi.spyOn(hosted, 'createHostedRelay');
+  const f = await fixture('127.0.0.1', { journals: true }, false);
+  await expect(f.server.listen(f.port, '127.0.0.1')).rejects.toThrow('journal index unavailable');
+  expect(handles).toHaveLength(1);
+  expect(handles[0]!.closed).toBe(true);
+  expect(create).not.toHaveBeenCalled();
+  await expect(request(f.origin + '/auth/status')).rejects.toThrow();
+});
+
+it('closes the journal database and stops listening when the Relay cannot be built', async () => {
+  const handles = watchJournalDatabases();
+  vi.spyOn(hosted, 'createHostedRelay').mockImplementation(() => { throw new Error('relay unavailable'); });
+  const f = await fixture('127.0.0.1', { journals: true }, false);
+  await expect(f.server.listen(f.port, '127.0.0.1')).rejects.toThrow('relay unavailable');
+  expect(handles[0]!.closed).toBe(true);
+  await expect(request(f.origin + '/auth/status')).rejects.toThrow();
+});
+
+it('closes the journal database when the port is taken', async () => {
+  const handles = watchJournalDatabases();
+  const f = await fixture('127.0.0.1', { journals: true }, false);
+  const occupied = createServer(); occupied.listen(f.port, '127.0.0.1'); await once(occupied, 'listening');
+  cleanups.push(() => new Promise<void>(resolve => occupied.close(() => resolve())));
+  await expect(f.server.listen(f.port, '127.0.0.1')).rejects.toThrow(/EADDRINUSE/);
+  expect(handles[0]!.closed).toBe(true);
 });

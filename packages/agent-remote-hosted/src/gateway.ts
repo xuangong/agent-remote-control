@@ -1204,7 +1204,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
       try { await scheduling; available(); const prepared = await prepare(request); await scheduling; available(); return prepared; } catch { return json(503, {}); }
     },
     refresh,
-    /** Loads the head index of every Host the journal store holds; the Node hosts call it once before they listen. */
+    /** Loads the head index of every Host the journal store holds, so the first open of a Host does not wait for it. A host that builds the journal service itself loads it itself, before it accepts connections. */
     async loadJournalIndex() { await journalService?.loadAllServed(); },
     async close() {
       if (closing) return;

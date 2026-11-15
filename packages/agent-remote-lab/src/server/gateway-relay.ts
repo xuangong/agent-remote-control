@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
 import { InputResourceStore } from '@orchardworks/agent-remote-relay';
-import { BROKER_MAX_FRAME_BYTES, createHostedRelay, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-remote-hosted';
+import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { InvalidHttpRequest, relaySocket, rejectUpgrade, webRequest, writeResponse } from './remote-host-broker.js';
@@ -100,22 +100,30 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
   return {
     server,
     async listen(port: number, host = '127.0.0.1') {
-      await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); resolve(); }); });
+      // The journal database is opened and its head index loaded before the server accepts a connection, so no Host registers and
+      // no browser opens a session while the gate does not know which sessions are journal-served.
+      let journalService: HostJournals | undefined;
+      if (options.journalFile) {
+        journalDatabase = await openNodeJournalDatabase(options.journalFile);
+        try {
+          journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase), now: Date.now });
+          await journalService.loadAllServed();
+        } catch (error) { journalDatabase.close(); journalDatabase = undefined; throw error; }
+      }
+      try { await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, host, () => { server.off('error', reject); resolve(); }); }); }
+      catch (error) { journalDatabase?.close(); journalDatabase = undefined; throw error; }
       const address = server.address() as AddressInfo;
       if (new URL(auth.origin).port === '0') { const origin = new URL(auth.origin); origin.port = String(address.port); auth.origin = origin.origin; }
       if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
       try {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
-        if (options.journalFile) journalDatabase = await openNodeJournalDatabase(options.journalFile);
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),
-          ...(journalDatabase ? { journals: new SqlJournalStore(journalDatabase) } : {}),
+          ...(journalService ? { journalService } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
-        try { await runtime.loadJournalIndex(); }
-        catch (error) { await runtime.close().catch(() => undefined); runtime = undefined; throw error; }
       } catch (error) { storage?.close(); journalDatabase?.close(); journalDatabase = undefined; server.close(); throw error; }
       return { port: address.port, url: auth.origin };
     },

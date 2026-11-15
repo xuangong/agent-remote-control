@@ -1,0 +1,185 @@
+import { randomUUID } from 'node:crypto';
+
+import type { JournalIndexEntry } from '@orchardworks/agent-remote-journal';
+import {
+  encodeRemoteHostUplinkMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, REMOTE_HOST_UPLINK_VERSION,
+  type JournalRefusalReason, type RemoteHostUplinkMessage,
+} from '@orchardworks/agent-remote-protocol';
+
+import type { HostJournals, JournalFilled } from './host-journals.js';
+
+/** The most requests one connection has open to its Host at a time. */
+export const JOURNAL_REQUEST_LIMIT = 32;
+/** How long the Host has to answer a request. */
+export const JOURNAL_REQUEST_TIMEOUT_MS = 15_000;
+
+/** The journal messages a Host sends to its Relay. */
+export type JournalHostMessage = Extract<RemoteHostUplinkMessage, { type: 'journal_open' | 'journal_publish' | 'journal_fill' | 'journal_older_done' }>;
+
+export function isJournalHostMessage(message: RemoteHostUplinkMessage): message is JournalHostMessage {
+  return message.type === 'journal_open' || message.type === 'journal_publish' || message.type === 'journal_fill' || message.type === 'journal_older_done';
+}
+
+export class JournalRequestError extends Error {
+  constructor(readonly code: 'invalid' | 'unavailable' | 'busy' | 'in_flight' | 'timeout' | 'closed', message: string) {
+    super(message);
+    this.name = 'JournalRequestError';
+  }
+}
+
+export interface JournalConnectionOptions {
+  hostId: string;
+  journals: HostJournals;
+  send(message: RemoteHostUplinkMessage): void;
+  /** Whether this is still the Host's current uplink connection. */
+  current(): boolean;
+  scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
+  requestTimeoutMs?: number;
+  /** Receives the reason a message was not sent because it does not encode. */
+  diagnostic?(message: string): void;
+}
+
+export interface JournalConnection {
+  /** Handles one journal message from the Host. Calls made in order enqueue their journal work in that order. */
+  receive(message: JournalHostMessage): Promise<void>;
+  /** Asks the Host's Controller to read item bodies again from native history; resolves once the journal took them. */
+  requestFill(sessionKey: string, itemKeys: readonly string[]): Promise<JournalFilled>;
+  /** Asks the Host's Controller to read older history and publish it as prepended items. */
+  requestOlder(sessionKey: string, limit: number): Promise<{ olderAvailable: boolean }>;
+  /** Ends the connection: pending requests fail and its sessions need opening again. */
+  close(): void;
+}
+
+type Pending = { kind: 'fill' | 'older'; sessionKey: string; itemKeys: ReadonlySet<string>; resolve(value: never): void; reject(error: Error): void; timer: unknown };
+
+/**
+ * One uplink connection's side of the journals: it runs the Host's publications through the journal service, tells the
+ * Host what was stored or refused, and keeps the requests the Relay made to the Host until they are answered.
+ */
+export function createJournalConnection(options: JournalConnectionOptions): JournalConnection {
+  const { hostId, journals, scheduler } = options;
+  const timeoutMs = options.requestTimeoutMs ?? JOURNAL_REQUEST_TIMEOUT_MS;
+  /** The generation each session was opened with on this connection. */
+  const opened = new Map<string, number>();
+  const pending = new Map<string, Pending>();
+  /** Whether the message encodes; a message that does not is reported and never sent. */
+  function encodes(message: RemoteHostUplinkMessage): boolean {
+    if (encodeRemoteHostUplinkMessage(message).status === 'ok') return true;
+    options.diagnostic?.(`The journal message ${message.type} does not encode and was not sent.`);
+    return false;
+  }
+  /** Sends a message to a connection that is still current; false when nothing was sent. */
+  function send(message: RemoteHostUplinkMessage): boolean {
+    if (!options.current() || !encodes(message)) return false;
+    options.send(message);
+    return true;
+  }
+  const refuse = (sessionKey: string, generation: number, sequence: number, reason: JournalRefusalReason, itemKey?: string) =>
+    send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_refused', sessionKey, generation, sequence, reason, ...(itemKey === undefined ? {} : { itemKey }) });
+
+  function request<T>(kind: Pending['kind'], sessionKey: string, itemKeys: readonly string[], message: (requestId: string) => RemoteHostUplinkMessage): Promise<T> {
+    if (!options.current()) return Promise.reject(new JournalRequestError('unavailable', 'The Host connection is not current.'));
+    if (pending.size >= JOURNAL_REQUEST_LIMIT) return Promise.reject(new JournalRequestError('busy', 'Too many pending journal requests.'));
+    if ([...pending.values()].some(item => item.kind === kind && item.sessionKey === sessionKey)) {
+      return Promise.reject(new JournalRequestError('in_flight', `A journal ${kind} request for ${sessionKey} is already pending.`));
+    }
+    const requestId = randomUUID();
+    const body = message(requestId);
+    if (!encodes(body)) return Promise.reject(new JournalRequestError('invalid', `The journal ${kind} request does not encode.`));
+    return new Promise<T>((resolve, reject) => {
+      const timer = scheduler.setTimeout(() => {
+        pending.delete(requestId);
+        reject(new JournalRequestError('timeout', 'The Host did not answer the journal request before the Relay deadline.'));
+      }, timeoutMs);
+      pending.set(requestId, { kind, sessionKey, itemKeys: new Set(itemKeys), resolve: resolve as (value: never) => void, reject, timer });
+      try { options.send(body); }
+      catch (error) {
+        scheduler.clearTimeout(timer);
+        pending.delete(requestId);
+        reject(error instanceof Error ? error : new Error('The journal request could not be written.'));
+      }
+    });
+  }
+
+  /** The pending request this answer belongs to, taken out of the map; undefined when the Relay asked for no such thing. */
+  function answered(requestId: string, kind: Pending['kind'], sessionKey: string): Pending | undefined {
+    const found = pending.get(requestId);
+    if (!found || found.kind !== kind || found.sessionKey !== sessionKey) return undefined;
+    pending.delete(requestId);
+    scheduler.clearTimeout(found.timer);
+    return found;
+  }
+
+  return {
+    async receive(message) {
+      switch (message.type) {
+        case 'journal_open': {
+          const { sessionKey, requestId } = message;
+          const reply = (generation: number, watermark: number, epoch: string, index: JournalIndexEntry[]): RemoteHostUplinkMessage =>
+            ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_opened', requestId, sessionKey, generation, watermark, epoch, index });
+          const result = await journals.open(hostId, sessionKey, message.publisherId, (index, epoch) => encodes(reply(1, 0, epoch, index)));
+          if (!options.current()) return;
+          if ('refused' in result) {
+            opened.delete(sessionKey);
+            refuse(sessionKey, 1, 0, 'invalid');
+            return;
+          }
+          opened.set(sessionKey, result.generation);
+          send(reply(result.generation, result.watermark, result.epoch, result.index));
+          return;
+        }
+        case 'journal_publish': {
+          const { sessionKey, generation } = message;
+          if (opened.get(sessionKey) !== generation) {
+            refuse(sessionKey, generation, message.entries[0]!.sequence, 'fenced');
+            return;
+          }
+          const result = await journals.publish(hostId, sessionKey, generation, message.entries);
+          if (!options.current()) return;
+          if (result.cursor && result.refusal?.reason !== 'fenced') {
+            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_ack', sessionKey, generation, watermark: result.watermark, cursor: result.cursor });
+          }
+          if (result.refusal) {
+            const { sequence, reason, itemKey } = result.refusal;
+            refuse(sessionKey, generation, sequence, reason, itemKey);
+          }
+          return;
+        }
+        case 'journal_fill': {
+          const found = answered(message.requestId, 'fill', message.sessionKey);
+          if (!found) return;
+          try { found.resolve(await journals.fill(hostId, message.sessionKey, message.items.filter(({ row }) => found.itemKeys.has(row.itemKey))) as never); }
+          catch (error) { found.reject(error instanceof Error ? error : new Error('The journal could not take the bodies.')); }
+          return;
+        }
+        case 'journal_older_done': {
+          answered(message.requestId, 'older', message.sessionKey)?.resolve({ olderAvailable: message.olderAvailable } as never);
+          return;
+        }
+      }
+    },
+
+    requestFill(sessionKey, itemKeys) {
+      if (itemKeys.length < 1 || itemKeys.length > JOURNAL_FILL_MAX_ITEMS || new Set(itemKeys).size !== itemKeys.length) {
+        return Promise.reject(new JournalRequestError('invalid', `A fill asks for 1 to ${JOURNAL_FILL_MAX_ITEMS} distinct items.`));
+      }
+      return request<JournalFilled>('fill', sessionKey, itemKeys, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill_request', requestId, sessionKey, itemKeys: [...itemKeys] }));
+    },
+
+    requestOlder(sessionKey, limit) {
+      if (!Number.isInteger(limit) || limit < 1 || limit > JOURNAL_OLDER_MAX_LIMIT) {
+        return Promise.reject(new JournalRequestError('invalid', `An older-history read asks for 1 to ${JOURNAL_OLDER_MAX_LIMIT} items.`));
+      }
+      return request<{ olderAvailable: boolean }>('older', sessionKey, [], requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, limit }));
+    },
+
+    close() {
+      opened.clear();
+      for (const item of pending.values()) {
+        scheduler.clearTimeout(item.timer);
+        item.reject(new JournalRequestError('closed', 'The Host connection closed before it answered.'));
+      }
+      pending.clear();
+    },
+  };
+}

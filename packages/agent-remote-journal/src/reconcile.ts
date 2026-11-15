@@ -16,7 +16,7 @@ export type ReconcilePlan =
  *
  * Every journal item takes part in positioning, so a reread item may match a live-only one, such as a sealed item
  * that native history now contains; a matched item is corrected when it is open, has no digest or its digest differs.
- * The reread's oldest item is the anchor: journal items older than it are outside the window and stay. When the
+ * The reread's oldest item is the anchor (a journal without non-live-only items is walked from the start): journal items older than it are outside the window and stay. When the
  * reread starts with items the journal does not know and its first known item is the journal's first non-live-only
  * item, those leading items are older history and are returned in `prepend`, oldest first; any other known item
  * after unknown ones means native history was rewritten (`replace`), and no known item at all is a `gap`.
@@ -38,15 +38,15 @@ export function planReconcile(index: readonly JournalIndexEntry[], reread: reado
   const abandon: string[] = [];
   let walkFrom = 0;
   let next = 0;
-  if (reread.length > 0 && index.length > 0 && !position.has((reread[0] as ReconcileCandidate).itemKey)) {
+  const firstJournalItem = index.findIndex(({ liveOnly }) => !liveOnly);
+  if (reread.length > 0 && firstJournalItem >= 0 && !position.has((reread[0] as ReconcileCandidate).itemKey)) {
     const firstKnown = reread.findIndex(({ itemKey }) => position.has(itemKey));
     if (firstKnown < 0) return { kind: 'gap' };
-    const firstJournalItem = index.findIndex(({ liveOnly }) => !liveOnly);
     if (position.get((reread[firstKnown] as ReconcileCandidate).itemKey) !== firstJournalItem) return { kind: 'replace', reason: 'inserted' };
     for (const { itemKey } of reread.slice(0, firstKnown)) prepend.push(itemKey);
     walkFrom = firstKnown;
     next = firstJournalItem;
-  } else if (reread.length > 0 && index.length > 0) {
+  } else if (reread.length > 0 && firstJournalItem >= 0) {
     next = position.get((reread[0] as ReconcileCandidate).itemKey) as number;
   }
   const passOver = (from: number, to: number): ReconcilePlan | undefined => {

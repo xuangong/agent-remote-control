@@ -86,4 +86,12 @@ describe('planReconcile', () => {
     expect(planReconcile(index, [{ itemKey: 'a', digest: 'da' }, { itemKey: 'b', digest: 'other' }]))
       .toEqual({ kind: 'continue', prepend: [], append: [], correct: ['b'], abandon: [] });
   });
+
+  it('walks a journal of only relay-only items from the start like an empty one', () => {
+    const index = [entry('u1', undefined, { liveOnly: true })];
+    expect(planReconcile(index, [{ itemKey: 'u2', digest: 'd2' }, { itemKey: 'm1', digest: 'dm' }]))
+      .toEqual({ kind: 'continue', prepend: [], append: ['u2', 'm1'], correct: [], abandon: [] });
+    expect(planReconcile(index, [{ itemKey: 'u1', digest: 'd1' }, { itemKey: 'm1', digest: 'dm' }]))
+      .toEqual({ kind: 'continue', prepend: [], append: ['m1'], correct: ['u1'], abandon: [] });
+  });
 });

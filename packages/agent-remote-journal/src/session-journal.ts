@@ -130,7 +130,7 @@ export class SessionJournal {
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     this.advance(publication);
     this.meta.nextSeq += 1;
-    const background = row.item.background ?? item.body?.item.background ?? item.background;
+    const background = row.item.background ?? (item.body ? item.body.item.background : item.background);
     const stored = structuredClone(row.item);
     if (background) stored.background = structuredClone(background);
     if (item.clientMessageId !== undefined && stored.type === 'user_message') stored.clientMessageId = item.clientMessageId;

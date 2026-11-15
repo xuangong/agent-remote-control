@@ -122,4 +122,19 @@ describe('retention', () => {
     journal.fill('c1', bodyFromRow(call({})), 'digest-c1b');
     expect(journal.state().items[0]?.body?.item).not.toHaveProperty('background');
   });
+
+  it('does not bring back an evicted background that a later row cleared', () => {
+    const { journal, publish } = openJournal();
+    const background = { id: 'review-1', kind: 'review' as const, status: 'visible' as const };
+    const call = (extra: object) => ({ itemKey: 'c1', providerId: 'codex', sourceKey: 'c1', occurredAt: 0, turnId: 'turn-1', item: { type: 'tool_call' as const, callId: 'c1', name: 'shell', status: 'completed' as const, error: null, detail: { type: 'shell' as const, command: 'ls' }, ...extra } });
+    journal.append(publish(), call({ background }));
+    journal.complete(publish(), 'c1', 'digest-c1');
+    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
+    journal.evict(1);
+    journal.fill('c1', bodyFromRow(call({})), 'digest-c1');
+    journal.append(publish(), call({}));
+    journal.complete(publish(), 'c1', 'digest-c1b');
+    journal.correct(publish(), call({}), 'digest-c1c', journal.index()[0]!.revision);
+    expect(journal.state().items[0]?.body?.item).not.toHaveProperty('background');
+  });
 });

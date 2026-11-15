@@ -27,16 +27,37 @@ for (const name of readdirSync(resolve(root, 'packages')).sort()) {
     scope.push(`${prefix}/${entry}`);
   }
 }
+const entries = [];
+function walk(target) {
+  const identity = lstatSync(target);
+  entries.push({ target, directory: identity.isDirectory() });
+  if (identity.isDirectory()) {
+    for (const name of readdirSync(target).sort()) if (name !== 'node_modules') walk(resolve(target, name));
+  }
+}
+for (const entry of scope) walk(resolve(root, entry));
+// Git-ignored files at any depth (editor files, caches) are local state, so one batched query drops them before anything is hashed.
+function ignoredPaths(paths) {
+  if (paths.length === 0) return new Set();
+  try {
+    const output = execFileSync('git', ['check-ignore', '--no-index', '-z', '--stdin'], { cwd: root, input: paths.join('\0') + '\0', maxBuffer: 1 << 28 });
+    return new Set(output.toString('utf8').split('\0').filter(Boolean));
+  } catch (error) { if (error.status === 1) return new Set(); throw error; }
+}
+const relativeName = target => relative(root, target).split(sep).join('/');
+const ignoredNames = ignoredPaths(entries.map(({ target }) => relativeName(target)));
 const files = new Map();
-function collect(target) {
+for (const { target } of entries) {
+  const name = relativeName(target);
+  if (ignoredNames.has(name) || [...ancestorsOf(name)].some(ancestor => ignoredNames.has(ancestor))) continue;
   const identity = lstatSync(target);
   if (identity.isSymbolicLink()) throw new Error(`Compatibility scope contains a symbolic link: ${target}`);
-  if (identity.isDirectory()) {
-    for (const name of readdirSync(target).sort()) if (name !== 'node_modules') collect(resolve(target, name));
-  } else if (identity.isFile()) files.set(relative(root, target).split(sep).join('/'), target);
-  else throw new Error(`Compatibility scope contains a non-file: ${target}`);
+  if (identity.isFile()) files.set(name, target);
+  else if (!identity.isDirectory()) throw new Error(`Compatibility scope contains a non-file: ${target}`);
 }
-for (const entry of scope) collect(resolve(root, entry));
+function* ancestorsOf(name) {
+  for (let at = name.indexOf('/'); at !== -1; at = name.indexOf('/', at + 1)) yield name.slice(0, at);
+}
 const hash = createHash('sha256');
 for (const [name, target] of [...files].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
   hash.update(name); hash.update('\0'); hash.update(readFileSync(target)); hash.update('\0');

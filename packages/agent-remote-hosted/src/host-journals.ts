@@ -150,11 +150,12 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const fenced = (): JournalPublished => ({ rows: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
       const key = storeKey(hostId, sessionKey);
       if (needsReopen.has(key)) return fenced();
-      const journal = await load(hostId, sessionKey, false);
-      const publisherId = journal?.publisher?.publisherId;
-      if (!journal || publisherId === undefined) return fenced();
       const published: JournalPublished = { rows: [], watermark: 0 };
+      let journal: SessionJournal | undefined;
       try {
+        journal = await load(hostId, sessionKey, false);
+        const publisherId = journal?.publisher?.publisherId;
+        if (!journal || publisherId === undefined) return fenced();
         for (const entry of entries) {
           try { apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published); }
           catch (error) {

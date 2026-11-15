@@ -277,4 +277,30 @@ describe('createHostJournals', () => {
     expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1 });
     expect(await journals.publish(HOST, SESSION, 2, [append(2, 'm2', 'Again')])).toMatchObject({ watermark: 2 });
   });
+
+  it('refuses publications queued behind one whose journal could not be loaded, until the session is opened again', async () => {
+    const memory = new MemoryJournalStore();
+    const seeded = SessionJournal.create(KEY);
+    const { generation } = seeded.claim('controller-1');
+    seeded.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Stored'));
+    seeded.complete({ publisherId: 'controller-1', generation, sequence: 2 }, 'm1', 'digest-m1');
+    seeded.evict(0);
+    await memory.apply(seeded.takeChanges()!);
+    let failWrite = false, failLoad = false;
+    const store: JournalStore = { delete: key => memory.delete(key),
+      load: async key => { if (failLoad) { failLoad = false; throw new Error('store unavailable'); } return memory.load(key); },
+      apply: async changes => { if (failWrite) { failWrite = false; throw new Error('disk full'); } await memory.apply(changes); } };
+    const { journals } = fixture(store);
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    failWrite = true;
+    await expect(journals.fill(HOST, SESSION, [{ row: row('m1', 'Stored'), digest: 'digest-m1' }])).rejects.toThrow('disk full');
+    failLoad = true;
+    const first = journals.publish(HOST, SESSION, 2, [append(3, 'm3', 'Lost')]);
+    const second = journals.publish(HOST, SESSION, 2, [append(4, 'm4', 'Would skip m3')]);
+    await expect(first).rejects.toThrow('store unavailable');
+    expect(await second).toEqual({ rows: [], watermark: 0, refusal: { sequence: 4, reason: 'fenced' } });
+    expect((await memory.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 3, watermark: 2 });
+    expect(await journals.publish(HOST, SESSION, 3, [append(3, 'm3', 'Again')])).toMatchObject({ watermark: 3 });
+  });
 });

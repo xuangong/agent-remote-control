@@ -54,6 +54,7 @@ Every plan follows the repository rules in `AGENTS.md`:
   - a retention sweep for sessions that receive no publications;
   - retries of pending journal deletions on a timer;
   - eviction of prepended (older-history) bodies, which the incremental window never evicts because they were never inside it. Only a cap-driven shrink or a fill's trim removes them today.
+  - a sweep of orphaned journals: list the store's Host prefixes and delete those of Hosts the Relay no longer knows. Pending deletions that overflowed their bound (1024, oldest dropped with a diagnostic) or failed for good are cleaned up this way.
 
   P0 measurements set the numbers.
 - **P1-B2 and P1-D: no holes in a client's window.** The client loads older history from its first entry's `seqStart` (`packages/agent-remote-web/src/client/remote-session-client.ts:372`). A correction, or any update to an item older than what a subscriber holds, must not leave the client holding an isolated old entry. If it did, the next older page would skip everything in between. Two ways to avoid it:

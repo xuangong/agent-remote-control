@@ -30,7 +30,10 @@ Every plan follows the repository rules in `AGENTS.md`:
 | P0 Baselines | Done | [baselines](2026-11-15-p0-baselines.md); targets revised in the design |
 | P1-B1 Relay journal service | Done | uplink journal messages, `host-journals.ts`, `journal-uplink.ts` |
 | P1-B2 Journal-served sessions | Done | hosted suite 790 tests; crude-mode guard suites unchanged; local instance verified (crude path, model turn) |
-| P1-B3 Storage and partition | Planned | `2026-11-15-p1b3a-journal-storage.md`, `2026-11-15-p1b3b-cloudflare-journal-partition.md` |
+| P1-B3a Journal storage (Node) | In progress | Tasks 1–5 landed: paged index protocol, incremental UTF-8 sizes, SQLite store, bounded service, benchmark (`node:sqlite` kept) |
+| P1-B3b Cloudflare journal partition | Planned and reviewed | `2026-11-15-p1b3b-cloudflare-journal-partition.md` |
+| P1-C Controller publisher | Planned and reviewed | `2026-11-15-p1c1-controller-publisher.md` (full), `-p1c2-` and `-p1c3-` (outlines) |
+| P1-D Client device store | Planned and reviewed | `2026-11-15-p1d-client-device-store.md`, `2026-11-15-p1d2-client-measurement.md` |
 
 ## Notes carried to later plans
 

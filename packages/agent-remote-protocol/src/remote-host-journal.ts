@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+import { BackgroundActivity } from './background-activity.js';
 import { SafeNonNegativeInteger, SafeTimelinePosition, TimelineCursor } from './cursor.js';
 import { ResourceBinding } from './resources.js';
 import { AgentSnapshotPayload } from './snapshot.js';
@@ -63,20 +64,33 @@ export const JournalIndexEntry = Type.Object({
 }, object);
 export type JournalIndexEntry = Static<typeof JournalIndexEntry>;
 
-export const JournalHead = Type.Object({ snapshot: AgentSnapshotPayload, observedAt: milliseconds }, object);
+/**
+ * The Controller's latest Snapshot. Its `attention.cursor` is stated in the Controller's own timeline, which the journal
+ * does not share; `attentionItemKey` names the item that cursor points at, and the journal serves the cursor of that item
+ * in its own epoch and sequence.
+ */
+export const JournalHead = Type.Object({ snapshot: AgentSnapshotPayload, observedAt: milliseconds, attentionItemKey: Type.Optional(itemKey) }, object);
 export type JournalHead = Static<typeof JournalHead>;
 
 const sequence = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
-const items = Type.Array(CompleteItemInput, { maxItems: JOURNAL_ITEMS_PER_ENTRY_MAX });
+/** An item of a replacement or a prepend: one row carrying its whole content, and its digest unless the item is still open. */
+export const JournalItemInput = Type.Object({ row: JournalRowInput, digest: Type.Optional(digest) }, object);
+export type JournalItemInput = Static<typeof JournalItemInput>;
+const items = Type.Array(JournalItemInput, { maxItems: JOURNAL_ITEMS_PER_ENTRY_MAX });
 export const JournalPublishEntry = Type.Union([
   Type.Object({ sequence, op: Type.Literal('append'), row: JournalRowInput }, object),
   Type.Object({ sequence, op: Type.Literal('complete'), itemKey, digest }, object),
   Type.Object({ sequence, op: Type.Literal('seal'), itemKey }, object),
   Type.Object({ sequence, op: Type.Literal('alias'), itemKey, clientMessageId: identity }, object),
-  Type.Object({ sequence, op: Type.Literal('correct'), row: JournalRowInput, digest, expectedRevision: revision }, object),
+  /** The item takes the row's content. With a digest it is complete; without one it stays open, as an item still streaming does. */
+  Type.Object({ sequence, op: Type.Literal('correct'), row: JournalRowInput, digest: Type.Optional(digest), expectedRevision: revision }, object),
   Type.Object({ sequence, op: Type.Literal('replace'), items }, object),
   Type.Object({ sequence, op: Type.Literal('prepend'), items }, object),
   Type.Object({ sequence, op: Type.Literal('head'), head: JournalHead }, object),
+  /** A resource binding of an item was replaced; the journal replaces it in place and tells subscribers. */
+  Type.Object({ sequence, op: Type.Literal('rebind'), itemKey, previous: ResourceBinding, replacement: ResourceBinding }, object),
+  /** A background outcome; the journal applies it in place to every item it concerns and tells subscribers. */
+  Type.Object({ sequence, op: Type.Literal('outcome'), providerId: identity, turnId: Type.Optional(identity), background: BackgroundActivity, occurredAt: milliseconds }, object),
 ]);
 export type JournalPublishEntry = Static<typeof JournalPublishEntry>;
 
@@ -85,10 +99,24 @@ export const JournalRefusalReason = Type.Union(JOURNAL_REFUSAL_REASONS.map(reaso
 export type JournalRefusalReason = (typeof JOURNAL_REFUSAL_REASONS)[number];
 
 /** Host to Relay. */
-export const JournalOpen = Type.Object({ requestId, sessionKey, publisherId: identity }, object);
+/**
+ * `reset` opens the journal without its index: the Relay claims the journal, answers an empty index, and accepts nothing but
+ * a replacement (and then a head) until one is stored. Only a Controller that was refused with `index_too_large` asks for it.
+ */
+export const JournalOpen = Type.Object({ requestId, sessionKey, publisherId: identity, reset: Type.Optional(Type.Literal(true)) }, object);
 export const JournalPublish = Type.Object({ sessionKey, generation, entries: Type.Array(JournalPublishEntry, { minItems: 1, maxItems: JOURNAL_PUBLISH_MAX_ENTRIES }) }, object);
 export const JournalFill = Type.Object({ requestId, sessionKey, items: Type.Array(CompleteItemInput, { maxItems: JOURNAL_FILL_MAX_ITEMS }) }, object);
 export const JournalOlderDone = Type.Object({ requestId, sessionKey, olderAvailable: Type.Boolean() }, object);
+/**
+ * The Controller can no longer keep the session's journal current, and says so: the Relay clears the journal's head, so
+ * the session is read through the Controller again until a later publication sets a head. `generation` is the one the
+ * Controller opened the journal with; an older one is ignored.
+ */
+export const JournalUnserve = Type.Object({ sessionKey, generation }, object);
+export const JOURNAL_REQUEST_REFUSAL_REASONS = ['not_followed', 'not_ready'] as const;
+export type JournalRequestRefusalReason = (typeof JOURNAL_REQUEST_REFUSAL_REASONS)[number];
+/** The Controller cannot answer a fill or an older-history request: it does not follow the session, or has not opened its journal yet. */
+export const JournalRequestRefused = Type.Object({ requestId, sessionKey, reason: Type.Union(JOURNAL_REQUEST_REFUSAL_REASONS.map(reason => Type.Literal(reason))) }, object);
 /** Asks for the entries of the index of epoch `epoch` after `after`, a `seqStart`; sent for the `indexAfter` of the last page, one request at a time. */
 export const JournalIndexRequest = Type.Object({ requestId, sessionKey, generation, epoch: identity, after: SafeTimelinePosition }, object);
 

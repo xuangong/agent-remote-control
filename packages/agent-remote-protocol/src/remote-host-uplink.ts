@@ -8,7 +8,7 @@ import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
 import { HostSessionStates } from './session-states.js';
-import { JournalAck, JournalFill, JournalFillRequest, JournalIndexPage, JournalIndexRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, validJournalMessage } from './remote-host-journal.js';
+import { JournalAck, JournalFill, JournalFillRequest, JournalIndexPage, JournalIndexRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, JournalRequestRefused, JournalUnserve, validJournalMessage } from './remote-host-journal.js';
 
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
@@ -64,7 +64,7 @@ export const RemoteHostUplinkMessage = Type.Union([
   // teamSuccession: Team recipients follow a generic succession of their session, including one to another provider.
   // callForSupport: the Host runs Call For Support groups: requester seats, coordinators and supporters.
   // It requested them with callForSupport=1 and named its read-only providers with readOnlyProvider=<id> query parameters.
-  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), outbox: Type.Optional(Type.Literal(1)), journal: Type.Optional(Type.Literal(1)), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('registered'), sessionStates: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), outbox: Type.Optional(Type.Literal(1)), journal: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2)])), teamInbox: Type.Optional(Type.Literal(1)), teamRecipients: Type.Optional(Type.Literal(1)), teamSuccession: Type.Optional(Type.Literal(1)), callForSupport: Type.Optional(Type.Literal(1)), teamResources: Type.Optional(Type.Literal(true)), teamManagement: Type.Optional(Type.Literal(true)), hostId: identity, successionEnrollment: Type.Optional(SuccessionAssociationAuthority), successionEnrollmentVersion: Type.Optional(Type.Union([Type.Literal(2), Type.Literal(3)])), pairingPurpose: Type.Optional(PairingPurpose), heartbeat: RemoteHostHeartbeat, tunnelToken: Type.Optional(identity) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('provider_snapshot'), providers: Type.Array(provider, { maxItems: 64 }) }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('preview_snapshot'), snapshot: PreviewRegistrationSnapshot }, object),
   // Only after the Relay acknowledged sessionStates in registered; reply facts only after it acknowledged sessionStates: 2.
@@ -75,6 +75,8 @@ export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_publish'), ...JournalPublish.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_fill'), ...JournalFill.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_older_done'), ...JournalOlderDone.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_unserve'), ...JournalUnserve.properties }, object),
+  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_request_refused'), ...JournalRequestRefused.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_index_request'), ...JournalIndexRequest.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_opened'), ...JournalOpened.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_index_page'), ...JournalIndexPage.properties }, object),
@@ -99,6 +101,10 @@ export const RemoteHostUplinkMessage = Type.Union([
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
   { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_index_page' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+
+/** The journal messages the Relay sends to a Controller that holds the journal grant. */
+export type JournalRelayMessage = Extract<RemoteHostUplinkMessage,
+  { type: 'journal_opened' | 'journal_index_page' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

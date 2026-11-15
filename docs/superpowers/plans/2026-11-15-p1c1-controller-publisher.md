@@ -89,7 +89,7 @@ Protocol fixtures: `packages/agent-remote-protocol/test/fixtures` holds only rec
 - Modify: `packages/agent-provider-sdk/src/index.ts`
 - Create: `packages/agent-provider-sdk/src/item-identity.test.ts`
 
-- [ ] **Step 1: Write the failing test.** Create `packages/agent-provider-sdk/src/item-identity.test.ts`:
+- [x] **Step 1: Write the failing test.** Create `packages/agent-provider-sdk/src/item-identity.test.ts`:
 
 <!-- write: packages/agent-provider-sdk/src/item-identity.test.ts -->
 ```ts
@@ -116,12 +116,12 @@ describe('the journal capability', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test and see it fail.**
+- [x] **Step 2: Run the test and see it fail.**
 
 Run: `pnpm --filter @orchardworks/agent-provider-sdk exec vitest run src/item-identity.test.ts --testTimeout=10000`
 Expected: FAIL (`supportsJournal` is not exported).
 
-- [ ] **Step 3: Implement.** Create `packages/agent-provider-sdk/src/item-identity.ts`:
+- [x] **Step 3: Implement.** Create `packages/agent-provider-sdk/src/item-identity.ts`:
 
 <!-- write: packages/agent-provider-sdk/src/item-identity.ts -->
 ```ts
@@ -219,12 +219,12 @@ export * from './native-evidence.js';
 export * from './item-identity.js';
 ```
 
-- [ ] **Step 4: Run the tests and see them pass, then typecheck and build.**
+- [x] **Step 4: Run the tests and see them pass, then typecheck and build.**
 
 Run: `pnpm --filter @orchardworks/agent-provider-sdk run test` then `pnpm --filter @orchardworks/agent-provider-sdk run typecheck` then `pnpm --filter @orchardworks/agent-provider-sdk run build`
 Expected: PASS for all.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ```bash
 git add packages/agent-provider-sdk/src
@@ -249,8 +249,9 @@ The new entries and messages are versioned with the grant: a Controller asks for
 - Modify: `packages/agent-remote-protocol/src/remote-host-journal.ts`
 - Modify: `packages/agent-remote-protocol/src/remote-host-uplink.ts`
 - Modify: `packages/agent-remote-protocol/src/remote-host-journal.test.ts`
+- Modify: `packages/agent-remote-hosted/src/host-journals.ts` and `host-journals.test.ts` (the guard below)
 
-- [ ] **Step 1: Write the failing tests.** In `packages/agent-remote-protocol/src/remote-host-journal.test.ts`, add a resource binding next to the other constants:
+- [x] **Step 1: Write the failing tests.** In `packages/agent-remote-protocol/src/remote-host-journal.test.ts`, add a resource binding next to the other constants:
 
 <!-- edit: packages/agent-remote-protocol/src/remote-host-journal.test.ts -->
 <!-- old -->
@@ -324,12 +325,12 @@ Extend the test of the grant:
     expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 3 })).status).toBe('rejected');
 ```
 
-- [ ] **Step 2: Run the tests and see them fail.**
+- [x] **Step 2: Run the tests and see them fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol exec vitest run src/remote-host-journal.test.ts --testTimeout=10000`
 Expected: FAIL (`rebind`, `outcome`, `journal_unserve` and `journal_request_refused` are unknown, an item needs its digest, and the grant 2 is refused).
 
-- [ ] **Step 3: Implement the schema.** In `packages/agent-remote-protocol/src/remote-host-journal.ts`, import the background schema:
+- [x] **Step 3: Implement the schema.** In `packages/agent-remote-protocol/src/remote-host-journal.ts`, import the background schema:
 
 <!-- edit: packages/agent-remote-protocol/src/remote-host-journal.ts -->
 <!-- old -->
@@ -491,15 +492,17 @@ export type JournalRelayMessage = Extract<RemoteHostUplinkMessage,
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
 ```
 
-- [ ] **Step 4: Run the tests and see them pass, then the package.**
+- [x] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol exec vitest run src/remote-host-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run typecheck` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS for all. The two grants differ only in what the Controller may send: a Relay that acknowledges 2 applies `rebind`, `outcome`, open corrections, digest-less items, `attentionItemKey`, `journal_unserve` and `journal_request_refused`.
+Expected: PASS for all (landed: SDK 97 tests, protocol 431). The two grants differ only in what the Controller may send: a Relay that acknowledges 2 applies `rebind`, `outcome`, open corrections, digest-less items, `attentionItemKey`, `journal_unserve` and `journal_request_refused`.
 
-- [ ] **Step 5: Commit.**
+**Landed with this task, to keep `agent-remote-hosted` compiling and safe:** the schema change makes digests optional, which the hosted service's types did not allow. `host-journals.ts` gains `GrantOneEntry` and `requireGrantOneEntry`: until Task 4 applies the new entries, a publication entry that needs grant 2 (`rebind`, `outcome`, a `correct` or a `replace`/`prepend` item without a digest, a head with `attentionItemKey`) is refused as `invalid` with its sequence unconsumed (`JournalInvalidPublicationError`), so no journal stores what this Relay cannot serve. Task 4 removes the guard when it applies those entries. `broker.ts` still acknowledges `journal: 1` only, and `journal_unserve` and `journal_request_refused` are decoded but not yet handled (Task 4).
+
+- [x] **Step 5: Commit.**
 
 ```bash
-git add packages/agent-remote-protocol/src
+git add packages/agent-remote-protocol/src packages/agent-remote-hosted/src
 git commit -m "feat(protocol): publish amendments and open items through the journal, take a session out of serving, refuse requests at once, and grant 2" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

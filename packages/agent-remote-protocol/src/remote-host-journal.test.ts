@@ -12,6 +12,7 @@ const snapshot = {
   capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' },
 };
+const binding = { locator: 'docs/plan.md', resourceId: 'resource-1', status: 'pending' };
 const message = (fields: Record<string, unknown>) => ({ uplinkVersion: 2, ...fields });
 const publish = (entries: unknown[]) => message({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries });
 const seal = (sequence: number) => ({ sequence, op: 'seal', itemKey: 'item-1' });
@@ -27,8 +28,17 @@ const valid: Array<Record<string, unknown>> = [
     { sequence: 5, op: 'correct', row, digest: DIGEST, expectedRevision: 3 },
     { sequence: 6, op: 'replace', items: [{ row, digest: DIGEST }] },
     { sequence: 7, op: 'prepend', items: [{ row, digest: DIGEST }] },
-    { sequence: 8, op: 'head', head: { snapshot, observedAt: 1_725_000_000_000 } },
+    { sequence: 8, op: 'head', head: { snapshot, observedAt: 1_725_000_000_000, attentionItemKey: 'item-1' } },
+    { sequence: 9, op: 'correct', row, expectedRevision: 3 },
+    { sequence: 10, op: 'rebind', itemKey: 'item-1', previous: binding, replacement: { ...binding, resourceId: 'resource-2', status: 'available' } },
+    { sequence: 11, op: 'outcome', providerId: 'codex', turnId: 'turn-1', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1_725_000_000_000 },
+    { sequence: 12, op: 'replace', items: [{ row }] },
+    { sequence: 13, op: 'prepend', items: [{ row, digest: DIGEST }, { row: { ...row, itemKey: 'item-2' } }] },
   ]),
+  message({ type: 'journal_unserve', sessionKey: SESSION, generation: 2 }),
+  message({ type: 'journal_request_refused', requestId: 'fill-1', sessionKey: SESSION, reason: 'not_followed' }),
+  message({ type: 'journal_request_refused', requestId: 'older-1', sessionKey: SESSION, reason: 'not_ready' }),
+  message({ type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1', reset: true }),
   message({ type: 'journal_fill', requestId: 'fill-1', sessionKey: SESSION, items: [{ row, digest: DIGEST }] }),
   message({ type: 'journal_older_done', requestId: 'older-1', sessionKey: SESSION, olderAvailable: true }),
   message({ type: 'journal_opened', requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'epoch-1', index: [indexEntry] }),
@@ -59,7 +69,8 @@ describe('journal uplink envelopes', () => {
   it('lets the Relay acknowledge journals when it registers a Host', () => {
     const registered = { uplinkVersion: 2, type: 'registered', journal: 1, hostId: 'host', heartbeat: { intervalMs: 20_000, timeoutMs: 10_000 } };
     expect(decodeRemoteHostUplinkMessage(JSON.stringify(registered)).status).toBe('ok');
-    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 2 })).status).toBe('rejected');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 2 })).status).toBe('ok');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 3 })).status).toBe('rejected');
   });
 
   it.each<[string, Record<string, unknown>]>([
@@ -72,6 +83,19 @@ describe('journal uplink envelopes', () => {
     ['a row with an extra field', publish([{ sequence: 1, op: 'append', row: { ...row, title: 'Secret' } }])],
     ['a row with an unknown item type', publish([{ sequence: 1, op: 'append', row: { ...row, item: { type: 'banner', text: 'x' } } }])],
     ['a correction with revision zero', publish([{ sequence: 1, op: 'correct', row, digest: DIGEST, expectedRevision: 0 }])],
+    ['a correction without a revision', publish([{ sequence: 1, op: 'correct', row }])],
+    ['a rebind without its replacement', publish([{ sequence: 1, op: 'rebind', itemKey: 'item-1', previous: binding }])],
+    ['an outcome without a provider', publish([{ sequence: 1, op: 'outcome', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 }])],
+    ['an outcome at a time that is no date', publish([{ sequence: 1, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 8_640_000_000_000_001 }])],
+    ['a runtime event entry, which no longer exists', publish([{ sequence: 1, op: 'event', event: { type: 'turn_started', providerId: 'codex' }, occurredAt: 1 }])],
+    ['a head whose attention item key is empty', publish([{ sequence: 1, op: 'head', head: { snapshot, observedAt: 1, attentionItemKey: '' } }])],
+    ['a replacement item with an empty digest', publish([{ sequence: 1, op: 'replace', items: [{ row, digest: '' }] }])],
+    ['a fill item without a digest', message({ type: 'journal_fill', requestId: 'f', sessionKey: SESSION, items: [{ row }] })],
+    ['an unserve for generation zero', message({ type: 'journal_unserve', sessionKey: SESSION, generation: 0 })],
+    ['a request refusal without a reason', message({ type: 'journal_request_refused', requestId: 'f', sessionKey: SESSION })],
+    ['a request refusal with an unknown reason', message({ type: 'journal_request_refused', requestId: 'f', sessionKey: SESSION, reason: 'tired' })],
+    ['an open that resets with a false flag', message({ type: 'journal_open', requestId: 'o', sessionKey: SESSION, publisherId: 'controller-1', reset: false })],
+    ['an open whose reset is not a flag', message({ type: 'journal_open', requestId: 'o', sessionKey: SESSION, publisherId: 'controller-1', reset: 'yes' })],
     ['a publication with too many entries', publish(Array.from({ length: JOURNAL_PUBLISH_MAX_ENTRIES + 1 }, (_, at) => seal(at + 1)))],
     ['a publication above the byte bound', publish([{ sequence: 1, op: 'append', row: { ...row, item: { type: 'assistant_message', text: 'x'.repeat(JOURNAL_MESSAGE_MAX_BYTES) } } }])],
     ['a fill that repeats an item', message({ type: 'journal_fill', requestId: 'f', sessionKey: SESSION, items: [{ row, digest: DIGEST }, { row, digest: DIGEST }] })],

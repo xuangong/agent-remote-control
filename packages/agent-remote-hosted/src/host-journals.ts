@@ -193,6 +193,13 @@ function wholeNumber(name: string, value: number): number {
   return value;
 }
 
+/** The entries a grant 1 Controller sends: every item and correction is complete, and a head names no attention item. */
+type GrantOneEntry = Exclude<JournalPublishEntry, { op: 'rebind' | 'outcome' }> extends infer Entry
+  ? Entry extends { op: 'correct' } ? Entry & { digest: string }
+    : Entry extends { op: 'replace' | 'prepend' } ? Omit<Entry, 'items'> & { items: CompleteItemInput[] }
+    : Entry
+  : never;
+
 type Cached = { hostId: string; sessionKey: string; journal: SessionJournal; bytes: number };
 /** Where a journal's retained window began after its last eviction, in the epoch it was measured in. */
 type RetainedWindow = { epoch: string; start: number };
@@ -342,6 +349,18 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     return !host || host.total - (host.sessions.get(sessionKey) ?? 0) + size <= limits.hostBytes;
   }
 
+  /**
+   * A Controller holding grant 1 sends complete items only. Entries that need grant 2 (amendments, open items, attention
+   * item keys) are refused as invalid publications, so no journal ever holds what this Relay cannot serve.
+   */
+  function requireGrantOneEntry(entry: JournalPublishEntry): asserts entry is GrantOneEntry {
+    const needsGrantTwo = entry.op === 'rebind' || entry.op === 'outcome'
+      || (entry.op === 'correct' && entry.digest === undefined)
+      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
+      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined);
+    if (needsGrantTwo) throw new JournalInvalidPublicationError(entry.sequence);
+  }
+
   /** Evicts bodies, from the larger window to none, until the journal is within `target` or nothing more can go. */
   function shrink(journal: SessionJournal, target: number): number {
     let size = journal.residentBytes();
@@ -365,7 +384,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
    * carries over, without evicting first; the other entries evict bodies to make room before they are refused. An entry
    * larger than the room is refused before anything is evicted. The size is measured once and then counted up by the entries.
    */
-  function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: JournalPublishEntry) => void {
+  function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: GrantOneEntry) => void {
     let size: number | undefined;
     return entry => {
       if (entry.op === 'head') {
@@ -404,7 +423,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     windows.set(journal, { epoch: journal.epoch, start });
   }
 
-  function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
+  function apply(journal: SessionJournal, publication: JournalPublication, entry: GrantOneEntry, published: JournalPublished): void {
     switch (entry.op) {
       case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row }); break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
@@ -509,6 +528,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
           const current = journal.publisher;
           const fresh = current !== null && current.generation === generation && entry.sequence === current.watermark + 1;
           try {
+            requireGrantOneEntry(entry);
             if (fresh) admit(entry);
             apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);
             if (fresh) {

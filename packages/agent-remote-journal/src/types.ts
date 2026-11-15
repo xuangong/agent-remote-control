@@ -1,9 +1,9 @@
 import type {
-  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalIndexEntry, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
+  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalHead, JournalIndexEntry, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
 } from '@orchardworks/agent-remote-protocol';
 
 /** The wire shapes the journal consumes and produces; the Host uplink carries them unchanged. */
-export type { CompleteItemInput, JournalIndexEntry, JournalRowInput };
+export type { CompleteItemInput, JournalHead, JournalIndexEntry, JournalRowInput };
 
 
 /** A row stamped with the journal's epoch and sequence; what subscribers receive live. */
@@ -72,6 +72,8 @@ export interface JournalMeta {
   /** The lowest sequence in use; older rows are prepended below it. */
   minSeq: number;
   publisher: JournalPublisher | null;
+  /** Absent until the Controller publishes its first Snapshot. */
+  head?: JournalHead;
   retiredEpochs: { epoch: string; retiredAt: number }[];
 }
 

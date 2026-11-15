@@ -10,7 +10,7 @@ import { replacementOrder } from './replacement.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError,
   JournalStaleRevisionError, JournalUnknownItemError,
-  type CompleteItemInput, type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
+  type CompleteItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
 
@@ -45,6 +45,11 @@ export class SessionJournal {
   get epoch(): string { return this.meta.epoch; }
   /** The last forward sequence assigned: the cursor of a subscriber that has everything. */
   get cursor(): TimelineCursor { return { epoch: this.meta.epoch, seq: this.meta.nextSeq - 1 }; }
+
+  /** The latest Snapshot the publisher reported, or undefined before the first one. */
+  get head(): JournalHead | undefined { return this.meta.head === undefined ? undefined : structuredClone(this.meta.head); }
+  /** The publisher that may write now: its generation and last applied publication. Null before the first claim. */
+  get publisher(): JournalPublisher | null { return this.meta.publisher === null ? null : { ...this.meta.publisher }; }
 
   /**
    * Registers a publisher's new uplink connection and fences off every older one. A reconnecting publisher resumes
@@ -125,6 +130,14 @@ export class SessionJournal {
     if (item.body?.item.type === 'user_message') item.body.item.clientMessageId = clientMessageId;
     item.revision += 1;
     this.dirty.add(itemKey);
+  }
+
+  /** Replaces the head with the Controller's latest Snapshot. */
+  setHead(publication: JournalPublication, head: JournalHead): void {
+    if (this.duplicate(publication)) return;
+    const stored = structuredClone(head);
+    this.advance(publication);
+    this.meta.head = stored;
   }
 
   /** Replaces an item's content after a reread found it different, unless the item moved since the index was read. */

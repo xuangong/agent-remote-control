@@ -22,6 +22,16 @@ Every plan follows the repository rules in `AGENTS.md`:
 - `pnpm compatibility:update` runs after reviewed changes.
 - Changes to the website, Relay or Controller are verified on `pnpm local`.
 
+## Progress
+
+| Plan | State | Evidence |
+|---|---|---|
+| P1-A Journal core | Done | `@orchardworks/agent-remote-journal`, 141 tests |
+| P0 Baselines | Done | [baselines](2026-11-15-p0-baselines.md); targets revised in the design |
+| P1-B1 Relay journal service | Done | uplink journal messages, `host-journals.ts`, `journal-uplink.ts` |
+| P1-B2 Journal-served sessions | Done | hosted suite 790 tests; crude-mode guard suites unchanged; local instance verified (crude path, model turn) |
+| P1-B3 Storage and partition | Planned | `2026-11-15-p1b3a-journal-storage.md`, `2026-11-15-p1b3b-cloudflare-journal-partition.md` |
+
 ## Notes carried to later plans
 
 - **P1-D: measure under latency, against the same runner.**

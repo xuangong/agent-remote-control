@@ -2049,6 +2049,46 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
+  /**
+   * The limits and authorization every message of a browser session stream passes before anything else happens to it.
+   * Returns a function that is true when the message may proceed; otherwise it already closed the stream or answered.
+   */
+  function admitClientMessages(client: RelaySocket, context: BrokerRequestContext, subject: string | undefined, expiry: () => number | undefined): (raw: string, binary: boolean) => boolean {
+    let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
+    const refuse = (code: number, reason: string) => { client.close(code, reason); return false; };
+    return (raw, binary) => {
+      if (binary) return refuse(1003, 'Text protocol required');
+      if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
+      let publicMessage: { type?: string; payload?: { locator?: unknown } };
+      try { publicMessage = JSON.parse(raw.toString()); } catch { return refuse(1008, 'Invalid session message'); }
+      if (publicMessage?.type === 'image_upload_chunk') {
+        const bytes = Buffer.byteLength(raw.toString());
+        imageChunkBytes += bytes;
+        if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return refuse(1008, 'Image upload rate exceeded');
+      } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request'
+        // A conversation's images and a previewed file's local resources resolve and read one message each.
+        || publicMessage?.type === 'resource_resolve_request' || publicMessage?.type === 'resource_request') {
+        const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
+        if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return refuse(1008, 'Resource transfer rate exceeded');
+      } else if (++messageCount > 120) return refuse(1008, 'Control message rate exceeded');
+      if (context.authorizeMessage?.(raw.toString()) === false) {
+        const decoded = decodeClientMessage(raw.toString());
+        if (decoded.status !== 'ok' || !('payload' in decoded.value) || !('requestId' in decoded.value.payload)) return refuse(1008, 'Invalid session message');
+        client.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: {
+          requestId: decoded.value.payload.requestId, code: 'reauthentication_required',
+          message: 'Sign in again before changing session permissions. Then retry the change.', recoverable: true,
+        } }));
+        return false;
+      }
+      if (!owner(subject)) {
+        try { if (publicMessage.type === 'resource_resolve_request' && !(typeof publicMessage.payload?.locator === 'string' && /^input-image:[a-f0-9-]{36}$/.test(publicMessage.payload.locator))) return refuse(1008, 'Only the Host owner can resolve local files'); }
+        catch { return refuse(1008, 'Invalid session message'); }
+      }
+      const expiresAt = expiry();
+      if (expiresAt !== undefined && expiresAt <= now()) return refuse(1008, 'Credential expired');
+      return true;
+    };
+  }
   async function upgrade(request: Request, context: BrokerRequestContext, url: URL) {
     assertAvailable();
     if (url.pathname === '/ws/remote-host') {
@@ -2087,37 +2127,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
       stream.timer = opening;
       client.onError(() => undefined);
-      let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
+      const admit = admitClientMessages(client, context, subject, expiry);
       client.onMessage((raw, binary) => {
-        if (binary) return client.close(1003, 'Text protocol required');
-        if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
-        let publicMessage: { type?: string; payload?: { locator?: unknown } };
-        try { publicMessage = JSON.parse(raw.toString()); } catch { return client.close(1008, 'Invalid session message'); }
-        if (publicMessage?.type === 'image_upload_chunk') {
-          const bytes = Buffer.byteLength(raw.toString());
-          imageChunkBytes += bytes;
-          if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return client.close(1008, 'Image upload rate exceeded');
-        } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request'
-          // A conversation's images and a previewed file's local resources resolve and read one message each.
-          || publicMessage?.type === 'resource_resolve_request' || publicMessage?.type === 'resource_request') {
-          const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
-          if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return client.close(1008, 'Resource transfer rate exceeded');
-        } else if (++messageCount > 120) return client.close(1008, 'Control message rate exceeded');
-        if (context.authorizeMessage?.(raw.toString()) === false) {
-          const decoded = decodeClientMessage(raw.toString());
-          if (decoded.status !== 'ok' || !('payload' in decoded.value) || !('requestId' in decoded.value.payload)) return client.close(1008, 'Invalid session message');
-          client.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: {
-            requestId: decoded.value.payload.requestId, code: 'reauthentication_required',
-            message: 'Sign in again before changing session permissions. Then retry the change.', recoverable: true,
-          } }));
-          return;
-        }
-        if (!owner(subject)) {
-          try { if (publicMessage.type === 'resource_resolve_request' && !(typeof publicMessage.payload?.locator === 'string' && /^input-image:[a-f0-9-]{36}$/.test(publicMessage.payload.locator))) return client.close(1008, 'Only the Host owner can resolve local files'); }
-          catch { return client.close(1008, 'Invalid session message'); }
-        }
-        const expiresAt = expiry();
-        if (expiresAt !== undefined && expiresAt <= now()) return client.close(1008, 'Credential expired');
+        if (!admit(raw, binary)) return;
         let outgoing: string;
         try { outgoing = sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client'); }
         catch { return client.close(1008, 'Invalid session target'); }

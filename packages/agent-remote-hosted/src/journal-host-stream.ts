@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import type { RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
+import type { NativeSessionOwner, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
 import { sessionIdentityMessage } from './session-identity.js';
 import { RELAY_SOCKET_OPEN, type BrokerScheduler, type RelaySocket } from './transport.js';
@@ -53,9 +53,12 @@ export interface HostStreamOpener {
   open(sink: HostStreamSink): Promise<HostStream>;
 }
 
-/** Why a Controller stream could not be opened or written; `code` is the code a browser can show. */
+/**
+ * Why a Controller stream could not be opened or written. `code` is the code a browser can show; `status` is the HTTP
+ * status of the broker's refusal and `nativeOwner` the native owner it reported, when it had them.
+ */
 export class HostStreamRefusal extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(readonly code: string, message: string, readonly status?: number | undefined, readonly nativeOwner?: NativeSessionOwner | undefined) {
     super(message);
     this.name = 'HostStreamRefusal';
   }
@@ -89,8 +92,8 @@ export interface HostStreamContext {
 function refusalOf(error: unknown): HostStreamRefusal {
   if (error instanceof HostStreamRefusal) return error;
   if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    return new HostStreamRefusal(typeof code === 'string' ? code : 'host_unavailable', error.message);
+    const { code, status, nativeOwner } = error as { code?: unknown; status?: unknown; nativeOwner?: NativeSessionOwner };
+    return new HostStreamRefusal(typeof code === 'string' ? code : 'host_unavailable', error.message, typeof status === 'number' ? status : undefined, nativeOwner);
   }
   return new HostStreamRefusal('host_unavailable', 'The Controller session is unavailable.');
 }
@@ -104,7 +107,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
       if (full) {
         throw new HostStreamRefusal('session_stream_capacity', full === 'host'
           ? 'This Host has too many sessions open in browsers. Close session views you no longer use; operations on this session work again when a slot is free.'
-          : 'Too many sessions are open across your browsers and devices. Close tabs, windows or session views you no longer use; operations on this session work again when a slot is free.');
+          : 'Too many sessions are open across your browsers and devices. Close tabs, windows or session views you no longer use; operations on this session work again when a slot is free.', 429);
       }
       const streamId = randomUUID();
       let closed = false;

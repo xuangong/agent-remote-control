@@ -66,7 +66,7 @@
 | `packages/agent-remote-hosted/src/journal-session-stream.ts` | New: the per-browser-stream read-path protocol. |
 | `packages/agent-remote-hosted/src/journal-session-stream.test.ts` | New: tests over a real `SessionJournal` with fake sockets. |
 | `packages/agent-remote-hosted/src/journal-sessions.ts` | New: subscriber registry, shared fill and older-history state, gating, `hostReturned`. |
-| `packages/agent-remote-hosted/src/journal-sessions.test.ts` | New: `hostReturned` reaches only the streams of one Host. |
+| `packages/agent-remote-hosted/src/journal-sessions.test.ts` | New: `hostReturned`, chained fills, shared-state lifetime, late older-history answers. |
 | `packages/agent-remote-hosted/src/broker.ts` | Modify: `admitClientMessages` extraction, gating, `acceptJournalServed`, wiring, `onReady` hook. |
 | `packages/agent-remote-hosted/src/test-utils/journal-session-fixture.ts` | New: in-memory transports, a fake Controller and a browser helper. |
 | `packages/agent-remote-hosted/src/broker-journal-sessions.test.ts` | New: end-to-end tests over the in-memory transport and the session channel. |
@@ -462,6 +462,14 @@ describe('a Controller stream', () => {
     for (const each of [recovery, full, account, unwritable]) { expect(each.streams.size).toBe(0); expect(each.timers.size).toBe(0); }
   });
 
+  it('carries the status and the native owner of the broker\'s refusal, and 429 for a reached limit', async () => {
+    const nativeOwner = { kind: 'native_cli' as const, generation: 'g1' };
+    const owned = fixture({ recover: async () => { throw Object.assign(new Error('The session is owned.'), { status: 409, code: 'native_session_owned', nativeOwner }); } });
+    await expect(owned.opener.open(owned.sink)).rejects.toMatchObject({ code: 'native_session_owned', status: 409, nativeOwner });
+    const full = fixture({ capacity: () => 'account' });
+    await expect(full.opener.open(full.sink)).rejects.toMatchObject({ code: 'session_stream_capacity', status: 429 });
+  });
+
   it('closes the stream and tells the Controller when the browser leaves', async () => {
     const f = fixture();
     const stream = await f.opener.open(f.sink);
@@ -472,6 +480,17 @@ describe('a Controller stream', () => {
     expect(f.timers.size).toBe(0);
     expect(f.seen.ended).toEqual([]);
     expect(() => stream.send(cancel)).toThrow(HostStreamRefusal);
+  });
+
+  it('never reports an end for a stream the browser closed, even when the broker closes its socket afterwards', async () => {
+    const f = fixture();
+    const stream = await f.opener.open(f.sink);
+    const [, entry] = [...f.streams][0]!;
+    stream.close();
+    const closes = f.written.filter(message => message.type === 'stream_close').length;
+    entry.socket.close(1008, 'Invalid Remote Host session identity');
+    expect(f.seen.ended).toEqual([]);
+    expect(f.written.filter(message => message.type === 'stream_close')).toHaveLength(closes);
   });
 
   it('ends the stream when the Controller does not accept it in time', async () => {
@@ -607,7 +626,7 @@ Expected: FAIL: cannot resolve `./journal-host-stream.js`.
 ```ts
 import { randomUUID } from 'node:crypto';
 
-import type { RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
+import type { NativeSessionOwner, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
 import { sessionIdentityMessage } from './session-identity.js';
 import { RELAY_SOCKET_OPEN, type BrokerScheduler, type RelaySocket } from './transport.js';
@@ -660,9 +679,12 @@ export interface HostStreamOpener {
   open(sink: HostStreamSink): Promise<HostStream>;
 }
 
-/** Why a Controller stream could not be opened or written; `code` is the code a browser can show. */
+/**
+ * Why a Controller stream could not be opened or written. `code` is the code a browser can show; `status` is the HTTP
+ * status of the broker's refusal and `nativeOwner` the native owner it reported, when it had them.
+ */
 export class HostStreamRefusal extends Error {
-  constructor(readonly code: string, message: string) {
+  constructor(readonly code: string, message: string, readonly status?: number | undefined, readonly nativeOwner?: NativeSessionOwner | undefined) {
     super(message);
     this.name = 'HostStreamRefusal';
   }
@@ -696,8 +718,8 @@ export interface HostStreamContext {
 function refusalOf(error: unknown): HostStreamRefusal {
   if (error instanceof HostStreamRefusal) return error;
   if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    return new HostStreamRefusal(typeof code === 'string' ? code : 'host_unavailable', error.message);
+    const { code, status, nativeOwner } = error as { code?: unknown; status?: unknown; nativeOwner?: NativeSessionOwner };
+    return new HostStreamRefusal(typeof code === 'string' ? code : 'host_unavailable', error.message, typeof status === 'number' ? status : undefined, nativeOwner);
   }
   return new HostStreamRefusal('host_unavailable', 'The Controller session is unavailable.');
 }
@@ -711,7 +733,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
       if (full) {
         throw new HostStreamRefusal('session_stream_capacity', full === 'host'
           ? 'This Host has too many sessions open in browsers. Close session views you no longer use; operations on this session work again when a slot is free.'
-          : 'Too many sessions are open across your browsers and devices. Close tabs, windows or session views you no longer use; operations on this session work again when a slot is free.');
+          : 'Too many sessions are open across your browsers and devices. Close tabs, windows or session views you no longer use; operations on this session work again when a slot is free.', 429);
       }
       const streamId = randomUUID();
       let closed = false;
@@ -787,7 +809,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
 - [ ] **Step 4: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-host-stream.test.ts --testTimeout=10000`
-Expected: PASS, 14 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Typecheck.**
 
@@ -936,12 +958,13 @@ git commit -m "refactor(hosted): share the per-message limits and authorization 
 
 ```ts
 import { bodyFromRow, SessionJournal } from '@orchardworks/agent-remote-journal';
-import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
 import { createJournalSessionStream, PENDING_CONTROL_REVISION, type JournalReads } from './journal-session-stream.js';
+import { BROKER_MAX_FRAME_BYTES } from './transport.js';
 
 type Wire = Record<string, any>;
 const DIGEST = 'a'.repeat(64);
@@ -958,24 +981,49 @@ const snapshot = (status: 'idle' | 'running' = 'idle'): AgentSnapshotPayload => 
 const message = (fields: Wire) => JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields });
 const negotiate = message({ type: 'negotiate' });
 let counter = 0;
-const pageRequest = (direction: 'tail' | 'before' | 'after', cursor?: { epoch: string; seq: number }) =>
-  message({ type: 'timeline_request', payload: { requestId: `page-${++counter}`, agentId: 'agent', direction, limit: 100, ...(cursor ? { cursor } : {}) } });
+const pageRequest = (direction: 'tail' | 'before' | 'after', cursor?: { epoch: string; seq: number }, limit = 100) =>
+  message({ type: 'timeline_request', payload: { requestId: `page-${++counter}`, agentId: 'agent', direction, limit, ...(cursor ? { cursor } : {}) } });
 const sendMessage = message({ type: 'send_message', payload: { requestId: 'send-1', operationId: OPERATION, agentId: 'agent', text: 'Hi' } });
 
-function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Error; olderFails?: boolean } = {}) {
+interface FixtureOptions {
+  head?: boolean; evictBodies?: boolean; hostOpen?: Error; hostHang?: boolean; olderFails?: boolean;
+  /** Extra items after the two default ones. */
+  extraRows?: number;
+  /** The fill does not bring the bodies back. */
+  fillBringsNothing?: boolean;
+  pageFails?: Error;
+  /** Negotiation reads the journal status, which resolves only when this promise does. */
+  statusGate?: Promise<void>;
+}
+
+function fixture(options: FixtureOptions = {}) {
   const journal = SessionJournal.create('host-1:codex:thread-1');
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });
-  for (const [key, text] of [['m1', 'Hello'], ['m2', 'World']] as const) { journal.append(at(), row(key, text)); journal.complete(at(), key, DIGEST); }
+  const texts = new Map<string, string>([['m1', 'Hello'], ['m2', 'World']]);
+  for (let index = 0; index < (options.extraRows ?? 0); index++) texts.set(`x${index}`, `Extra ${index}`);
+  for (const [key, text] of texts) { journal.append(at(), row(key, text)); journal.complete(at(), key, DIGEST); }
   if (options.head !== false) journal.setHead(at(), { snapshot: snapshot(), observedAt: 5 });
   if (options.evictBodies) journal.evict(0);
   let olderBeyondJournal = true;
-  const calls = { fill: [] as string[][], older: [] as number[], hostOpens: 0 };
+  const calls = { fill: [] as string[][], older: [] as number[], pages: [] as Array<{ limit: number }>, hostOpens: 0 };
   const reads: JournalReads = {
-    status: async () => ({ cursor: journal.cursor, ...(journal.head ? { head: journal.head } : {}) }),
-    page: async request => journal.page(request, { olderBeyondJournal }),
-    fill: async keys => { calls.fill.push(keys); for (const key of keys) journal.fill(key, bodyFromRow(row(key, key === 'm1' ? 'Hello' : 'World')), DIGEST); },
+    status: async () => {
+      const read = { cursor: journal.cursor, ...(journal.head ? { head: journal.head } : {}) };
+      await options.statusGate;
+      return read;
+    },
+    page: async request => {
+      calls.pages.push({ limit: request.limit });
+      if (options.pageFails) throw options.pageFails;
+      return journal.page(request, { olderBeyondJournal });
+    },
+    fill: async keys => {
+      calls.fill.push(keys);
+      if (options.fillBringsNothing) return;
+      for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
+    },
     older: async limit => {
       calls.older.push(limit);
       if (options.olderFails) throw new Error('The Host is offline.');
@@ -986,13 +1034,14 @@ function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Er
   };
   const sent: Wire[] = [];
   const closed: Array<[number | undefined, string | undefined]> = [];
-  const client = { readyState: 1, bufferedAmount: 0, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
   const hostWrites: Wire[] = [];
   let sink: HostStreamSink | undefined;
   let hostClosed = false;
   const hostStreams: HostStreamOpener = {
     async open(next) {
       calls.hostOpens += 1;
+      if (options.hostHang) return new Promise<HostStream>(() => undefined);
       if (options.hostOpen) throw options.hostOpen;
       sink = next;
       const stream: HostStream = { send: raw => { hostWrites.push(JSON.parse(raw)); }, close: () => { hostClosed = true; } };
@@ -1003,14 +1052,14 @@ function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Er
   let nextTimer = 0;
   const scheduler = { setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: (timer: unknown) => { timers.delete(timer as number); } };
   const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
-  const published = (events: JournalPublished['events']): JournalPublished => ({ rows: [], events, watermark: sequence, cursor: journal.cursor });
+  const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
-    journal, stream, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
+    journal, stream, client, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
     types: () => sent.map(frame => frame.type),
     runTimers() { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } },
     appendLive(itemKey: string, text: string): JournalPublished {
       const stamped = journal.append(at(), row(itemKey, text))!;
-      return { ...published([{ kind: 'row', row: stamped }]), rows: [stamped] };
+      return published([{ kind: 'row', row: stamped }]);
     },
     setHead(status: 'idle' | 'running'): JournalPublished {
       journal.setHead(at(), { snapshot: snapshot(status), observedAt: 6 });
@@ -1264,6 +1313,164 @@ describe('a journal-served session stream', () => {
     expect(f.calls.hostOpens).toBe(0);
   });
 });
+
+describe('the reasons a Controller stream cannot open', () => {
+  const refusal = (code: string, status?: number, extra: Wire = {}) => Object.assign(new Error(`Refused: ${code}.`), { code, ...(status === undefined ? {} : { status }), ...extra });
+  const acquire = (requestId: string) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
+
+  it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
+    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
+    f.stream.receive(negotiate);
+    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Refused: session_stream_capacity.']]));
+  });
+
+  it('answers an acquire with the pending state and the native owner, refuses the rest for good, and tries again on the next message', async () => {
+    const nativeOwner = { kind: 'native_cli', generation: 'g1' };
+    const f = fixture({ hostOpen: refusal('native_session_owned', 409, { nativeOwner }) });
+    await f.negotiated();
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    f.stream.receive(acquire('control-1'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'session_control',
+      payload: { agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: 'control-1', nativeOwner } }));
+    f.stream.receive(sendMessage);
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } }));
+    expect(f.calls.hostOpens).toBe(3);
+    f.stream.hostReturned();
+    expect(f.closed).toEqual([]);
+  });
+
+  it('refuses the held messages with a recoverable error for a server failure and for a timeout', async () => {
+    for (const status of [503, 408, undefined]) {
+      const f = fixture({ hostOpen: refusal('session_attach_failed', status) });
+      await f.negotiated();
+      f.stream.receive(acquire('control-1'));
+      f.stream.receive(sendMessage);
+      await vi.waitFor(() => expect(f.sent.filter(frame => frame.type === 'protocol_error').map(frame => frame.payload))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ requestId: 'send-1', recoverable: true })])));
+      expect(f.sent.filter(frame => frame.type === 'session_control' && frame.payload.requestId)).toEqual([]);
+      expect(f.closed).toEqual([]);
+    }
+  });
+});
+
+describe('the activity of an observer', () => {
+  const observer = async () => {
+    const f = fixture();
+    f.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
+    await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
+    return f;
+  };
+
+  it('sends one update with the latest cursor for several publications within the window', async () => {
+    const f = await observer();
+    f.stream.deliver(f.appendLive('m3', 'a'));
+    f.stream.deliver(f.appendLive('m4', 'b'));
+    f.stream.deliver(f.appendLive('m5', 'c'));
+    expect(f.sent).toHaveLength(2);
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'idle', cursor: { epoch: f.journal.epoch, seq: 5 } });
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+  });
+
+  it('sends a status change at once, with the cursor of its own publication', async () => {
+    const f = await observer();
+    const appended = f.appendLive('m3', 'a');
+    const changed = f.setHead('running');
+    f.stream.deliver({ ...changed, events: [...appended.events, ...changed.events] });
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'running', cursor: { epoch: f.journal.epoch, seq: 3 } });
+    const count = f.sent.length;
+    f.runTimers();
+    expect(f.sent).toHaveLength(count);
+  });
+
+  it('waits for the window when a head changes nothing the observer shows', async () => {
+    const f = await observer();
+    f.stream.deliver(f.setHead('idle'));
+    expect(f.sent).toHaveLength(2);
+  });
+});
+
+describe('a journal-served stream under load', () => {
+  it('answers every page failure with the fixed timeline_unavailable error and no raw code', async () => {
+    for (const code of ['unavailable', 'in_flight', 'busy', 'timeout', 'store_failed']) {
+      const f = fixture({ pageFails: Object.assign(new Error(`internal ${code}`), { code }) });
+      await f.negotiated();
+      f.stream.receive(pageRequest('tail'));
+      await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable', recoverable: true } }));
+      expect(JSON.stringify(f.sent.at(-1))).not.toContain('internal');
+      expect(f.sent.at(-1)!.payload.code).not.toBe(code);
+    }
+  });
+
+  it('serves a 300-item tail whose bodies are all evicted, in several fill rounds', async () => {
+    const f = fixture({ evictBodies: true, extraRows: 298 });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 300));
+    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    expect(f.sent.at(-1)!.payload.entries).toHaveLength(300);
+    expect(f.calls.fill.map(keys => keys.length)).toEqual([64, 64, 64, 64, 44]);
+  });
+
+  it('stops filling when a round brings nothing back', async () => {
+    const f = fixture({ evictBodies: true, fillBringsNothing: true });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
+    expect(f.calls.fill).toHaveLength(1);
+  });
+
+  it('caps a requested page at 500 items', async () => {
+    const f = fixture();
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 1000));
+    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    expect(f.calls.pages[0]).toEqual({ limit: 500 });
+  });
+
+  it('handles messages that arrive behind negotiate in order, after the Snapshot', async () => {
+    const f = fixture();
+    f.stream.receive(negotiate);
+    f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
+    f.stream.receive(pageRequest('tail'));
+    f.stream.receive(sendMessage);
+    await vi.waitFor(() => expect(f.types()).toContain('timeline_page'));
+    expect(f.types().slice(0, 4)).toEqual(['negotiated', 'agent_snapshot', 'session_control', 'timeline_subscribed']);
+    expect(f.types()).not.toContain('protocol_error');
+    await vi.waitFor(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
+  });
+
+  it('counts held control requests against the limit of held messages', async () => {
+    const f = fixture({ hostHang: true });
+    await f.negotiated();
+    const acquire = (id: number) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId: `control-${id}`, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
+    for (let index = 0; index < 16; index++) { f.stream.receive(sendMessage); f.stream.receive(acquire(index)); }
+    expect(f.closed).toEqual([]);
+    f.stream.receive(acquire(99));
+    expect(f.closed).toEqual([[1013, 'Remote stream is not ready']]);
+  });
+
+  it('refreshes the head it sent when something was published while negotiation was being answered', async () => {
+    let release!: () => void;
+    const f = fixture({ statusGate: new Promise<void>(resolve => { release = resolve; }) });
+    f.stream.receive(negotiate);
+    f.stream.deliver(f.setHead('running'));
+    release();
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { status: 'running' } }));
+    expect(f.types().slice(0, 3)).toEqual(['negotiated', 'agent_snapshot', 'session_control']);
+  });
+
+  it('closes a stream whose browser connection cannot keep up', async () => {
+    const f = fixture();
+    await f.negotiated();
+    f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
+    f.client.bufferedAmount = BROKER_MAX_FRAME_BYTES + 1;
+    f.stream.deliver(f.appendLive('m3', 'x'));
+    expect(f.closed).toEqual([[1013, 'Slow browser connection']]);
+  });
+});
 ```
 
 - [ ] **Step 2: Run it and see it fail.**
@@ -1276,8 +1483,8 @@ Expected: FAIL: cannot resolve `./journal-session-stream.js`.
 ```ts
 import type { JournalHead, JournalPageRequest, JournalPageResult, JournalRow } from '@orchardworks/agent-remote-journal';
 import {
-  decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION,
-  type AgentSnapshotPayload, type AgentStatus, type ClientMessage, type HistoryPage, type ServerMessage, type TimelineCursor,
+  decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE,
+  type AgentSnapshotPayload, type AgentStatus, type ClientMessage, type HistoryPage, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublished, JournalStatus } from './host-journals.js';
@@ -1292,6 +1499,7 @@ const FILL_ROUNDS = 4;
 const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
 const ACTIVITY_COALESCE_MS = 500;
+const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
 /** Frames of the Controller session that the journal answers instead; they never reach the browser. */
 const READ_PATH_FRAMES = new Set([
@@ -1340,11 +1548,16 @@ function protocolError(code: string, message: string, recoverable: boolean, requ
   return { protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: { ...(requestId === undefined ? {} : { requestId }), code, message, recoverable } };
 }
 
-/** The reason a Controller stream or a Host request failed: the error's own code when it has one. */
-function refusalOf(error: unknown): { code: string; message: string } {
+interface Refusal { code: string; message: string; status?: number; nativeOwner?: NativeSessionOwner }
+
+/** The reason a Controller stream or a Host request failed: the error's own code, status and native owner when it has them. */
+function refusalOf(error: unknown): Refusal {
   if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    return { code: typeof code === 'string' ? code : 'host_unavailable', message: error.message };
+    const { code, status, nativeOwner } = error as { code?: unknown; status?: unknown; nativeOwner?: NativeSessionOwner };
+    return {
+      code: typeof code === 'string' ? code : 'host_unavailable', message: error.message,
+      ...(typeof status === 'number' ? { status } : {}), ...(nativeOwner === undefined ? {} : { nativeOwner }),
+    };
   }
   return { code: 'host_unavailable', message: 'The Controller session is unavailable.' };
 }
@@ -1388,14 +1601,24 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** The control revision of the Controller session, once it has reported one. */
   let controlRevision: string | undefined;
   /** Messages for the Controller stream that wait for it to open. */
-  const held: Array<{ raw: string; requestId?: string }> = [];
-  let heldBytes = 0;
+  const held: Array<{ raw: string; bytes: number; requestId?: string }> = [];
   /** Requests to acquire control that name the pending revision and wait for the Controller's own. */
-  const heldControl: ControlRequest[] = [];
+  const heldControl: Array<{ request: ControlRequest; bytes: number }> = [];
+  /** Messages that arrived while negotiation was being answered; they are handled in order once it is done. */
+  const queued: Array<{ raw: string; bytes: number }> = [];
   let activitySnapshot: AgentSnapshotPayload | undefined;
   let activityCursor: TimelineCursor | undefined;
   let lastActivity: string | undefined;
+  /** What the observer was last told, to tell a status change (sent at once) from a content burst (coalesced). */
+  let lastStatus: string | undefined;
+  let lastActivityCursor: TimelineCursor | undefined;
   let activityTimer: unknown;
+
+  /** Holds one more message against the limits shared by everything that waits; false when it would exceed them. */
+  function hasRoomFor(bytes: number): boolean {
+    const waiting = [...held, ...heldControl, ...queued];
+    return waiting.length < HELD_MAX_MESSAGES && waiting.reduce((sum, item) => sum + item.bytes, bytes) <= HELD_MAX_BYTES;
+  }
 
   function sendRaw(json: string): void {
     if (isPhase('closed') || client.readyState !== RELAY_SOCKET_OPEN) return;
@@ -1419,8 +1642,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     hostState = 'idle';
     stream?.close();
     held.length = 0;
-    heldBytes = 0;
     heldControl.length = 0;
+    queued.length = 0;
     if (code !== undefined) client.close(code, reason);
   }
 
@@ -1449,20 +1672,39 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     activityTimer = undefined;
     if (!activitySnapshot) return;
     const background = activitySnapshot.attention?.background;
+    const status = activityStatus(activitySnapshot);
     const payload = {
-      agentId: publicAgentId, status: activityStatus(activitySnapshot),
+      agentId: publicAgentId, status,
       ...(activityCursor ? { cursor: activityCursor } : {}),
       ...(background ? { background: { id: background.id, kind: background.kind, status: background.status } } : {}),
     };
     const key = JSON.stringify(payload);
     if (key === lastActivity) return;
     lastActivity = key;
+    lastStatus = JSON.stringify({ status, background: payload.background });
+    lastActivityCursor = activityCursor;
     sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload });
   }
 
   function scheduleActivity(): void {
-    if (activityTimer !== undefined) return;
+    if (activityTimer !== undefined || !activitySnapshot) return;
+    if (activityCursor?.epoch === lastActivityCursor?.epoch && activityCursor?.seq === lastActivityCursor?.seq) return;
+    // Status is sent at once; content bursts share one bounded metadata update.
     activityTimer = scheduler.setTimeout(() => { activityTimer = undefined; publishActivity(); }, ACTIVITY_COALESCE_MS);
+  }
+
+  /** Takes a new head and cursor for the observer: a changed status or background goes out now, anything else waits for the window. */
+  function observe(snapshot: AgentSnapshotPayload | undefined, cursor: TimelineCursor | undefined): void {
+    if (cursor) activityCursor = cursor;
+    if (snapshot) activitySnapshot = snapshot;
+    if (!activitySnapshot) return;
+    const background = activitySnapshot.attention?.background;
+    const state = JSON.stringify({
+      status: activityStatus(activitySnapshot),
+      background: background ? { id: background.id, kind: background.kind, status: background.status } : undefined,
+    });
+    if (state !== lastStatus) publishActivity();
+    else scheduleActivity();
   }
 
   /** Sends the head as it is now: an update for a content stream, activity for an observer. */
@@ -1470,7 +1712,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     const status = await reads.status();
     if (isPhase('closed')) return;
     if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
-    if (activityOnly) { activitySnapshot = status.head.snapshot; activityCursor = status.cursor; publishActivity(); }
+    if (activityOnly) observe(status.head.snapshot, status.cursor);
     else sendServer(snapshotMessage('agent_update', status.head));
   }
 
@@ -1480,9 +1722,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
     sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
     if (activityOnly) {
-      activitySnapshot = status.head.snapshot;
-      activityCursor = status.cursor;
-      publishActivity();
+      observe(status.head.snapshot, status.cursor);
     } else {
       sendServer(snapshotMessage('agent_snapshot', status.head));
       sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false } });
@@ -1491,11 +1731,12 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     phase = 'live';
     if (stale) { stale = false; refreshHead().catch(() => shutdown(1011, 'Session journal could not be read')); }
     if (!activityOnly) ensureHost();
+    for (const item of queued.splice(0)) receive(item.raw);
   }
 
-  function refuse(requestIds: ReadonlyArray<string | undefined>, error: unknown): void {
+  function refuse(requestIds: ReadonlyArray<string | undefined>, error: unknown, final = false): void {
     const { code, message } = refusalOf(error);
-    for (const requestId of requestIds) sendServer(protocolError(code, message, true, requestId));
+    for (const requestId of requestIds) sendServer(protocolError(code, message, !final, requestId));
   }
 
   /** Opens the Controller stream when none is open or opening; what waits for it is sent once it is open. */
@@ -1508,8 +1749,13 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       hostState = 'open';
       waitingForHost = false;
       try { stream.send(NEGOTIATE_FRAME); }
-      catch (error) { refuse([...held.map(item => item.requestId), ...heldControl.map(item => item.payload.requestId)], error); held.length = 0; heldBytes = 0; heldControl.length = 0; return; }
-      heldBytes = 0;
+      catch (error) {
+        const requestIds = [...held.map(item => item.requestId), ...heldControl.map(item => item.request.payload.requestId)];
+        held.length = 0;
+        heldControl.length = 0;
+        refuse(requestIds, error);
+        return;
+      }
       for (const item of held.splice(0)) {
         try { stream.send(item.raw); }
         catch (error) { refuse([item.requestId], error); }
@@ -1517,21 +1763,28 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       flushControl();
     }, error => {
       hostState = 'idle';
+      if (isPhase('closed')) return;
+      const refusal = refusalOf(error);
       const messages = held.splice(0);
-      const requests = heldControl.splice(0);
-      heldBytes = 0;
-      if (refusalOf(error).code !== 'host_offline') {
+      const requests = heldControl.splice(0).map(item => item.request);
+      const { status } = refusal;
+      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, refusal.message); return; }
+      // A refusal that retrying cannot change leaves the stream reading; one that depends on the Host waits for it.
+      const hopeless = status !== undefined && status >= 400 && status < 500 && status !== 408;
+      const offline = refusal.code === 'host_offline';
+      waitingForHost = offline;
+      if (!offline && !hopeless) {
         refuse([...messages.map(item => item.requestId), ...requests.map(item => item.payload.requestId)], error);
         return;
       }
-      waitingForHost = true;
-      refuse(messages.map(item => item.requestId), error);
+      refuse(messages.map(item => item.requestId), error, !offline);
       for (const request of requests) {
         if (request.payload.action === 'acquire') {
           sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
             agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: request.payload.requestId,
+            ...(refusal.nativeOwner === undefined ? {} : { nativeOwner: refusal.nativeOwner }),
           } });
-        } else refuse([request.payload.requestId], error);
+        } else refuse([request.payload.requestId], error, !offline);
       }
     });
   }
@@ -1563,7 +1816,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** Sends the held control requests with the Controller's own revision, once it is known and the stream is open. */
   function flushControl(): void {
     if (controlRevision === undefined || hostState !== 'open') return;
-    for (const request of heldControl.splice(0)) {
+    for (const { request } of heldControl.splice(0)) {
       forward(JSON.stringify({ ...request, payload: { ...request.payload, revision: controlRevision } }), request.payload.requestId);
     }
   }
@@ -1577,9 +1830,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       return;
     }
     const bytes = encoder.encode(raw).byteLength;
-    if (held.length >= HELD_MAX_MESSAGES || heldBytes + bytes > HELD_MAX_BYTES) { shutdown(1013, 'Remote stream is not ready'); return; }
-    held.push({ raw, ...(requestId === undefined ? {} : { requestId }) });
-    heldBytes += bytes;
+    if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+    held.push({ raw, bytes, ...(requestId === undefined ? {} : { requestId }) });
     ensureHost();
   }
 
@@ -1595,7 +1847,10 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     };
     try {
       let result = await reads.page(query);
-      for (let round = 0; result?.kind === 'missing' && round < FILL_ROUNDS; round++) {
+      const rounds = Math.ceil(query.limit / JOURNAL_FILL_MAX_ITEMS) + 1;
+      let previouslyMissing = Number.POSITIVE_INFINITY;
+      for (let round = 0; result?.kind === 'missing' && round < rounds && result.itemKeys.length < previouslyMissing; round++) {
+        previouslyMissing = result.itemKeys.length;
         await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
         result = await reads.page(query);
       }
@@ -1606,19 +1861,21 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
           result = (await reads.page(query)) ?? served;
         } catch { result = served; }
       }
-      if (result?.kind !== 'page') {
-        sendServer(protocolError('timeline_unavailable', 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.', true, payload.requestId));
-        return;
-      }
-      sendServer(result.page);
-    } catch (error) {
-      const { code, message } = refusalOf(error);
-      sendServer(protocolError(code === 'host_unavailable' ? 'timeline_unavailable' : code, message, true, payload.requestId));
+      if (result?.kind === 'page') sendServer(result.page);
+      else sendServer(protocolError('timeline_unavailable', TIMELINE_UNAVAILABLE, true, payload.requestId));
+    } catch {
+      sendServer(protocolError('timeline_unavailable', TIMELINE_UNAVAILABLE, true, payload.requestId));
     }
   }
 
   function receive(raw: string): void {
     if (isPhase('closed')) return;
+    if (isPhase('negotiating')) {
+      const bytes = encoder.encode(raw).byteLength;
+      if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+      queued.push({ raw, bytes });
+      return;
+    }
     const decoded = decodeClientMessage(raw);
     if (decoded.status === 'rejected') {
       const issue = decoded.issues[0];
@@ -1656,7 +1913,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
         return;
       case 'session_control_request':
         if (message.payload.revision !== PENDING_CONTROL_REVISION) { forward(raw, message.payload.requestId); return; }
-        heldControl.push(message);
+        {
+          const bytes = encoder.encode(raw).byteLength;
+          if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+          heldControl.push({ request: message, bytes });
+        }
         ensureHost();
         flushControl();
         return;
@@ -1668,19 +1929,19 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   function deliver(result: JournalPublished): void {
     if (isPhase('closed') || isPhase('new')) return;
     if (isPhase('negotiating')) { stale = true; return; }
-    let content = false;
+    if (activityOnly) {
+      // The publication's cursor is taken first, so a head published with it already carries the cursor it belongs to.
+      let head: AgentSnapshotPayload | undefined;
+      for (const event of result.events) if (event.kind === 'head') head = event.head.snapshot;
+      if (result.events.length > 0) observe(head, result.cursor);
+      return;
+    }
     for (const event of result.events) {
-      if (event.kind === 'head') {
-        if (activityOnly) { activitySnapshot = event.head.snapshot; publishActivity(); }
-        else sendServer(snapshotMessage('agent_update', event.head));
-        continue;
-      }
-      content = true;
-      if (activityOnly || !subscribed) continue;
+      if (event.kind === 'head') { sendServer(snapshotMessage('agent_update', event.head)); continue; }
+      if (!subscribed) continue;
       sendServer(event.kind === 'row' ? streamFrame(event.row)
         : { protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: publicAgentId, epoch: event.epoch } });
     }
-    if (activityOnly && content && result.cursor) { activityCursor = result.cursor; scheduleActivity(); }
   }
 
   function hostReturned(): void {
@@ -1738,13 +1999,22 @@ interface SharedSession {
   streams: Set<JournalSessionStream>;
   /** True once a Controller said it holds no history older than the journal; reset by a replacement. */
   olderExhausted: boolean;
-  fill?: Promise<void>;
+  /** How many replacements the journal had; an answer about older history that began before one says nothing about the new epoch. */
+  replacements: number;
+  /** The last queued fill: fills of a session run one after another, each with its own items. */
+  fillTail: Promise<void>;
   older?: Promise<void>;
+  /** Fills and older-history reads that have not settled; the state stays while any is pending. */
+  pending: number;
 }
 
 export function createJournalSessions(options: JournalSessionsOptions): JournalSessions {
   const sessions = new Map<string, SharedSession>();
   const keyOf = (hostId: string, sessionKey: string) => JSON.stringify([hostId, sessionKey]);
+  /** The shared state goes when no stream uses it and no read is pending; it is checked again whenever either changes. */
+  function release(key: string, shared: SharedSession): void {
+    if (shared.streams.size === 0 && shared.pending === 0 && sessions.get(key) === shared) sessions.delete(key);
+  }
 
   return {
     async serves(hostId, sessionKey) {
@@ -1754,20 +2024,26 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     attach(attachment) {
       const { hostId, sessionKey } = attachment;
       const key = keyOf(hostId, sessionKey);
-      const shared = sessions.get(key) ?? { hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false };
+      const shared = sessions.get(key) ?? { hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
       sessions.set(key, shared);
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
         page: (request: JournalPageRequest): Promise<JournalPageResult | undefined> => options.journals.page(hostId, sessionKey, request, !shared.olderExhausted),
         fill(itemKeys) {
-          // One fill per session at a time; a stream that needed other bodies asks again after this one settles.
-          shared.fill ??= options.requestFill(hostId, sessionKey, itemKeys).then(() => undefined).finally(() => { shared.fill = undefined; });
-          return shared.fill;
+          // One fill per session at a time, each asking for its own items.
+          shared.pending += 1;
+          const run = shared.fillTail.then(() => options.requestFill(hostId, sessionKey, itemKeys)).then(() => undefined);
+          shared.fillTail = run.catch(() => undefined);
+          return run.finally(() => { shared.pending -= 1; release(key, shared); });
         },
         older(limit) {
-          shared.older ??= options.requestOlder(hostId, sessionKey, limit)
-            .then(({ olderAvailable }) => { if (!olderAvailable) shared.olderExhausted = true; })
-            .finally(() => { shared.older = undefined; });
+          if (shared.older === undefined) {
+            const began = shared.replacements;
+            shared.pending += 1;
+            shared.older = options.requestOlder(hostId, sessionKey, limit)
+              .then(({ olderAvailable }) => { if (!olderAvailable && shared.replacements === began) shared.olderExhausted = true; })
+              .finally(() => { shared.older = undefined; shared.pending -= 1; release(key, shared); });
+          }
           return shared.older;
         },
         olderBeyondJournal: () => !shared.olderExhausted,
@@ -1781,7 +2057,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         close() {
           stream.close();
           shared.streams.delete(stream);
-          if (shared.streams.size === 0 && sessions.get(key) === shared) sessions.delete(key);
+          release(key, shared);
         },
       };
     },
@@ -1789,7 +2065,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     published(hostId, sessionKey, result) {
       const shared = sessions.get(keyOf(hostId, sessionKey));
       if (!shared) return;
-      if (result.events.some(event => event.kind === 'replaced')) shared.olderExhausted = false;
+      if (result.events.some(event => event.kind === 'replaced')) { shared.olderExhausted = false; shared.replacements += 1; }
       for (const stream of [...shared.streams]) {
         try { stream.deliver(result); }
         catch { /* One stream's failure does not stop the others. */ }
@@ -1812,16 +2088,19 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
 - [ ] **Step 5: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-session-stream.test.ts --testTimeout=10000`
-Expected: PASS, 18 tests.
+Expected: PASS, 32 tests.
 
-Then add `packages/agent-remote-hosted/src/journal-sessions.test.ts`, which checks that `hostReturned(hostId)` reaches only the streams of that Host:
+Then add `packages/agent-remote-hosted/src/journal-sessions.test.ts`, which checks that `hostReturned(hostId)` reaches only the streams of that Host, and the shared state of a session (chained fills, its lifetime while a fill is pending, a late older-history answer after a replacement):
 
 ```ts
-import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import { describe, expect, it } from 'vitest';
+import { bodyFromRow, SessionJournal } from '@orchardworks/agent-remote-journal';
+import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { HostStreamOpener } from './journal-host-stream.js';
 import { createJournalSessions } from './journal-sessions.js';
+
+const headSnapshot = { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } } as AgentSnapshotPayload;
 
 function socket() {
   const closed: Array<[number | undefined, string | undefined]> = [];
@@ -1830,7 +2109,7 @@ function socket() {
 
 describe('the journal sessions of a Relay', () => {
   it('tells only the waiting streams of the returned Host that it is back', async () => {
-    const head = { snapshot: { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } }, observedAt: 1 };
+    const head = { snapshot: headSnapshot, observedAt: 1 };
     const sessions = createJournalSessions({
       journals: { status: async () => ({ cursor: { epoch: 'e', seq: 0 }, head } as never), page: async () => undefined },
       requestFill: async () => ({}) as never,
@@ -1853,11 +2132,89 @@ describe('the journal sessions of a Relay', () => {
     expect(second.closed).toEqual([[1012, 'Remote Host reconnected']]);
     expect(other.closed).toEqual([]);
   });
+
+  /** A session over a real journal whose bodies can be evicted, with fills and older reads that wait for the test. */
+  async function journalSessions(options: { evict?: boolean } = {}) {
+    const journal = SessionJournal.create('host-1:codex:thread-1');
+    const { generation } = journal.claim('controller-1');
+    let sequence = 0;
+    const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });
+    const row = (itemKey: string) => ({ itemKey, providerId: 'codex', sourceKey: itemKey, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message' as const, text: itemKey, messageId: itemKey } });
+    for (const key of ['k1', 'k2']) { journal.append(at(), row(key)); journal.complete(at(), key, 'a'.repeat(64)); }
+    journal.setHead(at(), { snapshot: headSnapshot, observedAt: 1 });
+    if (options.evict !== false) journal.evict(0);
+    const fills: Array<{ keys: string[]; finish(): void }> = [];
+    const olderReads: Array<{ answer(olderAvailable: boolean): void }> = [];
+    const olderArguments: boolean[] = [];
+    const sessions = createJournalSessions({
+      journals: {
+        status: async () => ({ cursor: journal.cursor, head: journal.head! }),
+        page: async (_host, _key, request, olderBeyondJournal) => { olderArguments.push(olderBeyondJournal); return journal.page(request, { olderBeyondJournal }); },
+      },
+      requestFill: (_host, _key, keys) => new Promise(resolve => {
+        fills.push({ keys, finish: () => { for (const key of keys) journal.fill(key, bodyFromRow(row(key)), 'a'.repeat(64)); resolve({ filled: keys, mismatched: [], unknown: [] }); } });
+      }),
+      requestOlder: () => new Promise(resolve => { olderReads.push({ answer: olderAvailable => resolve({ olderAvailable }) }); }),
+      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
+    });
+    const open = async (limit: number, direction: 'tail' | 'before' = 'tail') => {
+      const { client, closed } = socket();
+      const sent: Array<Record<string, any>> = [];
+      client.send = (data: string) => { sent.push(JSON.parse(data)); };
+      const stream = sessions.attach({ hostId: 'host-1', sessionKey: 'codex:thread-1', publicAgentId: 'agent', client, hostStreams: { open: () => new Promise(() => undefined) } });
+      stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+      await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(3));
+      stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: { requestId: `page-${limit}-${sent.length}`, agentId: 'agent', direction, limit, ...(direction === 'before' ? { cursor: { epoch: journal.epoch, seq: 1 } } : {}) } }));
+      return { stream, sent, closed };
+    };
+    return { sessions, fills, olderReads, olderArguments, journal, open };
+  }
+
+  it('asks for the bodies of one session one fill at a time, each stream for its own items', async () => {
+    const f = await journalSessions();
+    const first = await f.open(1);
+    await vi.waitFor(() => expect(f.fills).toHaveLength(1));
+    const second = await f.open(2);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.fills.map(fill => fill.keys)).toEqual([['k2']]);
+    f.fills[0]!.finish();
+    await vi.waitFor(() => expect(f.fills).toHaveLength(2));
+    expect(f.fills[1]!.keys).toEqual(['k1', 'k2']);
+    f.fills[1]!.finish();
+    await vi.waitFor(() => expect(first.sent.at(-1)?.type).toBe('timeline_page'));
+    await vi.waitFor(() => expect(second.sent.at(-1)?.type).toBe('timeline_page'));
+  });
+
+  it('keeps the shared state of a session while a fill is pending, so a reload waits for it', async () => {
+    const f = await journalSessions();
+    const first = await f.open(2);
+    await vi.waitFor(() => expect(f.fills).toHaveLength(1));
+    first.stream.close();
+    const reloaded = await f.open(2);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.fills).toHaveLength(1);
+    f.fills[0]!.finish();
+    await vi.waitFor(() => expect(f.fills).toHaveLength(2));
+    f.fills[1]!.finish();
+    await vi.waitFor(() => expect(reloaded.sent.at(-1)?.type).toBe('timeline_page'));
+  });
+
+  it('does not mark a replaced journal as exhausted because of an answer about the one it replaced', async () => {
+    const f = await journalSessions({ evict: false });
+    await f.open(100, 'before');
+    await vi.waitFor(() => expect(f.olderReads).toHaveLength(1));
+    f.sessions.published('host-1', 'codex:thread-1', { events: [{ kind: 'replaced', epoch: 'epoch-2' }], watermark: 0 });
+    f.olderReads[0]!.answer(false);
+    await vi.waitFor(() => expect(f.olderArguments.length).toBeGreaterThanOrEqual(2));
+    await f.open(100, 'before');
+    await vi.waitFor(() => expect(f.olderArguments.at(-1)).toBe(true));
+    expect(f.olderArguments.at(-1)).toBe(true);
+  });
 });
 ```
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-sessions.test.ts --testTimeout=10000`
-Expected: PASS, 1 test.
+Expected: PASS, 4 tests.
 
 - [ ] **Step 6: Typecheck.**
 

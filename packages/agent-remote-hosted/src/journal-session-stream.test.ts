@@ -1,10 +1,11 @@
 import { bodyFromRow, SessionJournal } from '@orchardworks/agent-remote-journal';
-import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
 import { createJournalSessionStream, PENDING_CONTROL_REVISION, type JournalReads } from './journal-session-stream.js';
+import { BROKER_MAX_FRAME_BYTES } from './transport.js';
 
 type Wire = Record<string, any>;
 const DIGEST = 'a'.repeat(64);
@@ -21,24 +22,49 @@ const snapshot = (status: 'idle' | 'running' = 'idle'): AgentSnapshotPayload => 
 const message = (fields: Wire) => JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields });
 const negotiate = message({ type: 'negotiate' });
 let counter = 0;
-const pageRequest = (direction: 'tail' | 'before' | 'after', cursor?: { epoch: string; seq: number }) =>
-  message({ type: 'timeline_request', payload: { requestId: `page-${++counter}`, agentId: 'agent', direction, limit: 100, ...(cursor ? { cursor } : {}) } });
+const pageRequest = (direction: 'tail' | 'before' | 'after', cursor?: { epoch: string; seq: number }, limit = 100) =>
+  message({ type: 'timeline_request', payload: { requestId: `page-${++counter}`, agentId: 'agent', direction, limit, ...(cursor ? { cursor } : {}) } });
 const sendMessage = message({ type: 'send_message', payload: { requestId: 'send-1', operationId: OPERATION, agentId: 'agent', text: 'Hi' } });
 
-function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Error; olderFails?: boolean } = {}) {
+interface FixtureOptions {
+  head?: boolean; evictBodies?: boolean; hostOpen?: Error; hostHang?: boolean; olderFails?: boolean;
+  /** Extra items after the two default ones. */
+  extraRows?: number;
+  /** The fill does not bring the bodies back. */
+  fillBringsNothing?: boolean;
+  pageFails?: Error;
+  /** Negotiation reads the journal status, which resolves only when this promise does. */
+  statusGate?: Promise<void>;
+}
+
+function fixture(options: FixtureOptions = {}) {
   const journal = SessionJournal.create('host-1:codex:thread-1');
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });
-  for (const [key, text] of [['m1', 'Hello'], ['m2', 'World']] as const) { journal.append(at(), row(key, text)); journal.complete(at(), key, DIGEST); }
+  const texts = new Map<string, string>([['m1', 'Hello'], ['m2', 'World']]);
+  for (let index = 0; index < (options.extraRows ?? 0); index++) texts.set(`x${index}`, `Extra ${index}`);
+  for (const [key, text] of texts) { journal.append(at(), row(key, text)); journal.complete(at(), key, DIGEST); }
   if (options.head !== false) journal.setHead(at(), { snapshot: snapshot(), observedAt: 5 });
   if (options.evictBodies) journal.evict(0);
   let olderBeyondJournal = true;
-  const calls = { fill: [] as string[][], older: [] as number[], hostOpens: 0 };
+  const calls = { fill: [] as string[][], older: [] as number[], pages: [] as Array<{ limit: number }>, hostOpens: 0 };
   const reads: JournalReads = {
-    status: async () => ({ cursor: journal.cursor, ...(journal.head ? { head: journal.head } : {}) }),
-    page: async request => journal.page(request, { olderBeyondJournal }),
-    fill: async keys => { calls.fill.push(keys); for (const key of keys) journal.fill(key, bodyFromRow(row(key, key === 'm1' ? 'Hello' : 'World')), DIGEST); },
+    status: async () => {
+      const read = { cursor: journal.cursor, ...(journal.head ? { head: journal.head } : {}) };
+      await options.statusGate;
+      return read;
+    },
+    page: async request => {
+      calls.pages.push({ limit: request.limit });
+      if (options.pageFails) throw options.pageFails;
+      return journal.page(request, { olderBeyondJournal });
+    },
+    fill: async keys => {
+      calls.fill.push(keys);
+      if (options.fillBringsNothing) return;
+      for (const key of keys) journal.fill(key, bodyFromRow(row(key, texts.get(key)!)), DIGEST);
+    },
     older: async limit => {
       calls.older.push(limit);
       if (options.olderFails) throw new Error('The Host is offline.');
@@ -49,13 +75,14 @@ function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Er
   };
   const sent: Wire[] = [];
   const closed: Array<[number | undefined, string | undefined]> = [];
-  const client = { readyState: 1, bufferedAmount: 0, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
+  const client = { readyState: 1, bufferedAmount: 0 as number | undefined, send: (data: string) => { sent.push(JSON.parse(data)); }, close: (code?: number, reason?: string) => { closed.push([code, reason]); } };
   const hostWrites: Wire[] = [];
   let sink: HostStreamSink | undefined;
   let hostClosed = false;
   const hostStreams: HostStreamOpener = {
     async open(next) {
       calls.hostOpens += 1;
+      if (options.hostHang) return new Promise<HostStream>(() => undefined);
       if (options.hostOpen) throw options.hostOpen;
       sink = next;
       const stream: HostStream = { send: raw => { hostWrites.push(JSON.parse(raw)); }, close: () => { hostClosed = true; } };
@@ -66,14 +93,14 @@ function fixture(options: { head?: boolean; evictBodies?: boolean; hostOpen?: Er
   let nextTimer = 0;
   const scheduler = { setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: (timer: unknown) => { timers.delete(timer as number); } };
   const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
-  const published = (events: JournalPublished['events']): JournalPublished => ({ rows: [], events, watermark: sequence, cursor: journal.cursor });
+  const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
-    journal, stream, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
+    journal, stream, client, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
     types: () => sent.map(frame => frame.type),
     runTimers() { for (const [id, callback] of [...timers]) { timers.delete(id); callback(); } },
     appendLive(itemKey: string, text: string): JournalPublished {
       const stamped = journal.append(at(), row(itemKey, text))!;
-      return { ...published([{ kind: 'row', row: stamped }]), rows: [stamped] };
+      return published([{ kind: 'row', row: stamped }]);
     },
     setHead(status: 'idle' | 'running'): JournalPublished {
       journal.setHead(at(), { snapshot: snapshot(status), observedAt: 6 });
@@ -325,5 +352,163 @@ describe('a journal-served session stream', () => {
     f.stream.receive(pageRequest('tail'));
     expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'activity_only', recoverable: false } });
     expect(f.calls.hostOpens).toBe(0);
+  });
+});
+
+describe('the reasons a Controller stream cannot open', () => {
+  const refusal = (code: string, status?: number, extra: Wire = {}) => Object.assign(new Error(`Refused: ${code}.`), { code, ...(status === undefined ? {} : { status }), ...extra });
+  const acquire = (requestId: string) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
+
+  it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
+    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
+    f.stream.receive(negotiate);
+    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Refused: session_stream_capacity.']]));
+  });
+
+  it('answers an acquire with the pending state and the native owner, refuses the rest for good, and tries again on the next message', async () => {
+    const nativeOwner = { kind: 'native_cli', generation: 'g1' };
+    const f = fixture({ hostOpen: refusal('native_session_owned', 409, { nativeOwner }) });
+    await f.negotiated();
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    f.stream.receive(acquire('control-1'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'session_control',
+      payload: { agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: 'control-1', nativeOwner } }));
+    f.stream.receive(sendMessage);
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } }));
+    expect(f.calls.hostOpens).toBe(3);
+    f.stream.hostReturned();
+    expect(f.closed).toEqual([]);
+  });
+
+  it('refuses the held messages with a recoverable error for a server failure and for a timeout', async () => {
+    for (const status of [503, 408, undefined]) {
+      const f = fixture({ hostOpen: refusal('session_attach_failed', status) });
+      await f.negotiated();
+      f.stream.receive(acquire('control-1'));
+      f.stream.receive(sendMessage);
+      await vi.waitFor(() => expect(f.sent.filter(frame => frame.type === 'protocol_error').map(frame => frame.payload))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ requestId: 'send-1', recoverable: true })])));
+      expect(f.sent.filter(frame => frame.type === 'session_control' && frame.payload.requestId)).toEqual([]);
+      expect(f.closed).toEqual([]);
+    }
+  });
+});
+
+describe('the activity of an observer', () => {
+  const observer = async () => {
+    const f = fixture();
+    f.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
+    await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_activity']));
+    return f;
+  };
+
+  it('sends one update with the latest cursor for several publications within the window', async () => {
+    const f = await observer();
+    f.stream.deliver(f.appendLive('m3', 'a'));
+    f.stream.deliver(f.appendLive('m4', 'b'));
+    f.stream.deliver(f.appendLive('m5', 'c'));
+    expect(f.sent).toHaveLength(2);
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'idle', cursor: { epoch: f.journal.epoch, seq: 5 } });
+    f.runTimers();
+    expect(f.sent).toHaveLength(3);
+  });
+
+  it('sends a status change at once, with the cursor of its own publication', async () => {
+    const f = await observer();
+    const appended = f.appendLive('m3', 'a');
+    const changed = f.setHead('running');
+    f.stream.deliver({ ...changed, events: [...appended.events, ...changed.events] });
+    expect(f.sent.at(-1)!.payload).toEqual({ agentId: 'agent', status: 'running', cursor: { epoch: f.journal.epoch, seq: 3 } });
+    const count = f.sent.length;
+    f.runTimers();
+    expect(f.sent).toHaveLength(count);
+  });
+
+  it('waits for the window when a head changes nothing the observer shows', async () => {
+    const f = await observer();
+    f.stream.deliver(f.setHead('idle'));
+    expect(f.sent).toHaveLength(2);
+  });
+});
+
+describe('a journal-served stream under load', () => {
+  it('answers every page failure with the fixed timeline_unavailable error and no raw code', async () => {
+    for (const code of ['unavailable', 'in_flight', 'busy', 'timeout', 'store_failed']) {
+      const f = fixture({ pageFails: Object.assign(new Error(`internal ${code}`), { code }) });
+      await f.negotiated();
+      f.stream.receive(pageRequest('tail'));
+      await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable', recoverable: true } }));
+      expect(JSON.stringify(f.sent.at(-1))).not.toContain('internal');
+      expect(f.sent.at(-1)!.payload.code).not.toBe(code);
+    }
+  });
+
+  it('serves a 300-item tail whose bodies are all evicted, in several fill rounds', async () => {
+    const f = fixture({ evictBodies: true, extraRows: 298 });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 300));
+    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    expect(f.sent.at(-1)!.payload.entries).toHaveLength(300);
+    expect(f.calls.fill.map(keys => keys.length)).toEqual([64, 64, 64, 64, 44]);
+  });
+
+  it('stops filling when a round brings nothing back', async () => {
+    const f = fixture({ evictBodies: true, fillBringsNothing: true });
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail'));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'timeline_unavailable' } }));
+    expect(f.calls.fill).toHaveLength(1);
+  });
+
+  it('caps a requested page at 500 items', async () => {
+    const f = fixture();
+    await f.negotiated();
+    f.stream.receive(pageRequest('tail', undefined, 1000));
+    await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
+    expect(f.calls.pages[0]).toEqual({ limit: 500 });
+  });
+
+  it('handles messages that arrive behind negotiate in order, after the Snapshot', async () => {
+    const f = fixture();
+    f.stream.receive(negotiate);
+    f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
+    f.stream.receive(pageRequest('tail'));
+    f.stream.receive(sendMessage);
+    await vi.waitFor(() => expect(f.types()).toContain('timeline_page'));
+    expect(f.types().slice(0, 4)).toEqual(['negotiated', 'agent_snapshot', 'session_control', 'timeline_subscribed']);
+    expect(f.types()).not.toContain('protocol_error');
+    await vi.waitFor(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
+  });
+
+  it('counts held control requests against the limit of held messages', async () => {
+    const f = fixture({ hostHang: true });
+    await f.negotiated();
+    const acquire = (id: number) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId: `control-${id}`, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
+    for (let index = 0; index < 16; index++) { f.stream.receive(sendMessage); f.stream.receive(acquire(index)); }
+    expect(f.closed).toEqual([]);
+    f.stream.receive(acquire(99));
+    expect(f.closed).toEqual([[1013, 'Remote stream is not ready']]);
+  });
+
+  it('refreshes the head it sent when something was published while negotiation was being answered', async () => {
+    let release!: () => void;
+    const f = fixture({ statusGate: new Promise<void>(resolve => { release = resolve; }) });
+    f.stream.receive(negotiate);
+    f.stream.deliver(f.setHead('running'));
+    release();
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { status: 'running' } }));
+    expect(f.types().slice(0, 3)).toEqual(['negotiated', 'agent_snapshot', 'session_control']);
+  });
+
+  it('closes a stream whose browser connection cannot keep up', async () => {
+    const f = fixture();
+    await f.negotiated();
+    f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
+    f.client.bufferedAmount = BROKER_MAX_FRAME_BYTES + 1;
+    f.stream.deliver(f.appendLive('m3', 'x'));
+    expect(f.closed).toEqual([[1013, 'Slow browser connection']]);
   });
 });

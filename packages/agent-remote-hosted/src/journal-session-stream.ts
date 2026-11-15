@@ -1,7 +1,7 @@
 import type { JournalHead, JournalPageRequest, JournalPageResult, JournalRow } from '@orchardworks/agent-remote-journal';
 import {
-  decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION,
-  type AgentSnapshotPayload, type AgentStatus, type ClientMessage, type HistoryPage, type ServerMessage, type TimelineCursor,
+  decodeClientMessage, encodeServerMessage, JOURNAL_FILL_MAX_ITEMS, JOURNAL_OLDER_MAX_LIMIT, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE,
+  type AgentSnapshotPayload, type AgentStatus, type ClientMessage, type HistoryPage, type NativeSessionOwner, type ServerMessage, type TimelineCursor,
 } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublished, JournalStatus } from './host-journals.js';
@@ -16,6 +16,7 @@ const FILL_ROUNDS = 4;
 const HELD_MAX_MESSAGES = 32;
 const HELD_MAX_BYTES = 1024 * 1024;
 const ACTIVITY_COALESCE_MS = 500;
+const TIMELINE_UNAVAILABLE = 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.';
 const RESTORING_REASON = 'The Controller session is not connected yet.';
 /** Frames of the Controller session that the journal answers instead; they never reach the browser. */
 const READ_PATH_FRAMES = new Set([
@@ -64,11 +65,16 @@ function protocolError(code: string, message: string, recoverable: boolean, requ
   return { protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: { ...(requestId === undefined ? {} : { requestId }), code, message, recoverable } };
 }
 
-/** The reason a Controller stream or a Host request failed: the error's own code when it has one. */
-function refusalOf(error: unknown): { code: string; message: string } {
+interface Refusal { code: string; message: string; status?: number; nativeOwner?: NativeSessionOwner }
+
+/** The reason a Controller stream or a Host request failed: the error's own code, status and native owner when it has them. */
+function refusalOf(error: unknown): Refusal {
   if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    return { code: typeof code === 'string' ? code : 'host_unavailable', message: error.message };
+    const { code, status, nativeOwner } = error as { code?: unknown; status?: unknown; nativeOwner?: NativeSessionOwner };
+    return {
+      code: typeof code === 'string' ? code : 'host_unavailable', message: error.message,
+      ...(typeof status === 'number' ? { status } : {}), ...(nativeOwner === undefined ? {} : { nativeOwner }),
+    };
   }
   return { code: 'host_unavailable', message: 'The Controller session is unavailable.' };
 }
@@ -112,14 +118,24 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** The control revision of the Controller session, once it has reported one. */
   let controlRevision: string | undefined;
   /** Messages for the Controller stream that wait for it to open. */
-  const held: Array<{ raw: string; requestId?: string }> = [];
-  let heldBytes = 0;
+  const held: Array<{ raw: string; bytes: number; requestId?: string }> = [];
   /** Requests to acquire control that name the pending revision and wait for the Controller's own. */
-  const heldControl: ControlRequest[] = [];
+  const heldControl: Array<{ request: ControlRequest; bytes: number }> = [];
+  /** Messages that arrived while negotiation was being answered; they are handled in order once it is done. */
+  const queued: Array<{ raw: string; bytes: number }> = [];
   let activitySnapshot: AgentSnapshotPayload | undefined;
   let activityCursor: TimelineCursor | undefined;
   let lastActivity: string | undefined;
+  /** What the observer was last told, to tell a status change (sent at once) from a content burst (coalesced). */
+  let lastStatus: string | undefined;
+  let lastActivityCursor: TimelineCursor | undefined;
   let activityTimer: unknown;
+
+  /** Holds one more message against the limits shared by everything that waits; false when it would exceed them. */
+  function hasRoomFor(bytes: number): boolean {
+    const waiting = [...held, ...heldControl, ...queued];
+    return waiting.length < HELD_MAX_MESSAGES && waiting.reduce((sum, item) => sum + item.bytes, bytes) <= HELD_MAX_BYTES;
+  }
 
   function sendRaw(json: string): void {
     if (isPhase('closed') || client.readyState !== RELAY_SOCKET_OPEN) return;
@@ -143,8 +159,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     hostState = 'idle';
     stream?.close();
     held.length = 0;
-    heldBytes = 0;
     heldControl.length = 0;
+    queued.length = 0;
     if (code !== undefined) client.close(code, reason);
   }
 
@@ -173,20 +189,39 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     activityTimer = undefined;
     if (!activitySnapshot) return;
     const background = activitySnapshot.attention?.background;
+    const status = activityStatus(activitySnapshot);
     const payload = {
-      agentId: publicAgentId, status: activityStatus(activitySnapshot),
+      agentId: publicAgentId, status,
       ...(activityCursor ? { cursor: activityCursor } : {}),
       ...(background ? { background: { id: background.id, kind: background.kind, status: background.status } } : {}),
     };
     const key = JSON.stringify(payload);
     if (key === lastActivity) return;
     lastActivity = key;
+    lastStatus = JSON.stringify({ status, background: payload.background });
+    lastActivityCursor = activityCursor;
     sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'agent_activity', payload });
   }
 
   function scheduleActivity(): void {
-    if (activityTimer !== undefined) return;
+    if (activityTimer !== undefined || !activitySnapshot) return;
+    if (activityCursor?.epoch === lastActivityCursor?.epoch && activityCursor?.seq === lastActivityCursor?.seq) return;
+    // Status is sent at once; content bursts share one bounded metadata update.
     activityTimer = scheduler.setTimeout(() => { activityTimer = undefined; publishActivity(); }, ACTIVITY_COALESCE_MS);
+  }
+
+  /** Takes a new head and cursor for the observer: a changed status or background goes out now, anything else waits for the window. */
+  function observe(snapshot: AgentSnapshotPayload | undefined, cursor: TimelineCursor | undefined): void {
+    if (cursor) activityCursor = cursor;
+    if (snapshot) activitySnapshot = snapshot;
+    if (!activitySnapshot) return;
+    const background = activitySnapshot.attention?.background;
+    const state = JSON.stringify({
+      status: activityStatus(activitySnapshot),
+      background: background ? { id: background.id, kind: background.kind, status: background.status } : undefined,
+    });
+    if (state !== lastStatus) publishActivity();
+    else scheduleActivity();
   }
 
   /** Sends the head as it is now: an update for a content stream, activity for an observer. */
@@ -194,7 +229,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     const status = await reads.status();
     if (isPhase('closed')) return;
     if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
-    if (activityOnly) { activitySnapshot = status.head.snapshot; activityCursor = status.cursor; publishActivity(); }
+    if (activityOnly) observe(status.head.snapshot, status.cursor);
     else sendServer(snapshotMessage('agent_update', status.head));
   }
 
@@ -204,9 +239,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (!status?.head) { shutdown(1012, 'Session journal unavailable'); return; }
     sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
     if (activityOnly) {
-      activitySnapshot = status.head.snapshot;
-      activityCursor = status.cursor;
-      publishActivity();
+      observe(status.head.snapshot, status.cursor);
     } else {
       sendServer(snapshotMessage('agent_snapshot', status.head));
       sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false } });
@@ -215,11 +248,12 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     phase = 'live';
     if (stale) { stale = false; refreshHead().catch(() => shutdown(1011, 'Session journal could not be read')); }
     if (!activityOnly) ensureHost();
+    for (const item of queued.splice(0)) receive(item.raw);
   }
 
-  function refuse(requestIds: ReadonlyArray<string | undefined>, error: unknown): void {
+  function refuse(requestIds: ReadonlyArray<string | undefined>, error: unknown, final = false): void {
     const { code, message } = refusalOf(error);
-    for (const requestId of requestIds) sendServer(protocolError(code, message, true, requestId));
+    for (const requestId of requestIds) sendServer(protocolError(code, message, !final, requestId));
   }
 
   /** Opens the Controller stream when none is open or opening; what waits for it is sent once it is open. */
@@ -232,8 +266,13 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       hostState = 'open';
       waitingForHost = false;
       try { stream.send(NEGOTIATE_FRAME); }
-      catch (error) { refuse([...held.map(item => item.requestId), ...heldControl.map(item => item.payload.requestId)], error); held.length = 0; heldBytes = 0; heldControl.length = 0; return; }
-      heldBytes = 0;
+      catch (error) {
+        const requestIds = [...held.map(item => item.requestId), ...heldControl.map(item => item.request.payload.requestId)];
+        held.length = 0;
+        heldControl.length = 0;
+        refuse(requestIds, error);
+        return;
+      }
       for (const item of held.splice(0)) {
         try { stream.send(item.raw); }
         catch (error) { refuse([item.requestId], error); }
@@ -241,21 +280,28 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       flushControl();
     }, error => {
       hostState = 'idle';
+      if (isPhase('closed')) return;
+      const refusal = refusalOf(error);
       const messages = held.splice(0);
-      const requests = heldControl.splice(0);
-      heldBytes = 0;
-      if (refusalOf(error).code !== 'host_offline') {
+      const requests = heldControl.splice(0).map(item => item.request);
+      const { status } = refusal;
+      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, refusal.message); return; }
+      // A refusal that retrying cannot change leaves the stream reading; one that depends on the Host waits for it.
+      const hopeless = status !== undefined && status >= 400 && status < 500 && status !== 408;
+      const offline = refusal.code === 'host_offline';
+      waitingForHost = offline;
+      if (!offline && !hopeless) {
         refuse([...messages.map(item => item.requestId), ...requests.map(item => item.payload.requestId)], error);
         return;
       }
-      waitingForHost = true;
-      refuse(messages.map(item => item.requestId), error);
+      refuse(messages.map(item => item.requestId), error, !offline);
       for (const request of requests) {
         if (request.payload.action === 'acquire') {
           sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
             agentId: publicAgentId, revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: request.payload.requestId,
+            ...(refusal.nativeOwner === undefined ? {} : { nativeOwner: refusal.nativeOwner }),
           } });
-        } else refuse([request.payload.requestId], error);
+        } else refuse([request.payload.requestId], error, !offline);
       }
     });
   }
@@ -287,7 +333,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** Sends the held control requests with the Controller's own revision, once it is known and the stream is open. */
   function flushControl(): void {
     if (controlRevision === undefined || hostState !== 'open') return;
-    for (const request of heldControl.splice(0)) {
+    for (const { request } of heldControl.splice(0)) {
       forward(JSON.stringify({ ...request, payload: { ...request.payload, revision: controlRevision } }), request.payload.requestId);
     }
   }
@@ -301,9 +347,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       return;
     }
     const bytes = encoder.encode(raw).byteLength;
-    if (held.length >= HELD_MAX_MESSAGES || heldBytes + bytes > HELD_MAX_BYTES) { shutdown(1013, 'Remote stream is not ready'); return; }
-    held.push({ raw, ...(requestId === undefined ? {} : { requestId }) });
-    heldBytes += bytes;
+    if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+    held.push({ raw, bytes, ...(requestId === undefined ? {} : { requestId }) });
     ensureHost();
   }
 
@@ -319,7 +364,10 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     };
     try {
       let result = await reads.page(query);
-      for (let round = 0; result?.kind === 'missing' && round < FILL_ROUNDS; round++) {
+      const rounds = Math.ceil(query.limit / JOURNAL_FILL_MAX_ITEMS) + 1;
+      let previouslyMissing = Number.POSITIVE_INFINITY;
+      for (let round = 0; result?.kind === 'missing' && round < rounds && result.itemKeys.length < previouslyMissing; round++) {
+        previouslyMissing = result.itemKeys.length;
         await reads.fill(result.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
         result = await reads.page(query);
       }
@@ -330,19 +378,21 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
           result = (await reads.page(query)) ?? served;
         } catch { result = served; }
       }
-      if (result?.kind !== 'page') {
-        sendServer(protocolError('timeline_unavailable', 'This part of the conversation is not available right now. It is shown again when the computer that holds it is reachable.', true, payload.requestId));
-        return;
-      }
-      sendServer(result.page);
-    } catch (error) {
-      const { code, message } = refusalOf(error);
-      sendServer(protocolError(code === 'host_unavailable' ? 'timeline_unavailable' : code, message, true, payload.requestId));
+      if (result?.kind === 'page') sendServer(result.page);
+      else sendServer(protocolError('timeline_unavailable', TIMELINE_UNAVAILABLE, true, payload.requestId));
+    } catch {
+      sendServer(protocolError('timeline_unavailable', TIMELINE_UNAVAILABLE, true, payload.requestId));
     }
   }
 
   function receive(raw: string): void {
     if (isPhase('closed')) return;
+    if (isPhase('negotiating')) {
+      const bytes = encoder.encode(raw).byteLength;
+      if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+      queued.push({ raw, bytes });
+      return;
+    }
     const decoded = decodeClientMessage(raw);
     if (decoded.status === 'rejected') {
       const issue = decoded.issues[0];
@@ -380,7 +430,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
         return;
       case 'session_control_request':
         if (message.payload.revision !== PENDING_CONTROL_REVISION) { forward(raw, message.payload.requestId); return; }
-        heldControl.push(message);
+        {
+          const bytes = encoder.encode(raw).byteLength;
+          if (!hasRoomFor(bytes)) { shutdown(1013, 'Remote stream is not ready'); return; }
+          heldControl.push({ request: message, bytes });
+        }
         ensureHost();
         flushControl();
         return;
@@ -392,19 +446,19 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   function deliver(result: JournalPublished): void {
     if (isPhase('closed') || isPhase('new')) return;
     if (isPhase('negotiating')) { stale = true; return; }
-    let content = false;
+    if (activityOnly) {
+      // The publication's cursor is taken first, so a head published with it already carries the cursor it belongs to.
+      let head: AgentSnapshotPayload | undefined;
+      for (const event of result.events) if (event.kind === 'head') head = event.head.snapshot;
+      if (result.events.length > 0) observe(head, result.cursor);
+      return;
+    }
     for (const event of result.events) {
-      if (event.kind === 'head') {
-        if (activityOnly) { activitySnapshot = event.head.snapshot; publishActivity(); }
-        else sendServer(snapshotMessage('agent_update', event.head));
-        continue;
-      }
-      content = true;
-      if (activityOnly || !subscribed) continue;
+      if (event.kind === 'head') { sendServer(snapshotMessage('agent_update', event.head)); continue; }
+      if (!subscribed) continue;
       sendServer(event.kind === 'row' ? streamFrame(event.row)
         : { protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: publicAgentId, epoch: event.epoch } });
     }
-    if (activityOnly && content && result.cursor) { activityCursor = result.cursor; scheduleActivity(); }
   }
 
   function hostReturned(): void {

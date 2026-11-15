@@ -74,6 +74,14 @@ describe('a Controller stream', () => {
     for (const each of [recovery, full, account, unwritable]) { expect(each.streams.size).toBe(0); expect(each.timers.size).toBe(0); }
   });
 
+  it('carries the status and the native owner of the broker\'s refusal, and 429 for a reached limit', async () => {
+    const nativeOwner = { kind: 'native_cli' as const, generation: 'g1' };
+    const owned = fixture({ recover: async () => { throw Object.assign(new Error('The session is owned.'), { status: 409, code: 'native_session_owned', nativeOwner }); } });
+    await expect(owned.opener.open(owned.sink)).rejects.toMatchObject({ code: 'native_session_owned', status: 409, nativeOwner });
+    const full = fixture({ capacity: () => 'account' });
+    await expect(full.opener.open(full.sink)).rejects.toMatchObject({ code: 'session_stream_capacity', status: 429 });
+  });
+
   it('closes the stream and tells the Controller when the browser leaves', async () => {
     const f = fixture();
     const stream = await f.opener.open(f.sink);

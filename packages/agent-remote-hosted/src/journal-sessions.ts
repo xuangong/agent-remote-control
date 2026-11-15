@@ -42,13 +42,22 @@ interface SharedSession {
   streams: Set<JournalSessionStream>;
   /** True once a Controller said it holds no history older than the journal; reset by a replacement. */
   olderExhausted: boolean;
-  fill?: Promise<void>;
+  /** How many replacements the journal had; an answer about older history that began before one says nothing about the new epoch. */
+  replacements: number;
+  /** The last queued fill: fills of a session run one after another, each with its own items. */
+  fillTail: Promise<void>;
   older?: Promise<void>;
+  /** Fills and older-history reads that have not settled; the state stays while any is pending. */
+  pending: number;
 }
 
 export function createJournalSessions(options: JournalSessionsOptions): JournalSessions {
   const sessions = new Map<string, SharedSession>();
   const keyOf = (hostId: string, sessionKey: string) => JSON.stringify([hostId, sessionKey]);
+  /** The shared state goes when no stream uses it and no read is pending; it is checked again whenever either changes. */
+  function release(key: string, shared: SharedSession): void {
+    if (shared.streams.size === 0 && shared.pending === 0 && sessions.get(key) === shared) sessions.delete(key);
+  }
 
   return {
     async serves(hostId, sessionKey) {
@@ -58,20 +67,26 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     attach(attachment) {
       const { hostId, sessionKey } = attachment;
       const key = keyOf(hostId, sessionKey);
-      const shared = sessions.get(key) ?? { hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false };
+      const shared = sessions.get(key) ?? { hostId, streams: new Set<JournalSessionStream>(), olderExhausted: false, replacements: 0, fillTail: Promise.resolve(), pending: 0 };
       sessions.set(key, shared);
       const reads: JournalReads = {
         status: () => options.journals.status(hostId, sessionKey),
         page: (request: JournalPageRequest): Promise<JournalPageResult | undefined> => options.journals.page(hostId, sessionKey, request, !shared.olderExhausted),
         fill(itemKeys) {
-          // One fill per session at a time; a stream that needed other bodies asks again after this one settles.
-          shared.fill ??= options.requestFill(hostId, sessionKey, itemKeys).then(() => undefined).finally(() => { shared.fill = undefined; });
-          return shared.fill;
+          // One fill per session at a time, each asking for its own items.
+          shared.pending += 1;
+          const run = shared.fillTail.then(() => options.requestFill(hostId, sessionKey, itemKeys)).then(() => undefined);
+          shared.fillTail = run.catch(() => undefined);
+          return run.finally(() => { shared.pending -= 1; release(key, shared); });
         },
         older(limit) {
-          shared.older ??= options.requestOlder(hostId, sessionKey, limit)
-            .then(({ olderAvailable }) => { if (!olderAvailable) shared.olderExhausted = true; })
-            .finally(() => { shared.older = undefined; });
+          if (shared.older === undefined) {
+            const began = shared.replacements;
+            shared.pending += 1;
+            shared.older = options.requestOlder(hostId, sessionKey, limit)
+              .then(({ olderAvailable }) => { if (!olderAvailable && shared.replacements === began) shared.olderExhausted = true; })
+              .finally(() => { shared.older = undefined; shared.pending -= 1; release(key, shared); });
+          }
           return shared.older;
         },
         olderBeyondJournal: () => !shared.olderExhausted,
@@ -85,7 +100,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         close() {
           stream.close();
           shared.streams.delete(stream);
-          if (shared.streams.size === 0 && sessions.get(key) === shared) sessions.delete(key);
+          release(key, shared);
         },
       };
     },
@@ -93,7 +108,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
     published(hostId, sessionKey, result) {
       const shared = sessions.get(keyOf(hostId, sessionKey));
       if (!shared) return;
-      if (result.events.some(event => event.kind === 'replaced')) shared.olderExhausted = false;
+      if (result.events.some(event => event.kind === 'replaced')) { shared.olderExhausted = false; shared.replacements += 1; }
       for (const stream of [...shared.streams]) {
         try { stream.deliver(result); }
         catch { /* One stream's failure does not stop the others. */ }

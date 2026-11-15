@@ -6,7 +6,7 @@ import {
   type JournalRefusalReason, type RemoteHostUplinkMessage,
 } from '@orchardworks/agent-remote-protocol';
 
-import type { HostJournals, JournalFilled } from './host-journals.js';
+import type { HostJournals, JournalFilled, JournalPublished } from './host-journals.js';
 
 /** The most requests one connection has open to its Host at a time. */
 export const JOURNAL_REQUEST_LIMIT = 32;
@@ -37,6 +37,11 @@ export interface JournalConnectionOptions {
   requestTimeoutMs?: number;
   /** Told when a journal message was not sent because it does not encode. */
   diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void;
+  /**
+   * Called with the result of every publication the journal stored, after the store holds it and whether or not this
+   * connection is still current: the rows are durable, so subscribers must see them. A failure here changes nothing.
+   */
+  published?(sessionKey: string, result: JournalPublished): void;
 }
 
 export interface JournalConnection {
@@ -138,6 +143,8 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             return;
           }
           const result = await journals.publish(hostId, sessionKey, generation, message.entries);
+          try { options.published?.(sessionKey, result); }
+          catch { /* A subscriber's failure does not undo a stored publication. */ }
           if (!options.current()) return;
           if (result.cursor && result.refusal?.reason !== 'fenced') {
             send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_ack', sessionKey, generation, watermark: result.watermark, cursor: result.cursor });

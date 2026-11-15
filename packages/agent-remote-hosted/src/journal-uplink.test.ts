@@ -2,7 +2,7 @@ import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage, JOURNAL_INDEX_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { createHostJournals, type HostJournals } from './host-journals.js';
+import { createHostJournals, type HostJournals, type JournalPublished } from './host-journals.js';
 import { createJournalConnection, isJournalHostMessage, JOURNAL_REQUEST_LIMIT, JOURNAL_REQUEST_TIMEOUT_MS, type JournalHostMessage } from './journal-uplink.js';
 
 const SESSION = 'codex:thread-1';
@@ -21,14 +21,14 @@ function wire(fields: Record<string, unknown>): JournalHostMessage {
 
 type Sent = { type: string; [field: string]: unknown };
 
-function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void } = {}) {
+function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed'): void; published?(sessionKey: string, result: JournalPublished): void } = {}) {
   const store = new MemoryJournalStore();
   const journals = options.journals ?? createHostJournals({ store, now: () => 1_000 });
   const sent: Sent[] = [];
   const timers = new Map<number, { callback(): void; delayMs: number }>();
   let nextTimer = 0, live = true, sendFailure: Error | undefined;
   const connection = createJournalConnection({
-    hostId: 'host-1', journals, current: () => live, diagnostic: options.diagnostic,
+    hostId: 'host-1', journals, current: () => live, diagnostic: options.diagnostic, published: options.published,
     send: message => { if (sendFailure) throw sendFailure; sent.push(message as unknown as Sent); },
     scheduler: { setTimeout: (callback, delayMs) => { timers.set(++nextTimer, { callback, delayMs }); return nextTimer; }, clearTimeout: timer => { timers.delete(timer as number); } },
   });
@@ -47,6 +47,25 @@ function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal
 const requestIdOf = (sent: Sent[], type: string) => String(sent.find(message => message.type === type)!.requestId);
 
 describe('a journal connection', () => {
+  it('hands every stored publication to the broker, also after the connection is no longer current, but not a fenced one', async () => {
+    const reported: Array<{ sessionKey: string; events: number; cursorSeq?: number }> = [];
+    const f = fixture({ published: (sessionKey, result) => reported.push({ sessionKey, events: result.events.length, cursorSeq: result.cursor?.seq }) });
+    await f.open();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    f.endConnection();
+    await f.publish([{ sequence: 2, op: 'append', row: row('m2', 'World') }]);
+    expect(reported).toEqual([{ sessionKey: SESSION, events: 1, cursorSeq: 1 }, { sessionKey: SESSION, events: 1, cursorSeq: 2 }]);
+    await f.publish([{ sequence: 3, op: 'append', row: row('m3', 'Fenced') }], 9);
+    expect(reported).toHaveLength(2);
+  });
+
+  it('keeps a stored publication acknowledged when the broker fails to hand it on', async () => {
+    const f = fixture({ published: () => { throw new Error('subscriber failed'); } });
+    await f.open();
+    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', watermark: 1 });
+  });
+
   it('answers an open with the generation, watermark, epoch and index', async () => {
     const f = fixture();
     expect(await f.open()).toMatchObject({ type: 'journal_opened', uplinkVersion: 2, requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, index: [] });
@@ -103,7 +122,7 @@ describe('a journal connection', () => {
   it('does not send a message that fails to encode and reports it', async () => {
     const diagnostics: string[] = [];
     const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
-    const broken: HostJournals = { ...base, publish: async () => ({ rows: [], watermark: -1, cursor: { epoch: 'e', seq: 0 } }) };
+    const broken: HostJournals = { ...base, publish: async () => ({ rows: [], events: [], watermark: -1, cursor: { epoch: 'e', seq: 0 } }) };
     const f = fixture({ journals: broken, diagnostic: message => diagnostics.push(message) });
     await f.open();
     f.sent.length = 0;

@@ -45,7 +45,7 @@
   - When the Host's Controller connects again, every journal-served stream of that Host that is waiting for it closes with 1012 `Remote Host reconnected`. The client reconnects once and acquires control over the new Controller stream. `JournalSessions.hostReturned(hostId)` does this (Task 5); the broker calls it where it sets `host.ready = true` (Task 6).
 - **Why the Controller stream could not open.** Each failure is handled as crude mode handles it, but reads keep working wherever crude mode would not have stopped retrying. `HostStreamRefusal` carries the HTTP `status` and the `nativeOwner` of the broker's error. Its capacity refusal has status 429.
   - `host_offline`: as above.
-  - Capacity (status 429): the browser stream closes with `SESSION_CAPACITY_CLOSE_CODE` and the refusal's message, as `sessionSubscriptionRefusal` does. Hidden views then pause, and active views say why they wait and retry with their backoff.
+  - Capacity (status 429): the browser stream closes with `SESSION_CAPACITY_CLOSE_CODE` and a short reason (`CAPACITY_CLOSE_REASON`, at most 123 UTF-8 bytes) that tells the user to close views they no longer use. Hidden views then pause, and active views say why they wait and retry with their backoff.
   - Any other 4xx except 408 (for example `native_session_owned`, `session_unavailable` or `workspace_unavailable`) cannot be helped by retrying. Held `acquire` requests are answered with the pending state, which includes `nativeOwner` when the refusal has one. Every other held message is refused with a `protocol_error` whose `recoverable` is false. The stream stays open for reads and does not retry by itself. The next message that needs the Controller tries again.
   - 5xx, 408 and failures without a status are refused with a recoverable `protocol_error`, as Decision 5 says. The client reconnects with its backoff, as it does after a crude 1013.
 - **Follow-ups recorded in the roadmap**, not built here:
@@ -2364,6 +2364,8 @@ export function socketPair(closers: Array<() => void | Promise<void>>) {
       queueMicrotask(() => { if (this.peer.readyState === 1) for (const listener of this.peer.messages) listener(data, false); });
     }
     close(code?: number, reason?: string) {
+      // A `ws` socket throws for a close reason longer than 123 bytes of UTF-8.
+      if (reason !== undefined && Buffer.byteLength(reason) > 123) throw new RangeError('The close reason must be at most 123 bytes.');
       if (this.readyState !== 1) return;
       this.readyState = 3; this.closeCode = code; this.closeReason = reason;
       for (const listener of this.closes) listener();
@@ -2422,7 +2424,7 @@ export async function startRelay(options: RelayOptions = {}) {
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1`. It answers the attach of the session and the streams the Relay opens. */
-  async function connectController(behavior: { answerStreams?: boolean; attach?: { status: number; body: unknown } } = {}) {
+  async function connectController(behavior: { answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean } = {}) {
     const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?journal=1', { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
@@ -2439,6 +2441,7 @@ export async function startRelay(options: RelayOptions = {}) {
       const message = JSON.parse(data);
       if (message.type === 'rpc_request' && message.path === '/remote/attach') {
         attaches.push(message);
+        if (behavior.holdAttach) return;
         send({ type: 'rpc_response', requestId: message.requestId, status: behavior.attach?.status ?? 200, body: JSON.stringify(behavior.attach?.body ?? { agentId: PUBLIC_ID, nativeSessionId: 'native-session' }) });
       } else if (message.type === 'stream_open') {
         streams.push({ streamId: message.streamId, received: [] });
@@ -2502,6 +2505,7 @@ export async function startRelay(options: RelayOptions = {}) {
 import { acceptSessionChannel, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE } from '@orchardworks/agent-remote-protocol';
 import { afterEach, expect, it } from 'vitest';
 
+import { CAPACITY_CLOSE_REASON } from './journal-session-stream.js';
 import { collect, DIGEST, PUBLIC_ID, row, seedJournal, SESSION_KEY, sleep, snapshot, socketPair, startRelay, STORE_KEY, until, type Wire } from './test-utils/journal-session-fixture.js';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
@@ -2800,7 +2804,7 @@ it('closes the stream with the capacity code when the account has no stream slot
   browser.send({ type: 'negotiate' });
   await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
   expect(browser.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
-  expect(browser.pair.server.closeReason).toBe('Remote stream capacity reached');
+  expect(browser.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
   expect(controller.streams).toEqual([]);
 });
 
@@ -2850,6 +2854,54 @@ it('never opens a Controller stream for an activity observer', async () => {
   expect(controller.streams).toEqual([]);
   expect(controller.inbox.all.some(message => message.type === 'stream_open')).toBe(false);
   expect(controller.attaches).toEqual([]);
+});
+
+it('opens a session through the Controller when the journal store cannot be read', async () => {
+  const r = await relay({ seed: async store => { store.load = async () => { throw new Error('The store is unavailable.'); }; } });
+  const controller = await r.connectController();
+  const browser = await r.openBrowser();
+  browser.send({ type: 'negotiate' });
+  expect((await browser.take(message => message.type === 'agent_snapshot', 'the Controller\'s Snapshot')).payload.status).toBe('running');
+  expect(controller.attaches).toHaveLength(1);
+  expect(await until(() => controller.streams[0], 'the Controller stream')).toBeDefined();
+});
+
+it('refuses a held acquire as retryable when the Controller connection is replaced during the attach, and a new stream controls the new connection', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const first = await r.connectController({ holdAttach: true });
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  await until(() => first.attaches[0], 'the attach');
+  browser.send(acquire('control-1'));
+  await sleep(20);
+  const second = await r.connectController();
+  const outcome = await until(() => browser.frames.find(frame => frame.payload?.requestId === 'control-1') ?? (browser.pair.server.readyState !== 1 ? { closed: true } : undefined), 'an answer to the acquire');
+  expect(outcome).not.toMatchObject({ type: 'session_control' });
+  if (!('closed' in outcome)) expect(outcome).toMatchObject({ type: 'protocol_error', payload: { code: 'host_reconnected', recoverable: true } });
+  const next = await r.openBrowser();
+  await subscribed(next);
+  await negotiatedControllerStream(second);
+  await next.take(message => message.type === 'session_control' && message.payload.revision === 'rev-1', 'the Controller\'s control state');
+  next.send(acquire('control-2'));
+  expect(await next.take(message => message.type === 'session_control' && message.payload.requestId === 'control-2', 'control')).toMatchObject({ payload: { access: 'control', token: 'token-1' } });
+});
+
+it('closes the stream with the capacity code when the Host has no stream slot left', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const controller = await r.connectController();
+  const browsers = [];
+  for (let at = 0; at < 128; at++) {
+    const browser = await r.openBrowser();
+    browser.send({ type: 'negotiate' });
+    browsers.push(browser);
+  }
+  await until(() => controller.streams.length === 128 ? true : undefined, '128 Controller streams');
+  const last = await r.openBrowser();
+  last.send({ type: 'negotiate' });
+  await until(() => last.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
+  expect(last.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
+  expect(last.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
+  expect(controller.streams).toHaveLength(128);
 });
 ```
 
@@ -2919,6 +2971,20 @@ with
 
 ```ts
   /**
+   * Makes the Controller know the session before a stream opens. A Host whose uplink was replaced while the attach was in
+   * flight rejects the attach as offline although it is connected again; that is retryable, not a wait for the Host.
+   */
+  async function recoverForJournalStream(host: Host, binding: Binding): Promise<void> {
+    requireHost(host.id);
+    try { await recoverBinding(host, binding); }
+    catch (error) {
+      if (error instanceof BrokerError && error.code === 'host_offline' && host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN) {
+        throw new BrokerError(503, 'host_reconnected', 'The Host reconnected while the session was opening. Reconnect to continue.');
+      }
+      throw error;
+    }
+  }
+  /**
    * A browser stream whose session is read from its journal. Reads never touch the Controller; the Controller stream for
    * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
    * disconnects apply to it like to any other stream.
@@ -2939,7 +3005,7 @@ with
         hostStreams: createHostStreamOpener({
           streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
           authorized: () => { const end = expiry(); return end === undefined || end > now(); },
-          recover: () => recoverBinding(host, binding),
+          recover: () => recoverForJournalStream(host, binding),
           capacity: () => host.streams.size >= HOST_STREAM_LIMIT ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
           write: message => send(host, message), scheduler, openTimeoutMs: options.rpcTimeoutMs ?? 30_000,
           diagnostic: details => diagnostic(host, details),
@@ -2962,7 +3028,12 @@ and `    let host: Host;` add:
 ```ts
     // Authorization above is the same for both modes. A session with a journal head is read from it, whether or not its Host is online.
     const journalHost = journalSessions && hosts.get(binding.hostId);
-    if (journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId))) return acceptJournalServed(journalHost, binding, context);
+    // A store that cannot be read must not stop the session from opening: the Controller path still works.
+    const journaled = journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => {
+      diagnostic(journalHost, { event: 'journal_store_failed' });
+      return false;
+    });
+    if (journalHost && journaled) return acceptJournalServed(journalHost, binding, context);
 ```
 
 (h) In `register`'s `registered()`, right after `host.ready = true;` add:
@@ -2974,7 +3045,7 @@ and `    let host: Host;` add:
 - [ ] **Step 5: Run the new tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/broker-journal-sessions.test.ts --testTimeout=10000`
-Expected: PASS, 20 tests.
+Expected: PASS, 23 tests.
 
 - [ ] **Step 6: Run the suites around the changed code.**
 

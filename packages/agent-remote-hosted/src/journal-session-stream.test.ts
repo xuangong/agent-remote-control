@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
-import { createJournalSessionStream, PENDING_CONTROL_REVISION, type JournalReads } from './journal-session-stream.js';
+import { CAPACITY_CLOSE_REASON, createJournalSessionStream, PENDING_CONTROL_REVISION, type JournalReads } from './journal-session-stream.js';
 import { BROKER_MAX_FRAME_BYTES } from './transport.js';
 
 type Wire = Record<string, any>;
@@ -370,7 +370,7 @@ describe('the reasons a Controller stream cannot open', () => {
   it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
     const f = fixture({ hostOpen: refusal('session_stream_capacity', 429), closeThrows: 'long reason' });
     f.stream.receive(negotiate);
-    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached']]));
+    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, CAPACITY_CLOSE_REASON]]));
   });
 
   it('cuts a close reason to 123 bytes of whole characters, and survives a socket whose close throws', async () => {

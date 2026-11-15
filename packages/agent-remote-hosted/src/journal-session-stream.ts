@@ -10,6 +10,8 @@ import { BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN, type BrokerScheduler, type R
 
 /** The control revision the Relay shows before the Controller session reports its own; a request naming it is rewritten. */
 export const PENDING_CONTROL_REVISION = 'relay-pending';
+/** What a browser is told when no Controller stream slot is free; short enough for a WebSocket close frame. */
+export const CAPACITY_CLOSE_REASON = 'Too many sessions are open. Close views you no longer use; this one retries when a slot is free.';
 const PAGE_DEFAULT_LIMIT = 100;
 const PAGE_MAX_LIMIT = 500;
 const HELD_MAX_MESSAGES = 32;
@@ -298,7 +300,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       const messages = held.splice(0);
       const requests = heldControl.splice(0).map(item => item.request);
       const { status } = refusal;
-      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, 'Remote stream capacity reached'); return; }
+      if (status === 429) { shutdown(SESSION_CAPACITY_CLOSE_CODE, CAPACITY_CLOSE_REASON); return; }
       // A refusal that retrying cannot change leaves the stream reading; one that depends on the Host waits for it.
       const hopeless = status !== undefined && status >= 400 && status < 500 && status !== 408;
       const offline = refusal.code === 'host_offline';

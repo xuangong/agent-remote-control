@@ -1,6 +1,7 @@
 import { acceptSessionChannel, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE } from '@orchardworks/agent-remote-protocol';
 import { afterEach, expect, it } from 'vitest';
 
+import { CAPACITY_CLOSE_REASON } from './journal-session-stream.js';
 import { collect, DIGEST, PUBLIC_ID, row, seedJournal, SESSION_KEY, sleep, snapshot, socketPair, startRelay, STORE_KEY, until, type Wire } from './test-utils/journal-session-fixture.js';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
@@ -299,7 +300,7 @@ it('closes the stream with the capacity code when the account has no stream slot
   browser.send({ type: 'negotiate' });
   await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
   expect(browser.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
-  expect(browser.pair.server.closeReason).toBe('Remote stream capacity reached');
+  expect(browser.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
   expect(controller.streams).toEqual([]);
 });
 
@@ -349,4 +350,52 @@ it('never opens a Controller stream for an activity observer', async () => {
   expect(controller.streams).toEqual([]);
   expect(controller.inbox.all.some(message => message.type === 'stream_open')).toBe(false);
   expect(controller.attaches).toEqual([]);
+});
+
+it('opens a session through the Controller when the journal store cannot be read', async () => {
+  const r = await relay({ seed: async store => { store.load = async () => { throw new Error('The store is unavailable.'); }; } });
+  const controller = await r.connectController();
+  const browser = await r.openBrowser();
+  browser.send({ type: 'negotiate' });
+  expect((await browser.take(message => message.type === 'agent_snapshot', 'the Controller\'s Snapshot')).payload.status).toBe('running');
+  expect(controller.attaches).toHaveLength(1);
+  expect(await until(() => controller.streams[0], 'the Controller stream')).toBeDefined();
+});
+
+it('refuses a held acquire as retryable when the Controller connection is replaced during the attach, and a new stream controls the new connection', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const first = await r.connectController({ holdAttach: true });
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  await until(() => first.attaches[0], 'the attach');
+  browser.send(acquire('control-1'));
+  await sleep(20);
+  const second = await r.connectController();
+  const outcome = await until(() => browser.frames.find(frame => frame.payload?.requestId === 'control-1') ?? (browser.pair.server.readyState !== 1 ? { closed: true } : undefined), 'an answer to the acquire');
+  expect(outcome).not.toMatchObject({ type: 'session_control' });
+  if (!('closed' in outcome)) expect(outcome).toMatchObject({ type: 'protocol_error', payload: { code: 'host_reconnected', recoverable: true } });
+  const next = await r.openBrowser();
+  await subscribed(next);
+  await negotiatedControllerStream(second);
+  await next.take(message => message.type === 'session_control' && message.payload.revision === 'rev-1', 'the Controller\'s control state');
+  next.send(acquire('control-2'));
+  expect(await next.take(message => message.type === 'session_control' && message.payload.requestId === 'control-2', 'control')).toMatchObject({ payload: { access: 'control', token: 'token-1' } });
+});
+
+it('closes the stream with the capacity code when the Host has no stream slot left', async () => {
+  const r = await relay({ seed: store => seedJournal(store) });
+  const controller = await r.connectController();
+  const browsers = [];
+  for (let at = 0; at < 128; at++) {
+    const browser = await r.openBrowser();
+    browser.send({ type: 'negotiate' });
+    browsers.push(browser);
+  }
+  await until(() => controller.streams.length === 128 ? true : undefined, '128 Controller streams');
+  const last = await r.openBrowser();
+  last.send({ type: 'negotiate' });
+  await until(() => last.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
+  expect(last.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
+  expect(last.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
+  expect(controller.streams).toHaveLength(128);
 });

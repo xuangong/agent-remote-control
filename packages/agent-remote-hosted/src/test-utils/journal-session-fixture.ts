@@ -50,6 +50,8 @@ export function socketPair(closers: Array<() => void | Promise<void>>) {
       queueMicrotask(() => { if (this.peer.readyState === 1) for (const listener of this.peer.messages) listener(data, false); });
     }
     close(code?: number, reason?: string) {
+      // A `ws` socket throws for a close reason longer than 123 bytes of UTF-8.
+      if (reason !== undefined && Buffer.byteLength(reason) > 123) throw new RangeError('The close reason must be at most 123 bytes.');
       if (this.readyState !== 1) return;
       this.readyState = 3; this.closeCode = code; this.closeReason = reason;
       for (const listener of this.closes) listener();
@@ -108,7 +110,7 @@ export async function startRelay(options: RelayOptions = {}) {
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1`. It answers the attach of the session and the streams the Relay opens. */
-  async function connectController(behavior: { answerStreams?: boolean; attach?: { status: number; body: unknown } } = {}) {
+  async function connectController(behavior: { answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean } = {}) {
     const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?journal=1', { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
@@ -125,6 +127,7 @@ export async function startRelay(options: RelayOptions = {}) {
       const message = JSON.parse(data);
       if (message.type === 'rpc_request' && message.path === '/remote/attach') {
         attaches.push(message);
+        if (behavior.holdAttach) return;
         send({ type: 'rpc_response', requestId: message.requestId, status: behavior.attach?.status ?? 200, body: JSON.stringify(behavior.attach?.body ?? { agentId: PUBLIC_ID, nativeSessionId: 'native-session' }) });
       } else if (message.type === 'stream_open') {
         streams.push({ streamId: message.streamId, received: [] });

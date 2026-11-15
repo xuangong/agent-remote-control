@@ -2104,6 +2104,20 @@ export function createHostBroker(options: HostBrokerOptions) {
    * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
    * disconnects apply to it like to any other stream.
    */
+  /**
+   * Makes the Controller know the session before a stream opens. A Host whose uplink was replaced while the attach was in
+   * flight rejects the attach as offline although it is connected again; that is retryable, not a wait for the Host.
+   */
+  async function recoverForJournalStream(host: Host, binding: Binding): Promise<void> {
+    requireHost(host.id);
+    try { await recoverBinding(host, binding); }
+    catch (error) {
+      if (error instanceof BrokerError && error.code === 'host_offline' && host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN) {
+        throw new BrokerError(503, 'host_reconnected', 'The Host reconnected while the session was opening. Reconnect to continue.');
+      }
+      throw error;
+    }
+  }
   function acceptJournalServed(host: Host, binding: Binding, context: BrokerRequestContext) {
     const subject = principal(context);
     return { accept(client: RelaySocket) {
@@ -2120,7 +2134,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         hostStreams: createHostStreamOpener({
           streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
           authorized: () => { const end = expiry(); return end === undefined || end > now(); },
-          recover: () => recoverBinding(host, binding),
+          recover: () => recoverForJournalStream(host, binding),
           capacity: () => host.streams.size >= HOST_STREAM_LIMIT ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
           write: message => send(host, message), scheduler, openTimeoutMs: options.rpcTimeoutMs ?? 30_000,
           diagnostic: details => diagnostic(host, details),
@@ -2148,7 +2162,12 @@ export function createHostBroker(options: HostBrokerOptions) {
     if (!binding || !sessionAllowed(binding, principal(context)) || !await permitted(context) || request.headers.get('origin') !== origin) return rejectUpgrade(403);
     // Authorization above is the same for both modes. A session with a journal head is read from it, whether or not its Host is online.
     const journalHost = journalSessions && hosts.get(binding.hostId);
-    if (journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId))) return acceptJournalServed(journalHost, binding, context);
+    // A store that cannot be read must not stop the session from opening: the Controller path still works.
+    const journaled = journalHost && await journalSessions!.serves(journalHost.id, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => {
+      diagnostic(journalHost, { event: 'journal_store_failed' });
+      return false;
+    });
+    if (journalHost && journaled) return acceptJournalServed(journalHost, binding, context);
     let host: Host;
     try { host = requireHost(binding.hostId); await recoverBinding(host, binding); }
     catch (error) {

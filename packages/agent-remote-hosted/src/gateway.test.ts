@@ -2,6 +2,7 @@ import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, it } from 'vitest';
+import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
 import { createHostedRelay } from './gateway.js';
 import { emptyRelayState, migrateLegacyNodeState, type HostedRelayState, type RelayStateStore } from './state.js';
 import type { RelayScheduler } from './scheduler.js';
@@ -149,4 +150,32 @@ it('validates persisted Host environment snapshots without requiring metadata fr
   expect(() => migrateLegacyNodeState({ ...initial, tenants: [{ ...initial.tenants[0], broker: {
     ...initial.tenants[0]!.broker, hosts: [{ ...host, environment: { ...environment, secret: 'unexpected' } }],
   } }] }, auth)).toThrow(/state/i);
+});
+
+it('refuses journals without durable Relay state', () => {
+  expect(() => createHostedRelay({ ...auth, scheduler, journals: new MemoryJournalStore() })).toThrow(/durable/);
+  expect(() => createHostedRelay({ ...auth, scheduler, journalService: {} as never })).toThrow(/durable/);
+});
+
+it('builds one journal service over its store and loads its head index on request', async () => {
+  const memory = new MemoryJournalStore();
+  const listed: string[] = [];
+  const journals = { load: (key: string) => memory.load(key), apply: memory.apply.bind(memory), delete: (key: string) => memory.delete(key),
+    catalog: { list: async (prefix: string) => { listed.push(prefix); return []; }, deletePrefix: (prefix: string) => memory.catalog.deletePrefix(prefix) } };
+  const relay = createHostedRelay({ ...auth, scheduler, journals, storage: { initial: emptyRelayState(auth), async commit() {} } });
+  closers.push(() => relay.close());
+  await relay.loadJournalIndex();
+  expect(listed).toEqual(['']);
+});
+
+it('uses a journal service built elsewhere, and loads nothing without one', async () => {
+  let loads = 0;
+  const journalService = { loadAllServed: async () => { loads += 1; } } as unknown as NonNullable<Parameters<typeof createHostedRelay>[0]['journalService']>;
+  const served = createHostedRelay({ ...auth, scheduler, journalService, storage: { initial: emptyRelayState(auth), async commit() {} } });
+  closers.push(() => served.close());
+  await served.loadJournalIndex();
+  expect(loads).toBe(1);
+  const plain = createHostedRelay({ ...auth, scheduler });
+  closers.push(() => plain.close());
+  await expect(plain.loadJournalIndex()).resolves.toBeUndefined();
 });

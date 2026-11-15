@@ -24,6 +24,7 @@ import { controllerPath, readControllerLocation } from './controller-location.js
 import { createHash, randomBytes } from 'node:crypto';
 import { createHostBroker, USER_STREAM_LIMIT, type RemoteHostBrokerState, type HostBrokerOptions } from './broker.js';
 import type { JournalStore } from '@orchardworks/agent-remote-journal';
+import { createHostJournals, type HostJournals } from './host-journals.js';
 import { createStreamPreemption } from './stream-preemption.js';
 import { createGatewayControlVerifier } from './control.js';
 import { SharingError } from './host-sharing.js';
@@ -62,6 +63,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   diagnosticStorage?: RelayDiagnosticStore;
   /** Where Host session journals are kept; absent, no Controller is granted journals. Journals of every account share it, keyed by Host. */
   journals?: JournalStore;
+  /** A journal service built elsewhere, such as one that reaches journal partitions; used instead of `journals`. */
+  journalService?: HostJournals;
   teamResources?: (namespace: string) => import('./team-resources.js').TeamResourceStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
@@ -109,6 +112,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const preemption = createStreamPreemption(userStreamCount, USER_STREAM_LIMIT);
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
+  if ((options.journals || options.journalService) && !durable) throw new Error('Session journals need durable Relay state: without it a deletion could be lost.');
+  const journalService = options.journalService ?? (options.journals ? createHostJournals({ store: options.journals, now: Date.now }) : undefined);
   const accountBacked = durable || auth.provider === 'google';
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
   const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -428,7 +433,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },
-        journals: options.journals,
+        ...(journalService ? { journalService } : {}),
         ...(options.successionEnrollment ? { successionEnrollment: { version: 1, origin: auth.origin, issuer: auth.issuer, namespace: grant.namespace, ownerSubject: grant.subject } as const, successionProjectionAllowance: allowance } : {}),
         userStreamCount, ...(stateRoom ? { stateRoom } : {}),
         onSessionStates: () => publishAllStates(),
@@ -1199,6 +1204,8 @@ export function createHostedRelay(options: HostedRelayOptions) {
       try { await scheduling; available(); const prepared = await prepare(request); await scheduling; available(); return prepared; } catch { return json(503, {}); }
     },
     refresh,
+    /** Loads the head index of every Host the journal store holds; the Node hosts call it once before they listen. */
+    async loadJournalIndex() { await journalService?.loadAllServed(); },
     async close() {
       if (closing) return;
       closing = true;

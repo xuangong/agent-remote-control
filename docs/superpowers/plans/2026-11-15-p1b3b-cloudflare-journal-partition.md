@@ -1,0 +1,1037 @@
+# P1-B3b Cloudflare journal partition Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** On Cloudflare, keep Host journals out of the `primary` Durable Object. One new Durable Object class, `JournalPartition`, holds the journals of one Host in its own SQLite storage and runs the existing journal service there; `primary` keeps every socket and the fan-out and reaches the partition through Durable Object RPC. Nothing changes for a deployment that does not turn journals on.
+
+**Architecture:** `agent-remote-hosted` gains the partition contract: `JournalPartitionApi` (plain-data RPC methods), `serveJournalPartition` (adapts a `HostJournals` service to that contract and bounds reply sizes), and `createPartitionJournals` (a `HostJournals` implementation for `primary` that forwards each call to the Host's partition, keeps the head index current from publication results, and orders opens, publications and deletions per Host). `agent-remote-cloudflare` gains the Durable Object class over `SqlJournalStore` (from P1-B3a) bound to `ctx.storage.sql`, the wiring in `RelayObject`, and the wrangler binding and migration. This is step 1 of the design's "Moving the Relay to partitions".
+
+**Tech Stack:** TypeScript 5.7, Cloudflare Workers Durable Objects with SQLite and RPC (`cloudflare:workers`, `compatibility_date` 2026-06-01), Miniflare 4 for real Worker tests, Vitest 4.1.11.
+
+**Design reference:** `docs/superpowers/specs/2026-11-15-im-session-service-design.md`, sections Architecture (Deployment and middleware, Moving the Relay to partitions) and Session journal (Durability and fan-out). Predecessor: `2026-11-15-p1b3a-journal-storage.md`, which must have landed completely (`SqlJournalStore` and `JournalSqlDatabase` in `@orchardworks/agent-remote-journal-sqlite`, the extended `HostJournals` interface with `indexPage`, `servedSessions`, `loadAllServed`, `deleteHost` and the `open` options, the gateway option `journalService`, the broker's switch, gate, stopping of streams and durable `journalDeletions`).
+
+**Commands.** Every test command sets a per-test deadline (`--testTimeout`). Run each with an outer deadline: the Bash tool `timeout` of at most 300000 ms (the Cloudflare suite and `pnpm local up` take up to 600000). Hosted tests import the protocol, journal and store packages from `dist`; the Cloudflare tests bundle the hosted package from source. Rebuild a package before running tests of its dependents. All work happens in the worktree `/Users/xian/projects/agent-remote-control/.worktrees/im-session-service`.
+
+## Decisions made in this plan
+
+These are not stated in the design or the brief.
+
+1. **One class, one object per Host.** `JournalPartition extends DurableObject`, addressed with `env.JOURNALS.getByName(hostId)` (the name-derived id, `idFromName(hostId)`). Host ids are UUIDs the Relay generates, so Hosts of different accounts never share an object. The class has no `fetch`, is bound only to the Relay Worker, and the Worker has no route to it, so only `primary` can call it; the partition does no authorization of its own (reads and submissions stay authorized in `primary` until P4 moves sockets).
+2. **The partition runs the unchanged service.** `createHostJournals` over `SqlJournalStore` over `durableObjectJournalDatabase(ctx.storage)`. Stamping, storing, the item index, the publish-time retention rule, quotas, the quota-refusal handling and deletion are the P1-B3a code; the partition adds only bounds suited to a Durable Object.
+3. **Plain data over RPC, no functions.** `JournalPartitionApi` takes and returns structured-clonable data. `open`'s `allowed` callback stays in `primary`: the proxy checks it before the call and orders it against deletions in its own per-Host queue.
+4. **Durable Object limits.**
+   - *Memory (128 MB per isolate):* the partition keeps only the journal in use: a cache of 2 journals bounded to 20 MiB of estimated size, and one session may hold 16 MiB. The estimate counts JSON characters; heap use is up to twice that, plus transient buffers while a journal loads. Per Host the quota stays 1 GiB of the object's SQLite storage.
+   - *Value size:* every stored value is split into 256 KiB chunks by `SqlJournalStore` (a SQLite value in a Durable Object may not exceed 2 MB).
+   - *RPC payload (32 MiB per message):* a publication is at most 8 MiB (`JOURNAL_MESSAGE_MAX_BYTES`) and a fill at most 8 MiB. A page reply is measured by its estimated structured-clone size (V8 clones a string with a two-byte character at two bytes per character, so the JSON length is doubled) and is answered again with half the limit until it fits 24 MiB. The index in an `open` reply is its first page of at most 2,000 entries (about 10 MiB at the longest keys); the Controller pulls the rest with `indexPage`, one page per call.
+5. **`primary` keeps the head index.** `createPartitionJournals` holds a `JournalHeadIndex` per Relay start. A Host's sessions are loaded with one `servedSessions` RPC when the first browser stream for the Host needs the answer (P1-B3a: shared by concurrent opens, outside the Host's queue, the gate waits at most 2 s) and kept current from the `hasHead` of each publication result and from deletions. Every head change and every deletion raises the Host's epoch in the proxy, and an answer read across a change is discarded and read again; a stream that finds no head calls `unserve`. After `primary` restarts the index starts empty and loads again.
+6. **Off by default.** The proxy exists only when the Worker has the `JOURNALS` binding and the variable `AGENT_REMOTE_JOURNALS` is `1`. No repository configuration sets the variable, so production and every existing deployment keep granting no journals until the Controller publisher (P1-C) lands. The binding and the migration `v2` ship in all three wrangler configurations; a deployment that has not copied them stays off.
+7. **Retention is the publish-time rule.** The partition evicts bodies outside the latest 50 turns after each publication, as the service does everywhere. It has no sweep and no alarm; use-based windows are P3.
+8. **Deleting a Host empties its object's tables** (`deletePrefix`). The object stays with its empty schema; a Durable Object cannot be destroyed from the Worker, and `storage.deleteAll()` would remove the schema under a running store. A revoke records the deletion in `journalDeletions` (P1-B3a) and the broker retries it until the partition confirms.
+9. **`primary`'s state is untouched.** No journal data enters `RelayObject`'s storage, so its 16 MiB bound and its full-state validation are unaffected. A test asserts that `primary` has no `journal` tables.
+
+---
+
+## File structure
+
+| File | Responsibility |
+|---|---|
+| `packages/agent-remote-hosted/src/journal-partition.ts` | New: `JournalPartitionApi`, the partition bounds, `serveJournalPartition`, `createPartitionJournals`. |
+| `packages/agent-remote-hosted/src/journal-partition.test.ts` | New: tests with in-process partitions behind structured-clone "RPC". |
+| `packages/agent-remote-hosted/src/index.ts` | Modify: exports. |
+| `packages/agent-remote-cloudflare/src/journal-sql-database.ts` | New: `durableObjectJournalDatabase`, the Durable Object binding of the store's SQL port. |
+| `packages/agent-remote-cloudflare/src/journal-partition.ts` | New: the `JournalPartition` Durable Object class. |
+| `packages/agent-remote-cloudflare/src/worker.ts` | Modify: export the class. |
+| `packages/agent-remote-cloudflare/src/relay-object.ts` | Modify: environment and the proxy. |
+| `packages/agent-remote-cloudflare/package.json`, `pnpm-lock.yaml` | Modify: dependency on the store package. |
+| `packages/agent-remote-cloudflare/test/fixture.ts` | Modify: the partition binding, test class and routes. |
+| `packages/agent-remote-cloudflare/test/journal-partition.test.ts` | New: Miniflare tests of the object and of `primary` with journals on. |
+| `packages/agent-remote-cloudflare/wrangler.jsonc`, `deploy/self-hosted/wrangler.jsonc`, `scripts/relay-workers-local.mjs` | Modify: binding and migration `v2`. |
+| `docs/self-hosted-deployment.md` | Modify: the Workers settings of the journal section. |
+
+---
+
+### Task 1: The partition contract, its server side and its proxy
+
+**Files:**
+- Create: `packages/agent-remote-hosted/src/journal-partition.ts`
+- Create: `packages/agent-remote-hosted/src/journal-partition.test.ts`
+- Modify: `packages/agent-remote-hosted/src/index.ts`
+
+- [ ] **Step 1: Write the failing tests.** `packages/agent-remote-hosted/src/journal-partition.test.ts`:
+
+```ts
+import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remote-journal';
+import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
+import { describe, expect, it } from 'vitest';
+
+import { createHostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
+import { createPartitionJournals, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
+
+const HOST = 'host-1';
+const SESSION = 'codex:thread-1';
+const LIMITS = { maxIndexItems: 1_000_000, pageItems: 2000 };
+const rowOf = (itemKey: string, text: string, turn = 1) => ({
+  itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
+  item: { type: 'assistant_message' as const, text, messageId: itemKey },
+});
+const append = (sequence: number, itemKey: string, text: string, turn = 1): JournalPublishEntry => ({ sequence, op: 'append', row: rowOf(itemKey, text, turn) });
+const complete = (sequence: number, itemKey: string): JournalPublishEntry => ({ sequence, op: 'complete', itemKey, digest: `digest-${itemKey}` });
+const snapshot = {
+  id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle' as const, activeTurn: null,
+  capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+  pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const },
+};
+const head = (sequence: number): JournalPublishEntry => ({ sequence, op: 'head', head: { snapshot, observedAt: 5 } });
+
+/** What a Durable Object does to every call: arguments and results cross as structured clones. */
+function overRpc(api: JournalPartitionApi): JournalPartitionApi {
+  const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
+  return {
+    open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status),
+    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost),
+  };
+}
+
+/** One partition per Host, each over its own store, reached the way `primary` reaches a Durable Object. */
+function cluster(options: Partial<Omit<HostJournalsOptions, 'store' | 'now'>> = {}) {
+  const stores = new Map<string, MemoryJournalStore>();
+  const partitions = new Map<string, JournalPartitionApi>();
+  const calls: string[] = [];
+  let held: Promise<void> | undefined;
+  const build = (hostId: string, memory: MemoryJournalStore): JournalPartitionApi => {
+    const store: JournalStore = { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: async prefix => { calls.push(`list:${hostId}`); return memory.catalog.list(prefix); }, deletePrefix: prefix => memory.catalog.deletePrefix(prefix) } };
+    const inner = serveJournalPartition(createHostJournals({ store, now: () => 1_000, ...options }));
+    return overRpc({
+      ...inner,
+      open: (...args) => { calls.push(`open:${hostId}`); return inner.open(...args); },
+      // The answer is read first and held back after: the caller holds an answer that later changes make stale.
+      servedSessions: async id => { calls.push(`served:${id}`); const sessions = await inner.servedSessions(id); await held; return sessions; },
+    });
+  };
+  const partition = (hostId: string): JournalPartitionApi => {
+    let api = partitions.get(hostId);
+    if (!api) {
+      const memory = new MemoryJournalStore();
+      stores.set(hostId, memory);
+      api = build(hostId, memory);
+      partitions.set(hostId, api);
+    }
+    return api;
+  };
+  return {
+    partition, stores, calls,
+    /** Partitions that start again over the same stores, as Durable Objects do after they are evicted: their journal services know nothing yet. */
+    restart: () => { const fresh = new Map<string, JournalPartitionApi>(); return (hostId: string) => { let api = fresh.get(hostId); if (!api) { api = build(hostId, stores.get(hostId) ?? new MemoryJournalStore()); fresh.set(hostId, api); } return api; }; },
+    holdServed: () => { let release!: () => void; held = new Promise<void>(resolve => { release = resolve; }); return () => { held = undefined; release(); }; },
+    journals: createPartitionJournals({ partition }),
+  };
+}
+
+describe('the journals of primary over journal partitions', () => {
+  it('opens, publishes and pages through the partition of each Host, keeping Hosts apart', async () => {
+    const { journals, stores } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open('host-2', SESSION, 'controller-2', LIMITS);
+    const published = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), complete(2, 'm1')]);
+    expect(published).toMatchObject({ watermark: 2, cursor: { seq: 1 }, hasHead: false, events: [{ kind: 'row' }] });
+    const page = await journals.page(HOST, SESSION, { requestId: 'p', agentId: 'a', direction: 'tail', limit: 10 }, false);
+    expect(page).toMatchObject({ kind: 'page', page: { payload: { entries: [expect.objectContaining({ item: expect.objectContaining({ text: 'Hello' }) })] } } });
+    expect(await journals.page('host-2', SESSION, { requestId: 'p', agentId: 'a', direction: 'tail', limit: 10 }, false)).toMatchObject({ kind: 'page', page: { payload: { entries: [] } } });
+    expect((await stores.get(HOST)!.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual([`${HOST}:${SESSION}`]);
+    expect((await stores.get('host-2')!.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual([`host-2:${SESSION}`]);
+    expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 1 } });
+  });
+
+  it('opens with the first page of the index and reads the rest a page at a time', async () => {
+    const { journals } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b'), append(3, 'm3', 'c')]);
+    const opened = await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 10, pageItems: 2 }) as JournalOpened;
+    expect(opened).toMatchObject({ generation: 2, more: true, index: [{ itemKey: 'm1' }, { itemKey: 'm2' }] });
+    expect((await journals.indexPage(HOST, SESSION, opened.epoch, 2, 10))!.map(entry => entry.itemKey)).toEqual(['m3']);
+    expect(await journals.indexPage(HOST, SESSION, 'another-epoch', 2, 10)).toBeUndefined();
+    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2 })).toEqual({ refused: 'index_too_large' });
+  });
+
+  it('learns which sessions have a head from publication results and loads a Host once', async () => {
+    const { journals, calls } = cluster();
+    expect(journals.served(HOST, SESSION)).toBeUndefined();
+    expect(await journals.servedSessions(HOST)).toEqual([]);
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)])).hasHead).toBe(true);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(journals.served(HOST, 'codex:other')).toBe(false);
+    expect(calls.filter(call => call === `list:${HOST}`)).toHaveLength(1);
+  });
+
+  it('shares one load among concurrent callers, and loads the heads from the partition after primary starts again', async () => {
+    const first = cluster();
+    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    first.calls.length = 0;
+    const restarted = createPartitionJournals({ partition: first.restart() });
+    expect(restarted.served(HOST, SESSION)).toBeUndefined();
+    const loads = await Promise.all([restarted.servedSessions(HOST), restarted.servedSessions(HOST), restarted.servedSessions(HOST)]);
+    expect(loads).toEqual([[SESSION], [SESSION], [SESSION]]);
+    expect(restarted.served(HOST, SESSION)).toBe(true);
+    expect(first.calls.filter(call => call === `list:${HOST}`)).toHaveLength(1);
+    expect(first.calls.filter(call => call === `served:${HOST}`)).toHaveLength(1);
+    await restarted.loadAllServed();
+  });
+
+  it('discards an answer that a deletion overtook', async () => {
+    const first = cluster();
+    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    const reader = createPartitionJournals({ partition: first.partition });
+    const release = first.holdServed();
+    const loading = reader.servedSessions(HOST);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await reader.deleteHost(HOST);
+    release();
+    expect(await loading).toEqual([]);
+    expect(reader.served(HOST, SESSION)).toBe(false);
+  });
+
+  it('discards an answer that a head change overtook, so a session whose head a quota cleared is not served again', async () => {
+    const first = cluster({ limits: { sessionItems: 1 } });
+    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    const reader = createPartitionJournals({ partition: first.partition });
+    const release = first.holdServed();
+    const loading = reader.servedSessions(HOST);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect((await reader.publish(HOST, SESSION, 1, [append(3, 'm2', 'World')])).unserved).toBe(true);
+    release();
+    expect(await loading).toEqual([]);
+    expect(reader.served(HOST, SESSION)).toBe(false);
+  });
+
+  it('forgets a session a stream found without a head, until a publication gives it one', async () => {
+    const { journals } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    journals.unserve(HOST, SESSION);
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    await journals.publish(HOST, SESSION, 1, [head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+  });
+
+  it('does not call the partition for an open whose connection ended', async () => {
+    const { journals, calls, stores } = cluster();
+    expect(await journals.open(HOST, SESSION, 'controller-1', { ...LIMITS, allowed: () => false })).toEqual({ refused: 'unavailable' });
+    expect(calls).toEqual([]);
+    expect(stores.size).toBe(0);
+  });
+
+  it('orders a deletion against publications: earlier ones apply, later ones are refused and the head index forgets', async () => {
+    const { journals, stores } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const before = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    const deleted = journals.deleteHost(HOST);
+    const after = journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'World')]);
+    expect((await before).hasHead).toBe(true);
+    await deleted;
+    expect((await after).refusal).toEqual({ sequence: 3, reason: 'fenced' });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect(await stores.get(HOST)!.catalog.list('')).toEqual([]);
+  });
+
+  it('stops serving a session whose head a quota cleared, and serves it again when the partition reports a head', async () => {
+    const { journals } = cluster({ limits: { sessionItems: 1 } });
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    const refused = await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')]);
+    expect(refused).toMatchObject({ unserved: true, hasHead: false });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    await journals.publish(HOST, SESSION, 1, [head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+  });
+});
+
+describe('serveJournalPartition', () => {
+  const publishSix = (api: JournalPartitionApi) => api.publish(HOST, SESSION, 1,
+    Array.from({ length: 6 }, (_, n) => [append(n * 2 + 1, `m${n}`, 'x'.repeat(2000), n), complete(n * 2 + 2, `m${n}`)]).flat());
+  const tail = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 6 };
+  const entriesOf = (result: Awaited<ReturnType<JournalPartitionApi['page']>>) => (result as { kind: 'page'; page: { payload: { entries: unknown[] } } }).page.payload.entries;
+
+  it('answers a page whose estimated clone size would pass the bound with fewer entries', async () => {
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const bounded = serveJournalPartition(journals, { replyMaxBytes: 5000 });
+    await bounded.open(HOST, SESSION, 'controller-1', LIMITS);
+    await publishSix(bounded);
+    const small = entriesOf(await bounded.page(HOST, SESSION, tail, false));
+    expect(small.length).toBeGreaterThan(0);
+    expect(small.length).toBeLessThan(6);
+    expect(entriesOf(await serveJournalPartition(journals).page(HOST, SESSION, tail, false))).toHaveLength(6);
+  });
+
+  it('returns no page for a session without a journal', async () => {
+    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), { replyMaxBytes: 1 });
+    expect(await api.page(HOST, SESSION, tail, false)).toBeUndefined();
+  });
+});
+```
+
+- [ ] **Step 2: Run the tests and see them fail.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-partition.test.ts --testTimeout=10000`
+Expected: FAIL (`./journal-partition.js` does not exist).
+
+- [ ] **Step 3: Implement.** `packages/agent-remote-hosted/src/journal-partition.ts`:
+
+```ts
+import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
+import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
+
+import type { HostJournals, JournalFilled, JournalOpened, JournalOpenRefusal, JournalPublished, JournalStatus } from './host-journals.js';
+import { JournalHeadIndex } from './journal-head-index.js';
+
+/** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
+export const JOURNAL_PARTITION_CACHE = { maxJournals: 2, maxBytes: 20 * 1024 * 1024 } as const;
+/** The growth limits of a partition; the per-Host quota is the one of the object's SQLite storage. */
+export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 16 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } as const;
+/** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. */
+const REPLY_MAX_BYTES = 24 * 1024 * 1024;
+
+/**
+ * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
+ * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
+ */
+export interface JournalPartitionApi {
+  open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
+  indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
+  publish(hostId: string, sessionKey: string, generation: number, entries: JournalPublishEntry[]): Promise<JournalPublished>;
+  fill(hostId: string, sessionKey: string, items: CompleteItemInput[]): Promise<JournalFilled>;
+  page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
+  status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
+  /** The Host's sessions that have a head. */
+  servedSessions(hostId: string): Promise<string[]>;
+  deleteHost(hostId: string): Promise<void>;
+}
+
+/** The partition side: adapts a journal service to the contract and keeps its page replies within the RPC bound. */
+export function serveJournalPartition(journals: HostJournals, options: { replyMaxBytes?: number } = {}): JournalPartitionApi {
+  const replyMaxBytes = options.replyMaxBytes ?? REPLY_MAX_BYTES;
+  return {
+    open: (hostId, sessionKey, publisherId, bounds) => journals.open(hostId, sessionKey, publisherId, bounds),
+    indexPage: (hostId, sessionKey, epoch, after, maxItems) => journals.indexPage(hostId, sessionKey, epoch, after, maxItems),
+    publish: (hostId, sessionKey, generation, entries) => journals.publish(hostId, sessionKey, generation, entries),
+    fill: (hostId, sessionKey, items) => journals.fill(hostId, sessionKey, items),
+    async page(hostId, sessionKey, request, olderBeyondJournal) {
+      let limit = request.limit;
+      for (;;) {
+        const result = await journals.page(hostId, sessionKey, { ...request, limit }, olderBeyondJournal);
+        // The structured clone of a string with a two-byte character takes two bytes per character.
+        if (!result || result.kind !== 'page' || limit === 1 || JSON.stringify(result).length * 2 <= replyMaxBytes) return result;
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
+    },
+    status: (hostId, sessionKey) => journals.status(hostId, sessionKey),
+    servedSessions: hostId => journals.servedSessions(hostId),
+    deleteHost: hostId => journals.deleteHost(hostId),
+  };
+}
+
+export interface PartitionJournalsOptions {
+  /** The partition of a Host: a Durable Object stub. */
+  partition(hostId: string): JournalPartitionApi;
+}
+
+/**
+ * The `primary` side: a `HostJournals` that forwards each call to the Host's partition. It keeps the head index, so a
+ * browser stream is gated without a call, and runs opens, publications and deletions of one Host in the order they were
+ * made, so a deletion is never overtaken by a later open or publication.
+ */
+export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
+  const { partition } = options;
+  const heads = new JournalHeadIndex();
+  const chains = new Map<string, Promise<void>>();
+  const loading = new Map<string, Promise<void>>();
+  /** Raised on every change of a Host's head index and when its deletion starts and ends, so an answer read in between is discarded. */
+  const epochs = new Map<string, number>();
+  const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
+  const isLoaded = (hostId: string) => heads.loaded(hostId);
+
+  function serialized<T>(hostId: string, work: () => Promise<T>): Promise<T> {
+    const result = (chains.get(hostId) ?? Promise.resolve()).then(work);
+    const tail = result.then(() => undefined, () => undefined);
+    chains.set(hostId, tail);
+    void tail.then(() => { if (chains.get(hostId) === tail) chains.delete(hostId); });
+    return result;
+  }
+
+  /** One load per Host at a time, outside the Host's queue. */
+  function loadHost(hostId: string): Promise<void> {
+    if (isLoaded(hostId)) return Promise.resolve();
+    let pending = loading.get(hostId);
+    if (!pending) {
+      pending = (async () => {
+        for (let attempt = 0; attempt < 3 && !isLoaded(hostId); attempt++) {
+          const epoch = epochs.get(hostId) ?? 0;
+          const sessions = await partition(hostId).servedSessions(hostId);
+          if ((epochs.get(hostId) ?? 0) === epoch && !isLoaded(hostId)) heads.load(hostId, sessions);
+        }
+      })().finally(() => { loading.delete(hostId); });
+      loading.set(hostId, pending);
+    }
+    return pending;
+  }
+
+  return {
+    open: (hostId, sessionKey, publisherId, { allowed, ...bounds }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
+      if (allowed && !allowed()) return { refused: 'unavailable' };
+      return partition(hostId).open(hostId, sessionKey, publisherId, bounds);
+    }),
+
+    indexPage: (hostId, sessionKey, epoch, after, maxItems) => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems),
+
+    publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
+      const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
+      if (result.hasHead === true) heads.add(hostId, sessionKey);
+      else if (result.hasHead === false) heads.remove(hostId, sessionKey);
+      bump(hostId);
+      return result;
+    }),
+
+    fill: (hostId, sessionKey, items) => partition(hostId).fill(hostId, sessionKey, [...items]),
+
+    page: (hostId, sessionKey, request, olderBeyondJournal) => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal),
+
+    status: (hostId, sessionKey) => partition(hostId).status(hostId, sessionKey),
+
+    async forget() { /* The partition owns its cache. */ },
+
+    served: (hostId, sessionKey) => heads.served(hostId, sessionKey),
+
+    unserve(hostId, sessionKey) {
+      heads.remove(hostId, sessionKey);
+      bump(hostId);
+    },
+
+    async servedSessions(hostId) {
+      await loadHost(hostId);
+      return heads.sessions(hostId);
+    },
+
+    async loadAllServed() { /* A Host's sessions load when the first stream for it needs them. */ },
+
+    deleteHost: hostId => serialized<void>(hostId, async () => {
+      bump(hostId);
+      await partition(hostId).deleteHost(hostId);
+      heads.clearHost(hostId);
+      bump(hostId);
+    }),
+  };
+}
+```
+
+In `packages/agent-remote-hosted/src/index.ts`, after the `host-journals.js` export add (only what the Cloudflare package imports):
+
+```ts
+export { createPartitionJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
+```
+
+- [ ] **Step 4: Run the tests and see them pass.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-partition.test.ts --testTimeout=10000`
+Expected: PASS. If the quota test's second publication is not refused, the first row plus its journal already exceeded one item; the limit is `sessionItems: 1`, so a second distinct item is refused.
+
+- [ ] **Step 5: Typecheck and rebuild.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
+Expected: PASS.
+
+- [ ] **Step 6: Commit.**
+
+```bash
+git add packages/agent-remote-hosted/src/journal-partition.ts packages/agent-remote-hosted/src/journal-partition.test.ts packages/agent-remote-hosted/src/index.ts
+git commit -m "feat(hosted): the journal partition contract, its server side and the primary-side proxy" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+### Task 2: The Durable Object over the store, tested in a real Worker
+
+**Files:**
+- Modify: `packages/agent-remote-cloudflare/package.json`, `pnpm-lock.yaml`
+- Create: `packages/agent-remote-cloudflare/src/journal-sql-database.ts`
+- Create: `packages/agent-remote-cloudflare/src/journal-partition.ts`
+- Modify: `packages/agent-remote-cloudflare/src/worker.ts`
+- Modify: `packages/agent-remote-cloudflare/test/fixture.ts`
+- Create: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`
+
+- [ ] **Step 1: Add the dependency.** In `packages/agent-remote-cloudflare/package.json`, add to `dependencies`, after the hosted line:
+
+```json
+    "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
+```
+
+Run: `pnpm install --offline` (or `pnpm install`)
+Expected: the Cloudflare package links the store package; `pnpm-lock.yaml` changes by that link only.
+
+- [ ] **Step 2: Extend the Miniflare fixture.** All edits are in `packages/agent-remote-cloudflare/test/fixture.ts`. They add a second Durable Object binding, a test subclass of the partition that can be tuned and inspected, and two routes on the test `primary` object.
+
+(a) In the signature of `fixture`, replace `workerVersionId?: string; authorityOutageGraceMs?: number } = {}) {` with
+
+```ts
+workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object } } = {}) {
+```
+
+(b) In the bundled entry, replace `export { default, RelayObject } from './src/worker.ts';` with
+
+```ts
+export { default, RelayObject, JournalPartition } from './src/worker.ts';
+```
+
+(c) In the test entry (the template literal after it), after the line `      import { WorkerRelaySocket } from './src/socket.ts';` add
+
+```js
+      import { JournalPartition } from './src/journal-partition.ts';
+```
+
+and, immediately before the line `      export default worker;`, add
+
+```js
+      export class TestJournalPartition extends JournalPartition {
+        tuning() { const raw = this.env.JOURNAL_TUNING; return raw ? JSON.parse(raw) : super.tuning(); }
+        async inspect(sql) { return this.ctx.storage.sql.exec(sql).toArray(); }
+      }
+```
+
+(d) In `TestRelayObject.fetch`, after the line `          if (path === '/_fixture/alarm') { await this.alarm(); return new Response('ok'); }` add
+
+```js
+          if (path === '/_fixture/journal-tables') return Response.json(this.fixtureContext.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'journal%'").toArray());
+          if (path.startsWith('/_fixture/partition/')) {
+            const [, , , hostId, method] = path.split('/');
+            try { const result = await this.fixtureEnv.JOURNALS.getByName(hostId)[method](...await request.json()); return Response.json({ result: result ?? null }); }
+            catch (error) { return Response.json({ error: String(error) }, { status: 500 }); }
+          }
+```
+
+(e) In `start()`, replace
+
+```ts
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
+```
+
+with
+
+```ts
+      durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, JOURNALS: { className: options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', useSQLite: true } }, durableObjectsPersist: join(directory, 'state'),
+```
+
+and replace `      bindings: { ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}),` with
+
+```ts
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.journals?.tuning ? { JOURNAL_TUNING: JSON.stringify(options.journals.tuning) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}),
+```
+
+- [ ] **Step 3: Write the failing tests for the object.** `packages/agent-remote-cloudflare/test/journal-partition.test.ts`:
+
+```ts
+import { expect, test } from 'vitest';
+
+import { fixture } from './fixture.js';
+
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+const SESSION = 'codex:thread-1';
+const LIMITS = { maxIndexItems: 1_000_000, pageItems: 2000 };
+const row = (itemKey: string, text: string, turn = 1) => ({
+  itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
+  item: { type: 'assistant_message', text, messageId: itemKey },
+});
+const snapshot = {
+  id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null,
+  capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
+  pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' },
+};
+const head = (sequence: number) => ({ sequence, op: 'head', head: { snapshot, observedAt: 5 } });
+const tail = { requestId: 'p', agentId: 'a', direction: 'tail', limit: 10 };
+
+/** Calls a method of the Host's journal partition, the way `primary` does: Durable Object RPC from the Worker. */
+async function call(f: Fixture, hostId: string, method: string, ...args: unknown[]): Promise<any> {
+  const response = await f.inspect(`partition/${hostId}/${method}`, { method: 'POST', body: JSON.stringify(args) });
+  const body = await response.json() as { result?: unknown; error?: string };
+  if (!response.ok) throw new Error(body.error);
+  return body.result;
+}
+
+test('keeps a published journal in the object of its Host, splits a large item into chunks and serves it after a restart', async () => {
+  const f = await fixture({ journals: {} });
+  const text = '😀é'.repeat(100_000);
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  const published = await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
+    { sequence: 1, op: 'append', row: row('big', text) }, { sequence: 2, op: 'complete', itemKey: 'big', digest: 'digest-big' }, head(3)]);
+  expect(published).toMatchObject({ watermark: 3, hasHead: true });
+  const sizes = await call(f, 'host-1', 'inspect', 'SELECT length(bytes) AS size FROM journal_chunks ORDER BY size DESC') as Array<{ size: number }>;
+  expect(sizes.length).toBeGreaterThanOrEqual(3);
+  expect(sizes[0]!.size).toBeLessThanOrEqual(262_144);
+  const before = await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false);
+  expect(before.page.payload.entries[0].item.text).toBe(text);
+  await f.restart();
+  expect(await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false)).toEqual(before);
+  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 2, watermark: 3 });
+}, 60_000);
+
+test('keeps each Host in its own object and deletes the journals of one Host without touching another', async () => {
+  const f = await fixture({ journals: {} });
+  for (const host of ['host-1', 'host-2']) {
+    await call(f, host, 'open', host, SESSION, 'controller-1', LIMITS);
+    await call(f, host, 'publish', host, SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
+  }
+  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
+  await call(f, 'host-1', 'deleteHost', 'host-1');
+  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
+  expect(await call(f, 'host-1', 'inspect', 'SELECT count(*) AS n FROM journal_sessions')).toEqual([{ n: 0 }]);
+  expect(await call(f, 'host-1', 'inspect', 'SELECT count(*) AS n FROM journal_chunks')).toEqual([{ n: 0 }]);
+  expect(await call(f, 'host-2', 'servedSessions', 'host-2')).toEqual([SESSION]);
+  expect(await call(f, 'host-2', 'status', 'host-2', SESSION)).toMatchObject({ cursor: { seq: 1 } });
+}, 60_000);
+
+test('refuses growth over the session limit of the object', async () => {
+  const f = await fixture({ journals: { tuning: { limits: { sessionBytes: 3500 } } } });
+  const big = 'x'.repeat(2000);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', big, 1) }])).refusal).toBeUndefined();
+  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', big, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
+}, 60_000);
+
+test('answers a page that would pass the reply bound with fewer entries', async () => {
+  const f = await fixture({ journals: { tuning: { replyMaxBytes: 5000 } } });
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  const entries = Array.from({ length: 6 }, (_, n) => [{ sequence: n * 2 + 1, op: 'append', row: row(`m${n}`, 'x'.repeat(2000), n) }, { sequence: n * 2 + 2, op: 'complete', itemKey: `m${n}`, digest: `digest-${n}` }]).flat();
+  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, entries);
+  const page = await call(f, 'host-1', 'page', 'host-1', SESSION, { ...tail, limit: 6 }, false);
+  expect(page.page.payload.entries.length).toBeGreaterThan(0);
+  expect(page.page.payload.entries.length).toBeLessThan(6);
+}, 60_000);
+
+test('refuses to open a journal whose index is over the item bound, claims nothing, and pages the index through RPC', async () => {
+  const f = await fixture({ journals: {} });
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
+    { sequence: 1, op: 'append', row: row('m1', 'a') }, { sequence: 2, op: 'append', row: row('m2', 'b') }, { sequence: 3, op: 'append', row: row('m3', 'c') }]);
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2 })).toEqual({ refused: 'index_too_large' });
+  const opened = await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { maxIndexItems: 10, pageItems: 2 });
+  expect(opened).toMatchObject({ generation: 2, watermark: 3, more: true });
+  expect(opened.index.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m1', 'm2']);
+  const rest = await call(f, 'host-1', 'indexPage', 'host-1', SESSION, opened.epoch, opened.index.at(-1).seqStart, 10);
+  expect(rest.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m3']);
+  expect(await call(f, 'host-1', 'indexPage', 'host-1', SESSION, 'another-epoch', 0, 10)).toBeNull();
+}, 60_000);
+```
+
+- [ ] **Step 4: Run the tests and see them fail.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
+Expected: FAIL at start-up (the bundle cannot resolve `./src/journal-partition.ts`).
+
+- [ ] **Step 5: Implement the binding of the store to a Durable Object.** `packages/agent-remote-cloudflare/src/journal-sql-database.ts`:
+
+```ts
+import type { JournalSqlDatabase, SqlValue } from '@orchardworks/agent-remote-journal-sqlite';
+
+/** Binds the journal store to a Durable Object's SQLite storage. Binary values cross as `ArrayBuffer`s and are given back as `Uint8Array`s. */
+export function durableObjectJournalDatabase(storage: DurableObjectStorage): JournalSqlDatabase {
+  const bind = (params: SqlValue[]): SqlStorageValue[] => params.map(value => (value instanceof Uint8Array ? value.slice().buffer as ArrayBuffer : value));
+  return {
+    run(sql, ...params) { storage.sql.exec(sql, ...bind(params)); },
+    all<Row extends Record<string, SqlValue>>(sql: string, ...params: SqlValue[]): Row[] {
+      return storage.sql.exec(sql, ...bind(params)).toArray().map(row => {
+        const converted: Record<string, SqlValue> = {};
+        for (const [key, value] of Object.entries(row)) converted[key] = value instanceof ArrayBuffer ? new Uint8Array(value) : value as SqlValue;
+        return converted as Row;
+      });
+    },
+    transaction: work => storage.transactionSync(work),
+  };
+}
+```
+
+- [ ] **Step 6: Implement the Durable Object.** `packages/agent-remote-cloudflare/src/journal-partition.ts`:
+
+```ts
+import { DurableObject } from 'cloudflare:workers';
+import {
+  createHostJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition,
+  type HostJournalsOptions, type JournalPartitionApi,
+} from '@orchardworks/agent-remote-hosted';
+import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
+
+import { durableObjectJournalDatabase } from './journal-sql-database.js';
+
+export interface JournalPartitionTuning extends Pick<HostJournalsOptions, 'cache' | 'limits' | 'retention'> {
+  /** The size above which a page reply is answered again with fewer entries. */
+  replyMaxBytes?: number;
+}
+
+/**
+ * The journals of one Host: the hosted journal service over a SQLite store in this object's own storage. Only `primary`
+ * calls it, through Durable Object RPC; it has no `fetch` and does no authorization. One object per Host, named by the Host id.
+ */
+export class JournalPartition extends DurableObject<unknown> implements JournalPartitionApi {
+  private readonly api: JournalPartitionApi;
+
+  constructor(context: DurableObjectState, env: unknown) {
+    super(context, env);
+    const tuning = this.tuning();
+    const journals = createHostJournals({
+      store: new SqlJournalStore(durableObjectJournalDatabase(context.storage)), now: Date.now,
+      cache: tuning.cache, limits: tuning.limits, retention: tuning.retention,
+    });
+    this.api = serveJournalPartition(journals, tuning.replyMaxBytes === undefined ? {} : { replyMaxBytes: tuning.replyMaxBytes });
+  }
+
+  /** The bounds of this object; a Durable Object has 128 MB of memory. */
+  protected tuning(): JournalPartitionTuning {
+    return { cache: JOURNAL_PARTITION_CACHE, limits: JOURNAL_PARTITION_LIMITS };
+  }
+
+  open(...args: Parameters<JournalPartitionApi['open']>) { return this.api.open(...args); }
+  indexPage(...args: Parameters<JournalPartitionApi['indexPage']>) { return this.api.indexPage(...args); }
+  publish(...args: Parameters<JournalPartitionApi['publish']>) { return this.api.publish(...args); }
+  fill(...args: Parameters<JournalPartitionApi['fill']>) { return this.api.fill(...args); }
+  page(...args: Parameters<JournalPartitionApi['page']>) { return this.api.page(...args); }
+  status(...args: Parameters<JournalPartitionApi['status']>) { return this.api.status(...args); }
+  servedSessions(...args: Parameters<JournalPartitionApi['servedSessions']>) { return this.api.servedSessions(...args); }
+  deleteHost(...args: Parameters<JournalPartitionApi['deleteHost']>) { return this.api.deleteHost(...args); }
+}
+```
+
+In `packages/agent-remote-cloudflare/src/worker.ts`, after `export { RelayObject } from './relay-object.js';` add
+
+```ts
+export { JournalPartition } from './journal-partition.js';
+```
+
+- [ ] **Step 7: Run the tests and see them pass.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
+Expected: PASS. If the bundle step cannot resolve `@orchardworks/agent-remote-journal-sqlite`, run `pnpm --filter @orchardworks/agent-remote-journal-sqlite run build` first. If a `cloudflare:workers` import is rejected by the bundler, check that the fixture's esbuild call lists `cloudflare:*` in `external` (it already does).
+
+- [ ] **Step 8: Typecheck the Cloudflare package.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck`
+Expected: PASS. If `implements JournalPartitionApi` rejects a method because the Durable Object RPC types demand `Rpc.Serializable` results, keep the class as it is and drop only the `implements` clause: `primary` casts the stub to `JournalPartitionApi` and never relies on the class type.
+
+- [ ] **Step 9: Commit.**
+
+```bash
+git add packages/agent-remote-cloudflare/package.json pnpm-lock.yaml packages/agent-remote-cloudflare/src packages/agent-remote-cloudflare/test
+git commit -m "feat(cloudflare): a journal partition Durable Object over the SQLite journal store" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: `primary` reaches the partitions; configuration and documentation
+
+**Files:**
+- Modify: `packages/agent-remote-cloudflare/src/relay-object.ts`
+- Modify: `packages/agent-remote-cloudflare/test/journal-partition.test.ts`
+- Modify: `packages/agent-remote-cloudflare/wrangler.jsonc`
+- Modify: `deploy/self-hosted/wrangler.jsonc`
+- Modify: `scripts/relay-workers-local.mjs`
+- Modify: `docs/self-hosted-deployment.md`
+
+- [ ] **Step 1: Write the failing test of the whole path.** Append to `packages/agent-remote-cloudflare/test/journal-partition.test.ts`, and change its second import line from `import { fixture } from './fixture.js';` to `import { fixture, send } from './fixture.js';`:
+
+```ts
+/** A Controller connected for journals: it registers (rotating its pairing key into a device credential on the first connection) and keeps what the Relay sends. */
+async function journalHost(f: Fixture, key: string) {
+  const socket = await f.upgrade('/ws/remote-host?journal=1', { authorization: `Bearer ${key}` });
+  const inbox: Array<Record<string, any>> = [];
+  socket.addEventListener('message', message => { inbox.push(JSON.parse(String(message.data))); });
+  const take = async (...types: string[]): Promise<Record<string, any>> => {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const at = inbox.findIndex(message => types.includes(message.type));
+      if (at >= 0) return inbox.splice(at, 1)[0]!;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`The Relay sent none of ${types.join(', ')}.`);
+  };
+  send(socket, { type: 'register', credentialRotation: true, installationId: 'journal-host', name: 'Journal Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+  let message = await take('credential_issued', 'registered');
+  let credential = key;
+  if (message.type === 'credential_issued') {
+    credential = message.credential;
+    send(socket, { type: 'credential_saved' });
+    message = await take('registered');
+  }
+  return { socket, take, registered: message, credential };
+}
+
+test('grants journals through the partitions, keeps journal rows out of primary and finds the journal again after a restart', async () => {
+  const f = await fixture({ journals: {} });
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered', journal: 1 });
+  const hostId = host.registered.hostId as string;
+  send(host.socket, { type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' });
+  expect(await host.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  send(host.socket, { type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [
+    { sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'm1', digest: 'digest-m1' }, head(3)] });
+  expect(await host.take('journal_ack')).toMatchObject({ generation: 1, watermark: 3 });
+  expect(await (await f.inspect('journal-tables')).json()).toEqual([]);
+  expect(await call(f, hostId, 'inspect', 'SELECT count(*) AS n FROM journal_sessions')).toEqual([{ n: 1 }]);
+  expect(await call(f, hostId, 'servedSessions', hostId)).toEqual([SESSION]);
+  host.socket.close();
+  await f.restart();
+  const again = await journalHost(f, host.credential);
+  expect(again.registered).toMatchObject({ type: 'registered', journal: 1, hostId });
+  send(again.socket, { type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' });
+  const reopened = await again.take('journal_opened');
+  expect(reopened).toMatchObject({ generation: 2, watermark: 3 });
+  expect(reopened.index.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m1']);
+}, 90_000);
+
+test('grants no journals when the Worker has the binding but the variable is not set', async () => {
+  const f = await fixture();
+  const owner = await f.login('owner');
+  const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
+  const host = await journalHost(f, pairing.key);
+  expect(host.registered).toMatchObject({ type: 'registered' });
+  expect(host.registered).not.toHaveProperty('journal');
+}, 60_000);
+```
+
+- [ ] **Step 2: Run the tests and see them fail.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts -t "grants" --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
+Expected: the first test FAILS (`registered.journal` is absent: `primary` builds no journal service yet); the second passes.
+
+- [ ] **Step 3: Wire `primary`.** In `packages/agent-remote-cloudflare/src/relay-object.ts`:
+
+Change the import on line 1 to
+
+```ts
+import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+```
+
+In `RelayEnvironment`, after `CF_VERSION_METADATA?: { id: string };` add
+
+```ts
+  /** The journal partitions, one Durable Object per Host. */
+  JOURNALS?: DurableObjectNamespace;
+  /** Set to `1` to keep Host session journals in the journal partitions; otherwise no Controller is granted journals. */
+  AGENT_REMOTE_JOURNALS?: string;
+```
+
+In `initialize`, immediately before `    this.core = createHostedRelay({ ...auth, `, add
+
+```ts
+    const partitions = this.env.AGENT_REMOTE_JOURNALS === '1' ? this.env.JOURNALS : undefined;
+    const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
+```
+
+and change `    this.core = createHostedRelay({ ...auth, ` to `    this.core = createHostedRelay({ ...auth, ...(journalService ? { journalService } : {}), ` (the rest of that statement stays as it is).
+
+- [ ] **Step 4: Run the tests and see them pass.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec vitest run test/journal-partition.test.ts --testTimeout=60000 --maxWorkers=1` (Bash `timeout` 300000)
+Expected: PASS for all tests in the file.
+
+- [ ] **Step 5: Typecheck and run the whole Cloudflare suite.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run typecheck` then `pnpm test:cloudflare` (Bash `timeout` 600000)
+Expected: PASS. The added Durable Object binding must not change any existing test.
+
+- [ ] **Step 6: Add the binding and the migration to the three configurations.**
+
+`packages/agent-remote-cloudflare/wrangler.jsonc`: replace
+
+```jsonc
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY",
+        "class_name": "RelayObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayObject"
+      ]
+    }
+  ],
+```
+
+with
+
+```jsonc
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY",
+        "class_name": "RelayObject"
+      },
+      {
+        "name": "JOURNALS",
+        "class_name": "JournalPartition"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "RelayObject"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "JournalPartition"
+      ]
+    }
+  ],
+```
+
+`deploy/self-hosted/wrangler.jsonc`: replace the two lines
+
+```jsonc
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
+```
+
+with
+
+```jsonc
+  "durable_objects": { "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }, { "name": "JOURNALS", "class_name": "JournalPartition" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }, { "tag": "v2", "new_sqlite_classes": ["JournalPartition"] }],
+```
+
+`scripts/relay-workers-local.mjs`: replace
+
+```js
+  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }] },
+  migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }],
+```
+
+with
+
+```js
+  durable_objects: { bindings: [{ name: 'RELAY', class_name: 'RelayObject' }, { name: 'JOURNALS', class_name: 'JournalPartition' }] },
+  migrations: [{ tag: 'v1', new_sqlite_classes: ['RelayObject'] }, { tag: 'v2', new_sqlite_classes: ['JournalPartition'] }],
+```
+
+No configuration sets `AGENT_REMOTE_JOURNALS`, so journals stay off everywhere.
+
+- [ ] **Step 7: Validate the configurations with a dry run.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare run build` then `pnpm build:relay` (Bash `timeout` 600000 for the second) then `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --outdir /tmp/arc-wrangler-dry` (Bash `timeout` 300000)
+Expected: the dry run succeeds and lists `env.JOURNALS (JournalPartition)  Durable Object` next to `env.RELAY (RelayObject)`.
+
+Run: `pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy --dry-run --config ../../deploy/self-hosted/wrangler.jsonc --outdir /tmp/arc-wrangler-dry-self`
+Expected: the same two bindings. Then `rm -rf /tmp/arc-wrangler-dry /tmp/arc-wrangler-dry-self`.
+
+Run: `node --test --test-timeout=60000 scripts/relay-local.test.mjs`
+Expected: PASS.
+
+- [ ] **Step 8: Document the Workers settings.** In `docs/self-hosted-deployment.md`, in the section `## Session journals (optional, off by default)` added by P1-B3a, change the cell of the `AGENT_REMOTE_JOURNALS=1` row to
+
+```markdown
+Turns journals on. Node / Docker: stores them in `journals.sqlite` in the state directory (`AGENT_REMOTE_STATE_DIR`); needs Node 22.13 or later (the image uses Node 22) and prints one `ExperimentalWarning` for Node's built-in SQLite. Workers: keeps them in the journal partitions (below); set it as a variable. Unset or any other value: no journals.
+```
+
+and append to the end of that section:
+
+```markdown
+On Cloudflare Workers the journals live in one Durable Object per Host (`JournalPartition`, bound as `JOURNALS`), not in
+the main Relay object, so they do not count toward its state bound. The binding and the migration `v2` are in the
+shipped `wrangler.jsonc` files; a deployment that already runs adds both to its own file (keep the `v1` migration as
+it is), deploys, and then sets the variable `AGENT_REMOTE_JOURNALS` to `1`. Without the binding or the variable, no
+Controller is granted journals. A partition keeps at most 2 journals (20 MiB estimated) in memory, refuses growth of a
+session past 16 MiB, and stores at most 1 GiB per Host. Revoking a Host empties its partition.
+```
+
+Run: `pnpm lint:docs`
+Expected: PASS.
+
+- [ ] **Step 9: Commit.**
+
+```bash
+git add packages/agent-remote-cloudflare deploy/self-hosted/wrangler.jsonc scripts/relay-workers-local.mjs docs/self-hosted-deployment.md
+git commit -m "feat(cloudflare): reach the journal partitions from primary, behind a variable that is off by default" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: Verify the workspace, update compatibility metadata and check the local instance
+
+**Files:**
+- Modify: `packages/agent-remote-lab/compatibility.json` (written by the script)
+
+- [ ] **Step 1: Build every package and typecheck.**
+
+Run: `pnpm -r run build` (Bash `timeout` 600000) then `pnpm typecheck` (Bash `timeout` 600000)
+Expected: PASS for both.
+
+- [ ] **Step 2: Run the affected suites.**
+
+Run: `pnpm --filter @orchardworks/agent-remote-hosted run test` (Bash `timeout` 300000)
+Run: `pnpm --filter @orchardworks/agent-remote-journal-sqlite run test` (Bash `timeout` 300000)
+Run: `pnpm test:cloudflare` (Bash `timeout` 600000)
+Run: `pnpm test:conformance` (Bash `timeout` 600000)
+Run: `PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @orchardworks/agent-remote-lab exec vitest run src/server/devbox.test.ts src/server/hosted-runtime.test.ts src/server/relay-conformance.test.ts --testTimeout=30000` (Bash `timeout` 600000)
+Expected: PASS for each: the Node hosts and crude Hosts are unchanged.
+
+- [ ] **Step 3: Update and check the compatibility digest.**
+
+Run: `pnpm compatibility:update` then `pnpm compatibility:check`
+Expected: `Compatibility updated: sha256:...` then `Compatibility verified: sha256:...`.
+
+- [ ] **Step 4: Commit the manifest.**
+
+```bash
+git add packages/agent-remote-lab/compatibility.json
+git commit -m "chore: update the compatibility manifest for the journal partition" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
+```
+
+- [ ] **Step 5: Verify on the local instance.** `pnpm local` runs the Node Relay, which this plan changes only by adding the `journalService` option it does not use, so this step proves the Node Relay and its crude read and send path are unaffected; the Workers path is proved by the Miniflare tests and the dry runs above, and was not run in a Workers runtime on this machine. Follow `.agents/skills/prepare-arc-local/SKILL.md`. Read `references/lifecycle.md#before-restarting-a-running-instance` first; if this checkout's instance runs or waits on a session this task did not start, stop and ask the user before `up`.
+
+Run from the worktree: `pnpm local up` (Bash `timeout` 600000)
+Expected: it builds, starts the instance, prints the status and exits 0.
+
+Run: `pnpm --silent local status --json`
+Expected: exit 0, state ready, running build commit equal to the checkout commit.
+
+Check and report each layer in the skill's format:
+
+1. **Site and Controller.** `agent-remote-controller-dev host providers` shows the expected providers `enabled`; `status` shows `uplink registered`.
+2. **Model turn.** Create a session in the instance workspace and read a real reply as `references/test-loop.md` describes: `agent-remote-controller-dev session create --provider claude --message "Reply with the single word ready."`, then `session read <address> --limit 2`. Release any Codex session you created.
+3. **Feature.** Not exercised on this instance: no deployment of it uses journal partitions. Say so.
+4. **Page.** Not exercised; nothing in this plan changes the page.
+
+Run: `pnpm local down` when nobody needs the instance.
+
+---
+
+## Self-review
+
+- **Partition class and RPC:** Tasks 1 to 3. One `JournalPartition` per Host through `getByName(hostId)`; the unchanged `createHostJournals` runs in it over `SqlJournalStore`; `primary` forwards through `createPartitionJournals`, keeps every socket and does the fan-out (the broker's `published` hook is unchanged and receives the partition's publication results).
+- **Journals out of `primary`'s state:** no journal code touches `RelayStateStore`; Task 3's test asserts `primary` has no `journal%` tables.
+- **Durable Object limits:** Decision 4 and the tests: chunking (Task 2, first test), memory bounds (Decision 4, `JOURNAL_PARTITION_*`), RPC payload (the reply bound test and the index page test).
+- **Gating from a cached head index:** `createPartitionJournals` loads each Host once through `servedSessions` and stays current from publication results and deletions (Task 1 tests); the broker's gate from P1-B3a waits at most 2 s for the first load.
+- **Switch, retention, deletion over RPC:** the switch lives in `primary`'s Host record (P1-B3a); retention is the publish-time rule of the service running in the partition; `deleteHost` is ordered against publications by the proxy's queue and by the partition's own, and a deletion the partition did not confirm stays in `journalDeletions` until it does.
+- **Wrangler configuration and migration:** Task 3 Steps 6 and 7 (three configurations, dry runs).
+- **Test approach:** Miniflare with a real Worker and real Durable Object RPC, as the package already uses; the proxy logic is tested in Node with structured-clone "RPC".
+- **Local instance verification:** Task 4 Step 5, with its limits stated.
+
+## Open risks
+
+- **Not run in workerd outside Miniflare.** The Workers runtime of `pnpm local` (Docker, `relay:local --runtime workers`) was not exercised; the dry runs validate the bindings and the migration only.
+- **The size estimate versus a 128 MB isolate.** The estimate counts JSON characters and heap use is up to twice that, plus transient buffers while a journal loads. The partition's bounds (2 journals, 20 MiB cache, 16 MiB per session) are conservative guesses; load a 16 MiB journal in the Miniflare fixture and watch memory before raising them, and revisit with the P0 numbers.
+- **RPC reply bound.** The page loop halves the limit until the estimated clone size fits 24 MiB; a single item above that (an item folded from many deltas) cannot be split and would fail the RPC. A journal message is at most 8 MiB, so one row cannot reach it, but many deltas of one item could.
+- **One extra hop.** Every browser read of a journal-served session costs a Durable Object RPC from `primary` (`status`, `page`), and every publication one more; P4 moves sockets next to the partitions.
+- **Deletion after a restart of `primary`.** The proxy's queue orders calls within one `primary` lifetime. A revoke records the Host in `journalDeletions` (P1-B3a), and the broker retries it at start and on every Host registration, so a deletion the partition did not confirm is not lost.
+- **An exported but unconfigured class.** A deployment that deploys the new Worker without the `v2` migration works (journals off); one that sets `AGENT_REMOTE_JOURNALS=1` without the binding also works (journals off).

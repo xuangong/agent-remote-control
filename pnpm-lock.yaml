@@ -404,6 +404,9 @@ importers:
 
   packages/agent-remote-hosted:
     dependencies:
+      '@orchardworks/agent-remote-journal':
+        specifier: workspace:*
+        version: link:../agent-remote-journal
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol

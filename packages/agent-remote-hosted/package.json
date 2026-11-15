@@ -24,6 +24,7 @@
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
+    "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*",
     "immer": "^11.2.9",

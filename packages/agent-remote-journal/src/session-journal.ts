@@ -1,12 +1,15 @@
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
-import { canonicalRow, entryBody, itemEntry, mergeResources, stampRow } from './journal-items.js';
+import {
+  canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, mergeResources, residentEntry, stampRow,
+} from './journal-items.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
 import { evictableItems } from './retention.js';
 import { replacementOrder } from './replacement.js';
 import {
-  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError, JournalUnknownItemError,
+  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError,
+  JournalStaleRevisionError, JournalUnknownItemError,
   type CompleteItemInput, type JournalChanges, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
@@ -73,13 +76,14 @@ export class SessionJournal {
       this.insertLast(opened);
       return row;
     }
-    const entry = itemEntry(existing);
-    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
+    const body = existing.body as JournalBody;
+    const entry = residentEntry(existing);
     this.advance(publication);
     this.meta.nextSeq += 1;
-    existing.seqEnd = entry.seqEnd;
-    existing.sourceSeqRanges = entry.sourceSeqRanges;
-    existing.body = entryBody(entry);
+    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
+    body.item = entry.item;
+    existing.seqEnd = row.seq;
+    extendSequenceRanges(existing.sourceSeqRanges, row.seq);
     if (input.liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
@@ -103,6 +107,7 @@ export class SessionJournal {
   seal(publication: JournalPublication, itemKey: string): void {
     if (this.duplicate(publication)) return;
     const item = this.require(itemKey);
+    if (item.body === null) throw new JournalBodyMissingError(itemKey);
     this.advance(publication);
     item.state = 'complete';
     item.liveOnly = true;
@@ -130,15 +135,16 @@ export class SessionJournal {
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     this.advance(publication);
     this.meta.nextSeq += 1;
-    const background = row.item.background ?? (item.body ? item.body.item.background : item.background);
     const stored = structuredClone(row.item);
-    if (background) stored.background = structuredClone(background);
-    if (item.clientMessageId !== undefined && stored.type === 'user_message') stored.clientMessageId = item.clientMessageId;
+    carryKnownFields(stored, knownFields(item));
     row.item = structuredClone(stored);
+    const known = item.body ?? item.keptBody;
     item.body = {
       item: stored, timestamp: row.timestamp,
-      collapsed: item.body?.collapsed ?? [], resources: mergeResources(item.body?.resources ?? [], row.resources),
+      collapsed: [...(known?.collapsed ?? [])], resources: mergeResources(known?.resources ?? [], row.resources),
     };
+    delete item.background;
+    delete item.keptBody;
     item.liveOnly = false;
     item.seqEnd = row.seq;
     item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
@@ -157,10 +163,14 @@ export class SessionJournal {
     if (this.duplicate(publication)) return this.meta.epoch;
     this.requireDistinct(items);
     const epoch = crypto.randomUUID();
+    let newestRevision = 0;
+    for (const { revision } of this.items) if (revision > newestRevision) newestRevision = revision;
     const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
       const seq = offset + 1;
-      if (entry.kind === 'reread') return this.completeItem(epoch, entry.complete, seq);
-      return { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
+      if (entry.kind === 'carried') return { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
+      const item = this.completeItem(epoch, entry.complete, seq, this.byKey.get(entry.complete.row.itemKey));
+      item.revision = newestRevision + 1;
+      return item;
     });
     this.advance(publication);
     this.meta.retiredEpochs = [
@@ -212,8 +222,14 @@ export class SessionJournal {
     }
   }
 
-  protected completeItem(epoch: string, complete: CompleteItemInput, seq: number): JournalItem {
-    return { ...this.openItem(stampRow(epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
+  /** A complete item built from native history; `previous` is the item of the same key whose alias and background it keeps. */
+  protected completeItem(epoch: string, complete: CompleteItemInput, seq: number, previous?: JournalItem): JournalItem {
+    const item: JournalItem = { ...this.openItem(stampRow(epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
+    if (previous) {
+      carryKnownFields((item.body as JournalBody).item, knownFields(previous));
+      if (previous.clientMessageId !== undefined) item.clientMessageId = previous.clientMessageId;
+    }
+    return item;
   }
 
   index(): JournalIndexEntry[] {
@@ -232,7 +248,7 @@ export class SessionJournal {
 
   /**
    * Evicts the bodies of complete, non-live-only items that carry a digest, outside the latest turns. Returns the
-   * evicted item keys. A background outcome stays on the item.
+   * evicted item keys. The background outcome, time, collapse marks and resources of a body stay on the item.
    */
   evict(keepLatestTurns: number): string[] {
     const keys = evictableItems(this.items, keepLatestTurns);
@@ -240,6 +256,7 @@ export class SessionJournal {
       const item = this.require(key);
       if (item.body?.item.background) item.background = structuredClone(item.body.item.background);
       else delete item.background;
+      if (item.body) item.keptBody = { timestamp: item.body.timestamp, collapsed: [...item.body.collapsed], resources: structuredClone(item.body.resources) };
       item.body = null;
       this.dirty.add(key);
     }
@@ -247,18 +264,21 @@ export class SessionJournal {
   }
 
   /**
-   * Puts back a body read again from the Host, with the item's alias and background outcome. An already resident body
-   * stays as it is; otherwise the digest must equal the one recorded when the item completed.
+   * Puts back a body read again from the Host, with the item's alias, background outcome, time, collapse marks and
+   * resources. An already resident body stays as it is; otherwise the digest must equal the one recorded when the item
+   * completed, and an item that recorded none cannot be filled.
    */
   fill(itemKey: string, body: JournalBody, digest: string): 'filled' | 'mismatch' | 'unknown' {
     const item = this.byKey.get(itemKey);
     if (!item) return 'unknown';
     if (item.body !== null) return 'filled';
-    if (item.digest !== undefined && item.digest !== digest) return 'mismatch';
+    if (item.digest === undefined || item.digest !== digest) return 'mismatch';
     const filled = structuredClone(body);
-    if (item.background) filled.item.background = structuredClone(item.background);
-    if (item.clientMessageId !== undefined && filled.item.type === 'user_message') filled.item.clientMessageId = item.clientMessageId;
+    carryKnownFields(filled.item, knownFields(item));
+    if (item.keptBody) Object.assign(filled, structuredClone(item.keptBody));
     item.body = filled;
+    delete item.background;
+    delete item.keptBody;
     this.dirty.add(itemKey);
     return 'filled';
   }
@@ -286,6 +306,7 @@ export class SessionJournal {
     if (!publisher || publisher.publisherId !== publication.publisherId || publisher.generation !== publication.generation) {
       throw new JournalFencedError(this.meta.sessionKey);
     }
+    if (!Number.isSafeInteger(publication.sequence) || publication.sequence < 1) throw new JournalInvalidPublicationError(publication.sequence);
     return publication.sequence <= publisher.watermark;
   }
 

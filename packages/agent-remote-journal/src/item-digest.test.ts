@@ -25,4 +25,9 @@ describe('itemDigest', () => {
     const second = await itemDigest({ type: 'tool_call', callId: 'call-1', name: 'shell', status: 'completed', error: null, detail: { cwd: '/tmp', command: 'ls', type: 'shell' } });
     expect(first).toBe(second);
   });
+
+  it('ignores the client message id that the journal writes into user messages', async () => {
+    const item = { type: 'user_message' as const, text: 'ask' };
+    expect(await itemDigest({ ...item, clientMessageId: 'client-1' })).toBe(await itemDigest(item));
+  });
 });

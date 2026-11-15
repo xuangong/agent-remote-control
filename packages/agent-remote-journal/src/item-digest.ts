@@ -2,10 +2,11 @@ import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
 
 /**
  * Digest of an item's content: equal for an item built from live deltas and the same item read again from native
- * history. Background outcomes merge in later and are left out.
+ * history. Background outcomes merge in later and the client message id is written by the journal, so both are left
+ * out.
  */
 export async function itemDigest(item: AgentTimelineItem): Promise<string> {
-  const { background: _background, ...content } = item;
+  const { background: _background, clientMessageId: _clientMessageId, ...content } = item as AgentTimelineItem & { clientMessageId?: string };
   const bytes = new TextEncoder().encode(canonicalJson(content));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');

@@ -25,6 +25,7 @@ describe('MemoryJournalStore', () => {
     const store = new MemoryJournalStore();
     const { journal, publish } = openJournal();
     journal.append(publish(), text('m1', 'd1', 'Old'));
+    journal.complete(publish(), 'm1', 'digest-1');
     await store.apply(journal.takeChanges()!);
     journal.replace(publish(), [{ row: text('m2', 'h2', 'Fresh'), digest: 'digest-2' }], 0);
     await store.apply(journal.takeChanges()!);

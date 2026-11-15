@@ -18,7 +18,7 @@ export type ReconcilePlan =
  * that native history now contains; a matched item is corrected when it is open, has no digest or its digest differs.
  * The reread's oldest item is the anchor; journal items older than it are outside the window and stay. A journal
  * without non-live-only items is walked from the start. When the reread starts with items the journal does not know
- * and its first known item is the journal's first non-live-only item, those leading items are older history and are
+ * and every journal item before its first known item is live-only, those leading items are older history and are
  * returned in `prepend`, oldest first; any other known item after unknown ones means native history was rewritten
  * (`replace`), and no known item at all is a `gap`.
  *
@@ -43,10 +43,11 @@ export function planReconcile(index: readonly JournalIndexEntry[], reread: reado
   if (reread.length > 0 && firstJournalItem >= 0 && !position.has((reread[0] as ReconcileCandidate).itemKey)) {
     const firstKnown = reread.findIndex(({ itemKey }) => position.has(itemKey));
     if (firstKnown < 0) return { kind: 'gap' };
-    if (position.get((reread[firstKnown] as ReconcileCandidate).itemKey) !== firstJournalItem) return { kind: 'replace', reason: 'inserted' };
+    const firstKnownAt = position.get((reread[firstKnown] as ReconcileCandidate).itemKey) as number;
+    if (index.slice(0, firstKnownAt).some(({ liveOnly }) => !liveOnly)) return { kind: 'replace', reason: 'inserted' };
     for (const { itemKey } of reread.slice(0, firstKnown)) prepend.push(itemKey);
     walkFrom = firstKnown;
-    next = firstJournalItem;
+    next = firstKnownAt;
   } else if (reread.length > 0 && firstJournalItem >= 0) {
     next = position.get((reread[0] as ReconcileCandidate).itemKey) as number;
   }

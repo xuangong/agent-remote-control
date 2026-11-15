@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { openJournal, PUBLISHER, text } from './journal.test-fixture.js';
+import { expectNoChange, openJournal, PUBLISHER, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import {
-  JournalDuplicateItemError, JournalFencedError, JournalItemTypeChangedError, JournalStaleRevisionError,
+  JournalDuplicateItemError, JournalFencedError, JournalInvalidRowError, JournalItemTypeChangedError, JournalStaleRevisionError,
   type JournalRowInput,
 } from './types.js';
 
@@ -90,6 +90,7 @@ describe('SessionJournal', () => {
   it('replaces the epoch with one sequence per item and remembers the retired epoch', () => {
     const { journal, publish } = openJournal();
     journal.append(publish(), text('m1', 'd1', 'Old'));
+    journal.complete(publish(), 'm1', 'digest-1');
     journal.takeChanges();
     const epoch = journal.replace(publish(), [{ row: text('m2', 'h2', 'Fresh'), digest: 'digest-2' }], 1_725_000_000_000);
     expect(epoch).not.toBe('epoch-1');
@@ -118,49 +119,39 @@ describe('SessionJournal', () => {
     it('for an invalid timestamp', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Hel'));
-      const before = journal.state();
-      expect(() => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt: Number.NaN })).toThrow(RangeError);
-      expect(journal.state()).toEqual(before);
+      expectNoChange(journal, () => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt: Number.NaN }), JournalInvalidRowError);
     });
 
     it('for a row that changes its item\'s type', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Hel'));
-      const before = journal.state();
-      expect(() => journal.append(publish(), {
+      expectNoChange(journal, () => journal.append(publish(), {
         itemKey: 'm1', providerId: 'codex', sourceKey: 'r1', occurredAt: 0, item: { type: 'reasoning', text: 'x' },
-      })).toThrow(JournalItemTypeChangedError);
-      expect(journal.state()).toEqual(before);
+      }), JournalItemTypeChangedError);
     });
 
     it('for a correction against a stale revision', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Hel'));
-      const before = journal.state();
-      expect(() => journal.correct(publish(), text('m1', 'h1', 'Hello'), 'digest', 99)).toThrow(JournalStaleRevisionError);
-      expect(journal.state()).toEqual(before);
+      expectNoChange(journal, () => journal.correct(publish(), text('m1', 'h1', 'Hello'), 'digest', 99), JournalStaleRevisionError);
     });
 
     it('for a replacement with an invalid timestamp', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Old'));
-      const before = journal.state();
-      expect(() => journal.replace(publish(), [
+      expectNoChange(journal, () => journal.replace(publish(), [
         { row: text('m2', 'h2', 'a'), digest: 'd2' },
         { row: { ...text('m3', 'h3', 'b'), occurredAt: 9e15 }, digest: 'd3' },
-      ], 0)).toThrow(RangeError);
-      expect(journal.state()).toEqual(before);
+      ], 0), JournalInvalidRowError);
     });
 
     it('for a replacement that repeats an item key', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Old'));
-      const before = journal.state();
-      expect(() => journal.replace(publish(), [
+      expectNoChange(journal, () => journal.replace(publish(), [
         { row: text('m2', 'h2', 'a'), digest: 'd2' },
         { row: text('m2', 'h3', 'b'), digest: 'd3' },
-      ], 0)).toThrow(JournalDuplicateItemError);
-      expect(journal.state()).toEqual(before);
+      ], 0), JournalDuplicateItemError);
     });
 
     it('for a prepend that exhausts positions', () => {
@@ -170,10 +161,8 @@ describe('SessionJournal', () => {
       state.meta.minSeq = Number.MIN_SAFE_INTEGER + 1;
       state.items[0]!.seqStart = Number.MIN_SAFE_INTEGER + 1;
       const exhausted = new SessionJournal(state);
-      const before = exhausted.state();
       const publication = { publisherId: PUBLISHER, generation: 1, sequence: 99 };
-      expect(() => exhausted.prepend(publication, ['a', 'b', 'c'].map(key => ({ row: text(key, key, key), digest: key })))).toThrow(/exhausted/);
-      expect(exhausted.state()).toEqual(before);
+      expectNoChange(exhausted, () => exhausted.prepend(publication, ['a', 'b', 'c'].map(key => ({ row: text(key, key, key), digest: key }))), /exhausted/);
     });
   });
 
@@ -233,8 +222,10 @@ describe('SessionJournal', () => {
     const setup = () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'One'));
+      journal.complete(publish(), 'm1', 'digest-m1');
       journal.append(publish(), ask);
       journal.append(publish(), text('m2', 'd2', 'Two'));
+      journal.complete(publish(), 'm2', 'digest-m2');
       return { journal, publish };
     };
 

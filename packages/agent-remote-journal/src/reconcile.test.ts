@@ -94,4 +94,16 @@ describe('planReconcile', () => {
     expect(planReconcile(index, [{ itemKey: 'u1', digest: 'd1' }, { itemKey: 'm1', digest: 'dm' }]))
       .toEqual({ kind: 'continue', prepend: [], append: ['m1'], correct: ['u1'], abandon: [] });
   });
+
+  it('prepends older items before a sealed item that leads the journal', () => {
+    const index = [entry('s', undefined, { liveOnly: true }), entry('a', 'da')];
+    expect(planReconcile(index, [{ itemKey: 'x', digest: 'dx' }, { itemKey: 's', digest: 'ds' }, { itemKey: 'a', digest: 'da' }]))
+      .toEqual({ kind: 'continue', prepend: ['x'], append: [], correct: ['s'], abandon: [] });
+  });
+
+  it('does not prepend before a known item that follows a journal item of native history', () => {
+    const index = [entry('a', 'da'), entry('s', undefined, { liveOnly: true }), entry('b', 'db')];
+    expect(planReconcile(index, [{ itemKey: 'x', digest: 'dx' }, { itemKey: 's', digest: 'ds' }, { itemKey: 'b', digest: 'db' }]))
+      .toEqual({ kind: 'replace', reason: 'inserted' });
+  });
 });

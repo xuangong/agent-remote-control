@@ -1,18 +1,10 @@
-import type { AgentTimelineItem, BackgroundActivity, ResourceBinding, TimelineCollapse, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
+import type {
+  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalIndexEntry, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
+} from '@orchardworks/agent-remote-protocol';
 
-/** One row a Controller publishes: a timeline row (`TimelineRowInput` in agent-remote-relay) plus the native identity of the item it belongs to. */
-export interface JournalRowInput {
-  itemKey: string;
-  providerId: string;
-  sourceKey: string;
-  nativeRevision?: number;
-  occurredAt: number;
-  turnId?: string;
-  item: AgentTimelineItem;
-  resources?: ResourceBinding[];
-  /** A row that a reread of native history cannot reproduce, such as an interaction record. */
-  liveOnly?: boolean;
-}
+/** The wire shapes the journal consumes and produces; the Host uplink carries them unchanged. */
+export type { CompleteItemInput, JournalIndexEntry, JournalRowInput };
+
 
 /** A row stamped with the journal's epoch and sequence; what subscribers receive live. */
 export interface JournalRow {
@@ -51,6 +43,8 @@ export interface JournalItem {
   clientMessageId?: string;
   /** The background outcome of the item, kept while its body is evicted. */
   background?: BackgroundActivity;
+  /** The rest of the body that is not reread from the Host, kept while the body is evicted. */
+  keptBody?: Omit<JournalBody, 'item'>;
   revision: number;
   body: JournalBody | null;
 }
@@ -94,25 +88,6 @@ export interface JournalChanges {
   replaced: boolean;
 }
 
-export interface JournalIndexEntry {
-  itemKey: string;
-  seqStart: number;
-  seqEnd: number;
-  state: 'open' | 'complete';
-  digest?: string;
-  liveOnly: boolean;
-  clientMessageId?: string;
-  revision: number;
-  /** Whether the journal holds the body; false after eviction. */
-  resident: boolean;
-}
-
-/** A complete item from native history: one row carrying its whole content, and its digest. */
-export interface CompleteItemInput {
-  row: JournalRowInput;
-  digest: string;
-}
-
 export class JournalFencedError extends Error {
   constructor(readonly sessionKey: string) {
     super(`A newer publisher owns the journal of ${sessionKey}.`);
@@ -152,5 +127,19 @@ export class JournalDuplicateItemError extends Error {
   constructor(readonly itemKey: string) {
     super(`Journal batch repeats item ${itemKey}.`);
     this.name = 'JournalDuplicateItemError';
+  }
+}
+
+export class JournalInvalidRowError extends Error {
+  constructor(readonly itemKey: string, readonly reason: string) {
+    super(`Journal row of ${itemKey} is invalid: ${reason}.`);
+    this.name = 'JournalInvalidRowError';
+  }
+}
+
+export class JournalInvalidPublicationError extends Error {
+  constructor(readonly sequence: number) {
+    super(`Journal publication sequence ${String(sequence)} is not a positive safe integer.`);
+    this.name = 'JournalInvalidPublicationError';
   }
 }

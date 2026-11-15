@@ -1,7 +1,7 @@
-import type { CompleteItemInput, JournalItem } from './types.js';
+import type { JournalItem, JournalItemInput } from './types.js';
 
 export type ReplacementEntry =
-  | { kind: 'reread'; complete: CompleteItemInput }
+  | { kind: 'reread'; complete: JournalItemInput }
   | { kind: 'carried'; item: JournalItem };
 
 /** An open item that native history lacks, closed: it is relay-only and keeps what was received. Other items stay as they are. */
@@ -16,7 +16,7 @@ function sealedCopy(item: JournalItem): JournalItem {
  * item or an open one (carried sealed), kept right after the nearest preceding old item that survives, or before the
  * first reread item when none does. Carried items keep their relative order.
  */
-export function replacementOrder(previous: readonly JournalItem[], reread: readonly CompleteItemInput[]): ReplacementEntry[] {
+export function replacementOrder(previous: readonly JournalItem[], reread: readonly JournalItemInput[]): ReplacementEntry[] {
   const rereadKeys = new Set(reread.map(({ row }) => row.itemKey));
   const carriedAfter = new Map<string | null, JournalItem[]>();
   let anchor: string | null = null;

@@ -1,4 +1,4 @@
-import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { mergeBackgroundActivity, type AgentTimelineItem, type BackgroundActivity, type ProjectedTimelineEntry, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import {
@@ -11,9 +11,12 @@ import { utf8ByteLength } from './utf8-size.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError, JournalSequenceGapError,
   JournalStaleRevisionError, JournalUnknownItemError,
-  type CompleteItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
+  type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
 } from './types.js';
+
+/** The item types whose rows replace the item's content instead of adding to it. */
+const CONTENT_REPLACING_TYPES: ReadonlySet<string> = new Set(['tool_call', 'todo']);
 
 /** How long a retired epoch is remembered, for diagnostics only. */
 export const RETIRED_EPOCH_MS = 7 * 24 * 60 * 60 * 1000;
@@ -66,8 +69,19 @@ export class SessionJournal {
   /** The last forward sequence assigned: the cursor of a subscriber that has everything. */
   get cursor(): TimelineCursor { return { epoch: this.meta.epoch, seq: this.meta.nextSeq - 1 }; }
 
-  /** The latest Snapshot the publisher reported, or undefined before the first one. */
-  get head(): JournalHead | undefined { return this.meta.head === undefined ? undefined : structuredClone(this.meta.head); }
+  /**
+   * The latest Snapshot the publisher reported, or undefined before the first one. Its attention cursor is the cursor of
+   * the item the publisher named, in this journal's epoch and sequence; without a named item it is the journal's latest cursor.
+   */
+  get head(): JournalHead | undefined {
+    if (this.meta.head === undefined) return undefined;
+    const { attentionItemKey, ...head } = structuredClone(this.meta.head);
+    if (head.snapshot.attention) {
+      const item = attentionItemKey === undefined ? undefined : this.byKey.get(attentionItemKey);
+      head.snapshot.attention.cursor = { epoch: this.meta.epoch, seq: item ? item.seqEnd : this.meta.nextSeq - 1 };
+    }
+    return head;
+  }
   /** The publisher that may write now: its generation and last applied publication. Null before the first claim. */
   get publisher(): JournalPublisher | null { return this.meta.publisher === null ? null : { ...this.meta.publisher }; }
 
@@ -129,7 +143,7 @@ export class SessionJournal {
    * What a replacement by `reread` would carry over: the live-only items and the open items it seals, with their count and
    * estimated size. A replacement is admitted by its own size plus this.
    */
-  carriedOnReplace(reread: readonly CompleteItemInput[]): { count: number; bytes: number } {
+  carriedOnReplace(reread: readonly JournalItemInput[]): { count: number; bytes: number } {
     let count = 0, bytes = 0;
     for (const entry of replacementOrder(this.items, reread)) {
       if (entry.kind !== 'carried') continue;
@@ -180,7 +194,10 @@ export class SessionJournal {
     if (this.duplicate(publication)) return undefined;
     const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
     const existing = this.byKey.get(input.itemKey);
-    if (existing && existing.body === null) throw new JournalBodyMissingError(input.itemKey);
+    if (existing && existing.body === null) {
+      if (!CONTENT_REPLACING_TYPES.has(input.item.type)) throw new JournalBodyMissingError(input.itemKey);
+      return this.appendToEvicted(publication, existing, row);
+    }
     const existingType = existing?.body?.item.type;
     if (existingType !== undefined && existingType !== input.item.type) {
       throw new JournalItemTypeChangedError(input.itemKey, existingType, input.item.type);
@@ -202,6 +219,39 @@ export class SessionJournal {
     existing.seqEnd = row.seq;
     extendSequenceRanges(existing.sourceSeqRanges, row.seq);
     if (input.liveOnly) existing.liveOnly = true;
+    existing.state = 'open';
+    delete existing.digest;
+    existing.revision = this.nextRevision();
+    this.touch(existing.itemKey);
+    return row;
+  }
+
+  /**
+   * A row of a type whose rows replace the item's content (`tool_call` and `todo`, as `mergeRowIntoEntry` does) reaches an
+   * item whose body was evicted. The row brings all the content, so the item is resident again and open, with:
+   * - the content of the row;
+   * - the resources the item kept, plus the row's, and the collapse marks and time the item kept;
+   * - the background the item kept, merged with the row's so an outcome never regresses.
+   * A row of any other type, which would append to or spread over content the journal no longer holds, is refused as before:
+   * a compaction's merge spreads fields, so a late row would lose the fields it omits and break the digest.
+   */
+  protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow): JournalRow {
+    const kept = existing.keptBody;
+    if (!kept) throw new JournalBodyMissingError(existing.itemKey);
+    const entry: ProjectedTimelineEntry = {
+      providerId: existing.providerId,
+      item: { ...structuredClone(row.item), ...(existing.background ? { background: structuredClone(existing.background) } : {}) } as AgentTimelineItem,
+      ...(existing.turnId === undefined ? {} : { turnId: existing.turnId }), timestamp: kept.timestamp, seqStart: existing.seqStart, seqEnd: existing.seqEnd,
+      sourceSeqRanges: [], collapsed: [...kept.collapsed], resources: structuredClone(kept.resources),
+    };
+    mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
+    this.advance(publication);
+    this.meta.nextSeq += 1;
+    existing.body = entryBody(entry);
+    delete existing.keptBody;
+    delete existing.background;
+    existing.seqEnd = row.seq;
+    extendSequenceRanges(existing.sourceSeqRanges, row.seq);
     existing.state = 'open';
     delete existing.digest;
     existing.revision = this.nextRevision();
@@ -252,8 +302,44 @@ export class SessionJournal {
     this.meta.head = stored;
   }
 
-  /** Replaces an item's content after a reread found it different, unless the item moved since the index was read. */
-  correct(publication: JournalPublication, input: JournalRowInput, digest: string, expectedRevision: number): JournalRow | undefined {
+  /**
+   * Replaces a resource binding of an item in place, in its body or, while that is evicted, in what the item keeps of it.
+   * Returns the epoch and sequence clients know the item by, or undefined for a duplicate publication and for an item the
+   * journal does not know, which has nothing to amend. An amendment does not move the item's revision.
+   */
+  rebind(publication: JournalPublication, itemKey: string, previous: ResourceBinding, replacement: ResourceBinding): { epoch: string; seq: number } | undefined {
+    if (this.duplicate(publication)) return undefined;
+    this.advance(publication);
+    const item = this.byKey.get(itemKey);
+    if (!item) return undefined;
+    const resources = item.body ? item.body.resources : item.keptBody?.resources;
+    resources?.forEach((resource, at) => {
+      if (resource.locator === previous.locator && resource.resourceId === previous.resourceId) resources[at] = structuredClone(replacement);
+    });
+    this.touch(itemKey);
+    return { epoch: this.meta.epoch, seq: item.seqEnd };
+  }
+
+  /** Applies a background outcome in place to every item of that background, evicted ones included; an outcome never regresses. False for a duplicate publication. */
+  outcome(publication: JournalPublication, background: BackgroundActivity): boolean {
+    if (this.duplicate(publication)) return false;
+    this.advance(publication);
+    for (const item of this.items) {
+      const current = item.body ? item.body.item.background : item.background;
+      if (current?.id !== background.id) continue;
+      const merged = structuredClone(mergeBackgroundActivity(current, background));
+      if (item.body) item.body.item.background = merged;
+      else item.background = merged;
+      this.touch(item.itemKey);
+    }
+    return true;
+  }
+
+  /**
+   * Replaces an item's content after a reread found it different, unless the item moved since the index was read. With a
+   * digest the item is complete; without one it stays open, as an item the Controller still receives deltas of does.
+   */
+  correct(publication: JournalPublication, input: JournalRowInput, digest: string | undefined, expectedRevision: number): JournalRow | undefined {
     if (this.duplicate(publication)) return undefined;
     const item = this.require(input.itemKey);
     if (item.revision !== expectedRevision) throw new JournalStaleRevisionError(item.itemKey, item.revision);
@@ -273,8 +359,13 @@ export class SessionJournal {
     item.liveOnly = false;
     item.seqEnd = row.seq;
     item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
-    item.state = 'complete';
-    item.digest = digest;
+    if (digest === undefined) {
+      item.state = 'open';
+      delete item.digest;
+    } else {
+      item.state = 'complete';
+      item.digest = digest;
+    }
     item.revision = this.nextRevision();
     this.touch(item.itemKey);
     return row;
@@ -284,7 +375,7 @@ export class SessionJournal {
    * Starts a new epoch from a reread of native history: one sequence per item, oldest first. Live-only items, which a
    * reread cannot reproduce, are carried over in place.
    */
-  replace(publication: JournalPublication, items: readonly CompleteItemInput[], now: number): string {
+  replace(publication: JournalPublication, items: readonly JournalItemInput[], now: number): string {
     if (this.duplicate(publication)) return this.meta.epoch;
     this.requireDistinct(items);
     const epoch = crypto.randomUUID();
@@ -329,7 +420,7 @@ export class SessionJournal {
   }
 
   /** Adds older items below the lowest sequence as one batch, oldest first. Items already known are skipped. */
-  prepend(publication: JournalPublication, older: readonly CompleteItemInput[]): JournalRow[] {
+  prepend(publication: JournalPublication, older: readonly JournalItemInput[]): JournalRow[] {
     if (this.duplicate(publication)) return [];
     const seen = new Set<string>();
     const fresh = older.filter(({ row }) => {
@@ -356,7 +447,7 @@ export class SessionJournal {
     return rows;
   }
 
-  protected requireDistinct(items: readonly CompleteItemInput[]): void {
+  protected requireDistinct(items: readonly JournalItemInput[]): void {
     const seen = new Set<string>();
     for (const { row } of items) {
       if (seen.has(row.itemKey)) throw new JournalDuplicateItemError(row.itemKey);
@@ -364,9 +455,9 @@ export class SessionJournal {
     }
   }
 
-  /** A complete item built from native history; `previous` is the item of the same key whose alias and background it keeps. */
-  protected completeItem(epoch: string, complete: CompleteItemInput, seq: number, previous?: JournalItem): JournalItem {
-    const item: JournalItem = { ...this.openItem(stampRow(epoch, seq, complete.row), false), state: 'complete', digest: complete.digest };
+  /** An item built from a reread: complete with its digest, or open without one. `previous` is the item of the same key whose alias and background it keeps. */
+  protected completeItem(epoch: string, complete: JournalItemInput, seq: number, previous?: JournalItem): JournalItem {
+    const item: JournalItem = { ...this.openItem(stampRow(epoch, seq, complete.row), complete.row.liveOnly === true), ...(complete.digest === undefined ? {} : { state: 'complete' as const, digest: complete.digest }) };
     if (previous) {
       carryKnownFields((item.body as JournalBody).item, knownFields(previous));
       if (previous.clientMessageId !== undefined) item.clientMessageId = previous.clientMessageId;

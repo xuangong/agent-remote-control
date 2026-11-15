@@ -1,9 +1,9 @@
 import type {
-  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalHead, JournalIndexEntry, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
+  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalHead, JournalIndexEntry, JournalItemInput, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
 } from '@orchardworks/agent-remote-protocol';
 
 /** The wire shapes the journal consumes and produces; the Host uplink carries them unchanged. */
-export type { CompleteItemInput, JournalHead, JournalIndexEntry, JournalRowInput };
+export type { CompleteItemInput, JournalHead, JournalIndexEntry, JournalItemInput, JournalRowInput };
 
 /** A row stamped with the journal's epoch and sequence; what subscribers receive live. */
 export interface JournalRow {

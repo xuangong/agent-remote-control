@@ -183,12 +183,12 @@ Add `'journal_index_page'` to the `RemoteHostUplinkBrokerMessage` extract, after
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-protocol exec vitest run src/remote-host-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-protocol run test` then `pnpm --filter @orchardworks/agent-remote-protocol run typecheck` then `pnpm --filter @orchardworks/agent-remote-protocol run build`
-Expected: PASS for all. If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
+Expected: PASS for all (50 tests in `remote-host-journal.test.ts`, 403 in the package; the hosted suite still passes, 790 tests, against the rebuilt `dist`). Then run `pnpm compatibility:update` and `pnpm compatibility:check`, and commit `packages/agent-remote-lab/compatibility.json` with the schema change. If another test names `JOURNAL_INDEX_MAX_ITEMS`, it now means the total across pages (100,000).
 
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add packages/agent-remote-protocol/src
+git add packages/agent-remote-protocol/src packages/agent-remote-lab/compatibility.json
 git commit -m "feat(protocol): pull the journal index page by page and refuse a publication over a quota" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

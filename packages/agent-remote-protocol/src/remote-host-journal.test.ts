@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { JOURNAL_FILL_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES, JOURNAL_PUBLISH_MAX_ENTRIES } from './remote-host-journal.js';
+import { JOURNAL_FILL_MAX_ITEMS, JOURNAL_INDEX_PAGE_MAX_ITEMS, JOURNAL_MESSAGE_MAX_BYTES, JOURNAL_PUBLISH_MAX_ENTRIES } from './remote-host-journal.js';
 import { decodeRemoteHostUplinkMessage, encodeRemoteHostUplinkMessage } from './remote-host-uplink.js';
 
 const SESSION = 'codex:thread-1';
@@ -32,6 +32,12 @@ const valid: Array<Record<string, unknown>> = [
   message({ type: 'journal_fill', requestId: 'fill-1', sessionKey: SESSION, items: [{ row, digest: DIGEST }] }),
   message({ type: 'journal_older_done', requestId: 'older-1', sessionKey: SESSION, olderAvailable: true }),
   message({ type: 'journal_opened', requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'epoch-1', index: [indexEntry] }),
+  message({ type: 'journal_opened', requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'epoch-1', index: [indexEntry], indexAfter: -2 }),
+  message({ type: 'journal_index_request', requestId: 'index-1', sessionKey: SESSION, generation: 1, epoch: 'epoch-1', after: -2 }),
+  message({ type: 'journal_open_refused', requestId: 'index-1', sessionKey: SESSION, reason: 'stale_epoch' }),
+  message({ type: 'journal_index_page', requestId: 'index-1', sessionKey: SESSION, index: [indexEntry], indexAfter: -2 }),
+  message({ type: 'journal_index_page', requestId: 'index-2', sessionKey: SESSION, index: [] }),
+  message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 4, reason: 'quota_exceeded', itemKey: 'item-1' }),
   message({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'index_too_large' }),
   message({ type: 'journal_open_refused', requestId: 'open-2', sessionKey: SESSION, reason: 'invalid' }),
   message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 8, cursor: { epoch: 'epoch-1', seq: 4 } }),
@@ -73,6 +79,15 @@ describe('journal uplink envelopes', () => {
     ['an older request with limit zero', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, limit: 0 })],
     ['an older request above the limit', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, limit: 201 })],
     ['an index entry whose range is reversed', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [{ ...indexEntry, seqStart: 3, seqEnd: 2 }] })],
+    ['a first page with a cursor that is not a position', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [], indexAfter: 1.5 })],
+    ['an index request without a position', message({ type: 'journal_index_request', requestId: 'i', sessionKey: SESSION, generation: 1, epoch: 'e' })],
+    ['an index request without an epoch', message({ type: 'journal_index_request', requestId: 'i', sessionKey: SESSION, generation: 1, after: 1 })],
+    ['an index request for generation zero', message({ type: 'journal_index_request', requestId: 'i', sessionKey: SESSION, generation: 0, epoch: 'e', after: 1 })],
+    ['an index request without a request id', message({ type: 'journal_index_request', sessionKey: SESSION, generation: 1, epoch: 'e', after: 1 })],
+    ['an index page above the page bound', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION,
+      index: Array.from({ length: JOURNAL_INDEX_PAGE_MAX_ITEMS + 1 }, (_, at) => ({ ...indexEntry, itemKey: `i${at}`, seqStart: at, seqEnd: at })) })],
+    ['an index page whose range is reversed', message({ type: 'journal_index_page', requestId: 'i', sessionKey: SESSION, index: [{ ...indexEntry, seqStart: 3, seqEnd: 2 }] })],
+    ['an index page without a request id', message({ type: 'journal_index_page', sessionKey: SESSION, index: [indexEntry] })],
     ['an acknowledgement without an epoch', message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 1, cursor: { seq: 1 } })],
     ['a refusal with an unknown reason', message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 1, reason: 'nope' })],
     ['an open refusal with an unknown reason', message({ type: 'journal_open_refused', requestId: 'o', sessionKey: SESSION, reason: 'nope' })],

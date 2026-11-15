@@ -20,8 +20,10 @@ export const JOURNAL_PUBLISH_MAX_ENTRIES = 256;
 export const JOURNAL_MESSAGE_MAX_BYTES = UPLINK_MAX_FRAME_BYTES / 4;
 /** The most items one replacement or prepend carries. */
 export const JOURNAL_ITEMS_PER_ENTRY_MAX = 5000;
-/** The most items an index in `journal_opened` lists. */
-export const JOURNAL_INDEX_MAX_ITEMS = 30_000;
+/** The most items an index lists, across `journal_opened` and the `journal_index_page` messages the Controller asks for. */
+export const JOURNAL_INDEX_MAX_ITEMS = 100_000;
+/** The most items one message of an index carries. */
+export const JOURNAL_INDEX_PAGE_MAX_ITEMS = 2000;
 /** The most bodies one fill carries or asks for. */
 export const JOURNAL_FILL_MAX_ITEMS = 64;
 /** The most items one older-history read asks for. */
@@ -78,7 +80,7 @@ export const JournalPublishEntry = Type.Union([
 ]);
 export type JournalPublishEntry = Static<typeof JournalPublishEntry>;
 
-export const JOURNAL_REFUSAL_REASONS = ['fenced', 'stale_revision', 'unknown_item', 'body_missing', 'type_changed', 'duplicate_item', 'invalid'] as const;
+export const JOURNAL_REFUSAL_REASONS = ['fenced', 'stale_revision', 'unknown_item', 'body_missing', 'type_changed', 'duplicate_item', 'invalid', 'quota_exceeded'] as const;
 export const JournalRefusalReason = Type.Union(JOURNAL_REFUSAL_REASONS.map(reason => Type.Literal(reason)));
 export type JournalRefusalReason = (typeof JOURNAL_REFUSAL_REASONS)[number];
 
@@ -87,11 +89,21 @@ export const JournalOpen = Type.Object({ requestId, sessionKey, publisherId: ide
 export const JournalPublish = Type.Object({ sessionKey, generation, entries: Type.Array(JournalPublishEntry, { minItems: 1, maxItems: JOURNAL_PUBLISH_MAX_ENTRIES }) }, object);
 export const JournalFill = Type.Object({ requestId, sessionKey, items: Type.Array(CompleteItemInput, { maxItems: JOURNAL_FILL_MAX_ITEMS }) }, object);
 export const JournalOlderDone = Type.Object({ requestId, sessionKey, olderAvailable: Type.Boolean() }, object);
+/** Asks for the entries of the index of epoch `epoch` after `after`, a `seqStart`; sent for the `indexAfter` of the last page, one request at a time. */
+export const JournalIndexRequest = Type.Object({ requestId, sessionKey, generation, epoch: identity, after: SafeTimelinePosition }, object);
 
 /** Relay to Host. */
+/**
+ * The journal is open. `index` is the first page of the item index. When the index does not fit it, `indexAfter` is the
+ * `seqStart` of the last entry sent and the Controller pulls the rest with `journal_index_request`; the journal is open for
+ * the Controller after the last page. `indexAfter` is absent when `index` is the whole index.
+ */
 export const JournalOpened = Type.Object({ requestId, sessionKey, generation, watermark: SafeNonNegativeInteger, epoch: identity,
-  index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS }) }, object);
-export const JOURNAL_OPEN_REFUSAL_REASONS = ['index_too_large', 'invalid'] as const;
+  index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_MAX_ITEMS }), indexAfter: Type.Optional(SafeTimelinePosition) }, object);
+/** The answer to a `journal_index_request`: the next entries in order, and `indexAfter` when more follow. */
+export const JournalIndexPage = Type.Object({ requestId, sessionKey,
+  index: Type.Array(JournalIndexEntry, { maxItems: JOURNAL_INDEX_PAGE_MAX_ITEMS }), indexAfter: Type.Optional(SafeTimelinePosition) }, object);
+export const JOURNAL_OPEN_REFUSAL_REASONS = ['index_too_large', 'invalid', 'stale_epoch'] as const;
 export type JournalOpenRefusalReason = (typeof JOURNAL_OPEN_REFUSAL_REASONS)[number];
 /** The Relay could not open the session's journal: no generation was claimed and the session stays unopened. */
 export const JournalOpenRefused = Type.Object({ requestId, sessionKey, reason: Type.Union(JOURNAL_OPEN_REFUSAL_REASONS.map(reason => Type.Literal(reason))) }, object);
@@ -114,6 +126,7 @@ export function validJournalMessage(message: { type: string }): boolean {
     case 'journal_fill': return distinct((message as unknown as Static<typeof JournalFill>).items.map(({ row }) => row.itemKey));
     case 'journal_fill_request': return distinct((message as unknown as Static<typeof JournalFillRequest>).itemKeys);
     case 'journal_opened': return (message as unknown as Static<typeof JournalOpened>).index.every(entry => entry.seqStart <= entry.seqEnd);
+    case 'journal_index_page': return (message as unknown as Static<typeof JournalIndexPage>).index.every(entry => entry.seqStart <= entry.seqEnd);
     default: return true;
   }
 }

@@ -202,7 +202,7 @@ describe('SessionJournal', () => {
     const { journal, publish } = openJournal();
     const call = (sourceKey: string): JournalRowInput => ({
       itemKey: 'c1', providerId: 'codex', sourceKey, occurredAt: 0,
-      item: { type: 'tool_call', callId: 'call-1', name: 'shell', status: 'completed', error: null, background: { id: 'review-1', kind: 'review', status: 'visible' } },
+      item: { type: 'tool_call', callId: 'call-1', name: 'shell', status: 'completed', error: null, detail: { type: 'shell', command: 'ls' }, background: { id: 'review-1', kind: 'review', status: 'visible' } },
       resources: [],
     });
     const first = journal.append(publish(), call('s1'))!;

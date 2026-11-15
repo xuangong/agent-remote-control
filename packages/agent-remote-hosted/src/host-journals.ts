@@ -182,7 +182,7 @@ class JournalIncompleteRefused extends Error {
 }
 
 /** How many Hosts' journals the service deletes from the store at once, for every caller of the Relay. */
-const HOST_DELETIONS_AT_ONCE = 4;
+export const HOST_DELETIONS_AT_ONCE = 4;
 
 function wholeNumber(name: string, value: number): number {
   if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative whole number.`);

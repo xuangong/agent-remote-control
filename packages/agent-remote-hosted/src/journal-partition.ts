@@ -1,0 +1,183 @@
+import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
+import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
+
+import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
+import { JournalHeadIndex } from './journal-head-index.js';
+
+/** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
+export const JOURNAL_PARTITION_CACHE = { maxJournals: 2, maxBytes: 20 * 1024 * 1024 } as const;
+/** The growth limits of a partition; the per-Host quota is the one of the object's SQLite storage. */
+export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 16 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } as const;
+/** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. */
+const REPLY_MAX_BYTES = 24 * 1024 * 1024;
+
+/** A page read in the same step as a fill. Whether the Host may hold older history is known to `primary`, so it crosses as a value. */
+export interface JournalPartitionRead {
+  request: JournalPageRequest;
+  olderBeyondJournal: boolean;
+}
+
+/**
+ * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
+ * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
+ */
+export interface JournalPartitionApi {
+  open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
+  indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
+  publish(hostId: string, sessionKey: string, generation: number, entries: JournalPublishEntry[]): Promise<JournalPublished>;
+  /** Fills bodies. With `read`, the page comes back in the same reply and was read in the same step as the fill. */
+  fill(hostId: string, sessionKey: string, items: CompleteItemInput[], read?: JournalPartitionRead): Promise<JournalFilled>;
+  page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
+  status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
+  /** The Host's sessions that have a head. */
+  servedSessions(hostId: string): Promise<string[]>;
+  deleteHost(hostId: string): Promise<void>;
+}
+
+/** The estimated size of a value as V8 clones it: a string with a two-byte character takes two bytes per character, so the JSON length is doubled. */
+const cloneBytes = (value: unknown): number => JSON.stringify(value).length * 2;
+
+/** The partition side: adapts a journal service to the contract and keeps its replies within the RPC bound. */
+export function serveJournalPartition(journals: HostJournals, options: { replyMaxBytes?: number } = {}): JournalPartitionApi {
+  const replyMaxBytes = options.replyMaxBytes ?? REPLY_MAX_BYTES;
+  return {
+    open: (hostId, sessionKey, publisherId, bounds) => journals.open(hostId, sessionKey, publisherId, bounds),
+    indexPage: (hostId, sessionKey, epoch, after, maxItems) => journals.indexPage(hostId, sessionKey, epoch, after, maxItems),
+    publish: (hostId, sessionKey, generation, entries) => journals.publish(hostId, sessionKey, generation, entries),
+    async fill(hostId, sessionKey, items, read) {
+      if (!read) return journals.fill(hostId, sessionKey, items);
+      const olderBeyondJournal = () => read.olderBeyondJournal;
+      let filled = await journals.fill(hostId, sessionKey, items, { request: read.request, olderBeyondJournal });
+      let limit = read.request.limit;
+      // The bodies are filled once. A page that is too large is read again with fewer entries, in a step of its own;
+      // bodies that were filled stay resident until a publication moves the retained window past them.
+      while (filled.page?.kind === 'page' && limit > 1 && cloneBytes(filled) > replyMaxBytes) {
+        limit = Math.max(1, Math.floor(limit / 2));
+        const { page } = await journals.fill(hostId, sessionKey, [], { request: { ...read.request, limit }, olderBeyondJournal });
+        const { page: _discarded, ...rest } = filled;
+        filled = page ? { ...rest, page } : rest;
+      }
+      return filled;
+    },
+    async page(hostId, sessionKey, request, olderBeyondJournal) {
+      let limit = request.limit;
+      for (;;) {
+        const result = await journals.page(hostId, sessionKey, { ...request, limit }, olderBeyondJournal);
+        if (!result || result.kind !== 'page' || limit === 1 || cloneBytes(result) <= replyMaxBytes) return result;
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
+    },
+    status: (hostId, sessionKey) => journals.status(hostId, sessionKey),
+    servedSessions: hostId => journals.servedSessions(hostId),
+    deleteHost: hostId => journals.deleteHost(hostId),
+  };
+}
+
+export interface PartitionJournalsOptions {
+  /** The partition of a Host: a Durable Object stub. */
+  partition(hostId: string): JournalPartitionApi;
+}
+
+/**
+ * The `primary` side: a `HostJournals` that forwards each call to the Host's partition. It keeps the head index, so a
+ * browser stream is gated without a call. Opens, publications, fills and deletions of one Host run in the order they were
+ * made, so a deletion is never overtaken by a later call. Each partition holds one Host, so the cap of four deletions at
+ * once across the Relay is held here, not in the partitions.
+ */
+export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
+  const { partition } = options;
+  const heads = new JournalHeadIndex();
+  const chains = new Map<string, Promise<void>>();
+  const loading = new Map<string, Promise<void>>();
+  /** Raised on every change of a Host's head index and when its deletion starts and ends, so an answer read in between is discarded. */
+  const epochs = new Map<string, number>();
+  const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
+  let deletionsRunning = 0;
+  const deletionWaiters: Array<() => void> = [];
+
+  async function withDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
+    while (deletionsRunning >= HOST_DELETIONS_AT_ONCE) await new Promise<void>(resolve => deletionWaiters.push(resolve));
+    deletionsRunning += 1;
+    try { return await operation(); } finally { deletionsRunning -= 1; deletionWaiters.shift()?.(); }
+  }
+
+  function serialized<T>(hostId: string, work: () => Promise<T>): Promise<T> {
+    const result = (chains.get(hostId) ?? Promise.resolve()).then(work);
+    const tail = result.then(() => undefined, () => undefined);
+    chains.set(hostId, tail);
+    void tail.then(() => { if (chains.get(hostId) === tail) chains.delete(hostId); });
+    return result;
+  }
+
+  /** One load per Host at a time, outside the Host's queue. A load that a head change or a deletion overtook is read again. */
+  function loadHost(hostId: string): Promise<void> {
+    if (heads.loaded(hostId)) return Promise.resolve();
+    let pending = loading.get(hostId);
+    if (!pending) {
+      pending = (async () => {
+        for (let attempt = 0; attempt < 3 && !heads.loaded(hostId); attempt++) {
+          const epoch = epochs.get(hostId) ?? 0;
+          const sessions = await partition(hostId).servedSessions(hostId);
+          if ((epochs.get(hostId) ?? 0) === epoch && !heads.loaded(hostId)) heads.load(hostId, sessions);
+        }
+      })().finally(() => { loading.delete(hostId); });
+      loading.set(hostId, pending);
+    }
+    return pending;
+  }
+
+  return {
+    open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
+      if (allowed && !allowed()) return { refused: 'unavailable' };
+      const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems });
+      if ('refused' in opened && opened.unserved) {
+        heads.remove(hostId, sessionKey);
+        bump(hostId);
+      }
+      return opened;
+    }),
+
+    indexPage: (hostId, sessionKey, epoch, after, maxItems) => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems),
+
+    publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
+      try {
+        const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
+        if (result.hasHead === true) heads.add(hostId, sessionKey);
+        else if (result.hasHead === false) heads.remove(hostId, sessionKey);
+        return result;
+      } finally { bump(hostId); }
+    }),
+
+    // Whether the Host may hold older history is asked here, in the Host's queue, as the service asks it.
+    fill: (hostId, sessionKey, items, read) => serialized<JournalFilled>(hostId, () =>
+      partition(hostId).fill(hostId, sessionKey, [...items], read && { request: read.request, olderBeyondJournal: read.olderBeyondJournal() })),
+
+    page: (hostId, sessionKey, request, olderBeyondJournal) => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal),
+
+    status: (hostId, sessionKey) => partition(hostId).status(hostId, sessionKey),
+
+    async forget() { /* The partition owns its cache. */ },
+
+    served: (hostId, sessionKey) => heads.served(hostId, sessionKey),
+
+    unserve(hostId, sessionKey) {
+      heads.remove(hostId, sessionKey);
+      bump(hostId);
+    },
+
+    async servedSessions(hostId) {
+      await loadHost(hostId);
+      return heads.sessions(hostId);
+    },
+
+    async loadAllServed() { /* A Host's sessions load when the first stream for it needs them. */ },
+
+    deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
+      bump(hostId);
+      try {
+        await partition(hostId).deleteHost(hostId);
+        heads.clearHost(hostId);
+      } finally { bump(hostId); }
+    })),
+  };
+}

@@ -18,7 +18,7 @@ These are not stated in the design or the brief.
 
 1. **One class, one object per Host.** `JournalPartition extends DurableObject`, addressed with `env.JOURNALS.getByName(hostId)` (the name-derived id, `idFromName(hostId)`). Host ids are UUIDs the Relay generates, so Hosts of different accounts never share an object. The class has no `fetch`, is bound only to the Relay Worker, and the Worker has no route to it, so only `primary` can call it; the partition does no authorization of its own (reads and submissions stay authorized in `primary` until P4 moves sockets).
 2. **The partition runs the unchanged service.** `createHostJournals` over `SqlJournalStore` over `durableObjectJournalDatabase(ctx.storage)`. Stamping, storing, the item index, the publish-time retention rule, quotas, the quota-refusal handling and deletion are the P1-B3a code; the partition adds only bounds suited to a Durable Object.
-3. **Plain data over RPC, no functions.** `JournalPartitionApi` takes and returns structured-clonable data. `open`'s `allowed` callback stays in `primary`: the proxy checks it before the call and orders it against deletions in its own per-Host queue.
+3. **Plain data over RPC, no functions.** `JournalPartitionApi` takes and returns structured-clonable data. `open`'s `allowed` callback stays in `primary`: the proxy checks it inside its per-Host queue, before the call, and orders it against deletions there. A fill's `read.olderBeyondJournal` is a function in the service; the proxy asks it inside the same queue and sends the answer as a boolean. The fill's page comes back in the reply, and a reply over the bound is read again with a halved limit by a fill of no items, so the filled bodies stay.
 4. **Durable Object limits.**
    - *Memory (128 MB per isolate):* the partition keeps only the journal in use: a cache of 2 journals bounded to 20 MiB of estimated size, and one session may hold 16 MiB. The estimate counts JSON characters; heap use is up to twice that, plus transient buffers while a journal loads. Per Host the quota stays 1 GiB of the object's SQLite storage.
    - *Value size:* every stored value is split into 256 KiB chunks by `SqlJournalStore` (a SQLite value in a Durable Object may not exceed 2 MB).
@@ -27,7 +27,8 @@ These are not stated in the design or the brief.
 6. **Off by default.** The proxy exists only when the Worker has the `JOURNALS` binding and the variable `AGENT_REMOTE_JOURNALS` is `1`. No repository configuration sets the variable, so production and every existing deployment keep granting no journals until the Controller publisher (P1-C) lands. The binding and the migration `v2` ship in all three wrangler configurations; a deployment that has not copied them stays off.
 7. **Retention is the publish-time rule.** The partition evicts bodies outside the latest 50 turns after each publication, as the service does everywhere. It has no sweep and no alarm; use-based windows are P3.
 8. **Deleting a Host empties its object's tables** (`deletePrefix`). The object stays with its empty schema; a Durable Object cannot be destroyed from the Worker, and `storage.deleteAll()` would remove the schema under a running store. A revoke records the deletion in `journalDeletions` (P1-B3a) and the broker retries it until the partition confirms.
-9. **`primary`'s state is untouched.** No journal data enters `RelayObject`'s storage, so its 16 MiB bound and its full-state validation are unaffected. A test asserts that `primary` has no `journal` tables.
+9. **The deletion cap stays 4 per Relay.** Each partition runs one Host, so its own semaphore never limits anything. The proxy in `primary` holds the semaphore (`HOST_DELETIONS_AT_ONCE`, exported by `host-journals.ts`) around each `deleteHost`, outside the Host's queue as the service does, so the broker's four-worker pool and any other caller together start at most four partition deletions at once.
+10. **`primary`'s state is untouched.** No journal data enters `RelayObject`'s storage, so its 16 MiB bound and its full-state validation are unaffected. A test asserts that `primary` has no `journal` tables.
 
 ---
 
@@ -37,6 +38,7 @@ These are not stated in the design or the brief.
 |---|---|
 | `packages/agent-remote-hosted/src/journal-partition.ts` | New: `JournalPartitionApi`, the partition bounds, `serveJournalPartition`, `createPartitionJournals`. |
 | `packages/agent-remote-hosted/src/journal-partition.test.ts` | New: tests with in-process partitions behind structured-clone "RPC". |
+| `packages/agent-remote-hosted/src/host-journals.ts` | Modify: export `HOST_DELETIONS_AT_ONCE`. |
 | `packages/agent-remote-hosted/src/index.ts` | Modify: exports. |
 | `packages/agent-remote-cloudflare/src/journal-sql-database.ts` | New: `durableObjectJournalDatabase`, the Durable Object binding of the store's SQL port. |
 | `packages/agent-remote-cloudflare/src/journal-partition.ts` | New: the `JournalPartition` Durable Object class. |
@@ -53,11 +55,12 @@ These are not stated in the design or the brief.
 ### Task 1: The partition contract, its server side and its proxy
 
 **Files:**
+- Modify: `packages/agent-remote-hosted/src/host-journals.ts` (export `HOST_DELETIONS_AT_ONCE`)
 - Create: `packages/agent-remote-hosted/src/journal-partition.ts`
 - Create: `packages/agent-remote-hosted/src/journal-partition.test.ts`
 - Modify: `packages/agent-remote-hosted/src/index.ts`
 
-- [ ] **Step 1: Write the failing tests.** `packages/agent-remote-hosted/src/journal-partition.test.ts`:
+- [x] **Step 1: Write the failing tests.** `packages/agent-remote-hosted/src/journal-partition.test.ts`:
 
 ```ts
 import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remote-journal';
@@ -69,6 +72,7 @@ import { createPartitionJournals, serveJournalPartition, type JournalPartitionAp
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
+const DEADLINE_MS = 5000;
 const LIMITS = { maxIndexItems: 1_000_000, pageItems: 2000 };
 const rowOf = (itemKey: string, text: string, turn = 1) => ({
   itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
@@ -165,6 +169,15 @@ describe('the journals of primary over journal partitions', () => {
     expect(calls.filter(call => call === `list:${HOST}`)).toHaveLength(1);
   });
 
+  it('keeps a head published before the Host loaded, and answers undefined until it loads', async () => {
+    const { journals } = cluster();
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    expect(journals.served(HOST, SESSION)).toBeUndefined();
+    expect(await journals.servedSessions(HOST)).toEqual([SESSION]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+  });
+
   it('shares one load among concurrent callers, and loads the heads from the partition after primary starts again', async () => {
     const first = cluster();
     await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
@@ -210,6 +223,7 @@ describe('the journals of primary over journal partitions', () => {
 
   it('forgets a session a stream found without a head, until a publication gives it one', async () => {
     const { journals } = cluster();
+    await journals.servedSessions(HOST);
     await journals.open(HOST, SESSION, 'controller-1', LIMITS);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
@@ -239,17 +253,76 @@ describe('the journals of primary over journal partitions', () => {
     expect(await stores.get(HOST)!.catalog.list('')).toEqual([]);
   });
 
-  it('stops serving a session whose head a quota cleared, and serves it again when the partition reports a head', async () => {
-    const { journals } = cluster({ limits: { sessionItems: 1 } });
+  it('stops serving a session whose head a quota cleared, and serves it again when a rebuild publishes a head', async () => {
+    const { journals } = cluster({ limits: { sessionItems: 2 } });
+    await journals.servedSessions(HOST);
     await journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), complete(2, 'm1'), append(3, 'm2', 'b'), complete(4, 'm2'), head(5)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
-    const refused = await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')]);
+    const refused = await journals.publish(HOST, SESSION, 1, [append(6, 'm3', 'c')]);
     expect(refused).toMatchObject({ unserved: true, hasHead: false });
     expect(journals.served(HOST, SESSION)).toBe(false);
-    await journals.publish(HOST, SESSION, 1, [head(3)]);
+    // The journal is missing a row until a replacement under a new generation rebuilds it.
+    const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
+    await journals.publish(HOST, SESSION, reopened.generation, [{ sequence: 7, op: 'replace', items: [{ row: rowOf('r1', 'Fresh'), digest: 'digest-r1' }] }, head(8)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
   });
+
+  it('takes the session out of serving when an open is refused over the index bound after clearing its head', async () => {
+    const { journals } = cluster();
+    await journals.servedSessions(HOST);
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b'), head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 1, pageItems: 1 })).toEqual({ refused: 'index_too_large', unserved: true });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+  });
+
+  it('fills bodies and reads the page in one step, asking olderBeyondJournal in the Host queue and sending only plain data', async () => {
+    const { journals } = cluster({ retention: { turns: 1, minItems: 1 } });
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'first', 1), complete(2, 'm1'), append(3, 'm2', 'second', 2), complete(4, 'm2')]);
+    const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
+    expect(await journals.page(HOST, SESSION, request, false)).toEqual({ kind: 'missing', itemKeys: ['m1'] });
+    let olderBeyondJournal = false;
+    const filling = journals.fill(HOST, SESSION, [{ row: rowOf('m1', 'first', 1), digest: 'digest-m1' }], { request, olderBeyondJournal: () => olderBeyondJournal });
+    olderBeyondJournal = true;
+    const filled = await filling;
+    expect(filled).toMatchObject({ filled: ['m1'], page: { kind: 'page', page: { payload: { entries: [{ item: { text: 'first' } }, { item: { text: 'second' } }], hasOlder: true } } } });
+    expect(await journals.fill(HOST, 'codex:none', [], { request, olderBeyondJournal: () => false })).toEqual({ filled: [], mismatched: [], unknown: [] });
+    expect(await journals.fill(HOST, SESSION, [])).not.toHaveProperty('page');
+  });
+
+  it('runs a fill after the publications made before it', async () => {
+    const { journals } = cluster({ retention: { turns: 1, minItems: 1 } });
+    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
+    void journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'first', 1), complete(2, 'm1')]);
+    const filled = await journals.fill(HOST, SESSION, [{ row: rowOf('m1', 'first', 1), digest: 'digest-m1' }], { request, olderBeyondJournal: () => false });
+    expect(filled.page).toMatchObject({ kind: 'page', page: { payload: { entries: [{ item: { text: 'first' } }] } } });
+  });
+
+  it('deletes at most four Hosts at once across partitions, and later deletions wait for a slot', async () => {
+    let running = 0, peak = 0, started = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const partitions = new Map<string, JournalPartitionApi>();
+    const journals = createPartitionJournals({ partition: hostId => {
+      let api = partitions.get(hostId);
+      if (!api) {
+        const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }));
+        api = { ...inner, deleteHost: async id => { started++; running++; peak = Math.max(peak, running); await gate; await inner.deleteHost(id); running--; } };
+        partitions.set(hostId, api);
+      }
+      return api;
+    } });
+    const deletions = Array.from({ length: 7 }, (_, n) => journals.deleteHost(`host-${n}`));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect({ started, running }).toEqual({ started: 4, running: 4 });
+    release();
+    await Promise.all(deletions);
+    expect({ started, peak, running }).toEqual({ started: 7, peak: 4, running: 0 });
+  }, DEADLINE_MS);
 });
 
 describe('serveJournalPartition', () => {
@@ -269,6 +342,21 @@ describe('serveJournalPartition', () => {
     expect(entriesOf(await serveJournalPartition(journals).page(HOST, SESSION, tail, false))).toHaveLength(6);
   });
 
+  it('answers a fill whose page would pass the bound with a page of fewer entries, keeping what was filled', async () => {
+    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000, retention: { turns: 1, minItems: 1 } });
+    const bounded = serveJournalPartition(journals, { replyMaxBytes: 5000 });
+    await bounded.open(HOST, SESSION, 'controller-1', LIMITS);
+    await publishSix(bounded);
+    const missing = await bounded.page(HOST, SESSION, tail, false);
+    const itemKeys = (missing as { itemKeys: string[] }).itemKeys;
+    expect(itemKeys.length).toBeGreaterThan(0);
+    const filled = await bounded.fill(HOST, SESSION, itemKeys.map(key => ({ row: rowOf(key, 'x'.repeat(2000), Number(key.slice(1))), digest: `digest-${key}` })), { request: tail, olderBeyondJournal: false });
+    expect(filled.filled).toEqual(itemKeys);
+    const size = entriesOf(filled.page).length;
+    expect(size).toBeGreaterThan(0);
+    expect(size).toBeLessThan(6);
+  });
+
   it('returns no page for a session without a journal', async () => {
     const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), { replyMaxBytes: 1 });
     expect(await api.page(HOST, SESSION, tail, false)).toBeUndefined();
@@ -276,18 +364,18 @@ describe('serveJournalPartition', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and see them fail.**
+- [x] **Step 2: Run the tests and see them fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-partition.test.ts --testTimeout=10000`
 Expected: FAIL (`./journal-partition.js` does not exist).
 
-- [ ] **Step 3: Implement.** `packages/agent-remote-hosted/src/journal-partition.ts`:
+- [x] **Step 3: Implement.** `packages/agent-remote-hosted/src/journal-partition.ts`:
 
 ```ts
 import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 
-import type { HostJournals, JournalFilled, JournalOpened, JournalOpenRefusal, JournalPublished, JournalStatus } from './host-journals.js';
+import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
 import { JournalHeadIndex } from './journal-head-index.js';
 
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
@@ -297,6 +385,12 @@ export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 16 * 1024 * 1024, hostBy
 /** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. */
 const REPLY_MAX_BYTES = 24 * 1024 * 1024;
 
+/** A page read in the same step as a fill. Whether the Host may hold older history is known to `primary`, so it crosses as a value. */
+export interface JournalPartitionRead {
+  request: JournalPageRequest;
+  olderBeyondJournal: boolean;
+}
+
 /**
  * What `primary` asks of the partition of one Host. Every argument and result is plain data that crosses Durable
  * Object RPC by structured clone; nothing here is a function. The partition runs the journal service of that one Host.
@@ -305,7 +399,8 @@ export interface JournalPartitionApi {
   open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number }): Promise<JournalOpened | JournalOpenRefusal>;
   indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
   publish(hostId: string, sessionKey: string, generation: number, entries: JournalPublishEntry[]): Promise<JournalPublished>;
-  fill(hostId: string, sessionKey: string, items: CompleteItemInput[]): Promise<JournalFilled>;
+  /** Fills bodies. With `read`, the page comes back in the same reply and was read in the same step as the fill. */
+  fill(hostId: string, sessionKey: string, items: CompleteItemInput[], read?: JournalPartitionRead): Promise<JournalFilled>;
   page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
   status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
   /** The Host's sessions that have a head. */
@@ -313,20 +408,36 @@ export interface JournalPartitionApi {
   deleteHost(hostId: string): Promise<void>;
 }
 
-/** The partition side: adapts a journal service to the contract and keeps its page replies within the RPC bound. */
+/** The estimated size of a value as V8 clones it: a string with a two-byte character takes two bytes per character, so the JSON length is doubled. */
+const cloneBytes = (value: unknown): number => JSON.stringify(value).length * 2;
+
+/** The partition side: adapts a journal service to the contract and keeps its replies within the RPC bound. */
 export function serveJournalPartition(journals: HostJournals, options: { replyMaxBytes?: number } = {}): JournalPartitionApi {
   const replyMaxBytes = options.replyMaxBytes ?? REPLY_MAX_BYTES;
   return {
     open: (hostId, sessionKey, publisherId, bounds) => journals.open(hostId, sessionKey, publisherId, bounds),
     indexPage: (hostId, sessionKey, epoch, after, maxItems) => journals.indexPage(hostId, sessionKey, epoch, after, maxItems),
     publish: (hostId, sessionKey, generation, entries) => journals.publish(hostId, sessionKey, generation, entries),
-    fill: (hostId, sessionKey, items) => journals.fill(hostId, sessionKey, items),
+    async fill(hostId, sessionKey, items, read) {
+      if (!read) return journals.fill(hostId, sessionKey, items);
+      const olderBeyondJournal = () => read.olderBeyondJournal;
+      let filled = await journals.fill(hostId, sessionKey, items, { request: read.request, olderBeyondJournal });
+      let limit = read.request.limit;
+      // The bodies are filled once. A page that is too large is read again with fewer entries, in a step of its own;
+      // bodies that were filled stay resident until a publication moves the retained window past them.
+      while (filled.page?.kind === 'page' && limit > 1 && cloneBytes(filled) > replyMaxBytes) {
+        limit = Math.max(1, Math.floor(limit / 2));
+        const { page } = await journals.fill(hostId, sessionKey, [], { request: { ...read.request, limit }, olderBeyondJournal });
+        const { page: _discarded, ...rest } = filled;
+        filled = page ? { ...rest, page } : rest;
+      }
+      return filled;
+    },
     async page(hostId, sessionKey, request, olderBeyondJournal) {
       let limit = request.limit;
       for (;;) {
         const result = await journals.page(hostId, sessionKey, { ...request, limit }, olderBeyondJournal);
-        // The structured clone of a string with a two-byte character takes two bytes per character.
-        if (!result || result.kind !== 'page' || limit === 1 || JSON.stringify(result).length * 2 <= replyMaxBytes) return result;
+        if (!result || result.kind !== 'page' || limit === 1 || cloneBytes(result) <= replyMaxBytes) return result;
         limit = Math.max(1, Math.floor(limit / 2));
       }
     },
@@ -343,8 +454,9 @@ export interface PartitionJournalsOptions {
 
 /**
  * The `primary` side: a `HostJournals` that forwards each call to the Host's partition. It keeps the head index, so a
- * browser stream is gated without a call, and runs opens, publications and deletions of one Host in the order they were
- * made, so a deletion is never overtaken by a later open or publication.
+ * browser stream is gated without a call. Opens, publications, fills and deletions of one Host run in the order they were
+ * made, so a deletion is never overtaken by a later call. Each partition holds one Host, so the cap of four deletions at
+ * once across the Relay is held here, not in the partitions.
  */
 export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
   const { partition } = options;
@@ -354,7 +466,14 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   /** Raised on every change of a Host's head index and when its deletion starts and ends, so an answer read in between is discarded. */
   const epochs = new Map<string, number>();
   const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
-  const isLoaded = (hostId: string) => heads.loaded(hostId);
+  let deletionsRunning = 0;
+  const deletionWaiters: Array<() => void> = [];
+
+  async function withDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
+    while (deletionsRunning >= HOST_DELETIONS_AT_ONCE) await new Promise<void>(resolve => deletionWaiters.push(resolve));
+    deletionsRunning += 1;
+    try { return await operation(); } finally { deletionsRunning -= 1; deletionWaiters.shift()?.(); }
+  }
 
   function serialized<T>(hostId: string, work: () => Promise<T>): Promise<T> {
     const result = (chains.get(hostId) ?? Promise.resolve()).then(work);
@@ -364,16 +483,16 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     return result;
   }
 
-  /** One load per Host at a time, outside the Host's queue. */
+  /** One load per Host at a time, outside the Host's queue. A load that a head change or a deletion overtook is read again. */
   function loadHost(hostId: string): Promise<void> {
-    if (isLoaded(hostId)) return Promise.resolve();
+    if (heads.loaded(hostId)) return Promise.resolve();
     let pending = loading.get(hostId);
     if (!pending) {
       pending = (async () => {
-        for (let attempt = 0; attempt < 3 && !isLoaded(hostId); attempt++) {
+        for (let attempt = 0; attempt < 3 && !heads.loaded(hostId); attempt++) {
           const epoch = epochs.get(hostId) ?? 0;
           const sessions = await partition(hostId).servedSessions(hostId);
-          if ((epochs.get(hostId) ?? 0) === epoch && !isLoaded(hostId)) heads.load(hostId, sessions);
+          if ((epochs.get(hostId) ?? 0) === epoch && !heads.loaded(hostId)) heads.load(hostId, sessions);
         }
       })().finally(() => { loading.delete(hostId); });
       loading.set(hostId, pending);
@@ -382,22 +501,30 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   }
 
   return {
-    open: (hostId, sessionKey, publisherId, { allowed, ...bounds }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
+    open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       if (allowed && !allowed()) return { refused: 'unavailable' };
-      return partition(hostId).open(hostId, sessionKey, publisherId, bounds);
+      const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems });
+      if ('refused' in opened && opened.unserved) {
+        heads.remove(hostId, sessionKey);
+        bump(hostId);
+      }
+      return opened;
     }),
 
     indexPage: (hostId, sessionKey, epoch, after, maxItems) => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
-      const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
-      if (result.hasHead === true) heads.add(hostId, sessionKey);
-      else if (result.hasHead === false) heads.remove(hostId, sessionKey);
-      bump(hostId);
-      return result;
+      try {
+        const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
+        if (result.hasHead === true) heads.add(hostId, sessionKey);
+        else if (result.hasHead === false) heads.remove(hostId, sessionKey);
+        return result;
+      } finally { bump(hostId); }
     }),
 
-    fill: (hostId, sessionKey, items) => partition(hostId).fill(hostId, sessionKey, [...items]),
+    // Whether the Host may hold older history is asked here, in the Host's queue, as the service asks it.
+    fill: (hostId, sessionKey, items, read) => serialized<JournalFilled>(hostId, () =>
+      partition(hostId).fill(hostId, sessionKey, [...items], read && { request: read.request, olderBeyondJournal: read.olderBeyondJournal() })),
 
     page: (hostId, sessionKey, request, olderBeyondJournal) => partition(hostId).page(hostId, sessionKey, request, olderBeyondJournal),
 
@@ -419,12 +546,13 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
 
     async loadAllServed() { /* A Host's sessions load when the first stream for it needs them. */ },
 
-    deleteHost: hostId => serialized<void>(hostId, async () => {
+    deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
       bump(hostId);
-      await partition(hostId).deleteHost(hostId);
-      heads.clearHost(hostId);
-      bump(hostId);
-    }),
+      try {
+        await partition(hostId).deleteHost(hostId);
+        heads.clearHost(hostId);
+      } finally { bump(hostId); }
+    })),
   };
 }
 ```
@@ -432,20 +560,20 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
 In `packages/agent-remote-hosted/src/index.ts`, after the `host-journals.js` export add (only what the Cloudflare package imports):
 
 ```ts
-export { createPartitionJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
+export { createPartitionJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition, type JournalPartitionApi, type JournalPartitionRead } from './journal-partition.js';
 ```
 
-- [ ] **Step 4: Run the tests and see them pass.**
+- [x] **Step 4: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted exec vitest run src/journal-partition.test.ts --testTimeout=10000`
-Expected: PASS. If the quota test's second publication is not refused, the first row plus its journal already exceeded one item; the limit is `sessionItems: 1`, so a second distinct item is refused.
+Expected: PASS (18 tests). The hosted suite then has 936 tests.
 
-- [ ] **Step 5: Typecheck and rebuild.**
+- [x] **Step 5: Typecheck and rebuild.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-hosted run typecheck` then `pnpm --filter @orchardworks/agent-remote-hosted run build`
 Expected: PASS.
 
-- [ ] **Step 6: Commit.**
+- [x] **Step 6: Commit.**
 
 ```bash
 git add packages/agent-remote-hosted/src/journal-partition.ts packages/agent-remote-hosted/src/journal-partition.test.ts packages/agent-remote-hosted/src/index.ts

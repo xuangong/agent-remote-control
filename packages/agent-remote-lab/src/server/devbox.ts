@@ -9,6 +9,8 @@ export interface DevboxServerOptions {
   origin: string;
   stateDir: string;
   webDist: string;
+  /** Store Host session journals in SQLite beside the Relay state. Off unless set. */
+  journals?: boolean;
 }
 export interface DevboxConnection { serverUrl: string; remoteKey: string }
 
@@ -22,6 +24,7 @@ export async function createDevboxServer(options: DevboxServerOptions) {
   const identity = await loadIdentity(options.stateDir, url.origin);
   const auth = { origin: url.origin, issuer: url.origin, secret: identity.secret, cookiePrefix: 'devbox' };
   const relay = createGatewayRelay({ ...auth, stateFile: join(options.stateDir, 'relay', 'state.json'),
+    ...(options.journals ? { journalFile: join(options.stateDir, 'relay', 'journals.sqlite') } : {}),
     requestInterceptor: createDevboxAuthentication(auth),
     recentAuthentication: grant => grant.subject === 'devbox' ? true : undefined,
     // Return idle Window polls before an outer preview tunnel's response deadline.

@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 import { WebSocketServer } from 'ws';
 import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
+import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
+import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
 import { InputResourceStore } from '@orchardworks/agent-remote-relay';
 import { BROKER_MAX_FRAME_BYTES, createHostedRelay, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
@@ -15,6 +17,8 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   previewDomain?: string;
   maxTenants?: number;
   stateFile?: string;
+  /** Where Host session journals are stored (a SQLite file); absent, no Controller is granted journals. Needs `stateFile`. */
+  journalFile?: string;
   keyLifetimeMs?: number;
   servePage?(request: IncomingMessage, response: ServerResponse): Promise<boolean>;
   /** Trusted runtime composition only; production entrypoints do not install authentication interceptors. */
@@ -28,6 +32,7 @@ export type GatewayRelayOptions = HostedAuthOptions & {
 export type GatewayRelayRequestInterceptor = (request: Request, dispatch: (request: Request) => Promise<Response | undefined>) => Promise<Response | undefined>;
 export function createGatewayRelay(options: GatewayRelayOptions) {
   const auth = resolveHostedAuth(options);
+  if (options.journalFile && !options.stateFile) throw new Error('Session journals need a state file: journals are kept only beside durable Relay state.');
   const originAliases = new Set(options.originAliases ?? []);
   for (const origin of originAliases) {
     const alias = new URL(origin);
@@ -38,6 +43,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
     handleProtocols(offered, request) { return protocols.has(request) ? protocols.get(request) ?? false : offered.values().next().value ?? false; } });
   let runtime: ReturnType<typeof createHostedRelay> | undefined;
   let storage: ReturnType<typeof openGatewayState> | undefined;
+  let journalDatabase: NodeJournalDatabase | undefined;
   const clientAddresses = new WeakMap<Request, string>();
   let previewOrigin = options.previewOrigin;
   function requestUrl(request: IncomingMessage) {
@@ -100,20 +106,24 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
       if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
       try {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
+        if (options.journalFile) journalDatabase = await openNodeJournalDatabase(options.journalFile);
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
         runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),
+          ...(journalDatabase ? { journals: new SqlJournalStore(journalDatabase) } : {}),
           ...(storage ? { storage: { initial, commit: value => storage!.commit(value), close: () => storage!.close() } } : {}) });
-      } catch (error) { storage?.close(); server.close(); throw error; }
+        try { await runtime.loadJournalIndex(); }
+        catch (error) { await runtime.close().catch(() => undefined); runtime = undefined; throw error; }
+      } catch (error) { storage?.close(); journalDatabase?.close(); journalDatabase = undefined; server.close(); throw error; }
       return { port: address.port, url: auth.origin };
     },
     async close() {
       await runtime?.close();
       for (const client of websockets.clients) client.terminate();
       await new Promise<void>(resolve => websockets.close(() => resolve()));
-      storage?.close(); server.closeAllConnections();
+      storage?.close(); journalDatabase?.close(); journalDatabase = undefined; server.closeAllConnections();
       if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
     },
   };

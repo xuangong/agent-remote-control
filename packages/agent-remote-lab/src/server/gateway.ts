@@ -6,9 +6,11 @@ import { createGatewayStaticPages } from './gateway-static.js';
 import { hostedAuthFromEnv } from '@orchardworks/agent-remote-hosted';
 
 const auth = hostedAuthFromEnv(process.env);
+const stateDirectory = process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay');
 const server = createGatewayRelay({
   ...auth,
-  stateFile: join(process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay'), 'state.json'),
+  stateFile: join(stateDirectory, 'state.json'),
+  ...(process.env.AGENT_REMOTE_JOURNALS === '1' ? { journalFile: join(stateDirectory, 'journals.sqlite') } : {}),
   previewOrigin: process.env.AGENT_REMOTE_PREVIEW_URL,
   previewDomain: process.env.AGENT_REMOTE_PREVIEW_DOMAIN,
   ...(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(process.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}),

@@ -394,3 +394,13 @@ test('prints a usage line when no instance directory is given', { timeout: 30000
   assert.equal(code, 1);
   assert.match(output, /Usage: node scripts\/local\/runner\.mjs <instance directory>/);
 });
+
+test('asks the server to keep Host journals only when ARC_LOCAL_JOURNALS is 1', { timeout: 30000 }, async t => {
+  const off = await fixture(t);
+  await off.start();
+  assert.equal(off.received.at(-1).journals, undefined);
+  const on = await fixture(t);
+  on.environment.ARC_LOCAL_JOURNALS = '1';
+  await on.start();
+  assert.equal(on.received.at(-1).journals, true);
+});

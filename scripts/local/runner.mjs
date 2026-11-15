@@ -50,7 +50,8 @@ export async function startInstance({ directory, environment = process.env, crea
     signal?.throwIfAborted();
     const factory = createServer ?? (await import(pathToFileURL(join(record.source, 'dist/devbox/server.mjs')).href)).createDevboxServer;
     server = await factory({ origin: record.origin, stateDir: files.relay,
-      webDist: environment.ARC_LOCAL_WEB_DIST ?? join(record.source, 'dist/relay/web') });
+      webDist: environment.ARC_LOCAL_WEB_DIST ?? join(record.source, 'dist/relay/web'),
+      ...(environment.ARC_LOCAL_JOURNALS === '1' ? { journals: true } : {}) });
     await server.listen(record.port, '127.0.0.1');
     // A saved device credential removed the server above; only a first start needs an invitation.
     const [invitation, provenance] = await abortable(Promise.all([

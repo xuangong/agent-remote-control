@@ -2,6 +2,7 @@
 import { createServer } from 'node:net';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import { once } from 'node:events';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createWindowView, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import * as hosted from '@orchardworks/agent-remote-hosted';
+import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
+import { openNodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
 import { createDevboxServer } from './devbox.js';
 import { createGatewayRelay } from './gateway-relay.js';
 
@@ -17,7 +20,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.spl
 const request = (url: string, init: RequestInit = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(5000) });
 const cookies = (response: Response) => response.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
 
-async function fixture(hostname = '127.0.0.1') {
+async function fixture(hostname = '127.0.0.1', extra: Partial<Parameters<typeof createDevboxServer>[0]> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'arc-devbox-http-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const webDist = join(directory, 'web'); await mkdir(webDist);
@@ -26,7 +29,7 @@ async function fixture(hostname = '127.0.0.1') {
   const port = (probe.address() as { port: number }).port;
   await new Promise<void>(resolve => probe.close(() => resolve()));
   const origin = `http://${hostname}:${port}`;
-  const options = { origin, stateDir: join(directory, 'state'), webDist };
+  const options = { origin, stateDir: join(directory, 'state'), webDist, ...extra };
   let server = await createDevboxServer(options); await server.listen(port, '127.0.0.1');
   cleanups.push(() => server.close());
   return { origin, options, directory, get server() { return server; },
@@ -240,3 +243,55 @@ it('rejects cross-origin bootstrap and authority forgery while production Relay 
   const identity = JSON.parse(await readFile(join(f.options.stateDir, 'identity.json'), 'utf8'));
   expect(identity.origin).toBe(f.origin);
 }, 15000);
+
+/** Connects a Controller that asks for journals and completes the credential handshake; returns what the Relay sends, by type. */
+async function journalController(origin: string, remoteKey: string) {
+  const socket = new WebSocket(origin.replace('http:', 'ws:') + '/ws/remote-host?journal=1', { headers: { authorization: `Bearer ${remoteKey}` }, handshakeTimeout: 3000 });
+  cleanups.push(async () => { socket.terminate(); });
+  await once(socket, 'open');
+  const inbox: Array<Record<string, any>> = [];
+  socket.on('message', data => { inbox.push(JSON.parse(data.toString())); });
+  const take = async (type: string) => {
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const at = inbox.findIndex(message => message.type === type);
+      if (at >= 0) return inbox.splice(at, 1)[0]!;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`The Relay sent no ${type}.`);
+  };
+  const send = (fields: Record<string, unknown>) => socket.send(JSON.stringify({ uplinkVersion: 2, ...fields }));
+  send({ type: 'register', installationId: 'journal-host', name: 'Journal Host', credentialRotation: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] });
+  expect(await take('credential_issued')).toMatchObject({ credential: expect.any(String) });
+  send({ type: 'credential_saved' });
+  return { socket, send, take, registered: await take('registered') };
+}
+
+it('stores Host journals in SQLite beside the state when journals are on, and grants them only then', async () => {
+  const off = await fixture();
+  expect(existsSync(join(off.options.stateDir, 'relay', 'journals.sqlite'))).toBe(false);
+  const offController = await journalController(off.origin, (await off.server.getConnection()).remoteKey);
+  expect(offController.registered).toMatchObject({ type: 'registered' });
+  expect(offController.registered).not.toHaveProperty('journal');
+
+  const f = await fixture('127.0.0.1', { journals: true });
+  expect(existsSync(join(f.options.stateDir, 'relay', 'journals.sqlite'))).toBe(true);
+  const controller = await journalController(f.origin, (await f.server.getConnection()).remoteKey);
+  expect(controller.registered).toMatchObject({ type: 'registered', journal: 1 });
+  controller.send({ type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' });
+  expect(await controller.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  controller.send({ type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [
+    { sequence: 1, op: 'append', row: { itemKey: 'm1', providerId: 'codex', sourceKey: 'm1:1', occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message', text: 'Hello', messageId: 'm1' } } },
+  ] });
+  expect(await controller.take('journal_ack')).toMatchObject({ generation: 1, watermark: 1 });
+  controller.socket.terminate();
+  await f.server.close();
+  const database = await openNodeJournalDatabase(join(f.options.stateDir, 'relay', 'journals.sqlite'));
+  try {
+    const stored = await new SqlJournalStore(database).load(`${controller.registered.hostId}:codex:thread-1`);
+    expect(stored?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
+  } finally { database.close(); }
+}, 30000);
+
+it('refuses journals without a state file', () => {
+  expect(() => createGatewayRelay({ origin: 'http://127.0.0.1:0', issuer: 'http://127.0.0.1:0', secret: 'journal-secret-01234567890123456789', journalFile: join(tmpdir(), 'arc-never.sqlite') })).toThrow(/state file/);
+});

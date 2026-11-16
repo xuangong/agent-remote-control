@@ -1,5 +1,7 @@
 # P1-D Client measurement and verification Implementation Plan
 
+> **Superseded** by [S4](2026-11-16-s4-client-absorbs-replacements.md) for the work it still covers (2026-11-16): it assumed a stable epoch and incremental corrections; see S4 section 1 for what survives.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Measure T1, T2 and T6 of the IM session service against the P0 baselines under 4x CPU slowdown and a 100 ms emulated round trip, with today's path as the control group, and verify the device store on the local instance. The runner gains a delaying proxy in front of the instance (so WebSocket frames are delayed, not only HTTP), counted T1 and T6 measures, and a T2 measure that starts at the first `attach` request. While the Host is offline, the Relay answers the `attach` of a journal-served, already bound session from its binding, so such a conversation opens from its journal. Online opens still attach through the Controller, as today.

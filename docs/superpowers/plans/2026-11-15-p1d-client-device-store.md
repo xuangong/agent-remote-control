@@ -1,5 +1,7 @@
 # P1-D Client device store Implementation Plan
 
+> **Superseded** by [S4](2026-11-16-s4-client-absorbs-replacements.md) for the work it still covers (2026-11-16): it assumed a stable epoch and incremental corrections; see S4 section 1 for what survives.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A conversation this device opened before shows its content from an IndexedDB device store on mount, before any network, with no blank timeline and no opening label. After negotiation the client asks for what it missed after its stored cursor, on the same epoch, and a changed epoch is swapped in once the new tail arrives. The client never leaves a hole in its window, and unchanged rows keep their rendered DOM nodes across a reconnect, a Controller restart or a Relay restart of a journal-served session.

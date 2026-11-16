@@ -133,3 +133,26 @@ it('stores nothing from a replica that is still waiting for a replacement or cam
   saveStoredDisplay(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, restoredFromDevice: true as const } });
   expect(readStoredDisplay(scope, target)).toBeUndefined();
 });
+
+it('keeps memory copies only while Clear cache on close is on, and removes the disk copies when it is turned on', async () => {
+  const { setClearCacheOnClose } = await import('./conversation-storage.js');
+  const scope = base('4');
+  setWorkspaceReady(scope, true, 'alice');
+  saveStoredDisplay(scope, target, replicaState);
+  await deviceStore.flush();
+  const onDisk = async () => new Promise<number>((resolve, reject) => {
+    const opening = indexedDB.open('agent-remote-image-drafts');
+    opening.onsuccess = () => { const transaction = opening.result.transaction('sessions', 'readonly'); const count = transaction.objectStore('sessions').count();
+      transaction.oncomplete = () => { opening.result.close(); resolve(count.result); }; };
+    opening.onerror = () => reject(opening.error);
+  });
+  expect(await onDisk()).toBe(1);
+  await setClearCacheOnClose(true);
+  try {
+    expect(await onDisk()).toBe(0);
+    expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
+    saveStoredDisplay(scope, { ...target, nativeSessionId: 'second' }, { ...replicaState, agent: { ...replicaState.agent!, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: 'second' } } });
+    await deviceStore.flush();
+    expect(await onDisk()).toBe(0);
+  } finally { await setClearCacheOnClose(false); }
+});

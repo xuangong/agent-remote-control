@@ -21,6 +21,7 @@ import {
   applyTimelineReplacement,
   createReplicaState,
   reduceTimelineEvent,
+  restoreFromDevice,
 } from './reducer.js';
 
 const capabilities = {
@@ -723,5 +724,41 @@ describe('absorbing a replacement by item key', () => {
     expect(keysOf(inside.state)).toEqual(['n22', 'n23', 'n24']);
     const older = applyHistoryPage(inside.state, page('before', [keyed('todo', 1, { type: 'todo', items: [] })], { epoch: 'epoch-one', hasOlder: false }));
     expect(keysOf(older.state)).toEqual(['todo', 'n22', 'n23', 'n24']);
+  });
+});
+
+describe('rows restored from the device', () => {
+  const record = () => ({ snapshot: snapshot().payload, epoch: 'epoch-one', nextSeq: 3, hasOlder: true,
+    entries: [entry(1, 1, { type: 'assistant_message', text: 'one', messageId: 'm1' }), entry(2, 2, { type: 'assistant_message', text: 'two', messageId: 'm2' })] });
+
+  it('seeds only a replica that has read nothing', () => {
+    const restored = restoreFromDevice(createReplicaState(), record());
+    expect(restored.timeline).toMatchObject({ initialized: true, epoch: 'epoch-one', nextSeq: 3, hasOlder: true, restoredFromDevice: true });
+    expect(restored.agent?.id).toBe('agent-one');
+    expect(restoreFromDevice(restored, { ...record(), epoch: 'epoch-two' }).timeline.epoch).toBe('epoch-one');
+    expect(restoreFromDevice(applyAgentSnapshot(createReplicaState(), snapshot()), record()).timeline.initialized).toBe(false);
+  });
+
+  it('are confirmed by the first page that reads forward from them, and not by one that reads older rows', () => {
+    const restored = restoreFromDevice(createReplicaState(), record());
+    const older = applyHistoryPage(restored, page('before', [entry(0, 0, { type: 'assistant_message', text: 'zero', messageId: 'm0' })], { endCursor: { epoch: 'epoch-one', seq: 0 } }));
+    expect(older.status).toBe('applied');
+    expect(older.state.timeline.restoredFromDevice).toBe(true);
+    const nothingNew = applyHistoryPage(restored, page('after', [], { window: { minSeq: 1, maxSeq: 2, nextSeq: 3 } }));
+    expect(nothingNew.status).toBe('applied');
+    expect(nothingNew.state.timeline.restoredFromDevice).toBeUndefined();
+  });
+
+  it('are replaced by the tail of the new epoch when the Relay does not hold the stored position, and then confirmed', () => {
+    const restored = restoreFromDevice(createReplicaState(), record());
+    const stale = applyHistoryPage(restored, page('after', [], { epoch: 'epoch-two', reset: true, staleCursor: true }));
+    expect(stale.status).toBe('replaced');
+    expect(stale.state.timeline).toMatchObject({ pendingEpoch: 'epoch-two', restoredFromDevice: true });
+    expect(stale.state.timeline.entries).toHaveLength(2);
+    const tail = applyHistoryPage(stale.state, page('tail', [entry(1, 1, { type: 'assistant_message', text: 'one', messageId: 'm1' })], { epoch: 'epoch-two' }));
+    expect(tail.status).toBe('applied');
+    expect(tail.state.timeline).toMatchObject({ epoch: 'epoch-two' });
+    expect(tail.state.timeline.restoredFromDevice).toBeUndefined();
+    expect(tail.state.timeline.pendingEpoch).toBeUndefined();
   });
 });

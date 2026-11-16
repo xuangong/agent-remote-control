@@ -37,6 +37,11 @@ export interface TimelineReplicaState {
    * is applied; frames of the pending epoch wait in `pendingLive`.
    */
   readonly pendingEpoch?: string;
+  /**
+   * The rows came from this device's store, not from the Relay: a record of the last read, at the position it ended. The first `after` or `tail` page of
+   * the connection confirms it (same epoch) or replaces it by key. Until then these rows are display, and the labels that say a session is opening give way.
+   */
+  readonly restoredFromDevice?: true;
 }
 
 /** Local delivery feedback, separate from the authoritative timeline and its cursor. */

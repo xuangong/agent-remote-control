@@ -2146,11 +2146,11 @@ export function createHostBroker(options: HostBrokerOptions) {
    * Returns a function that is true when the message may proceed; otherwise it already closed the stream or answered.
    */
   function admitClientMessages(client: RelaySocket, context: BrokerRequestContext, subject: string | undefined, expiry: () => number | undefined): (raw: string, binary: boolean) => boolean {
-    let messageWindow = now(); let messageCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
+    let messageWindow = now(); let messageCount = 0; let timelineCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
     const refuse = (code: number, reason: string) => { client.close(code, reason); return false; };
     return (raw, binary) => {
       if (binary) return refuse(1003, 'Text protocol required');
-      if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
+      if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; timelineCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
       let publicMessage: { type?: string; payload?: { locator?: unknown } };
       try { publicMessage = JSON.parse(raw.toString()); } catch { return refuse(1008, 'Invalid session message'); }
       if (publicMessage?.type === 'image_upload_chunk') {
@@ -2162,6 +2162,9 @@ export function createHostBroker(options: HostBrokerOptions) {
         || publicMessage?.type === 'resource_resolve_request' || publicMessage?.type === 'resource_request') {
         const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
         if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return refuse(1008, 'Resource transfer rate exceeded');
+      } else if (publicMessage?.type === 'timeline_request') {
+        // Searching and reading older history take one page per request over the session wire; they are reads, not control messages.
+        if (++timelineCount > 600) return refuse(1008, 'Timeline request rate exceeded');
       } else if (++messageCount > 120) return refuse(1008, 'Control message rate exceeded');
       if (context.authorizeMessage?.(raw.toString()) === false) {
         const decoded = decodeClientMessage(raw.toString());

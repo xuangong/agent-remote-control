@@ -24,6 +24,7 @@ import {
   applyTimelineReplacement,
   createReplicaState,
   reduceTimelineEvent,
+  restoreFromDevice,
 } from './reducer.js';
 import type { AgentReplicaState, OutgoingMessage, SnapshotApplicationOptions, TimelineReduction } from './types.js';
 import { anchorNow, MessageOutbox } from './message-outbox.js';
@@ -140,6 +141,11 @@ export class AgentReplica {
 
   replaceTimelineResourceBinding(message: TimelineResourceBindingReplacement): void {
     this.replace(applyTimelineResourceBindingReplacement(this.state, message));
+  }
+
+  /** Seeds an unread replica from this device's record of the session; a replica that read anything keeps what it has. */
+  restoreFromDevice(session: Parameters<typeof restoreFromDevice>[1]): void {
+    this.replace(restoreFromDevice(this.state, session));
   }
 
   replaceTimeline(epoch: string): void {

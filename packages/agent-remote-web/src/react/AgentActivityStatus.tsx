@@ -31,7 +31,9 @@ export function AgentActivityStatus({ state, sessionState, visible = true, disab
     : session.controlChecking ? 'Checking access'
     : session.connection === 'catching_up' ? 'Synchronizing'
     : session.connection === 'idle' ? 'Disconnected' : 'Opening session';
-  const label = disabled ? disabledLabel ?? connectionLabel
+  // Rows held but not yet confirmed: the last business label stands in for the opening and synchronizing words. A broken connection is never hidden.
+  const connectionWordHidden = session.holdingRows && !disabledLabel && (session.connection === 'connecting' || session.connection === 'catching_up' || session.controlChecking);
+  const label = disabled && !connectionWordHidden ? disabledLabel ?? connectionLabel
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'
     : runtimeConnection?.state === 'unavailable' ? 'Native runtime unavailable'

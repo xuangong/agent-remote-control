@@ -197,6 +197,19 @@ export function applyTimelineReplacement(state: AgentReplicaState, epoch: string
   };
 }
 
+/**
+ * Seeds a replica that has read nothing with what this device last read of the session: its display Snapshot and the newest rows at the journal position they
+ * ended. The connection's first page asks for what came after that position; a position the Relay does not hold becomes a replacement, merged by key.
+ */
+export function restoreFromDevice(state: AgentReplicaState, session: { snapshot: AgentSnapshot['payload']; epoch: string; nextSeq: number; hasOlder: boolean; entries: readonly ProjectedTimelineEntry[] }): AgentReplicaState {
+  if (state.agent || state.timeline.initialized || state.timeline.epoch !== null) return state;
+  return {
+    ...state,
+    agent: session.snapshot,
+    timeline: { epoch: session.epoch, initialized: true, entries: session.entries, nextSeq: session.nextSeq, hasOlder: session.hasOlder, pendingLive: [], restoredFromDevice: true },
+  };
+}
+
 /** The timeline starts over in `epoch`, with no row held and the old epoch retired: a recording's reset, as an observer saw it. */
 export function resetTimeline(state: AgentReplicaState, epoch: string): AgentReplicaState {
   const retired = state.timeline.epoch && state.timeline.epoch !== epoch ? unique([...state.retiredEpochs, state.timeline.epoch]) : state.retiredEpochs;
@@ -247,10 +260,12 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
   const nextSeq = options?.preserveLive
     ? Math.max(timeline.nextSeq, nextSequenceForPage(state, page))
     : nextSequenceForPage(state, page);
+  // A page that reads forward from the held position confirms rows restored from the device; one that reads older rows says nothing about them.
+  const { restoredFromDevice: _restored, ...confirmed } = timeline;
   const prepared: AgentReplicaState = {
     ...state,
     timeline: {
-      ...timeline,
+      ...(payload.direction === 'before' ? timeline : confirmed),
       epoch: payload.epoch,
       initialized: true,
       entries: applyBackgroundEntries(entries, timeline.backgroundActivities),

@@ -12,6 +12,11 @@ export interface RemoteSessionState {
   readonly handoff?: SessionHandoffState;
   readonly connection: RemoteSessionStatus;
   readonly synchronized: boolean;
+  /**
+   * Rows are on screen that the connection has not confirmed as current: they came from this device's store, or a replacement is waiting for its tail.
+   * While they are, the labels that say a session is opening, synchronizing or checking access give way to its last business label.
+   */
+  readonly holdingRows: boolean;
   readonly runtime: AgentRuntimeInfo['connection'];
   readonly control: AgentReplicaState['sessionControl'];
   readonly operations: Readonly<Record<SessionOperationKind, SessionOperationAvailability>>;
@@ -27,8 +32,9 @@ export function remoteSessionState(replica: AgentReplicaState | undefined, conne
   const control = replica?.sessionControl;
   const controlChecking = control?.access === 'checking';
   const readOnly = control !== undefined && !controlChecking && control.access !== 'control';
+  const holdingRows = !!replica && (replica.timeline.restoredFromDevice === true || replica.timeline.pendingEpoch !== undefined);
   return {
-    connection, synchronized, activity,
+    connection, synchronized, holdingRows, activity,
     busy: activity === 'running' || activity === 'waiting', controlChecking, readOnly,
     recovering: !readOnly && connection !== 'unavailable' && runtime?.state !== 'unavailable' && (!synchronized || controlChecking || runtime?.state === 'reconnecting' || runtime?.state === 'restoring'),
     runtime, control,

@@ -344,7 +344,7 @@ export class RemoteSessionClient {
       assertCurrent: () => {
         if (generation !== this.generation || epoch !== this.replica.getState().timeline.epoch) throw new Error('Conversation changed. Search again.');
       },
-      fetchBefore: seq => this.transport.fetchTimeline(this.agentId, 'before', { epoch, seq }, this.historyPageSize, { signal: options.signal }),
+      fetchBefore: seq => this.readTimeline('before', { epoch, seq }, options.signal ?? new AbortController().signal),
     });
   }
 
@@ -377,7 +377,7 @@ export class RemoteSessionClient {
     if (this.olderHistory) return this.olderHistory.promise;
     const generation = this.generation;
     const controller = new AbortController();
-    const promise = this.transport.fetchTimeline(this.agentId, 'before', { epoch: state.epoch, seq: first?.seqStart ?? 1 }, this.historyPageSize, { signal: controller.signal }).then((page) => {
+    const promise = this.readTimeline('before', { epoch: state.epoch, seq: first?.seqStart ?? 1 }, controller.signal).then((page) => {
       if (generation !== this.generation || controller.signal.aborted) return;
       if (page.payload.epoch !== this.replica.getState().timeline.epoch || page.payload.reset || page.payload.staleCursor || page.payload.gap) {
         throw new Error('Earlier activity changed. Retry loading history.');
@@ -800,9 +800,7 @@ export class RemoteSessionClient {
     let nextCursor = cursor;
     try {
       while (true) {
-        const page = await (this.timelineRecovery === 'websocket'
-          ? this.fetchSocketTimeline(direction, nextCursor, controller.signal)
-          : this.transport.fetchTimeline(this.agentId, direction, nextCursor, this.pageLimit(direction), { signal: controller.signal }));
+        const page = await this.readTimeline(direction, nextCursor, controller.signal);
         if (generation !== this.generation || this.recovery !== controller) return;
         const continuation = direction === 'after' && page.payload.hasNewer && page.payload.epoch === nextCursor?.epoch
           ? this.afterContinuation(page, nextCursor)
@@ -839,6 +837,13 @@ export class RemoteSessionClient {
   /** A tail is as long as the rows held (at most 200), so held rows inside the window are not dropped for lack of room. */
   private pageLimit(direction: TimelineDirection): number {
     return direction === 'tail' ? Math.min(TAIL_LIMIT_MAX, Math.max(this.historyPageSize, this.replica.getState().timeline.entries.length)) : this.historyPageSize;
+  }
+
+  /** A page of the timeline: over the session wire for a transport that recovers over it, so a journal-served session reads without its Controller; HTTP otherwise. */
+  private readTimeline(direction: TimelineDirection, cursor: TimelineCursor | undefined, signal: AbortSignal): Promise<HistoryPage> {
+    return this.timelineRecovery === 'websocket'
+      ? this.fetchSocketTimeline(direction, cursor, signal)
+      : this.transport.fetchTimeline(this.agentId, direction, cursor, this.pageLimit(direction), { signal });
   }
 
   private async fetchSocketTimeline(direction: TimelineDirection, cursor: TimelineCursor | undefined, signal: AbortSignal): Promise<HistoryPage> {

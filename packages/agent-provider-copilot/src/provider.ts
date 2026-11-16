@@ -29,6 +29,8 @@ export class CopilotAgentProvider implements AgentProviderAdapter {
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength = 36;
   readonly sessionRenameRequiresOpen = true;
+  /** Every timeline observation carries an item identity equal live and in a reread (`tests/journal-recording.test.ts` records it against the real CLI). */
+  readonly journal = { itemIdentity: 1 as const };
   readonly nativeEvidence: AgentProviderNativeEvidence;
   private readonly authority: AgentNativeAuthorityScope;
   private readonly client: CopilotClient;

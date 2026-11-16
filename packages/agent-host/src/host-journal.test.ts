@@ -16,9 +16,10 @@ afterEach(async () => { for (const close of closers.splice(0).reverse()) await c
 const SESSION = 'fake:thread-1';
 const history = () => [item('history', 'm1', 'Hello'), item('history', 'm2', 'World'), boundary()];
 
-async function start(options: { capable: boolean; idleGraceMs?: number; diagnostics?: unknown[] }) {
+async function start(options: { capable: boolean; relayKeepsJournals?: false; idleGraceMs?: number; diagnostics?: unknown[] }) {
   const store = new MemoryJournalStore();
-  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000, journals: store });
+  // A Relay built with default options keeps no journals.
+  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000, ...(options.relayKeepsJournals === false ? {} : { journals: store }) });
   const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
   const { key } = await pairing!.json();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
@@ -113,6 +114,15 @@ describe('the Controller publishing its sessions over the real uplink', () => {
     expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBeNull();
     await new Promise<void>(resolve => setTimeout(resolve, 150));
     expect(await run.journal()).toBeUndefined();
+  });
+
+  it('asks for journals but publishes nothing when the Relay keeps none, as a Relay with default options does', async () => {
+    const run = await start({ capable: true, relayKeepsJournals: false });
+    await run.attach();
+    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('1');
+    await new Promise<void>(resolve => setTimeout(resolve, 150));
+    expect(await run.journal()).toBeUndefined();
+    expect(run.sessions).toHaveLength(1);
   });
 
   it('records what it cannot publish as diagnostics, without content', async () => {

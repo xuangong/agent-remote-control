@@ -1,12 +1,8 @@
-import { readFileSync } from 'node:fs';
-import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
+import { recording } from './test-utils/copilot-recordings.js';
 import { continuityOutcome, itemsOf, journalOfRun, type ContinuityOutcome } from './test-utils/journal-continuity.js';
 
-/** What the real Copilot CLI did for each scenario: the live observations, and the history of the same session opened again. */
-interface Recording { live: ProviderObservation[]; reread: ProviderObservation[] }
-const recording = (name: string): Recording => JSON.parse(readFileSync(new URL(`../../agent-provider-copilot/tests/fixtures/journal/${name}.json`, import.meta.url), 'utf8')) as Recording;
 const UNCHANGED: ContinuityOutcome = { outcome: 'unchanged' };
 
 describe('Copilot journal continuity, from the recordings of the real CLI', () => {

@@ -52,8 +52,9 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
   const fromPublisher: Array<Record<string, any>> = [];
   const fromRelay: JournalRelayMessage[] = [];
   const published: Array<{ sessionKey: string; result: JournalPublished }> = [];
-  /** What the Relay recorded about its journals. */
+  /** What the Relay recorded about its journals, by name and with the metadata each one carried. */
   const diagnostics: string[] = [];
+  const diagnosticDetails: Array<{ event: string; agentId?: string; reason?: string; bytes?: number }> = [];
   let publisher: JournalPublisher | undefined;
   let online = true;
   const connection: JournalConnection = createJournalConnection({
@@ -64,7 +65,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
       fromRelay.push(relayMessage);
       queueMicrotask(() => publisher?.receive(relayMessage));
     },
-    diagnostic: event => { diagnostics.push(event); },
+    diagnostic: (event, details) => { diagnostics.push(event); diagnosticDetails.push({ event, ...details }); },
     published: (sessionKey, result) => { published.push({ sessionKey, result }); },
   });
   const writer = {
@@ -75,7 +76,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
     },
   };
   return {
-    store, writes, diagnostics, journals, connection, writer, fromPublisher, fromRelay, published,
+    store, writes, diagnostics, diagnosticDetails, journals, connection, writer, fromPublisher, fromRelay, published,
     /** The publisher the Relay's messages go to. */
     connect(next: JournalPublisher): void { publisher = next; next.available(writer); },
     /** Ends the connection: the Relay forgets which sessions it opened, and the publisher is told. */

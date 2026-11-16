@@ -573,7 +573,7 @@ describe('the head index', () => {
     expect(seeded.lists.filter(prefix => prefix === `${HOST}:`)).toHaveLength(2);
   });
 
-  it('discards a listing that a deletion overtook', async () => {
+  it('does not adopt a listing that a deletion overtook', async () => {
     const seeded = fixture();
     await open(seeded.journals, HOST, SESSION);
     await seeded.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
@@ -582,24 +582,6 @@ describe('the head index', () => {
     const loading = reader.servedSessions(HOST);
     await new Promise(resolve => setTimeout(resolve, 5));
     await reader.deleteHost(HOST);
-    release();
-    expect(await loading).toEqual([]);
-    expect(reader.served(HOST, SESSION)).toBe(false);
-  });
-
-  it('discards a listing that a head change overtook, so a session whose head was cleared is not served again', async () => {
-    const seeded = fixture();
-    await open(seeded.journals, HOST, SESSION);
-    await seeded.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
-    const reader = createHostJournals({ store: seeded.store, now: () => 1_000 });
-    const release = seeded.holdLists();
-    const loading = reader.servedSessions(HOST);
-    await new Promise(resolve => setTimeout(resolve, 5));
-    // Another process of the Relay's data clears the head in the store while the reader holds the older listing.
-    const limited = createHostJournals({ store: seeded.memory, now: () => 1_000, limits: { sessionItems: 1 } });
-    await limited.open(HOST, SESSION, 'controller-1', LIMITS);
-    expect((await limited.publish(HOST, SESSION, 2, [append(3, 'm2', 'b')])).unserved).toBe(true);
-    reader.unserve(HOST, SESSION);
     release();
     expect(await loading).toEqual([]);
     expect(reader.served(HOST, SESSION)).toBe(false);

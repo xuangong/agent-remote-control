@@ -234,6 +234,35 @@ it('does not serve a journal that has rows but no head, and refuses an offline H
   expect(await (prepared as Response).json()).toMatchObject({ code: 'host_offline' });
 });
 
+it('reads a session whose listing said it had a head through the Controller, and serves it again once a publication sets a head', async () => {
+  // The store lists the session as served although its journal has no head, as a listing taken before a quota refusal cleared the head does.
+  const r = await relay({
+    seed: store => seedJournal(store, { head: false }),
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: async prefix => (await memory.catalog.list(prefix)).map(entry => ({ ...entry, hasHead: true })), deletePrefix: prefix => memory.catalog.deletePrefix(prefix) } }),
+  });
+  const controller = await r.connectController();
+  const first = await r.openBrowser();
+  first.send({ type: 'negotiate' });
+  await until(() => first.pair.server.readyState !== 1 ? true : undefined, 'the stream that found no head to close');
+  expect(first.pair.server.closeCode).toBe(1012);
+  expect(controller.streams).toEqual([]);
+
+  const second = await r.openBrowser();
+  second.send({ type: 'negotiate' });
+  const stream = await negotiatedControllerStream(controller);
+  second.send(tail('page-1'));
+  await until(() => stream.received.some(message => message.type === 'timeline_request') ? true : undefined, 'the page read to reach the Controller');
+  expect(second.frames.some(frame => frame.type === 'timeline_page')).toBe(false);
+
+  await controller.open();
+  await controller.publish([{ op: 'head', head: { snapshot: snapshot('idle', 'native-session'), observedAt: 5 } }]);
+  const third = await r.openBrowser();
+  third.send({ type: 'negotiate' });
+  third.send(tail('page-2'));
+  expect(texts(await third.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello']);
+});
+
 it('answers a session channel subscription from the journal', async () => {
   const r = await relay({ seed: store => seedJournal(store) });
   const channel = socketPair(r.closers);

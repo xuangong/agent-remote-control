@@ -253,9 +253,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const hostsLoaded = new Set<string>();
   const usage = new Map<string, HostUsage>();
   const loading = new Map<string, Promise<void>>();
-  /** Raised on every change of a Host's head index and when its deletion starts and ends, so a listing read in between is discarded. */
-  const epochs = new Map<string, number>();
-  const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
   const storeKey = (hostId: string, sessionKey: string) => `${hostId}:${sessionKey}`;
   const hostPrefix = (hostId: string) => `${hostId}:`;
 
@@ -331,17 +328,14 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     hostsLoaded.add(hostId);
   }
 
-  /** Lists what the store holds for the Host, once at a time, for the head index and the Host's usage. A load that a deletion overtook is read again. */
+  /** Lists what the store holds for the Host, once at a time, for the head index and the Host's usage. A listing that a deletion overtook is not adopted: the deletion marks the Host loaded. A session the listing wrongly shows as served is found without a head when a browser opens it, and unserved. */
   function loadHost(hostId: string): Promise<void> {
     if (hostsLoaded.has(hostId)) return Promise.resolve();
     let pending = loading.get(hostId);
     if (!pending) {
       pending = (async () => {
-        for (let attempt = 0; attempt < 3 && !hostsLoaded.has(hostId); attempt++) {
-          const epoch = epochs.get(hostId) ?? 0;
-          const listing = await store.catalog?.list(hostPrefix(hostId)) ?? [];
-          if ((epochs.get(hostId) ?? 0) === epoch && !hostsLoaded.has(hostId)) adopt(hostId, listing);
-        }
+        const listing = await store.catalog?.list(hostPrefix(hostId)) ?? [];
+        if (!hostsLoaded.has(hostId)) adopt(hostId, listing);
       })().finally(() => { loading.delete(hostId); });
       loading.set(hostId, pending);
     }
@@ -495,7 +489,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         needsReopen.delete(key);
         account(hostId, sessionKey, kept);
         remember(hostId, sessionKey, journal, kept);
-        if (unserved) { heads.remove(hostId, sessionKey); bump(hostId); }
+        if (unserved) { heads.remove(hostId, sessionKey); }
         trimCache(key);
         return { generation, watermark, epoch: journal.epoch, index: [], more: false, ...(unserved ? { unserved: true as const } : {}) };
       }
@@ -507,7 +501,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         account(hostId, sessionKey, kept);
         remember(hostId, sessionKey, journal, kept);
         heads.remove(hostId, sessionKey);
-        bump(hostId);
         trimCache(key);
         return { refused: 'index_too_large', unserved: true };
       }
@@ -645,7 +638,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
 
     unserve(hostId, sessionKey) {
       heads.remove(hostId, sessionKey);
-      bump(hostId);
     },
 
     unserveHead: (hostId, sessionKey, generation) => serialized<JournalPublished | undefined>(hostId, async () => {
@@ -669,7 +661,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       account(hostId, sessionKey, bytes);
       remember(hostId, sessionKey, journal, bytes);
       heads.remove(hostId, sessionKey);
-      bump(hostId);
       trimCache(key);
       return { events: [], watermark: journal.publisher?.watermark ?? 0, cursor: journal.cursor, hasHead: false, ...(cleared ? { unserved: true as const } : {}) };
     }),
@@ -694,7 +685,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     },
 
     deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
-      bump(hostId);
       const prefix = hostPrefix(hostId);
       const known = [...(usage.get(hostId)?.sessions.keys() ?? [])];
       for (const key of [...cache.keys()]) if (key.startsWith(prefix)) drop(key);
@@ -705,7 +695,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       heads.clearHost(hostId);
       usage.set(hostId, { total: 0, sessions: new Map() });
       hostsLoaded.add(hostId);
-      bump(hostId);
     })),
   };
 }

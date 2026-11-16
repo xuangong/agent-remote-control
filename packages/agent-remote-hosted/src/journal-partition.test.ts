@@ -131,7 +131,7 @@ describe('the journals of primary over journal partitions', () => {
     await restarted.loadAllServed();
   });
 
-  it('discards an answer that a deletion overtook', async () => {
+  it('does not adopt an answer that a deletion overtook', async () => {
     const first = cluster();
     await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
     await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
@@ -140,20 +140,6 @@ describe('the journals of primary over journal partitions', () => {
     const loading = reader.servedSessions(HOST);
     await new Promise(resolve => setTimeout(resolve, 5));
     await reader.deleteHost(HOST);
-    release();
-    expect(await loading).toEqual([]);
-    expect(reader.served(HOST, SESSION)).toBe(false);
-  });
-
-  it('discards an answer that a head change overtook, so a session whose head a quota cleared is not served again', async () => {
-    const first = cluster({ limits: { sessionItems: 1 } });
-    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
-    const reader = createPartitionJournals({ partition: first.partition });
-    const release = first.holdServed();
-    const loading = reader.servedSessions(HOST);
-    await new Promise(resolve => setTimeout(resolve, 5));
-    expect((await reader.publish(HOST, SESSION, 1, [append(3, 'm2', 'World')])).unserved).toBe(true);
     release();
     expect(await loading).toEqual([]);
     expect(reader.served(HOST, SESSION)).toBe(false);

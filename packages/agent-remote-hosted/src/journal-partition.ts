@@ -126,9 +126,6 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
-  /** Raised when the head index loses a session (an unserve, an open or publication that cleared a head) and when a deletion starts and ends, so a load read in between is discarded. Adding a head never raises it. */
-  const epochs = new Map<string, number>();
-  const bump = (hostId: string) => { epochs.set(hostId, (epochs.get(hostId) ?? 0) + 1); };
   let deletionsRunning = 0;
   const deletionWaiters: Array<() => void> = [];
 
@@ -156,17 +153,14 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     return result;
   }
 
-  /** One load per Host at a time, outside the Host's queue. A load that a head change or a deletion overtook is read again. */
+  /** One load per Host at a time, outside the Host's queue. `heads.load` merges, so a head set meanwhile stays; a session wrongly listed as served is unserved when a browser finds no head. */
   function loadHost(hostId: string): Promise<void> {
     if (heads.loaded(hostId)) return Promise.resolve();
     let pending = loading.get(hostId);
     if (!pending) {
       pending = (async () => {
-        for (let attempt = 0; attempt < 3 && !heads.loaded(hostId); attempt++) {
-          const epoch = epochs.get(hostId) ?? 0;
-          const sessions = await partition(hostId).servedSessions(hostId);
-          if ((epochs.get(hostId) ?? 0) === epoch && !heads.loaded(hostId)) heads.load(hostId, sessions);
-        }
+        const sessions = await partition(hostId).servedSessions(hostId);
+        if (!heads.loaded(hostId)) heads.load(hostId, sessions);
       })().finally(() => { loading.delete(hostId); });
       loading.set(hostId, pending);
     }
@@ -178,27 +172,17 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
       if (allowed && !allowed()) return { refused: 'unavailable' };
       if (!await ensureVersion(hostId)) return { refused: 'unavailable' };
       const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems, ...(reset ? { reset: true as const } : {}) });
-      if (opened.unserved) {
-        heads.remove(hostId, sessionKey);
-        bump(hostId);
-      }
+      if (opened.unserved) heads.remove(hostId, sessionKey);
       return opened;
     }),
 
     indexPage: (hostId, sessionKey, epoch, after, maxItems) => serialized(hostId, () => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems)),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
-      try {
-        const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
-        if (result.hasHead === true) heads.add(hostId, sessionKey);
-        else if (result.hasHead === false) heads.remove(hostId, sessionKey);
-        // A publication that gives a head only adds to what a load reads, so it cannot make a load stale; one that took a head away can.
-        if (result.unserved) bump(hostId);
-        return result;
-      } catch (error) {
-        bump(hostId);
-        throw error;
-      }
+      const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);
+      if (result.hasHead === true) heads.add(hostId, sessionKey);
+      else if (result.hasHead === false) heads.remove(hostId, sessionKey);
+      return result;
     }),
 
     // Whether the Host may hold older history is asked here, in the Host's queue, as the service asks it.
@@ -212,10 +196,7 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
 
     unserveHead: (hostId, sessionKey, generation) => serialized<JournalPublished | undefined>(hostId, async () => {
       const result = await partition(hostId).unserveHead(hostId, sessionKey, generation);
-      if (result) {
-        heads.remove(hostId, sessionKey);
-        bump(hostId);
-      }
+      if (result) heads.remove(hostId, sessionKey);
       return result;
     }),
 
@@ -225,7 +206,6 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
 
     unserve(hostId, sessionKey) {
       heads.remove(hostId, sessionKey);
-      bump(hostId);
     },
 
     async servedSessions(hostId) {
@@ -236,11 +216,8 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     async loadAllServed() { /* A Host's sessions load when the first stream for it needs them. */ },
 
     deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
-      bump(hostId);
-      try {
-        await partition(hostId).deleteHost(hostId);
-        heads.clearHost(hostId);
-      } finally { bump(hostId); }
+      await partition(hostId).deleteHost(hostId);
+      heads.clearHost(hostId);
     })),
   };
 }

@@ -366,7 +366,7 @@ export class SessionJournal {
     };
     delete item.background;
     delete item.keptBody;
-    item.liveOnly = false;
+    item.liveOnly = input.liveOnly === true;
     item.seqEnd = row.seq;
     item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
     if (digest === undefined) {

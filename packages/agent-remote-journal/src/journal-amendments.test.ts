@@ -1,4 +1,5 @@
 import type { AgentSnapshotPayload, ResourceBinding } from '@orchardworks/agent-remote-protocol';
+import type { JournalRowInput } from './types.js';
 import { describe, expect, it } from 'vitest';
 
 import { openJournal, text } from './journal.test-fixture.js';
@@ -199,5 +200,21 @@ describe('the attention cursor of the head', () => {
     const { journal, publish } = withTwoItems();
     expect(journal.rebind(publish(), 'a', { ...pending, locator: 'other.md' }, { ...settled, locator: 'other.md' })).toBeUndefined();
     expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false })).toMatchObject({ page: { payload: { entries: [{ resources: [pending] }, {}] } } });
+  });
+});
+
+describe('a correction and the live-only mark', () => {
+  const liveOnlyItem = (): JournalRowInput => ({ ...text('q', 'q:1', 'Question'), liveOnly: true });
+
+  it('keeps the mark of an item the Controller still holds alone, and removes it when the correction adopts a native copy', () => {
+    const { journal, publish } = openJournal();
+    journal.append(publish(), liveOnlyItem());
+    const revision = () => journal.index().find(entry => entry.itemKey === 'q')!.revision;
+    journal.correct(publish(), liveOnlyItem(), 'digest-1', revision());
+    expect(journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ liveOnly: true, state: 'complete' });
+    expect(journal.liveOnlyCount).toBe(1);
+    journal.correct(publish(), text('q', 'q:native', 'Question'), 'digest-1', revision());
+    expect(journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ liveOnly: false });
+    expect(journal.liveOnlyCount).toBe(0);
   });
 });

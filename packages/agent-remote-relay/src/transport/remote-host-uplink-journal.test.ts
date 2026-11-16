@@ -14,7 +14,7 @@ async function until(check: () => boolean): Promise<void> {
   throw new Error('Timed out.');
 }
 
-async function connect(options: { acknowledge: boolean | 1; journal: boolean }) {
+async function connect(options: { acknowledge: boolean; journal: boolean }) {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await new Promise<void>(resolve => server.once('listening', resolve));
   closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
@@ -28,7 +28,7 @@ async function connect(options: { acknowledge: boolean | 1; journal: boolean }) 
     relaySocket = socket;
     socket.on('message', data => {
       const message = JSON.parse(data.toString());
-      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, ...(options.acknowledge ? { journal: options.acknowledge === 1 ? 1 : 2 } : {}) }));
+      if (message.type === 'register') socket.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 }, ...(options.acknowledge ? { journal: 1 } : {}) }));
       else if (message.type.startsWith('journal_')) received.push(message);
     });
   });
@@ -53,7 +53,7 @@ describe('the journal grant on the Host uplink', () => {
 
   it('is asked for, and the connection may write journal messages once the Relay acknowledges it', async () => {
     const { asked, available, received } = await connect({ acknowledge: true, journal: true });
-    expect(asked()).toBe('2');
+    expect(asked()).toBe('1');
     expect(available).toHaveLength(1);
     available[0]!.send(JSON.stringify({ uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' }));
     await until(() => received.length === 1);
@@ -77,14 +77,6 @@ describe('the journal grant on the Host uplink', () => {
   it('is told that no connection may write when the Relay does not acknowledge journals', async () => {
     const { available } = await connect({ acknowledge: false, journal: true });
     expect(available).toEqual([undefined]);
-  });
-
-  it('is told that no connection may write when the Relay acknowledges only level 1, which lacks what this Controller publishes', async () => {
-    const { available, messages, relaySocket } = await connect({ acknowledge: 1, journal: true });
-    expect(available).toEqual([undefined]);
-    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 1, cursor: { epoch: 'epoch-1', seq: 1 } }));
-    await delay(50);
-    expect(messages).toEqual([]);
   });
 
   it('is told that the connection ended, and offered the next one', async () => {

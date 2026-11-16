@@ -22,22 +22,6 @@ export function isJournalHostMessage(message: RemoteHostUplinkMessage): message 
     || message.type === 'journal_unserve' || message.type === 'journal_request_refused';
 }
 
-/**
- * Whether a message of a Controller needs the journal grant 2: unserving, request refusals, a reset open, amendments, open
- * items and corrections (no digest), and a head that names an attention item. A Controller granted 1 never sends one.
- */
-export function needsJournalGrantTwo(message: JournalHostMessage): boolean {
-  switch (message.type) {
-    case 'journal_unserve': case 'journal_request_refused': return true;
-    case 'journal_open': return message.reset === true;
-    case 'journal_publish': return message.entries.some(entry => entry.op === 'rebind' || entry.op === 'outcome'
-      || (entry.op === 'correct' && entry.digest === undefined)
-      || ((entry.op === 'replace' || entry.op === 'prepend') && entry.items.some(item => item.digest === undefined))
-      || (entry.op === 'head' && entry.head.attentionItemKey !== undefined));
-    default: return false;
-  }
-}
-
 export class JournalRequestError extends Error {
   constructor(readonly code: 'invalid' | 'unavailable' | 'busy' | 'in_flight' | 'timeout' | 'closed' | 'refused', message: string) {
     super(message);
@@ -158,9 +142,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           if (!options.current()) return;
           if ('refused' in result) {
             opened.delete(sessionKey);
-            if (result.refused === 'index_too_large') {
-              send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: 'index_too_large' });
-            }
+            send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open_refused', requestId, sessionKey, reason: result.refused === 'index_too_large' ? 'index_too_large' : 'invalid' });
             return;
           }
           opened.set(sessionKey, result.generation);

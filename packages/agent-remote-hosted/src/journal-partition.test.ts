@@ -354,34 +354,41 @@ describe('the partition contract across a rollout', () => {
     expect(Object.keys(api).sort()).toEqual([...new Set(steps.map(step => step.method))].sort());
   });
 
-  it('reads the capabilities of a partition once, and counts a partition without the method as version 1', async () => {
+  it('asks the partition for its version once per Host, however many opens follow', async () => {
     let asked = 0;
-    const fresh = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
-    const current = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { asked++; return fresh.capabilities(host); } }) });
-    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
-    expect(await current.capabilities(HOST)).toEqual({ journal: 2 });
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const journals = createPartitionJournals({ partition: () => ({ ...inner, capabilities: async host => { asked++; return inner.capabilities(host); } }) });
+    for (const session of ['codex:a', 'codex:b', 'codex:c']) expect(await journals.open(HOST, session, 'controller-1', LIMITS)).toMatchObject({ generation: 1 });
     expect(asked).toBe(1);
-
-    let clock = 0, failures = 0;
-    const { capabilities: _missing, ...older } = fresh;
-    const previous = createPartitionJournals({ now: () => clock, partition: () => ({ ...older, capabilities: async () => { failures++; throw new TypeError('The RPC receiver does not implement the method "capabilities".'); } }) });
-    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
-    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
-    expect(failures).toBe(1);
-    clock = 31_000;
-    expect(await previous.capabilities(HOST)).toEqual({ journal: 1 });
-    expect(failures).toBe(2);
+    await journals.open('host-2', SESSION, 'controller-1', LIMITS);
+    expect(asked).toBe(2);
   });
 
-  it('throws a failure that is not a missing method, and asks again instead of remembering version 1', async () => {
-    const fresh = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
-    let broken = true;
-    const journals = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async host => { if (broken) throw new Error('The Durable Object is overloaded.'); return fresh.capabilities(host); } }) });
-    await expect(journals.capabilities(HOST)).rejects.toThrow('overloaded');
-    const otherMethod = createPartitionJournals({ partition: () => ({ ...fresh, capabilities: async () => { throw new TypeError('The RPC receiver does not implement the method "open".'); } }) });
-    await expect(otherMethod.capabilities(HOST)).rejects.toThrow('"open"');
-    broken = false;
-    expect(await journals.capabilities(HOST)).toEqual({ journal: 2 });
+  it('refuses an open of a partition that cannot answer its version, calls it for nothing else, and asks again at the next open', async () => {
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const store = new MemoryJournalStore();
+    const behind = serveJournalPartition(createHostJournals({ store, now: () => 1 }));
+    const calls: string[] = [];
+    let answer: 'throws' | 'missing' | 'older' | 'current' = 'throws';
+    const partition: JournalPartitionApi = {
+      ...Object.fromEntries(Object.entries(behind).map(([name, call]) => [name, (...args: unknown[]) => { calls.push(name); return (call as (...call: unknown[]) => unknown)(...args); }])) as unknown as JournalPartitionApi,
+      capabilities: async () => {
+        calls.push('capabilities');
+        if (answer === 'throws') throw new Error('The Durable Object is overloaded.');
+        if (answer === 'missing') throw new TypeError('The RPC receiver does not implement the method "capabilities".');
+        return answer === 'older' ? { journal: 0 } : inner.capabilities(HOST);
+      },
+    };
+    const journals = createPartitionJournals({ partition: () => partition });
+    for (const failing of ['throws', 'missing', 'older'] as const) {
+      answer = failing;
+      expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable' });
+    }
+    expect(new Set(calls)).toEqual(new Set(['capabilities']));
+    expect(await store.catalog.list('')).toEqual([]);
+    answer = 'current';
+    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 1 });
+    expect(calls.filter(call => call === 'capabilities')).toHaveLength(4);
   });
 });
 

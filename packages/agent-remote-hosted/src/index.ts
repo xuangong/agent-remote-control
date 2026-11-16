@@ -1,6 +1,6 @@
 export { createHostBroker, type HostBrokerOptions, type RemoteHostBrokerState } from './broker.js';
 export { JournalRequestError } from './journal-uplink.js';
-export { createHostJournals, JOURNAL_CAPABILITIES, type JournalCapabilities, type HostJournals, type HostJournalsOptions, type JournalFilled, type JournalLiveEvent, type JournalOpenOptions, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalRefusal, type JournalStatus } from './host-journals.js';
+export { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalFilled, type JournalLiveEvent, type JournalOpenOptions, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalRefusal, type JournalStatus } from './host-journals.js';
 export { createPartitionJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition, estimateCloneBytes, type JournalPartitionApi, type JournalPartitionRead } from './journal-partition.js';
 export { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 export { BROKER_MAX_BODY_BYTES, BROKER_MAX_FRAME_BYTES, RELAY_SOCKET_OPEN,

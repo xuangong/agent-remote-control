@@ -7,18 +7,6 @@ import { JOURNAL_INDEX_MAX_ITEMS, type BackgroundActivity, type CompleteItemInpu
 
 import { JournalHeadIndex } from './journal-head-index.js';
 
-/** What a journal service can serve. `journal` is the highest grant it supports; a Controller is granted no more than this. */
-export interface JournalCapabilities {
-  journal: 1 | 2;
-}
-
-/**
- * The capabilities of the journal service in this build. Grant 2 means the service applies the amendment operations
- * (`rebind`, `outcome`), items and corrections without a digest, a head's `attentionItemKey`, `journal_unserve`,
- * `journal_request_refused` and the reset open.
- */
-export const JOURNAL_CAPABILITIES: JournalCapabilities = { journal: 2 };
-
 /** Journals kept in memory, for the whole Relay. */
 const CACHE_MAX_JOURNALS = 64;
 /** The estimated size of the journals kept in memory, for the whole Relay. */
@@ -196,8 +184,6 @@ export interface HostJournals {
    * `unserved` is set only when a head was cleared.
    */
   unserveHead(hostId: string, sessionKey: string, generation: number): Promise<JournalPublished | undefined>;
-  /** What the service behind the Host's journals can serve; the broker grants no more than `journal`. */
-  capabilities(hostId: string): Promise<JournalCapabilities>;
   /** Deletes every journal of the Host; at most four Hosts are deleted at once across the service. */
   deleteHost(hostId: string): Promise<void>;
 }
@@ -654,8 +640,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     forget: hostId => serialized<void>(hostId, async () => {
       for (const [key, entry] of cache) if (entry.hostId === hostId) drop(key);
     }),
-
-    capabilities: async () => ({ ...JOURNAL_CAPABILITIES }),
 
     served: (hostId, sessionKey) => heads.served(hostId, sessionKey),
 

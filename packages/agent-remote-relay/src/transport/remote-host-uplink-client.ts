@@ -182,7 +182,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     if (options.sessionStates) { endpoint.searchParams.set('sessionStates', '1'); endpoint.searchParams.set('sessionReplyFacts', '1'); }
     if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
     if (options.outbox) endpoint.searchParams.set('outbox', '1');
-    if (options.journal) endpoint.searchParams.set('journal', '2');
+    if (options.journal) endpoint.searchParams.set('journal', '1');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -312,7 +312,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (!!options.journal && decoded.value.journal === 2) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
+          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (!!options.journal && decoded.value.journal === 1) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -347,7 +347,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           options.outbox.onAvailable(!!sendOutbox);
         }
         if (options.journal) {
-          if (decoded.value.journal === 2) journalWriter = { send: json => { writer.send(json); } };
+          if (decoded.value.journal === 1) journalWriter = { send: json => { writer.send(json); } };
           options.journal.available(journalWriter);
         }
         if (options.providerChanges) {

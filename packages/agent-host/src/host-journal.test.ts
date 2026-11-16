@@ -79,7 +79,7 @@ describe('the Controller publishing its sessions over the real uplink', () => {
   it('asks the Relay for journals and publishes an attached session, history and live rows, to its journal', async () => {
     const run = await start({ capable: true });
     await run.attach();
-    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('2');
+    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('1');
     await until(async () => (await run.journal())?.head !== undefined, 'the head');
     let journal = (await run.journal())!;
     expect(journal.index().map(entry => [entry.itemKey, entry.state])).toEqual([['m1', 'complete'], ['m2', 'complete']]);

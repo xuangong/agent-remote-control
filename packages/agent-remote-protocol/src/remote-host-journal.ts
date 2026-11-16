@@ -8,13 +8,15 @@ import { AgentTimelineItem } from './timeline.js';
 import { UPLINK_MAX_FRAME_BYTES } from './uplink.js';
 
 /**
- * Session journals over the Host uplink. A Controller that asked for them (`journal=1` or `journal=2`, acknowledged by
- * `registered.journal` with the version the Relay grants) opens a session's journal, which fences every older connection of that session, publishes
+ * Session journals over the Host uplink. A Controller that asked for them (`journal=1`, acknowledged by
+ * `registered.journal`) opens a session's journal, which fences every older connection of that session, publishes
  * entries under the generation it was given, and answers the Relay's requests to read bodies and older history again.
  * The Relay acknowledges a publication only once its store holds it. The messages are listed without their envelope
  * (`uplinkVersion`, `type`), which remote-host-uplink.ts adds.
  */
 
+/** The one journal version: a Controller asks for it with `journal=1` and the Relay acknowledges it in `registered.journal`. */
+export const JOURNAL_VERSION = 1;
 /** The most entries one publication carries. */
 export const JOURNAL_PUBLISH_MAX_ENTRIES = 256;
 /** The most UTF-8 bytes of any journal message. */

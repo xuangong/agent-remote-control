@@ -73,7 +73,7 @@ describe('journal uplink envelopes', () => {
   it('lets the Relay acknowledge journals when it registers a Host', () => {
     const registered = { uplinkVersion: 2, type: 'registered', journal: 1, hostId: 'host', heartbeat: { intervalMs: 20_000, timeoutMs: 10_000 } };
     expect(decodeRemoteHostUplinkMessage(JSON.stringify(registered)).status).toBe('ok');
-    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 2 })).status).toBe('ok');
+    expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 2 })).status).toBe('rejected');
     expect(decodeRemoteHostUplinkMessage(JSON.stringify({ ...registered, journal: 3 })).status).toBe('rejected');
   });
 

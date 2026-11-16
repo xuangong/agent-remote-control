@@ -1,7 +1,9 @@
 import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 
-import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalCapabilities, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
+import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
+
+import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
 import { JournalHeadIndex } from './journal-head-index.js';
 
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
@@ -10,6 +12,11 @@ export const JOURNAL_PARTITION_CACHE = { maxJournals: 2, maxBytes: 20 * 1024 * 1
 export const JOURNAL_PARTITION_LIMITS = { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } as const;
 /** A reply whose estimated clone size passes this is answered again with fewer entries: a Workers RPC message may not exceed 32 MiB. A session holds at most 12 MiB of UTF-8, so one entry at two bytes per character stays well below the message limit. */
 const REPLY_MAX_BYTES = 24 * 1024 * 1024;
+
+/** What a partition reports about itself: the journal version it serves. */
+export interface JournalPartitionCapabilities {
+  journal: number;
+}
 
 /** A page read in the same step as a fill. Whether the Host may hold older history is known to `primary`, so it crosses as a value. */
 export interface JournalPartitionRead {
@@ -23,8 +30,8 @@ export interface JournalPartitionRead {
  *
  * The Relay and the partitions Worker deploy separately. The partitions Worker is always deployed first. The methods and
  * the fields of their arguments and results are never changed or removed, only added, and an added field is optional.
- * A Relay asks `capabilities` once per partition and grants nothing the partition did not report; a partition that has no
- * such method is a version-1 partition. `journal-partition.contract.json` records the calls and replies of every method.
+ * A Relay asks `capabilities` before the first open of a Host and refuses the open unless the partition answers the
+ * journal version the Relay speaks, so a partition never receives an operation it does not know. `journal-partition.contract.json` records the calls and replies of every method.
  */
 export interface JournalPartitionApi {
   open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number; reset?: true }): Promise<JournalOpened | JournalOpenRefusal>;
@@ -39,8 +46,8 @@ export interface JournalPartitionApi {
   /** The Host's sessions that have a head. */
   servedSessions(hostId: string): Promise<string[]>;
   deleteHost(hostId: string): Promise<void>;
-  /** What this partition can serve. A partition of an earlier version has no such method. */
-  capabilities(hostId: string): Promise<JournalCapabilities>;
+  /** The journal version this partition serves. */
+  capabilities(hostId: string): Promise<JournalPartitionCapabilities>;
 }
 
 /**
@@ -97,24 +104,13 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
     unserveHead: (hostId, sessionKey, generation) => journals.unserveHead(hostId, sessionKey, generation),
     servedSessions: hostId => journals.servedSessions(hostId),
     deleteHost: hostId => journals.deleteHost(hostId),
-    capabilities: hostId => journals.capabilities(hostId),
+    capabilities: async () => ({ journal: JOURNAL_VERSION }),
   };
 }
-
-/** Whether an RPC error says the receiver has no `capabilities` method, as workerd words it for a partition of an earlier version. Only that error: any other failure is not an answer. */
-function isMissingMethod(error: unknown): boolean {
-  return error instanceof Error && /does not implement the method "capabilities"/.test(error.message);
-}
-
-/** What a partition that has no `capabilities` method can serve. */
-const VERSION_ONE_PARTITION: JournalCapabilities = { journal: 1 };
-/** How long a partition without the `capabilities` method is remembered as version 1 before it is asked again; an answer is remembered for the life of the proxy. */
-const CAPABILITIES_RETRY_MS = 30_000;
 
 export interface PartitionJournalsOptions {
   /** The partition of a Host: a Durable Object stub. */
   partition(hostId: string): JournalPartitionApi;
-  now?(): number;
 }
 
 /**
@@ -125,8 +121,8 @@ export interface PartitionJournalsOptions {
  */
 export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
   const { partition } = options;
-  const now = options.now ?? Date.now;
-  const capabilitiesOf = new Map<string, { capabilities: JournalCapabilities; failedAt?: number }>();
+  /** The Hosts whose partition answered the version this Relay speaks. */
+  const verified = new Set<string>();
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
@@ -140,6 +136,16 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
     while (deletionsRunning >= HOST_DELETIONS_AT_ONCE) await new Promise<void>(resolve => deletionWaiters.push(resolve));
     deletionsRunning += 1;
     try { return await operation(); } finally { deletionsRunning -= 1; deletionWaiters.shift()?.(); }
+  }
+
+  /** Inside the Host's queue. An answer other than the Relay's version, or none, is not cached: the next open asks again. */
+  async function ensureVersion(hostId: string): Promise<boolean> {
+    if (verified.has(hostId)) return true;
+    try {
+      if ((await partition(hostId).capabilities(hostId)).journal !== JOURNAL_VERSION) return false;
+    } catch { return false; }
+    verified.add(hostId);
+    return true;
   }
 
   function serialized<T>(hostId: string, work: () => Promise<T>): Promise<T> {
@@ -170,6 +176,7 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   return {
     open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems, reset }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       if (allowed && !allowed()) return { refused: 'unavailable' };
+      if (!await ensureVersion(hostId)) return { refused: 'unavailable' };
       const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems, ...(reset ? { reset: true as const } : {}) });
       if (opened.unserved) {
         heads.remove(hostId, sessionKey);
@@ -211,21 +218,6 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
       }
       return result;
     }),
-
-    async capabilities(hostId) {
-      const known = capabilitiesOf.get(hostId);
-      if (known && (known.failedAt === undefined || now() - known.failedAt < CAPABILITIES_RETRY_MS)) return { ...known.capabilities };
-      try {
-        const capabilities = await partition(hostId).capabilities(hostId);
-        capabilitiesOf.set(hostId, { capabilities });
-        return { ...capabilities };
-      } catch (error) {
-        // Only a partition that lacks the method is version 1. Any other failure is not an answer: it is thrown, remembered as nothing, and the caller decides.
-        if (!isMissingMethod(error)) throw error;
-        capabilitiesOf.set(hostId, { capabilities: VERSION_ONE_PARTITION, failedAt: now() });
-        return { ...VERSION_ONE_PARTITION };
-      }
-    },
 
     async forget() { /* The partition owns its cache. */ },
 

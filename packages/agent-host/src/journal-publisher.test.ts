@@ -839,6 +839,26 @@ describe('older history and fills the Relay asks for', () => {
     expect(fill.items.map((value: Wire) => [value.row.itemKey, value.row.item.text, typeof value.digest])).toEqual([['m1', 'One', 'string']]);
   });
 
+  it('reads native history outside the publishing lane, so a head that must go at once does not wait for the read', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 5000 });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm2', 'Two'), boundary('older-1')], [{ observations: [item('history', 'm1', 'One')] }]);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: sourceOf(manager, { loadOlderHistory: async () => { await gate; return manager.loadOlderHistory(); } }) });
+    await live(relay);
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', beforeItemKey: 'm2', limit: 5 });
+    await settle(20);
+    const before = relay.written.length;
+    session.push({ type: 'observation', sourceKey: 'ask-1', occurredAt: 1, delivery: 'live', event: { type: 'interaction_requested', provider: 'fake', request: { kind: 'question', requestId: 'question-1', questions: [{ questionId: 'q', header: 'Pick', prompt: 'Which?', required: true, selection: 'single', options: [{ value: 'a', label: 'A' }], allowCustomText: false, allowDismiss: false }] } } });
+    await until(() => relay.written.slice(before).flatMap(message => message.entries ?? []).some((value: Wire) => value.op === 'head'), 'the urgent head while the read is pending');
+    expect(relay.written.some(message => message.type === 'journal_older_done')).toBe(false);
+    release();
+    await until(() => relay.written.some(message => message.type === 'journal_older_done'), 'the answer');
+  });
+
   it('takes room from the shared budget for a fill, like a publication', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });

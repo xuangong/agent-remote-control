@@ -269,6 +269,12 @@ export class SessionPublication {
     this.lane = this.lane.then(task).catch(() => undefined);
   }
 
+  /** Runs the publishing part of a request in the lane, and settles with its outcome. Reads of native history stay outside the lane, so they never delay a head. */
+  private inLane(token: number, task: () => Promise<void>): Promise<void> {
+    return new Promise((resolve, reject) => this.enqueue(async () => {
+      try { this.check(token); await task(); resolve(); } catch (error) { reject(error); }
+    }));
+  }
   private check(token: number): void {
     if (token !== this.cycle) throw new Cancelled();
   }
@@ -576,7 +582,7 @@ export class SessionPublication {
     // The requests that arrived while the window was sent wait for the session to be live.
     if (this.phase !== 'live') return;
     const token = this.cycle;
-    for (const request of this.requests.splice(0)) this.enqueue(() => this.answer(token, request));
+    for (const request of this.requests.splice(0)) void this.answer(token, request);
   }
 
   private async answer(token: number, request: (typeof this.requests)[number]): Promise<void> {
@@ -613,16 +619,18 @@ export class SessionPublication {
       const op: PublishOp = { op: 'prepend', items: block };
       ops.push({ op, bytes: entryBytes(op) ?? MESSAGE_BUDGET_BYTES });
     }
-    for (const chunk of chunkOps(ops)) {
-      await this.flushLive(token);
-      await this.publish(token, chunk);
-    }
-    // A binding that settled after the items were read arrived as a rebind before the journal held them, which passes it over.
-    const settled = rebindOps(groupItems(accepted.flatMap(({ item }) => this.source.itemRows(item.row.itemKey))));
-    for (const chunk of chunkOps(settled)) await this.publish(token, chunk);
-    this.check(token);
-    this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey,
-      olderAvailable: candidates.length > take.length || this.source.hasOlderHistory() }, this.options.providerId);
+    await this.inLane(token, async () => {
+      for (const chunk of chunkOps(ops)) {
+        await this.flushLive(token);
+        await this.publish(token, chunk);
+      }
+      // A binding that settled after the items were read arrived as a rebind before the journal held them, which passes it over.
+      const settled = rebindOps(groupItems(accepted.flatMap(({ item }) => this.source.itemRows(item.row.itemKey))));
+      for (const chunk of chunkOps(settled)) await this.publish(token, chunk);
+      this.check(token);
+      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey,
+        olderAvailable: candidates.length > take.length || this.source.hasOlderHistory() }, this.options.providerId);
+    });
   }
 
   /** Answers a fill with the bodies of the items it can find, in the order asked, as many as fit one message; the answer takes room in flight like a publication. */

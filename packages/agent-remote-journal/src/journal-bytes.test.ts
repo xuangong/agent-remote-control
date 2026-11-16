@@ -89,6 +89,20 @@ describe('live-only items', () => {
     expect(journal.liveOnlyBytes()).toBeLessThan(journal.residentBytes() - 10_000);
   });
 
+  it('removes the oldest beyond the byte cap as well, and never an open one', () => {
+    const { journal, publish } = openJournal();
+    for (const key of ['l1', 'l2', 'l3']) {
+      journal.append(publish(), live(key));
+      journal.complete(publish(), key, `digest-${key}`);
+    }
+    journal.append(publish(), live('open'));
+    const each = journal.liveOnlyBytes() / 4;
+    expect(journal.dropOldestLiveOnly(10, 2.5 * each)).toEqual(['l1', 'l2']);
+    expect(indexOf(journal).map(entry => entry.itemKey)).toEqual(['l3', 'open']);
+    expect(journal.dropOldestLiveOnly(10, 0)).toEqual(['l3']);
+    expect(journal.has('open')).toBe(true);
+  });
+
   it('removes the oldest beyond the cap, item and body, and tells the store', () => {
     const { journal, publish } = openJournal();
     for (const key of ['l1', 'l2', 'l3']) {

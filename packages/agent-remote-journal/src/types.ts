@@ -97,7 +97,7 @@ export interface JournalChanges {
 export type SyncResult =
   | { outcome: 'unchanged' }
   | { outcome: 'appended'; rows: JournalRow[] }
-  | { outcome: 'replaced'; epoch: string; trimmed: number };
+  | { outcome: 'replaced'; epoch: string };
 
 /** What a store reports about one stored journal without loading it. */
 export interface JournalListing {

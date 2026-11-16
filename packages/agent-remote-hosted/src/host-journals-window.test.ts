@@ -9,7 +9,6 @@ import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protoc
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
 const KEY = `${HOST}:${SESSION}`;
-const LIMITS = { maxIndexItems: 1_000_000, pageItems: 1_000_000 };
 const rowOf = (itemKey: string, text: string, extra: object = {}) => ({
   itemKey, providerId: 'codex', sourceKey: `${itemKey}:source`, occurredAt: 1_725_000_000_000, turnId: 'turn-1',
   item: { type: 'assistant_message' as const, text, messageId: itemKey }, ...extra,
@@ -40,7 +39,7 @@ function fixture(options: Partial<Omit<HostJournalsOptions, 'store'>> = {}) {
   const counted = countingStore();
   return { ...counted, journals: createHostJournals({ ...options, store: counted.store }) };
 }
-const open = (journals: HostJournals, publisherId = 'controller-1') => journals.open(HOST, SESSION, publisherId, LIMITS) as Promise<JournalOpened>;
+const open = (journals: HostJournals, publisherId = 'controller-1') => journals.open(HOST, SESSION, publisherId, {}) as Promise<JournalOpened>;
 const keys = async (memory: MemoryJournalStore) => (await memory.load(KEY))!.items.map(item => item.itemKey);
 
 describe('a window published to a journal', () => {
@@ -51,13 +50,12 @@ describe('a window published to a journal', () => {
     const binding: ResourceBinding = { locator: 'file:a', resourceId: 'r1', status: 'available' };
     let first = await open(journals);
     let result = await journals.publish(HOST, SESSION, first.generation, [window(1, withBackground), head(2)]);
-    expect(result.window).toEqual({ outcome: 'replaced', trimmed: 0 });
+    expect(result.window).toEqual({ outcome: 'replaced' });
     const epoch = result.cursor!.epoch;
     const baseline = writes.length;
     let sequence = 3;
     for (let reopen = 0; reopen < 5; reopen += 1) {
       first = await open(journals);
-      expect(first.epoch).not.toBe('');
       sequence = first.watermark + 1;
       result = await journals.publish(HOST, SESSION, first.generation, [
         window(sequence, withBackground),
@@ -66,7 +64,7 @@ describe('a window published to a journal', () => {
         head(sequence + 3),
       ]);
       expect(result.refusal).toBeUndefined();
-      expect(result.window).toEqual({ outcome: 'unchanged', trimmed: 0 });
+      expect(result.window).toEqual({ outcome: 'unchanged' });
       expect(result.events.map(event => event.kind)).toEqual(['head']);
       expect(result.cursor?.epoch).toBe(epoch);
     }
@@ -80,7 +78,7 @@ describe('a window published to a journal', () => {
     await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a')]), head(2)]);
     opened = await open(journals);
     const result = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, [done('a'), done('b'), done('c')])]);
-    expect(result.window).toEqual({ outcome: 'appended', trimmed: 0 });
+    expect(result.window).toEqual({ outcome: 'appended' });
     expect(result.events.map(event => event.kind)).toEqual(['row', 'row']);
     expect(result.cursor?.seq).toBe(3);
   });
@@ -91,26 +89,90 @@ describe('a window published to a journal', () => {
     await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a'), liveItem('l'), done('b')])]);
     opened = await open(journals);
     const result = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, [done('a', 'rewritten'), done('b')])]);
-    expect(result.window).toEqual({ outcome: 'replaced', trimmed: 0 });
+    expect(result.window).toEqual({ outcome: 'replaced' });
     expect(result.events.map(event => event.kind)).toEqual(['replaced']);
     expect(await keys(memory)).toEqual(['a', 'l', 'b']);
   });
 
-  it('trims a window to the newest items that fit the session, reports it, and leaves a larger window unchanged later', async () => {
+  it('admits a window whole when the session has room for it, and appends an extension after evicting bodies for it', async () => {
+    const items = ['a', 'b', 'c', 'd'].map((key, at) => done(key, key.repeat(400), { turnId: `turn-${at}` }));
+    const { journals, memory } = fixture({ limits: { sessionBytes: 3600 }, retention: { turns: 1, minItems: 0 } });
+    let opened = await open(journals);
+    expect((await journals.publish(HOST, SESSION, opened.generation, [window(1, items.slice(0, 3))])).window).toEqual({ outcome: 'replaced' });
+    opened = await open(journals);
+    const grown = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, items)]);
+    expect(grown.refusal).toBeUndefined();
+    expect(grown.window).toEqual({ outcome: 'appended' });
+    expect(await keys(memory)).toEqual(['a', 'b', 'c', 'd']);
+    const bodies = (await memory.load(KEY))!.items.map(item => item.body !== null);
+    expect(bodies.at(-1)).toBe(true);
+    expect(bodies.filter(Boolean).length).toBeLessThan(4);
+  });
+
+  it('refuses a window that the room cannot hold whole, and leaves the journal incomplete and out of serving instead of keeping part of it', async () => {
     const items = ['a', 'b', 'c', 'd'].map(key => done(key, key.repeat(400)));
     const { journals, memory } = fixture({ limits: { sessionBytes: 2600 } });
-    let opened = await open(journals);
-    const result = await journals.publish(HOST, SESSION, opened.generation, [window(1, items)]);
-    expect(result.refusal).toBeUndefined();
-    expect(result.window?.outcome).toBe('replaced');
-    expect(result.window!.trimmed).toBeGreaterThan(0);
+    const opened = await open(journals);
+    await journals.publish(HOST, SESSION, opened.generation, [window(1, items.slice(0, 2)), head(2)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+    const refused = await journals.publish(HOST, SESSION, opened.generation, [window(3, items)]);
+    expect(refused.refusal).toMatchObject({ reason: 'quota_exceeded', sequence: 3 });
+    expect(refused).toMatchObject({ unserved: true, hasHead: false });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect((await memory.load(KEY))!.meta.incomplete).toBe(true);
+    expect(await keys(memory)).toEqual(['a', 'b']);
+  });
+
+  it('refuses the window of a Host whose other sessions fill its budget, and serves nothing from the session', async () => {
+    const { journals, memory } = fixture({ limits: { hostBytes: 5000 } });
+    const other = await journals.open(HOST, 'codex:other', 'controller-1', {}) as JournalOpened;
+    await journals.publish(HOST, 'codex:other', other.generation, [{ sequence: 1, op: 'append', row: { ...rowOf('big', 'x'.repeat(3500)), turnId: 'turn-9' } }]);
+    const opened = await open(journals);
+    const refused = await journals.publish(HOST, SESSION, opened.generation, [window(1, ['a', 'b', 'c'].map(key => done(key, key.repeat(600)))), head(2)]);
+    expect(refused.refusal).toMatchObject({ reason: 'quota_exceeded', sequence: 1 });
+    expect(refused.hasHead).toBe(false);
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect(await keys(memory)).toEqual([]);
+    const again = await open(journals);
+    const retried = await journals.publish(HOST, SESSION, again.generation, [window(1, ['a', 'b', 'c'].map(key => done(key, key.repeat(600)))), head(2)]);
+    expect(retried.refusal).toMatchObject({ reason: 'quota_exceeded' });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+  });
+
+  it('refuses a live row too large for the room without emptying the journal, and the next window rebuilds it whole', async () => {
+    const { journals, memory } = fixture({ limits: { sessionBytes: 4000 } });
+    const opened = await open(journals);
+    await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a'), done('b')]), head(2)]);
+    const refused = await journals.publish(HOST, SESSION, opened.generation, [{ sequence: 3, op: 'append', row: rowOf('huge', 'x'.repeat(6000)) }]);
+    expect(refused.refusal).toMatchObject({ reason: 'quota_exceeded', sequence: 3 });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect(await keys(memory)).toEqual(['a', 'b']);
+    const recovered = await journals.publish(HOST, SESSION, opened.generation, [window(3, [done('a'), done('b'), done('c')]), head(4)]);
+    expect(recovered.refusal).toBeUndefined();
+    expect(recovered.window).toEqual({ outcome: 'replaced' });
+    expect(recovered.hasHead).toBe(true);
+    expect(await keys(memory)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('caps the live-only items by bytes so that a window always fits beside them', async () => {
+    const { journals, memory } = fixture({ limits: { sessionBytes: 6000 } });
+    const opened = await open(journals);
+    const live = (key: string) => ({ row: { ...rowOf(key, key.repeat(900)), liveOnly: true } });
+    let dropped = 0;
+    for (const [at, key] of ['l1', 'l2', 'l3', 'l4', 'l5'].entries()) {
+      const result = await journals.publish(HOST, SESSION, opened.generation, [
+        { sequence: at * 2 + 1, op: 'append', row: live(key).row }, { sequence: at * 2 + 2, op: 'complete', itemKey: key, digest: `digest-${key}` },
+      ]);
+      expect(result.refusal).toBeUndefined();
+      dropped += result.droppedLiveOnly ?? 0;
+    }
+    expect(dropped).toBeGreaterThan(0);
     const kept = await keys(memory);
-    expect(kept.at(-1)).toBe('d');
-    expect(kept.length).toBe(4 - result.window!.trimmed);
-    opened = await open(journals);
-    const again = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, items)]);
-    expect(again.window).toEqual({ outcome: 'unchanged', trimmed: 0 });
-    expect(await keys(memory)).toEqual(kept);
+    expect(kept.length).toBeLessThan(5);
+    expect(kept.at(-1)).toBe('l5');
+    const fits = await journals.publish(HOST, SESSION, opened.generation, [window(11, [done('a', 'a'.repeat(1200)), done('b', 'b'.repeat(1200))])]);
+    expect(fits.refusal).toBeUndefined();
+    expect(await keys(memory)).toEqual([...kept, 'a', 'b']);
   });
 
   it('marks the journal incomplete when a live append is refused for quota, and a window from the same generation recovers it', async () => {
@@ -166,7 +228,7 @@ describe('a window published to a journal', () => {
 });
 
 describe('the Relay\'s diagnostics for a window', () => {
-  it('tells when a window replaced the journal and when it was trimmed to the room, and nothing for an unchanged or appended one', async () => {
+  it('tells when a window replaced the journal, and nothing for an unchanged or appended one', async () => {
     const { journals } = fixture({ limits: { sessionBytes: 3000 } });
     const events: string[] = [];
     const connection = createJournalConnection({
@@ -186,8 +248,7 @@ describe('the Relay\'s diagnostics for a window', () => {
     await send(2, [done('a')]);
     await send(3, [done('a'), done('b')]);
     expect(events).toEqual([]);
-    const big = ['c', 'd', 'e', 'f'].map(key => done(key, key.repeat(500)));
-    await send(4, big);
-    expect(events).toEqual(['journal_window_replaced', 'journal_window_trimmed']);
+    await send(4, [done('c', 'rewritten')]);
+    expect(events).toEqual(['journal_window_replaced']);
   });
 });

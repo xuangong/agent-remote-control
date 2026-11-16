@@ -3,7 +3,7 @@ import {
   JournalUnknownItemError, SessionJournal, utf8ByteLength,
   type JournalHead, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
-import type { BackgroundActivity, CompleteItemInput, JournalPublishEntry, JournalRefusalReason, ResourceBinding, TimelineCursor } from '@orchardworks/agent-remote-protocol';
+import { JOURNAL_MESSAGE_MAX_BYTES, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
 import { JournalHeadIndex } from './journal-head-index.js';
 
@@ -104,8 +104,8 @@ export interface JournalPublished {
   unserved?: true;
   /** Live-only items removed because the session passed its cap. */
   droppedLiveOnly?: number;
-  /** How the Controller's window joined the journal, when the publication carried one; `trimmed` counts the window items left out for the room (only a replacement trims). */
-  window?: { outcome: 'unchanged' | 'appended' | 'replaced'; trimmed: number };
+  /** How the Controller's window joined the journal, when the publication carried one. */
+  window?: { outcome: 'unchanged' | 'appended' | 'replaced' };
   /** A quota refused prepended older history: nothing else changed, the journal stays served and complete, and older history for the session has ended. */
   prependRefused?: true;
 }
@@ -206,6 +206,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     hostBytes: wholeNumber('Journal Host bytes', options.limits?.hostBytes ?? HOST_MAX_BYTES),
     liveOnlyItems: wholeNumber('Journal live-only items', options.limits?.liveOnlyItems ?? LIVE_ONLY_MAX_ITEMS),
   };
+  /** Live-only items are carried by every replacement, so their bytes are capped to leave the room a window needs (one message, or half a small session). */
+  const liveOnlyBytesMax = limits.sessionBytes - Math.min(JOURNAL_MESSAGE_MAX_BYTES, Math.floor(limits.sessionBytes / 2));
   const retainTurns = wholeNumber('Journal retained turns', options.retention?.turns ?? RETAIN_TURNS);
   const retainItems = wholeNumber('Journal retained items', options.retention?.minItems ?? RETAIN_MIN_ITEMS);
   /** The window of each loaded journal. A journal loaded again measures its window afresh and evicts nothing. */
@@ -342,9 +344,11 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   }
 
   /**
-   * Checks each entry that grows the journal against the limits. A window is never refused: the journal trims it to the
-   * room. The growing entries evict bodies to make room before they are refused; an entry larger than the room is
-   * refused before anything is evicted. The size is measured once and then counted up by the entries.
+   * Checks each entry that grows the journal against the limits. A window is refused only when the whole window and what a
+   * replacement keeps (the meta and the live-only items, which are capped to leave room for a window) do not fit the room;
+   * otherwise it is admitted whole, after bodies are evicted so that an extension fits. The growing entries evict bodies to
+   * make room before they are refused; an entry larger than the room is refused before anything is evicted. The size is
+   * measured once and then counted up by the entries.
    */
   function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: JournalPublishEntry) => void {
     let size: number | undefined;
@@ -352,7 +356,15 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       // A journal that is missing rows takes a window before anything else, the head included.
       if (entry.op !== 'window' && journal.incomplete) throw new JournalIncompleteRefused();
       if (entry.op === 'head') return;
-      if (entry.op === 'window') { size = undefined; return; }
+      if (entry.op === 'window') {
+        const entryBytes = utf8ByteLength(JSON.stringify(entry));
+        const room = roomOf(hostId, sessionKey);
+        if (journal.keptBytes() + entryBytes > room) throw new JournalQuotaRefused(room < limits.sessionBytes ? 'host' : 'session');
+        const growth = journal.extensionBytes(entry.items);
+        if (growth && journal.residentBytes() + growth > room) shrink(journal, room - growth);
+        size = undefined;
+        return;
+      }
       if (entry.op !== 'append' && entry.op !== 'prepend') return;
       const entryBytes = utf8ByteLength(JSON.stringify(entry));
       const room = roomOf(hostId, sessionKey);
@@ -380,7 +392,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
       case 'window': {
         const result = journal.sync(publication, entry.items, { roomBytes });
-        published.window = { outcome: result.outcome, trimmed: result.outcome === 'replaced' ? result.trimmed : 0 };
+        published.window = { outcome: result.outcome };
         if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row });
         else if (result.outcome === 'replaced') published.events.push({ kind: 'replaced', epoch: result.epoch });
         break;
@@ -472,8 +484,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
             if (error instanceof JournalQuotaRefused && entry.op === 'prepend') {
               // Older history leaves no hole: the journal stays complete and served, and has no more older history to take.
               published.prependRefused = true;
-            } else if (error instanceof JournalQuotaRefused && entry.op === 'append') {
-              // The refused live row is missing from the journal: it is not served until a window rebuilds it, and every later entry is a gap or incomplete.
+            } else if (error instanceof JournalQuotaRefused && (entry.op === 'append' || entry.op === 'window')) {
+              // The refused live row, or the window that did not fit, leaves the journal behind its Controller: it is not served until a window rebuilds it, and every later entry is a gap or incomplete.
               journal.markIncomplete();
               if (journal.hasHead) {
                 journal.clearHead();
@@ -484,7 +496,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
           }
         }
         if (liveOnlyChanged) {
-          const dropped = journal.dropOldestLiveOnly(limits.liveOnlyItems);
+          const dropped = journal.dropOldestLiveOnly(limits.liveOnlyItems, liveOnlyBytesMax);
           if (dropped.length > 0) published.droppedLiveOnly = dropped.length;
         }
         evictLeavers(journal);

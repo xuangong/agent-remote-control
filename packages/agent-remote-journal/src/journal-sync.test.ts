@@ -29,7 +29,7 @@ const keys = (journal: SessionJournal): string[] => journal.state().items.map(({
 describe('what sync decides', () => {
   it('builds an empty journal from the window as a replacement', () => {
     const { journal, sync } = seeded();
-    expect(sync([done('a'), done('b')])).toMatchObject({ outcome: 'replaced', trimmed: 0 });
+    expect(sync([done('a'), done('b')])).toMatchObject({ outcome: 'replaced' });
     expect(keys(journal)).toEqual(['a', 'b']);
   });
 
@@ -226,55 +226,26 @@ describe('open items', () => {
 });
 
 describe('the room', () => {
-  const items = ['a', 'b', 'c', 'd'].map(key => done(key, key.repeat(200)));
-
-  function fixed(): number {
-    const { journal } = seeded();
-    return journal.residentBytes();
-  }
-
-  it('trims a window to the newest items that fit, counting the meta, and reports how many it dropped', () => {
-    const base = fixed();
-    const sizes = items.map(size);
-    const fits = (count: number) => base + sizes.slice(items.length - count).reduce((a, b) => a + b, 0);
-    for (const count of [4, 3, 1]) {
-      const { journal, sync } = seeded();
-      expect(sync(items, fits(count))).toMatchObject({ outcome: 'replaced', trimmed: items.length - count });
-      expect(keys(journal)).toEqual(items.slice(items.length - count).map(({ row: { itemKey } }) => itemKey));
-    }
-    // A room that fits the items but not the meta trims one more.
-    const { journal, sync } = seeded();
-    expect(sync(items, fits(3) - 1)).toMatchObject({ outcome: 'replaced', trimmed: 2 });
-    expect(keys(journal)).toEqual(['c', 'd']);
-  });
-
-  it('is unchanged under a larger room, because the leading items are older history, and under a smaller room', () => {
-    const base = fixed();
-    const sizes = items.map(size);
-    const small = base + sizes[2]! + sizes[3]!;
-    const { journal, sync } = seeded();
-    expect(sync(items, small)).toMatchObject({ outcome: 'replaced', trimmed: 2 });
-    const epoch = journal.epoch;
-    expect(sync(items, ROOM)).toEqual({ outcome: 'unchanged' });
-    const meta = new SessionJournal({ meta: journal.state().meta, items: [] }).residentBytes();
-    expect(sync(items, meta + sizes[3]!)).toEqual({ outcome: 'unchanged' });
-    expect(journal.epoch).toBe(epoch);
-    expect(keys(journal)).toEqual(['c', 'd']);
-  });
-
-  it('replaces instead of appending an extension that does not fit', () => {
+  it('replaces instead of appending an extension that does not fit, and keeps the whole window', () => {
     const { journal, sync } = seeded([done('a', 'a'.repeat(200))]);
     const room = journal.residentBytes() + 10;
     const epoch = journal.epoch;
-    expect(sync([done('a', 'a'.repeat(200)), done('b', 'b'.repeat(200))], room)).toMatchObject({ outcome: 'replaced', trimmed: 1 });
+    expect(sync([done('a', 'a'.repeat(200)), done('b', 'b'.repeat(200))], room)).toMatchObject({ outcome: 'replaced' });
     expect(journal.epoch).not.toBe(epoch);
+    expect(keys(journal)).toEqual(['a', 'b']);
   });
 
-  it('keeps the live-only items out of the trim: they are carried and counted first', () => {
-    const { journal, sync } = seeded([live('l')]);
-    const room = journal.residentBytes() + size(items[3]!);
-    expect(sync(items, room)).toMatchObject({ outcome: 'replaced', trimmed: 3 });
-    expect(keys(journal)).toEqual(['l', 'd']);
+  it('appends an extension that fits the room', () => {
+    const { journal, sync } = seeded([done('a', 'a'.repeat(200))]);
+    const room = journal.residentBytes() + size(done('b', 'b'.repeat(200)));
+    expect(sync([done('a', 'a'.repeat(200)), done('b', 'b'.repeat(200))], room)).toMatchObject({ outcome: 'appended' });
+  });
+
+  it('counts the meta and the live-only items, and nothing else, as what a replacement keeps', () => {
+    const { journal } = seeded([live('l'), done('a', 'a'.repeat(300))]);
+    const meta = new SessionJournal({ meta: journal.state().meta, items: [] }).residentBytes();
+    expect(journal.keptBytes()).toBe(meta + journal.liveOnlyBytes());
+    expect(journal.liveOnlyBytes()).toBeGreaterThan(0);
   });
 });
 

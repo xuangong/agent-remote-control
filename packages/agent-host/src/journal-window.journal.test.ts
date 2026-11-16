@@ -122,21 +122,6 @@ describe('a window that the Relay compares with its journal', () => {
       await expectSettled(relay, next.publisher);
     });
 
-    it('settles after a rewrite under a quota that keeps only the newest item of the window', async () => {
-      const relay = relayLoopback(clock, { limits: { sessionBytes: 2_000_000 } });
-      const first = start(relay);
-      await follow(first, history('none'), { live: [item('live', 'o', 'Interrupted', { completes: false })] });
-      await settled(relay);
-      expect(await keysOf(relay)).toEqual(['b2', 'o']);
-      expect(relay.diagnostics).toContain('journal_window_trimmed');
-      const replaced = replacements(relay);
-      const next = await restart(relay, first, history('b2'));
-      expect(replacements(relay)).toBe(replaced + 1);
-      expect(await keysOf(relay)).toEqual(['b2']);
-      expect((await journalOf(relay)).state().items[0]!.body?.item).toMatchObject({ text: expect.stringMatching(/^rewritten /) });
-      await expectSettled(relay, next.publisher);
-    });
-
     it('settles after a rewrite, carrying a provider live-only item the window does not hold', async () => {
       const relay = relayLoopback(clock);
       const first = start(relay);
@@ -209,19 +194,15 @@ describe('a window that the Relay compares with its journal', () => {
 });
 
 describe('the quota and a journal that is missing rows', () => {
-  const rows = () => Array.from({ length: 8 }, (_, at) => item('history', `m${at}`, `Item ${at} ${'y'.repeat(2000)}`));
+  const rows = (count: number) => Array.from({ length: count }, (_, at) => item('history', `m${at}`, `Item ${at} ${'y'.repeat(2000)}`));
 
-  it('trims a replacement to the newest items that fit, settles, keeps live rows flowing, and recovers a refused live row without a ladder', async () => {
-    const relay = relayLoopback(clock, { limits: { sessionBytes: 9_000 } });
+  it('keeps the whole window, settles, keeps live rows flowing, and serves nothing while a row larger than the room is in the window', async () => {
+    const relay = relayLoopback(clock, { limits: { sessionBytes: 12_000 } });
     const diagnostics: Array<{ event: string }> = [];
     const publisher = start(relay, {}, diagnostics);
-    const { session } = await follow(publisher, rows());
+    const { session } = await follow(publisher, rows(3));
     await settled(relay);
-    const kept = (await keysOf(relay));
-    expect(kept.length).toBeGreaterThan(0);
-    expect(kept.length).toBeLessThan(8);
-    expect(kept).toEqual(rows().slice(8 - kept.length).map((_, at) => `m${8 - kept.length + at}`));
-    expect(relay.diagnostics).toContain('journal_window_trimmed');
+    expect(await keysOf(relay)).toEqual(['m0', 'm1', 'm2']);
     const writes = relay.writes.length;
     for (let at = 0; at < 3; at += 1) await reopen(relay, publisher);
     expect(itemWrites(relay, writes)).toEqual([]);
@@ -229,18 +210,33 @@ describe('the quota and a journal that is missing rows', () => {
     session.push(item('live', 'small', 'Still flowing', { completes: true }));
     await until(async () => (await texts(relay)).includes('Still flowing'), 'a live row');
 
-    // A live row larger than the room leaves a hole: the journal is incomplete until the next window replaces it.
+    // A live row larger than the room leaves a hole, and the window that now holds it cannot fit either: the session is not served, and the Controller only retries with backoff.
     session.push(item('live', 'huge', 'z'.repeat(12_000), { completes: true }));
     await until(() => relay.diagnostics.includes('journal_quota_exceeded'), 'the refusal');
-    await until(async () => { const journal = await relay.journal(SESSION); return journal?.incomplete === false && journal.head !== undefined && heads(relay) > 4; }, 'the journal to be whole again');
-    await settle(40);
+    const publishes = () => relay.fromPublisher.filter(message => message.type === 'journal_publish').length;
+    const before = publishes();
+    await settle(200);
+    const journal = await journalOf(relay);
+    expect(journal.incomplete).toBe(true);
+    expect(journal.head).toBeUndefined();
+    expect(await keysOf(relay)).toEqual(['m0', 'm1', 'm2', 'small']);
+    expect(publishes() - before).toBeLessThanOrEqual(200 / limits.backoffBaseMs);
     expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
     expect(relay.fromPublisher.filter(message => message.type === 'journal_unserve')).toEqual([]);
-    const after = relay.writes.length;
-    await reopen(relay, publisher);
-    expect(itemWrites(relay, after)).toEqual([]);
-    session.push(item('live', 'next', 'After the hole', { completes: true }));
-    await until(async () => (await texts(relay)).includes('After the hole'), 'a live row after the recovery');
+  });
+
+  it('serves nothing and retries only with backoff while the Relay has no room for the whole window, then serves it when room appears', async () => {
+    const relay = relayLoopback(clock, { limits: { sessionBytes: 9_000 } });
+    const diagnostics: Array<{ event: string; reason?: string }> = [];
+    const publisher = start(relay, {}, diagnostics);
+    await follow(publisher, rows(8));
+    await settle(200);
+    const journal = await relay.journal(SESSION);
+    expect(journal?.head).toBeUndefined();
+    expect(journal?.state().items ?? []).toEqual([]);
+    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'quota_exceeded' });
+    expect(relay.fromPublisher.filter(message => message.type === 'journal_publish').length).toBeLessThanOrEqual(1 + 200 / limits.backoffBaseMs);
+    expect(relay.fromPublisher.filter(message => message.type === 'journal_unserve')).toEqual([]);
   });
 
   it('stays live when a scroll-up hits the quota: the journal keeps its head and rows, and the Relay marks older history over for the session', async () => {

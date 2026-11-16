@@ -36,8 +36,8 @@ export interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, live-only items the journal removed, and a window that replaced the journal or was trimmed to the room. */
-  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped' | 'journal_window_replaced' | 'journal_window_trimmed'): void;
+  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, live-only items the journal removed, and a window that replaced the journal. */
+  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped' | 'journal_window_replaced'): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
@@ -160,7 +160,6 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
           }
           if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
           if (stored && result.window?.outcome === 'replaced') options.diagnostic?.('journal_window_replaced');
-          if (stored && result.window && result.window.trimmed > 0) options.diagnostic?.('journal_window_trimmed');
           if (result.refusal?.reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
           if (!options.current()) return;
           if (result.cursor && stored) {

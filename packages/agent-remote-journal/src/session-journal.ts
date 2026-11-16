@@ -136,14 +136,27 @@ export class SessionJournal {
     return this.liveOnlyTotal;
   }
 
+  /** What a replacement keeps of this journal: its meta and its live-only items. */
+  keptBytes(): number {
+    return this.residentBytes() - (this.sizedTotal - this.liveOnlyTotal);
+  }
+
   /**
-   * Removes the oldest complete live-only items until at most `keep` live-only items remain, skeleton and body: nothing can
-   * rebuild them, so their place in the sequence goes with them. An open item is never removed: the next append would
-   * recreate it with only the new text. Returns the keys removed.
+   * Removes the oldest complete live-only items until at most `keep` live-only items and `keepBytes` of them remain, skeleton
+   * and body: nothing can rebuild them, so their place in the sequence goes with them. An open item is never removed: the next
+   * append would recreate it with only the new text. Returns the keys removed.
    */
-  dropOldestLiveOnly(keep: number): string[] {
-    const excess = this.liveOnlyCount - Math.max(0, keep);
-    const doomed = new Set(this.items.filter(item => item.liveOnly && item.state === 'complete').slice(0, Math.max(0, excess)).map(item => item.itemKey));
+  dropOldestLiveOnly(keep: number, keepBytes = Number.POSITIVE_INFINITY): string[] {
+    let count = this.liveOnlyCount;
+    let bytes = this.liveOnlyBytes();
+    const doomed = new Set<string>();
+    for (const item of this.items) {
+      if (count <= Math.max(0, keep) && bytes <= keepBytes) break;
+      if (!item.liveOnly || item.state !== 'complete') continue;
+      doomed.add(item.itemKey);
+      count -= 1;
+      bytes -= this.sizes.get(item.itemKey) ?? 0;
+    }
     if (doomed.size === 0) return [];
     const remaining = this.items.filter(item => !doomed.has(item.itemKey));
     this.items.length = 0;
@@ -316,39 +329,37 @@ export class SessionJournal {
 
   /**
    * Compares the Controller's newest window of native history with the journal and brings the journal to it with the least
-   * change: `unchanged` when it already holds the window, `appended` when the window only adds items at the end, otherwise
-   * one `replaced` epoch that carries the live-only items. The window is trimmed first to the newest items that fit
-   * `roomBytes`; items older than the journal's first shared item are not a change, because older history is not
-   * uploaded until it is asked for. A journal that is missing rows is always replaced.
+   * change: `unchanged` when it already holds the window, `appended` when the window only adds items at the end and they
+   * fit `roomBytes`, otherwise one `replaced` epoch that carries the live-only items. Items older than the journal's first
+   * shared item are not a change, because older history is not uploaded until it is asked for. A journal that is missing
+   * rows is always replaced. The caller has checked that the window and the live-only items fit the room.
    */
   sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number }): SyncResult {
     if (this.duplicate(publication)) return { outcome: 'unchanged' };
     this.requireDistinct(window);
-    const fixed = this.residentBytes() - (this.sizedTotal - this.liveOnlyTotal);
-    let budget = options.roomBytes - fixed;
-    let start = window.length;
-    while (start > 0) {
-      const size = utf8ByteLength(JSON.stringify(window[start - 1]));
-      if (size > budget) break;
-      budget -= size;
-      start -= 1;
-    }
-    const kept = window.slice(start);
-    const extension = this.incomplete ? undefined : this.extensionOf(kept);
+    const extension = this.incomplete ? undefined : this.extensionOf(window);
     if (extension && extension.length === 0) {
       this.advance(publication);
       return { outcome: 'unchanged' };
     }
-    if (extension && this.residentBytes() + extension.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0) <= options.roomBytes) {
+    if (extension && this.residentBytes() + this.extensionBytes(window)! <= options.roomBytes) {
       this.advance(publication);
       const rows = extension.map(item => {
-        const created = this.completeItem(this.meta.epoch, item, this.meta.nextSeq);
-        this.insertLast(created);
+        this.insertLast(this.completeItem(this.meta.epoch, item, this.meta.nextSeq));
         return stampRow(this.meta.epoch, this.meta.nextSeq++, item.row);
       });
       return { outcome: 'appended', rows };
     }
-    return { outcome: 'replaced', epoch: this.rebuild(publication, kept), trimmed: start };
+    return { outcome: 'replaced', epoch: this.rebuild(publication, window) };
+  }
+
+  /**
+   * How many bytes `sync` would append for `window`: zero when the journal already holds it, and undefined when the window
+   * replaces the journal instead. The Relay makes body room for this before it syncs.
+   */
+  extensionBytes(window: readonly JournalItemInput[]): number | undefined {
+    const extension = this.incomplete ? undefined : this.extensionOf(window);
+    return extension?.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0);
   }
 
   /**

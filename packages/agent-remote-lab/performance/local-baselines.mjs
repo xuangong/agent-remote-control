@@ -491,7 +491,7 @@ const scenarios = {
     });
     const relay = await relayDiagnostics(startedAt);
     const attaches = controllerLog(startedAt);
-    const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `copilot:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay) }));
+    const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `copilot:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay, attaches) }));
     return { method: 'One Copilot session: 10 reloads, 10 releases then a reload, 5 Controller restarts (pnpm local up --no-build) then a reload, 5 interruptions (a turn cancelled through session cancel, then a release and a reload). After each: the Relay windows since the previous step, and a full native read compared with the messages the page shows after scrolling to the start (the hole check).',
       label: options.label ?? null, address: session.address, thresholds: mixThresholds(described), controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
       steps: described.map(({ kind, windows, holes, sample }) => ({ kind, windows, holes, answeredBy: sample.answeredBy, pageBytes: sample.pageBytes, readyMs: sample.readyMs })) };

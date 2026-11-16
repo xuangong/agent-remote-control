@@ -1,6 +1,6 @@
 // Turns the result files of local-baselines.mjs into one table per target and a verdict per criterion:
 //   node packages/agent-remote-lab/performance/summarize-p1d.mjs .tmp/s4
-// It reads `<dir>/<arm>-<condition>.json` for the arms control, s4a and s4a-crude and the conditions 1x, 4x, rtt100 and 4x-rtt100,
+// It reads `<dir>/<arm>-<condition>.json` for the arms control, s4a, s4a-crude, s4b and s4b-crude and the conditions 1x, 4x, rtt100 and 4x-rtt100,
 // and prints the P0 figure beside them. A sample of a journal arm that was not served from the Relay's journal is excluded from
 // every statistic; the crude arm keeps every sample and reports the ones that were journal-served nevertheless.
 // A cell states a percentile only from 20 samples (10 for the conditions that restart the instance for every sample); with
@@ -11,13 +11,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { reportable } from './journal-measurement.mjs';
 
-export const ARMS = ['control', 's4a', 's4a-crude'];
+export const ARMS = ['control', 's4a', 's4a-crude', 's4b', 's4b-crude'];
 export const CONDITIONS = [['1x', 'no emulation'], ['4x', '4x CPU'], ['rtt100', '100 ms round trip'], ['4x-rtt100', '4x CPU and 100 ms round trip']];
 const cell = value => value === null || value === undefined ? 'n/a' : String(value);
 
 /** The samples that count for an arm: journal arms use only journal-served samples, the crude arm uses all of them. */
 export function usable(arm, samples) {
-  return arm === 's4a-crude' ? samples : samples.filter(sample => sample.journalServed === true);
+  return arm.endsWith('-crude') ? samples : samples.filter(sample => sample.journalServed === true);
 }
 
 /** A statistic as a table cell: the percentiles from the minimum count, the maximum and the count below it. */
@@ -96,7 +96,7 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
   }).filter(item => item.used);
   table('T6: a forced replacement (the Relay recorded a `changed` or `open_item` window; other samples are not counted)', ['Arm', 'Condition', 'Samples (forced/used/all)', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Draft changed', 'Focus lost (editor disabled while reconnecting)', 'Anchor lost', 'Anchor shift max (px)', 'Verdict'],
     // The crude path has no journal windows to name a replacement: every restart replaces the Controller's own epoch, so every sample counts.
-    forced.map(({ entry, used: own }) => { const result = replacementResult(entry.arm === 's4a-crude' ? own.kept.map(sample => ({ ...sample, replacementForced: true })) : own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.focusLost, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
+    forced.map(({ entry, used: own }) => { const result = replacementResult(entry.arm.endsWith('-crude') ? own.kept.map(sample => ({ ...sample, replacementForced: true })) : own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.focusLost, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
 
   const release = valid.map(entry => ({ entry, used: used(entry, 'runtime-release') ?? used(entry, 'release-continuity') })).filter(item => item.used);
   table('T6: a runtime release', ['Arm', 'Condition', 'Samples used', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Verdict'],
@@ -110,10 +110,37 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
       ...switches.map(({ entry, own }) => [entry.arm, entry.name, own.cold.shownMs, own.warm.shownMs, `${cell(own.cold.httpApi)} / ${cell(own.warm.httpApi)}`, `${cell(own.cold.openingStates)} / ${cell(own.warm.openingStates)}`, `${cell(own.cold.rowlessStates)} / ${cell(own.warm.rowlessStates)}`, verdictOf(own.warm.shownMs <= own.cold.shownMs)])]);
 
   const opens = valid.map(entry => ({ entry, used: used(entry, 'open-known') })).filter(item => item.used);
+  const p0Known = condition => p0(condition === '4x' ? 'p0-local-4x.json' : 'p0-local-1x-a.json')?.scenarios?.['open-known']?.reload;
   if (opens.length) {
-    table('T1: a conversation opened before (reloads)', ['Arm', 'Condition', 'Samples used', 'Content since mount, ms', 'Content since attach, ms', 'Opening-label states (max)', 'Row-less states since mount (max)'],
-      opens.map(({ entry, used: own }) => [entry.arm, entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentSinceMountMs), 20), figure(own.kept.map(sample => sample.contentSinceAttachMs), 20),
-        Math.max(0, ...own.kept.map(sample => sample.openingLabelFrames ?? 0)), Math.max(0, ...own.kept.map(sample => sample.rowlessFramesSinceMount ?? 0))]));
+    table('T1: a conversation opened before (reloads; criterion 0 opening-label states, 0 row-less states, content within 100 ms p95 at 4x CPU)', ['Arm', 'Condition', 'Samples used', 'Content since mount, ms', 'Content since navigation, ms', 'Opening-label states (max)', 'Opening-word states (max)', 'Row-less states since mount (max)'],
+      [['P0', 'no emulation', cell(p0Known('1x')?.contentMs?.n), 'n/a', figure([], 1).replace(/max .*/, `${cell(p0Known('1x')?.contentMs?.p50)} / ${cell(p0Known('1x')?.contentMs?.p95)}`), 'n/a', 'n/a', 'n/a'],
+        ['P0', '4x CPU', cell(p0Known('4x')?.contentMs?.n), 'n/a', `${cell(p0Known('4x')?.contentMs?.p50)} / ${cell(p0Known('4x')?.contentMs?.p95)}`, 'n/a', 'n/a', 'n/a'],
+        ...opens.map(({ entry, used: own }) => [entry.arm, entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentSinceMountMs), 10), figure(own.kept.map(sample => sample.contentMs), 10),
+          Math.max(0, ...own.kept.map(sample => sample.openingLabelFrames ?? 0)), Math.max(0, ...own.kept.map(sample => sample.openingWordFrames ?? 0)), Math.max(0, ...own.kept.map(sample => sample.rowlessFramesSinceMount ?? 0))])]);
+  }
+
+  const fresh = valid.map(entry => ({ entry, used: used(entry, 'open-fresh') })).filter(item => item.used);
+  if (fresh.length) {
+    const p0Fresh = (file, key) => p0(file)?.scenarios?.['open-fresh']?.summary?.[key];
+    table('T2: a conversation opened on a device with no stored content (criterion 500 ms p50 and 1,500 ms p95 at 4x CPU and 100 ms; no slower than the control at p50; at least 20 journal-served samples)', ['Arm', 'Condition', 'Samples used (journal-served/all)', 'Content since navigation, ms (p50 / p95)', 'Content since attach, ms (p50 / p95)'],
+      [['P0', '4x CPU', cell(p0Fresh('p0-local-4x.json', 'contentMs')?.n), `${cell(p0Fresh('p0-local-4x.json', 'contentMs')?.p50)} / ${cell(p0Fresh('p0-local-4x.json', 'contentMs')?.p95)}`, 'n/a'],
+        ...fresh.map(({ entry, used: own }) => [entry.arm, entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentMs), 20), figure(own.kept.map(sample => sample.contentSinceAttachMs), 20)])]);
+  }
+
+  const returns = valid.flatMap(entry => ['hidden-short', 'hidden-long', 'hidden-dead'].map(name => ({ entry, name, used: used(entry, name) }))).filter(item => item.used);
+  if (returns.length) {
+    const p0Return = p0('p0-local-1x-a.json')?.scenarios?.['hidden-short']?.summary;
+    table('Return: hidden, then shown again (criterion at most 2 HTTP requests while the sockets are alive, 0 opening-label states, current within 1 s p95; a dead socket is recorded without a budget)', ['Arm', 'Condition', 'Scenario', 'Samples used', 'HTTP API requests (min / max)', 'Requests by endpoint (largest sample)', 'Opening-label / word / row-less states (max)', 'Current, ms (p50 / p95)', 'Verdict'],
+      [['P0', 'no emulation', 'hidden-short', cell(p0Return?.n), `${cell(p0Return?.httpApi?.p50)} / ${cell(p0Return?.httpApi?.max)}`, '14 on every return (see S4b plan section 4)', 'n/a', 'n/a', 'n/a'],
+        ...returns.map(({ entry, name, used: own }) => {
+          const counts = own.kept.map(sample => sample.requests?.httpApi).filter(Number.isFinite);
+          const largest = [...own.kept].sort((a, b) => (b.requests?.httpApi ?? 0) - (a.requests?.httpApi ?? 0))[0];
+          const endpoints = largest ? Object.entries(largest.requests.httpByEndpoint ?? {}).map(([endpoint, count]) => `${endpoint.replace('/u/:user/v1/', '')}${count > 1 ? ' x' + count : ''}`).join(', ') : '';
+          const labels = Math.max(0, ...own.kept.map(sample => sample.openingLabelFrames ?? 0)), words = Math.max(0, ...own.kept.map(sample => sample.openingWordFrames ?? 0)), rowless = Math.max(0, ...own.kept.map(sample => sample.rowlessFrames ?? 0));
+          const alive = name !== 'hidden-dead';
+          return [entry.arm, entry.name, name, sampleCount(own), counts.length ? `${Math.min(...counts)} / ${Math.max(...counts)}` : 'n/a', endpoints || 'n/a', `${labels} / ${words} / ${rowless}`, figure(own.kept.map(sample => sample.currentMs), 10),
+            !alive ? 'recorded' : own.kept.length ? verdictOf(Math.max(0, ...counts) <= 2 && labels === 0) : 'no samples'];
+        })]);
   }
   return lines.join('\n');
 }

@@ -345,6 +345,9 @@ async function waitForState(handle, predicate, label, ms = actionMs) {
 // first label, placeholder or message. They are counts, never clock thresholds.
 const OPENING_LABELS = ['Opening session', 'Loading conversation', 'Awaiting Agent', 'Start with a Provider'];
 const showsOpening = state => [...state.labels, ...state.loading].some(text => OPENING_LABELS.some(label => text.includes(label)));
+// S4b also counts the other connection words that give way to a session's last business label while rows are held.
+const OPENING_WORDS = [...OPENING_LABELS, 'Synchronizing', 'Checking access'];
+const showsOpeningWord = state => [...state.labels, ...state.loading, ...state.control].some(text => OPENING_WORDS.some(label => text.includes(label)));
 const openSummary = (capture, start) => {
   const content = firstAt(capture.states, state => state.messages > 0);
   const ready = firstAt(capture.states, isReady);
@@ -358,6 +361,7 @@ const openSummary = (capture, start) => {
     contentSinceMountMs: content !== undefined && mounted !== undefined ? content - mounted : null,
     contentSinceAttachMs: content !== undefined && attachMs !== null && attachMs !== undefined ? content - attachMs : null,
     openingLabelFrames: sinceMount.filter(showsOpening).length,
+    openingWordFrames: sinceMount.filter(showsOpeningWord).length,
     rowlessFramesSinceMount: sinceMount.filter(state => state.entries === 0).length,
     blockedUntilMs: capture.states.filter(isBlocked).at(-1) ? (capture.states.filter(isBlocked).at(-1).t) : 0,
     states: stateSummary(capture.states, 0, settledAt),
@@ -483,6 +487,8 @@ const scenarios = {
   },
   // T3 short: hidden for the short duration, a turn started from the command line meanwhile.
   'hidden-short': () => hiddenScenario(hiddenShortMs, false),
+  // The sockets die while the page is hidden (the proxy closes every WebSocket): the return reopens them and every list refetches once. Recorded without a budget.
+  'hidden-dead': () => hiddenScenario(hiddenShortMs, false, true),
   // T3 long: hidden and frozen (as Chromium does to a long hidden tab) for the long duration.
   'hidden-long': () => hiddenScenario(hiddenLongMs, true),
   async 'send-resident'() { return sendScenario(false); },
@@ -813,17 +819,23 @@ async function approveToolAndWait(session) {
   throw new Error(`The long tool of ${session.address} did not start`);
 }
 
-async function hiddenScenario(hiddenMs, freeze) {
+async function hiddenScenario(hiddenMs, freeze, closeSockets = false) {
+  if (closeSockets && !proxy) throw new Error('hidden-dead needs the latency proxy: pass --rtt.');
   return inContext(async context => {
     const samples = [];
     // One session of each provider the instance has.
     const targets = [...new Set(sessions.map(item => item.provider))].map(provider => byProvider(provider)[0]);
     for (let i = 0; i < Math.max(1, reps - (freeze ? 1 : 0)); i++) for (const session of targets) {
       const handle = await instrument(context);
+      const metaBefore = journalMeta(session);
       await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
       await waitForState(handle, isReady, `ready ${session.address}`);
+      // Whether the session is read from the Relay's journal is known from this open: a return opens no new stream.
+      const opened = await handle.capture(Date.now());
+      const served = journalServed({ signal: journalSignal, itemKeysEchoed: opened.itemKeysEchoed, pageEpochs: opened.pageEpochs, metaBefore, metaAfter: journalMeta(session) });
       const before = (await handle.page.evaluate(() => window.__baseline.read())).assistant;
       await handle.page.evaluate(() => window.__baseline.setHidden(true));
+      if (closeSockets) proxy.closeWebSockets();
       const cdp = freeze ? handle.cdp : undefined;
       if (cdp) await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
       await delay(Math.min(3000, hiddenMs / 4));
@@ -847,7 +859,10 @@ async function hiddenScenario(hiddenMs, freeze) {
       await delay(600);
       const capture = await handle.capture(start);
       const blocking = stateSummary(capture.states, 0, Math.max(readyMs ?? 0, currentMs ?? 0, 1));
-      samples.push({ address: session.address, provider: session.provider, hiddenMs, frozen: freeze, alreadyCurrentOnReturn: alreadyCurrent,
+      samples.push({ address: session.address, provider: session.provider, hiddenMs, frozen: freeze, socketsClosed: closeSockets, alreadyCurrentOnReturn: alreadyCurrent,
+        journalServed: served,
+        openingLabelFrames: capture.states.filter(showsOpening).length, openingWordFrames: capture.states.filter(showsOpeningWord).length,
+        rowlessFrames: capture.states.filter(state => state.entries === 0).length,
         currentMs, readyMs, blockingStates: Object.fromEntries(Object.entries(blocking).filter(([key]) => /placeholder|control|composer: disabled|no messages|label: (?!Ready|Working)/.test(key))),
         requests: capture.requests, consoleErrors: capture.consoleErrors });
       await handle.page.close();

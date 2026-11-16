@@ -104,3 +104,28 @@ describe('the summary', () => {
     expect(text).not.toMatch(/100 ms round trip \| 1\/1/);
   });
 });
+
+describe('the S4b tables', () => {
+  const returned = (requests: number, labels = 0) => ({ journalServed: true, currentMs: 12, openingLabelFrames: labels, openingWordFrames: labels, rowlessFrames: 0,
+    requests: { httpApi: requests, httpByEndpoint: { 'GET /auth/status': 1, 'POST /u/:user/v1/session-reads': 1, ...(requests > 2 ? { 'GET /u/:user/v1/favorites': requests - 2 } : {}) } } });
+  it('passes a return only within two requests and with no opening label, and records a dead socket without a verdict', () => {
+    const directory = temporary();
+    write(directory, 'control-1x.json', { scenarios: { 'hidden-short': { samples: [returned(14), returned(14)] } } });
+    write(directory, 's4b-1x.json', { scenarios: { 'hidden-short': { samples: [returned(2), returned(2)] }, 'hidden-dead': { samples: [returned(14)] } } });
+    write(directory, 's4b-4x.json', { scenarios: { 'hidden-short': { samples: [returned(2), returned(2, 1)] } } });
+    const text = summarize(directory, directory);
+    expect(text).toMatch(/\| control \| no emulation \| hidden-short \| 2\/2 \| 14 \/ 14 \|.*\| miss \|/);
+    expect(text).toMatch(/\| s4b \| no emulation \| hidden-short \| 2\/2 \| 2 \/ 2 \| GET \/auth\/status, POST session-reads \| 0 \/ 0 \/ 0 \|.*\| pass \|/);
+    expect(text).toMatch(/\| s4b \| no emulation \| hidden-dead \| 1\/1 \| 14 \/ 14 \|.*\| recorded \|/);
+    expect(text).toMatch(/\| s4b \| 4x CPU \| hidden-short \| 2\/2 \| 2 \/ 2 \|.*\| miss \|/);
+  });
+
+  it('reports T1 content from mount with the opening-label and row-less maxima, and T2 from navigation and from attach', () => {
+    const directory = temporary();
+    const opened = (contentSinceMountMs: number, labels: number) => ({ journalServed: true, contentMs: contentSinceMountMs + 5, contentSinceMountMs, contentSinceAttachMs: 40, openingLabelFrames: labels, openingWordFrames: labels, rowlessFramesSinceMount: 0 });
+    write(directory, 's4b-4x.json', { scenarios: { 'open-known': { samples: [opened(30, 0), opened(50, 0)], navigationSamples: [] }, 'open-fresh': { samples: [opened(300, 0), { ...opened(400, 0), journalServed: false }] } } });
+    const text = summarize(directory, directory);
+    expect(text).toMatch(/\| s4b \| 4x CPU \| 2\/2 \| max 50 \(n=2\) \| max 55 \(n=2\) \| 0 \| 0 \| 0 \|/);
+    expect(text).toMatch(/\| s4b \| 4x CPU \| 1\/2 \| max 305 \(n=1\) \| max 40 \(n=1\) \|/);
+  });
+});

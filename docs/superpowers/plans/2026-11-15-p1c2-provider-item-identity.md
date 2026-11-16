@@ -1,3 +1,5 @@
+> **Superseded by [S3: the first journal provider](2026-11-16-s3-first-journal-provider.md).** Kept for its findings and its "Research for the relaxed contract"; its tasks are replaced.
+
 # P1-C2 Provider item identity Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -19,7 +19,6 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   const anchor = useRef<ReadingAnchor>();
   const expectedScroll = useRef<number>();
   const lastScrollTop = useRef(0);
-  const lastViewportHeight = useRef(0);
   const draggingScrollbar = useRef(false);
   const touchY = useRef<number>();
   const currentIdentity = useRef<string>();
@@ -101,6 +100,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   }
 
   function updatePosition(): void {
+    let anchorRestored = true;
     const viewport = viewportRef.current;
     if (!viewport || !isVisible.current || !viewport.clientHeight) return;
     if (following.current) {
@@ -114,7 +114,12 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
         const textTop = saved.text ? readingTextTop(entry, saved.text) : undefined;
         const adjustment = (textTop ?? entry.getBoundingClientRect().top) - viewport.getBoundingClientRect().top
           - (textTop !== undefined ? saved.text!.top : saved.offset);
-        if (Math.abs(adjustment) > 1) viewport.scrollTop += adjustment;
+        if (Math.abs(adjustment) > 1) {
+          const target = viewport.scrollTop + adjustment;
+          viewport.scrollTop = target;
+          // A write past the end of the scroll range is clamped by the browser and leaves the line displaced.
+          anchorRestored = Math.abs(viewport.scrollTop - target) <= 1;
+        }
       } else if (viewport.querySelector('[data-entry-key]')) {
         // The row the reader was on is gone: a replacement kept only a window that starts after it. The reader lands on the
         // window's first row, and older history reads from there as before.
@@ -126,10 +131,9 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     }
     expectedScroll.current = viewport.scrollTop;
     lastScrollTop.current = viewport.scrollTop;
-    lastViewportHeight.current = viewport.clientHeight;
-    // A reader's line is taken from their own scrolling (`onScroll`), not again from a position this function restored in the middle of a
-    // layout change; taking it again would keep the displacement.
-    if (following.current || !anchor.current) captureAnchor();
+    // A reader's line is taken again only from a position that restored it: a clamped write (the viewport grew or shrank at the end of
+    // the scroll range) leaves the line displaced, and taking that for the new line would keep the displacement.
+    if (following.current || !anchor.current || anchorRestored) captureAnchor();
     updateLatest(viewport);
   }
   const updateRef = useRef(updatePosition);
@@ -194,9 +198,6 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     const viewport = viewportRef.current;
     if (!viewport || !isVisible.current || !viewport.clientHeight) return;
     if (expectedScroll.current !== undefined && Math.abs(viewport.scrollTop - expectedScroll.current) < 1) return;
-    // A viewport that changed height (a notice or the composer growing) scrolls without a reading gesture: put the reader's line back
-    // instead of taking the displaced position for the new one.
-    if (lastViewportHeight.current && viewport.clientHeight !== lastViewportHeight.current) { updateRef.current(); return; }
     if (following.current) {
       // Browser focus and viewport resizing can scroll without a reading gesture.
       if (!draggingScrollbar.current || viewport.scrollTop >= lastScrollTop.current) {

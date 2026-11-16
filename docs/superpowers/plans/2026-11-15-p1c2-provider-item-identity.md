@@ -202,3 +202,63 @@ Expected: PASS, and a compatibility digest that verifies.
 - **Completion markers add empty rows.** An empty-body row per completed text item adds a row to the Controller's timeline and the journal's sequence. The merge makes them invisible in pages, but they cost a sequence number each.
 - **Window and `turnId`.** OpenCode's partial page has no turn ids until the boundary is loaded; if a reread of a partial page and a live run disagree on the first turn's `turnId`, the journal's retention windows move.
 - **Keys by ordinal.** OpenCode text parts are keyed by ordinal, which is stable only while content appends. A native edit that inserts a part would shift ordinals; it is a genuine rewrite and `replace` is the right answer.
+
+## Research for the relaxed contract (2026-11-16)
+
+The P1-C2 plan rewrite paused when the owner approved "replace when in doubt" (roadmap S2). Under the relaxed contract an adapter must provide stable item keys, completion marks and live-only marks. Content no longer has to be byte-identical between the live run and the reread. The findings below were verified against real runtimes or scripted servers. They feed the S3 plan.
+
+**Copilot**
+- Keys:
+  - user `user:<event.id>`;
+  - assistant `assistant:<messageId>`;
+  - tool `tool:<toolCallId>`;
+  - interaction `interaction:<requestId>`, the same key live and from history;
+  - compaction `compaction:<start event id>`.
+- Missing completion: assistant text equal to what was streamed produces no row. Add an empty-body completion row. Reasoning is the same.
+- Live-only: reasoning (`reasoningId`, absent from history), todo, and the adapter's own diagnostics.
+
+**Claude**
+- Keys:
+  - assistant text `assistant:<message.id>:<block index>`, and reasoning likewise;
+  - tool `tool:<tool_use_id>`;
+  - todo `todo:<tool_use_id>`;
+  - plain user messages `user:<uuid>`.
+- Missing completion: a full record that follows streamed text produces no row. Add an empty body. The `tool_use` row does not complete the item; the `tool_result` row does.
+- Live-only: compaction loading and boundary rows, approvals and questions, and the synthetic output of local commands (`model: '<synthetic>'`).
+
+**OpenCode**
+- Keys: the existing source-key bases are stable native ids:
+  - user, shell and compaction `message:<id>`;
+  - text and reasoning `part:<message>:<index>`;
+  - tool `part:<message>:tool:<partId>`.
+- Missing completion: text that ends with its message without a content change produces no row. Add an empty body. Compaction and tools already change state.
+- Live-only: interaction receipts and unsupported-form errors.
+
+**Codex**
+- Keys: `item.id` is the same live and in history. It is prefixed by type: `user:`, `assistant:` (plan included), `reasoning:`, `tool:`, `comm:`, `compaction:`, `image:`, and `turn-error:<turnId>`.
+- Missing completion: text equal to the streamed content produces no row. Add an empty body.
+- Live-only:
+  - interactions;
+  - the todo from `turn/plan/updated`;
+  - errors without a turn;
+  - `thread/compacted`;
+  - unsupported or invalid notifications.
+
+**Gaps that are about keys.** These have no common native id, so the relaxed contract does not remove them:
+- Claude: input folded into a running turn has a steer uuid live and an attachment uuid in the transcript. The `[Request interrupted…]` and `local-command-stdout` notices also differ in uuid. A key from a text hash plus an ordinal is the workable option.
+- Claude: a compaction leaves the SDK history with only the compacted chain. That is a real rewrite and is handled by a replacement.
+- Codex: plan mode hides the plan item live, but history returns it. Showing it live as well changes behaviour and needs the owner's confirmation.
+- Correction items (Codex, Copilot and Claude) do not exist in history, so they have no key. Under S2 such an item simply disappears at the next replacement.
+
+**Gaps that are only about content.** The relaxed contract no longer requires closing these:
+- Claude: a tool result's `tool_use_result` is missing from the SDK history.
+- Claude: wrapper text of slash commands, and the `messageId` of folded input.
+- Codex: multi-part reasoning lacks `\n\n` separators.
+- Codex: field differences between `item/completed` and history items.
+- Copilot: an approval's scope falls back to `once` in history.
+
+**Risks**
+- Claude: a reread after `/compact` triggers a replacement.
+- OpenCode: no test covers a change of compaction type, or a `turnId` change on a partial page.
+
+The paused worker's verified probes were left in `/tmp/c2probe` (a copy of HEAD).

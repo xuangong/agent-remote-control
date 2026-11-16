@@ -59,6 +59,14 @@ describe('items of the Controller timeline', () => {
     expect(merged).toMatchObject({ itemKey: 'a', providerId: 'fake', turnId: 'turn-1', resources: [{ resourceId: 'r1' }, { resourceId: 'r2' }] });
     expect(merged.sourceKey).toMatch(/^source:\d+$/);
   });
+
+  it('keeps the time, source, turn and live-only mark of the first row, whatever the later rows say', () => {
+    const first = row('a', 'x', { turnId: 'turn-first', identity: { key: 'a', liveOnly: true } });
+    const last = row('a', 'y', { turnId: 'turn-last', identity: { key: 'a', completes: true } });
+    const merged = mergedRow(groupItems([first, last])[0]!);
+    expect(merged).toMatchObject({ sourceKey: first.sourceKey, occurredAt: first.occurredAt, turnId: 'turn-first', liveOnly: true });
+    expect(mergedRow(groupItems([row('b', 'plain')])[0]!)).not.toHaveProperty('liveOnly');
+  });
 });
 
 describe('what the wire accepts', () => {

@@ -4829,8 +4829,10 @@ async function connect(options: { acknowledge: boolean | 1; journal: boolean }) 
   closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
   let asked: string | null = null;
   let relaySocket: WebSocket | undefined;
+  let connections = 0;
   const received: Array<Record<string, unknown>> = [];
   server.on('connection', (socket, request) => {
+    connections += 1;
     asked = new URL(request.url!, 'http://relay').searchParams.get('journal');
     relaySocket = socket;
     socket.on('message', data => {
@@ -4848,7 +4850,7 @@ async function connect(options: { acknowledge: boolean | 1; journal: boolean }) 
     ...(options.journal ? { journal: { available: writer => { available.push(writer); }, receive: message => { messages.push(message); } } } : {}) });
   closeables.push(() => client.close());
   await client.ready;
-  return { client, available, messages, received, asked: () => asked, relaySocket: () => relaySocket! };
+  return { client, available, messages, received, connections: () => connections, asked: () => asked, relaySocket: () => relaySocket! };
 }
 
 describe('the journal grant on the Host uplink', () => {
@@ -4902,13 +4904,34 @@ describe('the journal grant on the Host uplink', () => {
     expect(available[1]).toBeUndefined();
     expect(available[2]).toBeDefined();
   });
+
+  it('hands over nothing the Controller itself sends, even when the Relay echoes it', async () => {
+    const { messages, relaySocket } = await connect({ acknowledge: true, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' }));
+    await delay(50);
+    expect(messages).toEqual([]);
+  });
+
+  it('ends a connection on which the Relay sends journal messages that were never granted, and connects again', async () => {
+    const { connections, messages, relaySocket } = await connect({ acknowledge: false, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 1, cursor: { epoch: 'epoch-1', seq: 1 } }));
+    await until(() => connections() >= 2);
+    expect(messages).toEqual([]);
+  });
+
+  it('ends a connection whose repeated registration disagrees about the journal grant', async () => {
+    const { available, relaySocket } = await connect({ acknowledge: true, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
+    await until(() => available.length >= 3);
+    expect(available[1]).toBeUndefined();
+  });
 });
 ```
 
 - [ ] **Step 2: Run it and see it fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/transport/remote-host-uplink-journal.test.ts --testTimeout=10000`
-Expected: FAIL, 5 of the 6 tests (`journal` is not an option, so the client never asks for it).
+Expected: FAIL, 5 of the 9 tests (`journal` is not an option, so the client never asks for it).
 
 - [ ] **Step 3: Implement.** In `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts`, import the message type:
 
@@ -5051,7 +5074,7 @@ export interface RemoteHostUplinkDiagnostic {
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/transport/remote-host-uplink-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all (the relay package: 438 tests).
+Expected: PASS for all (the relay package: 441 tests).
 
 - [ ] **Step 5: Commit.**
 
@@ -5064,7 +5087,7 @@ git commit -m "feat(relay): let the Host uplink client ask for the journal grant
 
 The first two modules of the publisher are pure: they turn the Controller's rows into journal items and entries (`journal-items.ts`), and compare a reread of the timeline with the item index the Relay holds to say what to publish (`journal-reconcile.ts`). Nothing here talks to the Relay.
 
-Two rules are worth stating. An item under the reserved `controller:` key prefix is the Controller's own and live-only, whatever its rows say (Decision 17). `planPublication` checks every item against the wire limits before it compares anything, and names the refused ones in `refused` for the publisher's diagnostic, because a refused item left in the comparison would make a timeline that holds it look like a rewrite on every reconcile.
+Three rules follow from the core. Live-only items are left out of the order comparison and compared by key, because the core carries them through a replacement and passes over them when it compares. An empty reread or an empty block is never a replacement, which would wipe the journal. A correction states the live-only mark itself (`correct` sets it from the row). Two rules are worth stating. An item under the reserved `controller:` key prefix is the Controller's own and live-only, whatever its rows say (Decision 17). `planPublication` checks every item against the wire limits before it compares anything, and names the refused ones in `refused` for the publisher's diagnostic, because a refused item left in the comparison would make a timeline that holds it look like a rewrite on every reconcile.
 
 **Files:**
 - Modify: `packages/agent-host/package.json`
@@ -5153,6 +5176,14 @@ describe('items of the Controller timeline', () => {
     ])[0]!);
     expect(merged).toMatchObject({ itemKey: 'a', providerId: 'fake', turnId: 'turn-1', resources: [{ resourceId: 'r1' }, { resourceId: 'r2' }] });
     expect(merged.sourceKey).toMatch(/^source:\d+$/);
+  });
+
+  it('keeps the time, source, turn and live-only mark of the first row, whatever the later rows say', () => {
+    const first = row('a', 'x', { turnId: 'turn-first', identity: { key: 'a', liveOnly: true } });
+    const last = row('a', 'y', { turnId: 'turn-last', identity: { key: 'a', completes: true } });
+    const merged = mergedRow(groupItems([first, last])[0]!);
+    expect(merged).toMatchObject({ sourceKey: first.sourceKey, occurredAt: first.occurredAt, turnId: 'turn-first', liveOnly: true });
+    expect(mergedRow(groupItems([row('b', 'plain')])[0]!)).not.toHaveProperty('liveOnly');
   });
 });
 
@@ -5281,7 +5312,8 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
   };
 }
 
-const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'probe:probe', generation: 1 } as const;
+/** The longest session key the wire accepts, so an entry measured here encodes under any real key. */
+const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1 } as const;
 
 /**
  * The bytes an entry takes on the wire, or undefined when the wire refuses it: a field over its limit, a row that is
@@ -5363,7 +5395,7 @@ export function chunkOps(ops: readonly SizedOp[]): Array<{ ops: PublishOp[]; byt
 - [ ] **Step 5: Run the test and see it pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts --testTimeout=10000`
-Expected: PASS (13 tests).
+Expected: PASS (14 tests).
 
 - [ ] **Step 6: Write the failing test of the plan.** Create `packages/agent-host/src/journal-reconcile.test.ts`. `index` is what the Relay's journal reports; `items` is the reread:
 
@@ -5474,13 +5506,40 @@ describe('bringing a journal up to date', () => {
 
   it('asks for older history when none of the reread is in the journal', async () => {
     const journal = items(row('x', 'Older than the reread'));
-    expect(await planPublication(await indexOf(journal), items(row('a', 'One')), digest)).toEqual({ kind: 'gap' });
+    expect(await planPublication(await indexOf(journal), items(row('a', 'One')), digest)).toEqual({ kind: 'gap', refused: [] });
+  });
+
+  it('keeps the items it refused when asking for older history', async () => {
+    const long = 'k'.repeat(4097);
+    const journal = items(row('x', 'Older than the reread'));
+    expect(await planPublication(await indexOf(journal), items(row('a', 'One'), row(long, 'Too long')), digest)).toEqual({ kind: 'gap', refused: [long] });
   });
 
   it('compares only the newest items when the window is narrowed, and leaves the older journal items alone', async () => {
     const full = items(row('a', 'One'), row('b', 'Two'), row('c', 'Three'));
     const plan = await planPublication(await indexOf(full), full, digest, { window: 2 });
     expect(summary(plan)).toEqual([]);
+  });
+
+  it('leaves what the narrowed window does not cover out of the comparison, even when the journal lacks it', async () => {
+    const full = items(row('a', 'One'), row('b', 'Two'), row('c', 'Three'));
+    const journal = await indexOf(full.slice(1));
+    expect(summary(await planPublication(journal, full, digest, { window: 2 }))).toEqual([]);
+    expect(summary(await planPublication(journal, full, digest))).toEqual(['prepend:a']);
+  });
+
+  it('names the revision of the item, which is not its place in the journal', async () => {
+    const before = items(row('a', 'One'), row('b', 'Two'));
+    const index = (await indexOf(before)).map((entry, at) => ({ ...entry, seqStart: at + 10, seqEnd: at + 10, revision: at + 70 }));
+    const plan = await planPublication(index, items(row('a', 'One'), row('b', 'Two, extended')), digest);
+    expect(ops(plan)[0]).toMatchObject({ op: 'correct', expectedRevision: 71 });
+  });
+
+  it('publishes more than one block of older history with the block next to the journal first', async () => {
+    const big = (key: string) => row(key, 'x'.repeat(2_500_000));
+    const full = items(big('a'), big('b'), big('c'), row('d', 'Four'));
+    const plan = await planPublication(await indexOf(full.slice(3)), full, digest);
+    expect(summary(plan)).toEqual(['prepend:c', 'prepend:b', 'prepend:a']);
   });
 
   it('replaces with the newest items of the window when told to, which a quota refusal does', async () => {
@@ -5531,9 +5590,9 @@ describe('bringing a journal up to date', () => {
 
   it('says again the outcome of every background in the window, with the strongest status', async () => {
     const first = row('a', 'a');
-    first.item = { type: 'assistant_message', text: 'a', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'pending' } };
+    first.item = { type: 'assistant_message', text: 'a', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'visible' } };
     const second = row('b', 'b');
-    second.item = { type: 'assistant_message', text: 'b', messageId: 'b', background: { id: 'review-1', kind: 'review', status: 'visible' } };
+    second.item = { type: 'assistant_message', text: 'b', messageId: 'b', background: { id: 'review-1', kind: 'review', status: 'pending' } };
     const timeline = items(first, second, row('c', 'No background'));
     const continued = await planPublication(await indexOf(timeline), timeline, digest);
     expect(summary(continued)).toEqual(['outcome:review-1']);
@@ -5545,6 +5604,134 @@ describe('bringing a journal up to date', () => {
   it('builds the replacement a gap that could not be closed calls for', async () => {
     const timeline = items(row('a', 'One'), row('b', 'Two'));
     expect(summary(await replacementPlan(timeline, digest, 'gap'))).toEqual(['replace:a,b']);
+  });
+});
+```
+
+Round trips against a real `SessionJournal` are the proof that a plan, once published, leaves nothing to publish. Create `packages/agent-host/src/journal-reconcile.journal.test.ts`:
+
+<!-- write: packages/agent-host/src/journal-reconcile.journal.test.ts -->
+```ts
+import { itemDigest, SessionJournal, type JournalIndexEntry } from '@orchardworks/agent-remote-journal';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { describe, expect, it } from 'vitest';
+
+import { groupItems, mergedRow, type TimelineItem } from './journal-items.js';
+import { planPublication, type PlanOptions, type PublicationPlan } from './journal-reconcile.js';
+
+let seq = 0;
+const row = (key: string, text: string, identity: CanonicalTimelineRow['identity'] = { key, completes: true }): CanonicalTimelineRow => ({
+  epoch: 'e', seq: ++seq, providerId: 'fake', sourceKey: `source:${seq}`, occurredAt: 1_725_000_000_000 + seq, timestamp: new Date(1_725_000_000_000 + seq).toISOString(),
+  turnId: 'turn-1', item: { type: 'assistant_message', text, messageId: key }, resources: [], ...(identity ? { identity } : {}),
+});
+const done = (key: string, text = key) => row(key, text);
+const open = (key: string, text = key) => row(key, text, { key });
+const kept = (key: string, text = key) => row(key, text, { key, completes: true, liveOnly: true });
+const digest = (item: TimelineItem) => itemDigest(mergedRow(item).item);
+
+/** A real journal, written to by publishing plans as the Relay applies them. */
+function relay() {
+  const journal = SessionJournal.create('host-1:fake:session-1', 'epoch-1');
+  const { generation } = journal.claim('controller-1');
+  const next = () => ({ publisherId: 'controller-1', generation, sequence: (journal.publisher?.watermark ?? 0) + 1 });
+  const apply = (plan: PublicationPlan): void => {
+    if (plan.kind === 'gap') throw new Error('Unexpected gap.');
+    for (const { op } of [...plan.ops, ...(plan.kind === 'continue' ? plan.older : [])]) {
+      if (op.op === 'append') journal.append(next(), op.row);
+      else if (op.op === 'complete') journal.complete(next(), op.itemKey, op.digest);
+      else if (op.op === 'seal') journal.seal(next(), op.itemKey);
+      else if (op.op === 'correct') journal.correct(next(), op.row, op.digest, op.expectedRevision);
+      else if (op.op === 'replace') journal.replace(next(), op.items, 1_725_000_000_000);
+      else if (op.op === 'prepend') journal.prepend(next(), op.items);
+      else if (op.op === 'outcome') journal.outcome(next(), op.background);
+    }
+  };
+  /** One reconcile: the Controller rereads, plans against the index the Relay holds, and publishes the plan. */
+  const reconcile = async (reread: CanonicalTimelineRow[], options?: PlanOptions) => {
+    const plan = await planPublication(journal.index() as JournalIndexEntry[], groupItems(reread), digest, options);
+    apply(plan);
+    return plan;
+  };
+  const keys = () => journal.index().map(entry => entry.itemKey);
+  return { journal, reconcile, keys };
+}
+
+const opsOf = (plan: PublicationPlan) => plan.kind === 'continue' ? [...plan.ops, ...plan.older].map(({ op }) => op.op) : plan.kind === 'replace' ? plan.ops.map(({ op }) => op.op) : ['gap'];
+
+const isStable = async (fixture: ReturnType<typeof relay>, reread: CanonicalTimelineRow[], options?: PlanOptions) => opsOf(await fixture.reconcile(reread, options));
+const seed = async (...rows: CanonicalTimelineRow[]) => { const fixture = relay(); await fixture.reconcile(rows); return fixture; };
+
+describe('a journal that is planned against again after a plan was published', () => {
+  it('stays put after a rewrite that leaves an older open item and a live-only item behind', async () => {
+    const fixture = await seed(kept('q'), open('o'), done('a'), done('b'));
+    expect(await fixture.reconcile([done('b'), done('a')])).toMatchObject({ kind: 'replace', reason: 'reordered' });
+    expect(fixture.keys()).toEqual(['q', 'o', 'b', 'a']);
+    expect(await isStable(fixture, [done('b'), done('a')])).toEqual([]);
+  });
+
+  it('stays put after a replacement that keeps a live-only item the reread still holds', async () => {
+    const fixture = await seed(done('a'), kept('q'), open('o'), done('b'));
+    expect(await fixture.reconcile([done('b'), kept('q'), done('a')])).toMatchObject({ kind: 'replace' });
+    expect(await isStable(fixture, [done('b'), kept('q'), done('a')])).toEqual([]);
+  });
+
+  it('stays put after a narrowed quota window carried a live-only item to the front, and when the window widens', async () => {
+    const full = [done('a'), kept('q'), done('b'), done('c')];
+    const fixture = await seed(...full);
+    expect(await fixture.reconcile(full, { forceReplace: true, window: 2 })).toMatchObject({ kind: 'replace', reason: 'quota' });
+    expect(fixture.keys()).toEqual(['q', 'b', 'c']);
+    expect(await isStable(fixture, full, { window: 2 })).toEqual([]);
+    expect(opsOf(await fixture.reconcile(full))).toEqual(['prepend']);
+    expect(fixture.keys()).toEqual(['a', 'q', 'b', 'c']);
+    expect(await isStable(fixture, full)).toEqual([]);
+  });
+
+  it('stays put after older history that holds a provider live-only item was prepended', async () => {
+    const fixture = await seed(kept('q'), done('b'), done('c'));
+    expect(opsOf(await fixture.reconcile([done('a'), kept('q'), done('b'), done('c')]))).toEqual(['prepend']);
+    expect(fixture.keys()).toEqual(['a', 'q', 'b', 'c']);
+    expect(await isStable(fixture, [done('a'), kept('q'), done('b'), done('c')])).toEqual([]);
+    expect(opsOf(await fixture.reconcile([done('z'), done('a'), kept('q'), done('b'), done('c')]))).toEqual(['prepend']);
+    expect(await isStable(fixture, [done('z'), done('a'), kept('q'), done('b'), done('c')])).toEqual([]);
+  });
+
+  it('keeps the live-only mark of an item that completed while the Controller was away', async () => {
+    const fixture = await seed(done('a'), { ...open('q', 'Asked'), identity: { key: 'q', liveOnly: true } });
+    expect(fixture.journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ state: 'open', liveOnly: true });
+    const plan = await fixture.reconcile([done('a'), kept('q', 'Asked, and answered')]);
+    expect(opsOf(plan)).toEqual(['correct']);
+    expect(fixture.journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ state: 'complete', liveOnly: true });
+    expect(await isStable(fixture, [done('a'), kept('q', 'Asked, and answered')])).toEqual([]);
+    // The Relay restarts and the journal is restored from its state: the item is still carried.
+    const restored = new SessionJournal(structuredClone(fixture.journal.state()));
+    expect(restored.index().find(entry => entry.itemKey === 'q')).toMatchObject({ liveOnly: true });
+  });
+
+  it('lets a native copy take over an item the journal held alone', async () => {
+    const fixture = await seed(done('a'), open('o'), done('b'));
+    await fixture.reconcile([done('b'), done('a')]);
+    expect(fixture.journal.index().find(entry => entry.itemKey === 'o')).toMatchObject({ liveOnly: true, state: 'complete' });
+    expect(opsOf(await fixture.reconcile([done('b'), done('a'), done('o')]))).toEqual(['correct']);
+    expect(fixture.journal.index().find(entry => entry.itemKey === 'o')).toMatchObject({ liveOnly: false, state: 'complete' });
+    expect(await isStable(fixture, [done('b'), done('a'), done('o')])).toEqual([]);
+  });
+
+  it('never wipes a journal with an empty reread, a forced replacement of an empty window or items the wire refuses', async () => {
+    const fixture = await seed(done('a'), done('b'));
+    expect(await fixture.reconcile([])).toMatchObject({ kind: 'continue', ops: [], older: [] });
+    expect(await fixture.reconcile([], { forceReplace: true })).toMatchObject({ kind: 'continue', ops: [] });
+    expect(await fixture.reconcile([done('k'.repeat(4097))], { forceReplace: true })).toMatchObject({ kind: 'continue', ops: [], refused: ['k'.repeat(4097)] });
+    expect(fixture.keys()).toEqual(['a', 'b']);
+    expect(fixture.journal.index().every(entry => entry.state === 'complete' && !entry.liveOnly)).toBe(true);
+  });
+
+  it('numbers the revision of a correction from the item, not from its place', async () => {
+    const fixture = await seed(done('a'), done('b'));
+    await fixture.reconcile([done('a'), done('b', 'changed once')]);
+    const plan = await planPublication(fixture.journal.index() as JournalIndexEntry[], groupItems([done('a'), done('b', 'changed twice')]), digest);
+    const entry = fixture.journal.index().find(item => item.itemKey === 'b')!;
+    expect(entry.revision).not.toBe(entry.seqStart);
+    expect(plan.kind === 'continue' && plan.ops[0]?.op).toMatchObject({ op: 'correct', expectedRevision: entry.revision });
   });
 });
 ```
@@ -5579,7 +5766,7 @@ export type PublicationPlan =
   /** The newest items as a new epoch, with the outcomes of their backgrounds. Older items follow as older history once the journal is opened again. */
   | { kind: 'replace'; reason: ReplaceReason; ops: SizedOp[]; refused: string[] }
   /** None of the reread is in the journal: older history must be read before a decision. */
-  | { kind: 'gap' };
+  | { kind: 'gap'; refused: string[] };
 
 export interface PlanOptions {
   /** Compare only the newest `window` items of the reread. A quota refusal narrows it. */
@@ -5628,12 +5815,12 @@ export function outcomeOps(items: readonly TimelineItem[]): SizedOp[] {
   });
 }
 
-/** A replacement from the newest items that fit one message. An empty reread has nothing to replace with. */
+/** A replacement from the newest items that fit one message. With nothing to replace with, which would wipe the journal, nothing is published. */
 export async function replacementPlan(timeline: readonly TimelineItem[], digest: Digest, reason: ReplaceReason): Promise<PublicationPlan> {
   const { block, keys, refused } = await newestItems(timeline, digest);
   const op: PublishOp = { op: 'replace', items: block };
-  const bytes = entryBytes(op);
-  if (bytes === undefined) return { kind: 'replace', reason, ops: [], refused };
+  const bytes = block.length === 0 ? undefined : entryBytes(op);
+  if (bytes === undefined) return { kind: 'continue', ops: [], older: [], refused };
   const included = new Set(keys);
   return { kind: 'replace', reason, ops: [{ op, bytes }, ...outcomeOps(timeline.filter(item => included.has(item.key)))], refused };
 }
@@ -5653,16 +5840,21 @@ export async function planPublication(
   const { refused } = await sizedItems(windowed, takeDigest);
   const refusedKeys = new Set(refused);
   const items = windowed.filter(item => !refusedKeys.has(item.key));
-  const named = (plan: PublicationPlan): PublicationPlan => plan.kind === 'gap' ? plan : { ...plan, refused: [...new Set([...refused, ...plan.refused])] };
+  const named = (plan: PublicationPlan): PublicationPlan => ({ ...plan, refused: [...new Set([...refused, ...plan.refused])] }) as PublicationPlan;
 
+  // An empty reread says nothing about the journal; it is never a replacement.
+  if (items.length === 0) return named({ kind: 'continue', ops: [], older: [], refused: [] });
   if (options.forceReplace) return named(await replacementPlan(items, takeDigest, 'quota'));
   if (index.length === 0) {
-    return named(items.length === 0 ? { kind: 'continue', ops: [], older: [], refused: [] } : await replacementPlan(items, takeDigest, 'initial'));
+    return named(await replacementPlan(items, takeDigest, 'initial'));
   }
+  // The core carries live-only items through a replacement and passes over them when it compares, so their place in the
+  // order is not evidence of anything. They are compared by key instead.
+  const held = new Map(index.filter(entry => entry.liveOnly).map(entry => [entry.itemKey, entry]));
   const candidates = [];
-  for (const item of items) candidates.push({ itemKey: item.key, digest: item.complete ? await takeDigest(item) : OPEN_DIGEST });
-  const plan = planReconcile(index, candidates);
-  if (plan.kind === 'gap') return { kind: 'gap' };
+  for (const item of items) if (!held.has(item.key)) candidates.push({ itemKey: item.key, digest: item.complete ? await takeDigest(item) : OPEN_DIGEST });
+  const plan = candidates.length === 0 ? { kind: 'continue' as const, prepend: [], append: [], correct: [], abandon: [] } : planReconcile(index, candidates);
+  if (plan.kind === 'gap') return { kind: 'gap', refused };
   if (plan.kind === 'replace') return named(await replacementPlan(items, takeDigest, plan.reason));
 
   const byKey = new Map(items.map(item => [item.key, item]));
@@ -5683,6 +5875,13 @@ export async function planPublication(
     older.push({ op: { op: 'prepend', items: block }, bytes: block.reduce((sum, { row }) => sum + (sizeOf.get(row.itemKey) ?? 0), 0) });
   }
   const unaccepted = [...prepended.refused];
+  for (const item of items) {
+    const entry = held.get(item.key);
+    if (!entry) continue;
+    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === item.liveOnly;
+    if (current) continue;
+    if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
+  }
   for (const key of plan.correct) {
     const item = byKey.get(key) as TimelineItem;
     if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: revisions.get(key) as number })) unaccepted.push(key);
@@ -5701,12 +5900,12 @@ export async function planPublication(
 - [ ] **Step 9: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts src/journal-reconcile.test.ts --testTimeout=10000`, then the package (`pnpm --filter @orchardworks/agent-remote-controller run test`, 1507 tests) and its typecheck, then `pnpm compatibility:update` and `pnpm compatibility:check` after `git add` of the new files.
-Expected: PASS (32 tests in the two files).
+Expected: PASS (14 tests in `journal-items.test.ts`, 23 in `journal-reconcile.test.ts`, 8 in `journal-reconcile.journal.test.ts`).
 
 - [ ] **Step 10: Commit.**
 
 ```bash
-git add packages/agent-remote-lab/compatibility.json packages/agent-host/package.json pnpm-lock.yaml packages/agent-host/src/journal-items.ts packages/agent-host/src/journal-items.test.ts packages/agent-host/src/journal-reconcile.ts packages/agent-host/src/journal-reconcile.test.ts
+git add packages/agent-remote-lab/compatibility.json packages/agent-host/package.json pnpm-lock.yaml packages/agent-host/src/journal-reconcile.journal.test.ts packages/agent-host/src/journal-items.ts packages/agent-host/src/journal-items.test.ts packages/agent-host/src/journal-reconcile.ts packages/agent-host/src/journal-reconcile.test.ts
 git commit -m "feat(host): turn the Controller's timeline into journal items, and plan what a reopened journal needs" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

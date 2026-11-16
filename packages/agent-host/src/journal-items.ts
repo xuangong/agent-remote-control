@@ -64,7 +64,8 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
   };
 }
 
-const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'probe:probe', generation: 1 } as const;
+/** The longest session key the wire accepts, so an entry measured here encodes under any real key. */
+const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1 } as const;
 
 /**
  * The bytes an entry takes on the wire, or undefined when the wire refuses it: a field over its limit, a row that is

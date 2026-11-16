@@ -103,13 +103,40 @@ describe('bringing a journal up to date', () => {
 
   it('asks for older history when none of the reread is in the journal', async () => {
     const journal = items(row('x', 'Older than the reread'));
-    expect(await planPublication(await indexOf(journal), items(row('a', 'One')), digest)).toEqual({ kind: 'gap' });
+    expect(await planPublication(await indexOf(journal), items(row('a', 'One')), digest)).toEqual({ kind: 'gap', refused: [] });
+  });
+
+  it('keeps the items it refused when asking for older history', async () => {
+    const long = 'k'.repeat(4097);
+    const journal = items(row('x', 'Older than the reread'));
+    expect(await planPublication(await indexOf(journal), items(row('a', 'One'), row(long, 'Too long')), digest)).toEqual({ kind: 'gap', refused: [long] });
   });
 
   it('compares only the newest items when the window is narrowed, and leaves the older journal items alone', async () => {
     const full = items(row('a', 'One'), row('b', 'Two'), row('c', 'Three'));
     const plan = await planPublication(await indexOf(full), full, digest, { window: 2 });
     expect(summary(plan)).toEqual([]);
+  });
+
+  it('leaves what the narrowed window does not cover out of the comparison, even when the journal lacks it', async () => {
+    const full = items(row('a', 'One'), row('b', 'Two'), row('c', 'Three'));
+    const journal = await indexOf(full.slice(1));
+    expect(summary(await planPublication(journal, full, digest, { window: 2 }))).toEqual([]);
+    expect(summary(await planPublication(journal, full, digest))).toEqual(['prepend:a']);
+  });
+
+  it('names the revision of the item, which is not its place in the journal', async () => {
+    const before = items(row('a', 'One'), row('b', 'Two'));
+    const index = (await indexOf(before)).map((entry, at) => ({ ...entry, seqStart: at + 10, seqEnd: at + 10, revision: at + 70 }));
+    const plan = await planPublication(index, items(row('a', 'One'), row('b', 'Two, extended')), digest);
+    expect(ops(plan)[0]).toMatchObject({ op: 'correct', expectedRevision: 71 });
+  });
+
+  it('publishes more than one block of older history with the block next to the journal first', async () => {
+    const big = (key: string) => row(key, 'x'.repeat(2_500_000));
+    const full = items(big('a'), big('b'), big('c'), row('d', 'Four'));
+    const plan = await planPublication(await indexOf(full.slice(3)), full, digest);
+    expect(summary(plan)).toEqual(['prepend:c', 'prepend:b', 'prepend:a']);
   });
 
   it('replaces with the newest items of the window when told to, which a quota refusal does', async () => {
@@ -160,9 +187,9 @@ describe('bringing a journal up to date', () => {
 
   it('says again the outcome of every background in the window, with the strongest status', async () => {
     const first = row('a', 'a');
-    first.item = { type: 'assistant_message', text: 'a', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'pending' } };
+    first.item = { type: 'assistant_message', text: 'a', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'visible' } };
     const second = row('b', 'b');
-    second.item = { type: 'assistant_message', text: 'b', messageId: 'b', background: { id: 'review-1', kind: 'review', status: 'visible' } };
+    second.item = { type: 'assistant_message', text: 'b', messageId: 'b', background: { id: 'review-1', kind: 'review', status: 'pending' } };
     const timeline = items(first, second, row('c', 'No background'));
     const continued = await planPublication(await indexOf(timeline), timeline, digest);
     expect(summary(continued)).toEqual(['outcome:review-1']);

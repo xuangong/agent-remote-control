@@ -19,7 +19,7 @@ export type PublicationPlan =
   /** The newest items as a new epoch, with the outcomes of their backgrounds. Older items follow as older history once the journal is opened again. */
   | { kind: 'replace'; reason: ReplaceReason; ops: SizedOp[]; refused: string[] }
   /** None of the reread is in the journal: older history must be read before a decision. */
-  | { kind: 'gap' };
+  | { kind: 'gap'; refused: string[] };
 
 export interface PlanOptions {
   /** Compare only the newest `window` items of the reread. A quota refusal narrows it. */
@@ -68,12 +68,12 @@ export function outcomeOps(items: readonly TimelineItem[]): SizedOp[] {
   });
 }
 
-/** A replacement from the newest items that fit one message. An empty reread has nothing to replace with. */
+/** A replacement from the newest items that fit one message. With nothing to replace with, which would wipe the journal, nothing is published. */
 export async function replacementPlan(timeline: readonly TimelineItem[], digest: Digest, reason: ReplaceReason): Promise<PublicationPlan> {
   const { block, keys, refused } = await newestItems(timeline, digest);
   const op: PublishOp = { op: 'replace', items: block };
-  const bytes = entryBytes(op);
-  if (bytes === undefined) return { kind: 'replace', reason, ops: [], refused };
+  const bytes = block.length === 0 ? undefined : entryBytes(op);
+  if (bytes === undefined) return { kind: 'continue', ops: [], older: [], refused };
   const included = new Set(keys);
   return { kind: 'replace', reason, ops: [{ op, bytes }, ...outcomeOps(timeline.filter(item => included.has(item.key)))], refused };
 }
@@ -93,16 +93,21 @@ export async function planPublication(
   const { refused } = await sizedItems(windowed, takeDigest);
   const refusedKeys = new Set(refused);
   const items = windowed.filter(item => !refusedKeys.has(item.key));
-  const named = (plan: PublicationPlan): PublicationPlan => plan.kind === 'gap' ? plan : { ...plan, refused: [...new Set([...refused, ...plan.refused])] };
+  const named = (plan: PublicationPlan): PublicationPlan => ({ ...plan, refused: [...new Set([...refused, ...plan.refused])] }) as PublicationPlan;
 
+  // An empty reread says nothing about the journal; it is never a replacement.
+  if (items.length === 0) return named({ kind: 'continue', ops: [], older: [], refused: [] });
   if (options.forceReplace) return named(await replacementPlan(items, takeDigest, 'quota'));
   if (index.length === 0) {
-    return named(items.length === 0 ? { kind: 'continue', ops: [], older: [], refused: [] } : await replacementPlan(items, takeDigest, 'initial'));
+    return named(await replacementPlan(items, takeDigest, 'initial'));
   }
+  // The core carries live-only items through a replacement and passes over them when it compares, so their place in the
+  // order is not evidence of anything. They are compared by key instead.
+  const held = new Map(index.filter(entry => entry.liveOnly).map(entry => [entry.itemKey, entry]));
   const candidates = [];
-  for (const item of items) candidates.push({ itemKey: item.key, digest: item.complete ? await takeDigest(item) : OPEN_DIGEST });
-  const plan = planReconcile(index, candidates);
-  if (plan.kind === 'gap') return { kind: 'gap' };
+  for (const item of items) if (!held.has(item.key)) candidates.push({ itemKey: item.key, digest: item.complete ? await takeDigest(item) : OPEN_DIGEST });
+  const plan = candidates.length === 0 ? { kind: 'continue' as const, prepend: [], append: [], correct: [], abandon: [] } : planReconcile(index, candidates);
+  if (plan.kind === 'gap') return { kind: 'gap', refused };
   if (plan.kind === 'replace') return named(await replacementPlan(items, takeDigest, plan.reason));
 
   const byKey = new Map(items.map(item => [item.key, item]));
@@ -123,6 +128,13 @@ export async function planPublication(
     older.push({ op: { op: 'prepend', items: block }, bytes: block.reduce((sum, { row }) => sum + (sizeOf.get(row.itemKey) ?? 0), 0) });
   }
   const unaccepted = [...prepended.refused];
+  for (const item of items) {
+    const entry = held.get(item.key);
+    if (!entry) continue;
+    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === item.liveOnly;
+    if (current) continue;
+    if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
+  }
   for (const key of plan.correct) {
     const item = byKey.get(key) as TimelineItem;
     if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: revisions.get(key) as number })) unaccepted.push(key);

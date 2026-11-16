@@ -20,8 +20,10 @@ async function connect(options: { acknowledge: boolean | 1; journal: boolean }) 
   closeables.push(() => new Promise<void>(resolve => { for (const socket of server.clients) socket.terminate(); server.close(() => resolve()); }));
   let asked: string | null = null;
   let relaySocket: WebSocket | undefined;
+  let connections = 0;
   const received: Array<Record<string, unknown>> = [];
   server.on('connection', (socket, request) => {
+    connections += 1;
     asked = new URL(request.url!, 'http://relay').searchParams.get('journal');
     relaySocket = socket;
     socket.on('message', data => {
@@ -39,7 +41,7 @@ async function connect(options: { acknowledge: boolean | 1; journal: boolean }) 
     ...(options.journal ? { journal: { available: writer => { available.push(writer); }, receive: message => { messages.push(message); } } } : {}) });
   closeables.push(() => client.close());
   await client.ready;
-  return { client, available, messages, received, asked: () => asked, relaySocket: () => relaySocket! };
+  return { client, available, messages, received, connections: () => connections, asked: () => asked, relaySocket: () => relaySocket! };
 }
 
 describe('the journal grant on the Host uplink', () => {
@@ -92,5 +94,26 @@ describe('the journal grant on the Host uplink', () => {
     await until(() => available.length === 3);
     expect(available[1]).toBeUndefined();
     expect(available[2]).toBeDefined();
+  });
+
+  it('hands over nothing the Controller itself sends, even when the Relay echoes it', async () => {
+    const { messages, relaySocket } = await connect({ acknowledge: true, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' }));
+    await delay(50);
+    expect(messages).toEqual([]);
+  });
+
+  it('ends a connection on which the Relay sends journal messages that were never granted, and connects again', async () => {
+    const { connections, messages, relaySocket } = await connect({ acknowledge: false, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 1, cursor: { epoch: 'epoch-1', seq: 1 } }));
+    await until(() => connections() >= 2);
+    expect(messages).toEqual([]);
+  });
+
+  it('ends a connection whose repeated registration disagrees about the journal grant', async () => {
+    const { available, relaySocket } = await connect({ acknowledge: true, journal: true });
+    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
+    await until(() => available.length >= 3);
+    expect(available[1]).toBeUndefined();
   });
 });

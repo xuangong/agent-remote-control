@@ -4,7 +4,7 @@ import { WebSocket } from 'ws';
 
 import {
   successionAuthorityKey, decodeRemoteHostUplinkMessage, REMOTE_HOST_UPLINK_VERSION, UPLINK_MAX_FRAME_BYTES,
-  type ControllerIdentity, type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
+  type ControllerIdentity, type JournalRelayMessage, type RemoteHostHeartbeat, type HostEnvironment, type PairingPurpose,
   type HostSessionStates, type PreviewRegistrationSnapshot, type TrustedSuccessionContext,
 } from '@orchardworks/agent-remote-protocol';
 
@@ -12,6 +12,11 @@ import type { AgentRemoteRelay } from '../relay.js';
 import { createRemoteHostPluginHost, type RemoteHostPluginHostOptions } from './remote-host-plugin.js';
 import type { SessionWireOperationExecutor } from '../session-wire.js';
 import { createUplinkWriter } from './uplink-writer.js';
+
+const JOURNAL_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set<JournalRelayMessage['type']>([
+  'journal_opened', 'journal_index_page', 'journal_open_refused', 'journal_ack', 'journal_refused', 'journal_fill_request', 'journal_older_request',
+]);
+const isJournalRelayMessage = (message: { type: string }): message is JournalRelayMessage => JOURNAL_RELAY_MESSAGE_TYPES.has(message.type);
 
 export interface RemoteHostUplinkDiagnostic {
   readonly event: 'connecting' | 'registered' | 'disconnected' | 'reconnect_scheduled' | 'reconnect_stopped' | 'closed';
@@ -86,6 +91,15 @@ export interface RemoteHostUplinkClientOptions {
    * may poll, claim and settle them (onAvailable), and when the Relay says a message arrived (onReady).
    */
   readonly outbox?: { onAvailable(available: boolean): void; onReady(): void };
+  /**
+   * Publishes session journals. The client asks the Relay for the grant; `available` is called with a writer once the
+   * Relay acknowledged it, with undefined when it did not and again with undefined when the connection ends, and
+   * `receive` with every journal message the Relay sends while the grant holds. The owner validates what it writes.
+   */
+  readonly journal?: {
+    available(writer: { send(json: string): void } | undefined): void;
+    receive(message: JournalRelayMessage): void;
+  };
 }
 
 export interface RemoteHostUplinkClient {
@@ -168,6 +182,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     if (options.sessionStates) { endpoint.searchParams.set('sessionStates', '1'); endpoint.searchParams.set('sessionReplyFacts', '1'); }
     if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
     if (options.outbox) endpoint.searchParams.set('outbox', '1');
+    if (options.journal) endpoint.searchParams.set('journal', '2');
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
       headers: { authorization: `Bearer ${remoteKey}` },
@@ -186,6 +201,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     let lastHeartbeatAt: number | undefined;
     let retirement: DiagnosticDetails | undefined;
     let operationScope: string | undefined;
+    let journalWriter: { send(json: string): void } | undefined;
     let successionContext: TrustedSuccessionContext | undefined;
     let unsubscribeProviders: (() => void) | undefined;
     let unsubscribePreviews: (() => void) | undefined;
@@ -218,6 +234,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     function retire(cause: DisconnectCause): void {
       if (retired) return;
       rejectTeam(); rejectOutbox();
+      if (journalWriter) { journalWriter = undefined; options.journal?.available(undefined); }
       retired = true;
       unsubscribeProviders?.(); unsubscribeProviders = undefined; unsubscribePreviews?.();
       unsubscribeStates?.(); unsubscribeStates = undefined;
@@ -295,7 +312,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
+          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (!!options.journal && decoded.value.journal === 2) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -329,6 +346,10 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           sendOutbox = decoded.value.outbox === 1 ? json => { writer.send(json); } : undefined;
           options.outbox.onAvailable(!!sendOutbox);
         }
+        if (options.journal) {
+          if (decoded.value.journal === 2) journalWriter = { send: json => { writer.send(json); } };
+          options.journal.available(journalWriter);
+        }
         if (options.providerChanges) {
           const publish = () => { if (!retired) writer.send(JSON.stringify({ uplinkVersion: 2, type: 'provider_snapshot', providers: options.providerChanges!.current() })); };
           unsubscribeProviders = options.providerChanges.subscribe(publish);
@@ -352,6 +373,11 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
           unsubscribePreviews = options.previews.subscribe(publish);
           options.previews.registered({ hostId: decoded.value.hostId, tunnelToken: decoded.value.tunnelToken });
         }
+        return;
+      }
+      if (isJournalRelayMessage(decoded.value)) {
+        if (!journalWriter) { retire({ reason: 'protocol_error' }); return; }
+        options.journal!.receive(decoded.value);
         return;
       }
       if (decoded.value.type === 'outbox_response') {

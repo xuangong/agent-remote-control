@@ -348,13 +348,49 @@ No code. The documents must describe the code of Task 10.
 
 Follow `.agents/skills/prepare-arc-local/SKILL.md`. No provider declares the journal capability, so no Controller asks for journals; this task can show no regression, nothing more.
 
-- [ ] Run `pnpm --silent local status --json`. If this checkout's instance is running, follow "Before restarting a running instance" in `references/lifecycle.md` before `up`; never stop or alter an instance or service that is not this checkout's, and never touch the user's own Controller.
-- [ ] `ARC_LOCAL_JOURNALS=1 pnpm local up` (journals on, so the Relay opens its store and the smart-reading switch route is live). If an instance `journals.sqlite` from earlier runs exists, keep it: it must load.
-- [ ] Evidence by layer (report each as verified, failed or not exercised, per `references/verification.md`): **Build** `status` commit equals `git rev-parse HEAD` after the last edit; **Site** running and signed in; **Controller** `uplink registered` and `agent-remote-controller-dev host providers` lists the expected providers enabled; **Model turn** a session created in the instance `workspace/` with `agent-remote-controller-dev` completes a real reply, read back with `session read`; **Page** a headless screenshot of that session, opened and described, with a DOM assertion on the reply text.
-- [ ] Specific no-regression facts: the Controller's `registered` has no `journal` key (it asked for none) and `pnpm local logs` shows no `journal_` diagnostic; turn smart reading on and off for one provider through the route used by `broker-journal-switch.test.ts` and confirm the session still reads on the crude path each time; no `agent_update` or interaction frame regression in the page (a question asked by a test session appears and disappears).
-- [ ] Not exercised, with the reason: journal-served reads, windows, trimming, older history through a journal (no capable provider). The real-transport tests of Tasks 6 to 9 are the evidence for them; S3 enables the first provider.
-- [ ] Release any Codex session created (`agent-remote-controller-dev session release <address>`). Leave the instance as the skill's lifecycle reference says.
-- [ ] Record: `git --no-optional-locks diff --shortstat 33b1c80c HEAD -- packages`, the `wc -l` table below with actuals, the publisher field count (at most 20), suite counts, and Gate G. Update the roadmap Progress rows to Done with this evidence; commit.
+- [x] Run `pnpm --silent local status --json`. If this checkout's instance is running, follow "Before restarting a running instance" in `references/lifecycle.md` before `up`; never stop or alter an instance or service that is not this checkout's, and never touch the user's own Controller.
+- [x] `ARC_LOCAL_JOURNALS=1 pnpm local up` (journals on, so the Relay opens its store and the smart-reading switch route is live). If an instance `journals.sqlite` from earlier runs exists, keep it: it must load.
+- [x] Evidence by layer (report each as verified, failed or not exercised, per `references/verification.md`): **Build** `status` commit equals `git rev-parse HEAD` after the last edit; **Site** running and signed in; **Controller** `uplink registered` and `agent-remote-controller-dev host providers` lists the expected providers enabled; **Model turn** a session created in the instance `workspace/` with `agent-remote-controller-dev` completes a real reply, read back with `session read`; **Page** a headless screenshot of that session, opened and described, with a DOM assertion on the reply text.
+- [x] Specific no-regression facts: the Controller's `registered` has no `journal` key (it asked for none) and `pnpm local logs` shows no `journal_` diagnostic; turn smart reading on and off for one provider through the route used by `broker-journal-switch.test.ts` and confirm the session still reads on the crude path each time; no `agent_update` or interaction frame regression in the page (a question asked by a test session appears and disappears).
+- [x] Not exercised, with the reason: journal-served reads, windows, trimming, older history through a journal (no capable provider). The real-transport tests of Tasks 6 to 9 are the evidence for them; S3 enables the first provider.
+- [x] Release any Codex session created (`agent-remote-controller-dev session release <address>`). Leave the instance as the skill's lifecycle reference says.
+- [x] Record: `git --no-optional-locks diff --shortstat 33b1c80c HEAD -- packages`, the `wc -l` table below with actuals, the publisher field count (at most 20), suite counts, and Gate G. Update the roadmap Progress rows to Done with this evidence; commit.
+
+### Task 12 record (local-instance check, 2026-11-16, HEAD dc136f2c)
+
+Local instance `im-session-service-3ea54600`, origin http://localhost:61630, started with `ARC_LOCAL_JOURNALS=1 pnpm local up`. No earlier `journals.sqlite` existed in the instance, so no older store was loaded; the Relay created a fresh one. Loading an S1-era store was not exercised.
+
+- **Build** verified: running build `dc136f2c2179` equals `git rev-parse HEAD`, checkout clean.
+- **Site** verified: running, local user signed in. **Controller** verified: uplink registered; Codex, Claude Code and GitHub Copilot enabled; OpenCode unavailable (server credentials belong to the user's Controller).
+- **Model turn** verified: a Claude Code session in the instance `workspace/` replied `LOCAL-OK`, read back with `session read`.
+- **Page** verified: headless screenshot of that session shows the user prompt and the assistant reply `LOCAL-OK`, with a DOM assertion on `.agent-message-assistant`.
+- **Registered has no `journal` key**: derived, not captured. `host.ts` adds `journal` to `registered` only when `runtime.journals.capable()`, and no production adapter declares `journal`. `pnpm local logs` and Controller diagnostics contain no `journal_` entry.
+- **Smart-reading switch** through `/v1/remote/hosts/<hostId>/smart-reading` (PUT, as in `broker-journal-switch.test.ts`): for `claude`, GET listed `[]`, then `["claude"]` after on, then `[]` after off. The session read `LOCAL-OK` on the crude path after each change.
+- **Interaction frames** verified: a Claude Code session asked a question; the page showed the question form (screenshot read); after `session answer` the form was replaced by the Answered card and the final reply `DONE-ANSWERED Blue` appeared. The scripted "hidden" wait on the question text timed out because the Answered card repeats the question text; the form's disappearance is shown by the screenshot, not by that assertion.
+- **Not exercised** (no provider is journal-capable; S3 enables the first): journal-served reads, windows, older history through a journal, trimming. Tasks 6 to 9 real-transport tests are their evidence.
+- No Codex session was created, so none to release. Instance left running.
+- Note: the instance's Controller command line showed `signed_out` for `api` and `window` after `up` (a repeated `login` did not clear it); the switch calls used `pnpm local api` instead. Unrelated to journals.
+
+Diff against 33b1c80c, `packages` only: 80 files changed, 2722 insertions(+), 4387 deletions(-).
+
+| File | Expected | Actual |
+|---|---:|---:|
+| `agent-host/src/journal-publication.ts` | about 520 | 674 |
+| `agent-host/src/journal-reconcile.ts` | about 75 | 56 |
+| `agent-host/src/journal-items.ts` | about 135 | 149 |
+| `agent-host/src/journal-publisher.ts` | about 140 | 180 |
+| `agent-remote-journal/src` (`session-journal`, `replacement`, `types`; `reconcile.ts` deleted in 29d7ff7b) | about 835 | 801 (599 + 31 + 171) |
+| `agent-remote-hosted/src/host-journals.ts` | about 590 | 628 |
+| `agent-remote-hosted/src/journal-uplink.ts` | about 215 | 242 |
+| `agent-remote-hosted/src/journal-partition.ts` | about 170 | 212 |
+| `agent-remote-hosted/src/journal-index-pages.ts` | 0 | deleted |
+| `agent-remote-hosted/src/journal-session-stream.ts` | about 510 | 526 |
+| `agent-remote-hosted/src/broker.ts` | about 2,640 | 2,719 |
+| `agent-remote-protocol/src/remote-host-journal.ts` | about 115 | 131 |
+
+Publisher mutable fields (`grep -cP` in the Task 12 bullet): 19 (limit 20).
+
+Suites at Gate S2: protocol 418, journal 186, journal-sqlite 30, relay 440, hosted 967, Controller 1607, web 893, cloudflare 239, conformance 31, lab 2801. Gate G was not rerun in this task.
 
 ### Where the lines go (expected; record actuals in Task 12)
 

@@ -106,6 +106,19 @@ describe('what the wire accepts', () => {
     expect((await newestItems(items.slice(0, 1), digest)).block).toHaveLength(1);
   });
 
+  it('counts an entry by its own bytes, so 3,000 short replies fit one block', async () => {
+    const items = groupItems(Array.from({ length: 3000 }, (_, at) => row(`k${at}`, 'Fine.', { identity: { key: `k${at}`, completes: true } })));
+    const { block } = await newestItems(items, digest);
+    expect(block).toHaveLength(3000);
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', 'Hi')])[0]!) })).toBeLessThan(1000);
+  });
+
+  it('refuses an item that only fits the wire under a short session key', () => {
+    const text = 'x'.repeat(8 * 1024 * 1024 - 1000);
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', text)])[0]!) })).toBeUndefined();
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', 'x'.repeat(8 * 1024 * 1024 - 20_000))])[0]!) })).toBeGreaterThan(8 * 1024 * 1024 - 21_000);
+  });
+
   it('chunks operations by entry count and bytes, keeping their order', () => {
     const op = (at: number): PublishOp => ({ op: 'seal', itemKey: `k${at}` });
     const many = Array.from({ length: JOURNAL_PUBLISH_MAX_ENTRIES + 5 }, (_, at) => ({ op: op(at), bytes: 100 }));

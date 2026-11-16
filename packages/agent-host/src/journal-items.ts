@@ -64,6 +64,9 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
   };
 }
 
+/** What a message carries besides its entries, under the longest session key; counted once per message. */
+export const MESSAGE_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1, entries: [] })) - 2;
+
 /** The longest session key the wire accepts, so an entry measured here encodes under any real key. */
 const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1 } as const;
 
@@ -74,7 +77,8 @@ const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publis
  */
 export function entryBytes(op: PublishOp): number | undefined {
   const encoded = encodeRemoteHostUplinkMessage({ ...PROBE, entries: [{ sequence: 1, ...op } as JournalPublishEntry] });
-  return encoded.status === 'ok' ? Buffer.byteLength(encoded.json) : undefined;
+  // The entry's own bytes and its separator: the envelope is counted once per message, not once per entry.
+  return encoded.status === 'ok' ? Buffer.byteLength(encoded.json) - MESSAGE_ENVELOPE_BYTES + 1 : undefined;
 }
 
 /** The items the wire accepts, each with its digest (none for an item still open) and size, and the keys of those it refuses. */
@@ -96,7 +100,7 @@ export function blocksOf(items: readonly SizedItem[]): JournalItemInput[][] {
   let current: JournalItemInput[] = [];
   let bytes = 0;
   for (const sized of items) {
-    if (current.length > 0 && (current.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
+    if (current.length > 0 && (current.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || MESSAGE_ENVELOPE_BYTES + bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
       blocks.push(current);
       current = [];
       bytes = 0;
@@ -119,7 +123,7 @@ export async function newestItems(items: readonly TimelineItem[], digest: (item:
     refused.push(...bad);
     const sized = accepted[0];
     if (!sized) continue;
-    if (block.length > 0 && (block.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) break;
+    if (block.length > 0 && (block.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || MESSAGE_ENVELOPE_BYTES + bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) break;
     block.unshift(sized.item);
     keys.unshift((items[at] as TimelineItem).key);
     bytes += sized.bytes;
@@ -132,7 +136,7 @@ export function chunkOps(ops: readonly SizedOp[]): Array<{ ops: PublishOp[]; byt
   const chunks: Array<{ ops: PublishOp[]; bytes: number }> = [];
   let current: { ops: PublishOp[]; bytes: number } = { ops: [], bytes: 0 };
   for (const sized of ops) {
-    if (current.ops.length > 0 && (current.ops.length >= JOURNAL_PUBLISH_MAX_ENTRIES || current.bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
+    if (current.ops.length > 0 && (current.ops.length >= JOURNAL_PUBLISH_MAX_ENTRIES || MESSAGE_ENVELOPE_BYTES + current.bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
       chunks.push(current);
       current = { ops: [], bytes: 0 };
     }

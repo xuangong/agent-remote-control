@@ -2,7 +2,7 @@ import { itemDigest, SessionJournal, type JournalIndexEntry } from '@orchardwork
 import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 import { describe, expect, it } from 'vitest';
 
-import { groupItems, mergedRow, type TimelineItem } from './journal-items.js';
+import { groupItems, mergedRow, MESSAGE_BUDGET_BYTES, type TimelineItem } from './journal-items.js';
 import { planPublication, type PlanOptions, type PublicationPlan } from './journal-reconcile.js';
 
 let seq = 0;
@@ -118,5 +118,51 @@ describe('a journal that is planned against again after a plan was published', (
     const entry = fixture.journal.index().find(item => item.itemKey === 'b')!;
     expect(entry.revision).not.toBe(entry.seqStart);
     expect(plan.kind === 'continue' && plan.ops[0]?.op).toMatchObject({ op: 'correct', expectedRevision: entry.revision });
+  });
+});
+
+describe('a replacement that leaves an older open or live-only item in front of the block it sent', () => {
+  // History longer than one message: a replacement sends only [b1, b2] and leaves the older items to a prepend.
+  const big = (key: string, share: number) => done(key, 'x'.repeat(Math.floor(MESSAGE_BUDGET_BYTES * share)));
+  const reopen = async (fixture: ReturnType<typeof relay>, reread: CanonicalTimelineRow[], times: number, options?: PlanOptions) => {
+    const kinds: string[] = [];
+    for (let at = 0; at < times; at += 1) {
+      const plan = await fixture.reconcile(reread, options);
+      kinds.push(plan.kind === 'replace' ? `replace:${plan.reason}` : plan.kind);
+    }
+    return kinds;
+  };
+
+  it('settles after a rewrite, with an open item older than the block', async () => {
+    const [p1, o, p2, p3, b1, b2] = [done('p1'), open('o'), big('p2', 0.12), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(p1, o, p2, p3, b1, b2);
+    expect(fixture.keys()).toEqual(['b1', 'b2']);
+    await fixture.reconcile([p1, o, p2, p3, b1, b2]);
+    expect(fixture.keys()).toEqual(['p1', 'o', 'p2', 'p3', 'b1', 'b2']);
+    const rewritten = [p1, o, p3, b1, b2];
+    expect(await fixture.reconcile(rewritten)).toMatchObject({ kind: 'replace', reason: 'missing' });
+    expect(fixture.keys()).toEqual(['o', 'b1', 'b2']);
+    expect(await reopen(fixture, rewritten, 4)).toEqual(['continue', 'continue', 'continue', 'continue']);
+  });
+
+  it('settles after a quota replacement, whose window holds an open item older than the block', async () => {
+    const full = [done('p0'), open('o'), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(...full);
+    await fixture.reconcile(full);
+    expect(fixture.keys()).toEqual(['p0', 'o', 'p3', 'b1', 'b2']);
+    expect(await fixture.reconcile(full, { forceReplace: true, window: 4 })).toMatchObject({ kind: 'replace', reason: 'quota' });
+    expect(fixture.keys()).toEqual(['o', 'b1', 'b2']);
+    expect(await reopen(fixture, full, 4, { window: 4 })).toEqual(['continue', 'continue', 'continue', 'continue']);
+  });
+
+  it('settles after a rewrite, with a provider live-only item older than the block', async () => {
+    const [p1, l, p2, p3, b1, b2] = [done('p1'), kept('l'), big('p2', 0.12), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(p1, l, p2, p3, b1, b2);
+    await fixture.reconcile([p1, l, p2, p3, b1, b2]);
+    expect(fixture.keys()).toEqual(['p1', 'l', 'p2', 'p3', 'b1', 'b2']);
+    const rewritten = [p1, l, p3, b1, b2];
+    expect(await fixture.reconcile(rewritten)).toMatchObject({ kind: 'replace', reason: 'missing' });
+    expect(fixture.keys()).toEqual(['l', 'b1', 'b2']);
+    expect(await reopen(fixture, rewritten, 4)).toEqual(['continue', 'continue', 'continue', 'continue']);
   });
 });

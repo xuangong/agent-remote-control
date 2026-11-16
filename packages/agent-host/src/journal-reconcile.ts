@@ -131,9 +131,17 @@ export async function planPublication(
   for (const item of items) {
     const entry = held.get(item.key);
     if (!entry) continue;
-    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === item.liveOnly;
+    // A native copy replaces what the journal held alone only where the order already agrees; elsewhere the item stays
+    // the journal's own, so that it does not look like an insertion on the next reopen.
+    let adopt = !item.liveOnly;
+    if (adopt) {
+      const trial = [];
+      for (const other of items) if (!held.has(other.key) || other.key === item.key) trial.push({ itemKey: other.key, digest: other.complete ? await takeDigest(other) : OPEN_DIGEST });
+      adopt = planReconcile(index, trial).kind === 'continue';
+    }
+    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === !adopt;
     if (current) continue;
-    if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
+    if (!add({ op: 'correct', row: { ...mergedRow(item), ...(adopt ? {} : { liveOnly: true }) }, ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
   }
   for (const key of plan.correct) {
     const item = byKey.get(key) as TimelineItem;

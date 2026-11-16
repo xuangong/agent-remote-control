@@ -5087,7 +5087,7 @@ git commit -m "feat(relay): let the Host uplink client ask for the journal grant
 
 The first two modules of the publisher are pure: they turn the Controller's rows into journal items and entries (`journal-items.ts`), and compare a reread of the timeline with the item index the Relay holds to say what to publish (`journal-reconcile.ts`). Nothing here talks to the Relay.
 
-Three rules follow from the core. Live-only items are left out of the order comparison and compared by key, because the core carries them through a replacement and passes over them when it compares. An empty reread or an empty block is never a replacement, which would wipe the journal. A correction states the live-only mark itself (`correct` sets it from the row). Two rules are worth stating. An item under the reserved `controller:` key prefix is the Controller's own and live-only, whatever its rows say (Decision 17). `planPublication` checks every item against the wire limits before it compares anything, and names the refused ones in `refused` for the publisher's diagnostic, because a refused item left in the comparison would make a timeline that holds it look like a rewrite on every reconcile.
+A native copy replaces an item the journal held alone only where the order already agrees (a trial comparison says so); elsewhere the item stays live-only, because a replacement that sends only the newest block of a long history leaves older open or live-only items in front of it, and adopting them there would alternate between a replacement and a continuation on every reopen. An entry is counted by its own bytes, and the envelope under the longest session key once per message. Three rules follow from the core. Live-only items are left out of the order comparison and compared by key, because the core carries them through a replacement and passes over them when it compares. An empty reread or an empty block is never a replacement, which would wipe the journal. A correction states the live-only mark itself (`correct` sets it from the row). Two rules are worth stating. An item under the reserved `controller:` key prefix is the Controller's own and live-only, whatever its rows say (Decision 17). `planPublication` checks every item against the wire limits before it compares anything, and names the refused ones in `refused` for the publisher's diagnostic, because a refused item left in the comparison would make a timeline that holds it look like a rewrite on every reconcile.
 
 **Files:**
 - Modify: `packages/agent-host/package.json`
@@ -5224,6 +5224,19 @@ describe('what the wire accepts', () => {
     expect((await newestItems(items.slice(0, 1), digest)).block).toHaveLength(1);
   });
 
+  it('counts an entry by its own bytes, so 3,000 short replies fit one block', async () => {
+    const items = groupItems(Array.from({ length: 3000 }, (_, at) => row(`k${at}`, 'Fine.', { identity: { key: `k${at}`, completes: true } })));
+    const { block } = await newestItems(items, digest);
+    expect(block).toHaveLength(3000);
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', 'Hi')])[0]!) })).toBeLessThan(1000);
+  });
+
+  it('refuses an item that only fits the wire under a short session key', () => {
+    const text = 'x'.repeat(8 * 1024 * 1024 - 1000);
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', text)])[0]!) })).toBeUndefined();
+    expect(entryBytes({ op: 'append', row: mergedRow(groupItems([row('a', 'x'.repeat(8 * 1024 * 1024 - 20_000))])[0]!) })).toBeGreaterThan(8 * 1024 * 1024 - 21_000);
+  });
+
   it('chunks operations by entry count and bytes, keeping their order', () => {
     const op = (at: number): PublishOp => ({ op: 'seal', itemKey: `k${at}` });
     const many = Array.from({ length: JOURNAL_PUBLISH_MAX_ENTRIES + 5 }, (_, at) => ({ op: op(at), bytes: 100 }));
@@ -5312,6 +5325,9 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
   };
 }
 
+/** What a message carries besides its entries, under the longest session key; counted once per message. */
+export const MESSAGE_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1, entries: [] })) - 2;
+
 /** The longest session key the wire accepts, so an entry measured here encodes under any real key. */
 const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1 } as const;
 
@@ -5322,7 +5338,8 @@ const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publis
  */
 export function entryBytes(op: PublishOp): number | undefined {
   const encoded = encodeRemoteHostUplinkMessage({ ...PROBE, entries: [{ sequence: 1, ...op } as JournalPublishEntry] });
-  return encoded.status === 'ok' ? Buffer.byteLength(encoded.json) : undefined;
+  // The entry's own bytes and its separator: the envelope is counted once per message, not once per entry.
+  return encoded.status === 'ok' ? Buffer.byteLength(encoded.json) - MESSAGE_ENVELOPE_BYTES + 1 : undefined;
 }
 
 /** The items the wire accepts, each with its digest (none for an item still open) and size, and the keys of those it refuses. */
@@ -5344,7 +5361,7 @@ export function blocksOf(items: readonly SizedItem[]): JournalItemInput[][] {
   let current: JournalItemInput[] = [];
   let bytes = 0;
   for (const sized of items) {
-    if (current.length > 0 && (current.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
+    if (current.length > 0 && (current.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || MESSAGE_ENVELOPE_BYTES + bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
       blocks.push(current);
       current = [];
       bytes = 0;
@@ -5367,7 +5384,7 @@ export async function newestItems(items: readonly TimelineItem[], digest: (item:
     refused.push(...bad);
     const sized = accepted[0];
     if (!sized) continue;
-    if (block.length > 0 && (block.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) break;
+    if (block.length > 0 && (block.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || MESSAGE_ENVELOPE_BYTES + bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) break;
     block.unshift(sized.item);
     keys.unshift((items[at] as TimelineItem).key);
     bytes += sized.bytes;
@@ -5380,7 +5397,7 @@ export function chunkOps(ops: readonly SizedOp[]): Array<{ ops: PublishOp[]; byt
   const chunks: Array<{ ops: PublishOp[]; bytes: number }> = [];
   let current: { ops: PublishOp[]; bytes: number } = { ops: [], bytes: 0 };
   for (const sized of ops) {
-    if (current.ops.length > 0 && (current.ops.length >= JOURNAL_PUBLISH_MAX_ENTRIES || current.bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
+    if (current.ops.length > 0 && (current.ops.length >= JOURNAL_PUBLISH_MAX_ENTRIES || MESSAGE_ENVELOPE_BYTES + current.bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) {
       chunks.push(current);
       current = { ops: [], bytes: 0 };
     }
@@ -5395,7 +5412,7 @@ export function chunkOps(ops: readonly SizedOp[]): Array<{ ops: PublishOp[]; byt
 - [ ] **Step 5: Run the test and see it pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts --testTimeout=10000`
-Expected: PASS (14 tests).
+Expected: PASS (16 tests).
 
 - [ ] **Step 6: Write the failing test of the plan.** Create `packages/agent-host/src/journal-reconcile.test.ts`. `index` is what the Relay's journal reports; `items` is the reread:
 
@@ -5616,7 +5633,7 @@ import { itemDigest, SessionJournal, type JournalIndexEntry } from '@orchardwork
 import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 import { describe, expect, it } from 'vitest';
 
-import { groupItems, mergedRow, type TimelineItem } from './journal-items.js';
+import { groupItems, mergedRow, MESSAGE_BUDGET_BYTES, type TimelineItem } from './journal-items.js';
 import { planPublication, type PlanOptions, type PublicationPlan } from './journal-reconcile.js';
 
 let seq = 0;
@@ -5732,6 +5749,52 @@ describe('a journal that is planned against again after a plan was published', (
     const entry = fixture.journal.index().find(item => item.itemKey === 'b')!;
     expect(entry.revision).not.toBe(entry.seqStart);
     expect(plan.kind === 'continue' && plan.ops[0]?.op).toMatchObject({ op: 'correct', expectedRevision: entry.revision });
+  });
+});
+
+describe('a replacement that leaves an older open or live-only item in front of the block it sent', () => {
+  // History longer than one message: a replacement sends only [b1, b2] and leaves the older items to a prepend.
+  const big = (key: string, share: number) => done(key, 'x'.repeat(Math.floor(MESSAGE_BUDGET_BYTES * share)));
+  const reopen = async (fixture: ReturnType<typeof relay>, reread: CanonicalTimelineRow[], times: number, options?: PlanOptions) => {
+    const kinds: string[] = [];
+    for (let at = 0; at < times; at += 1) {
+      const plan = await fixture.reconcile(reread, options);
+      kinds.push(plan.kind === 'replace' ? `replace:${plan.reason}` : plan.kind);
+    }
+    return kinds;
+  };
+
+  it('settles after a rewrite, with an open item older than the block', async () => {
+    const [p1, o, p2, p3, b1, b2] = [done('p1'), open('o'), big('p2', 0.12), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(p1, o, p2, p3, b1, b2);
+    expect(fixture.keys()).toEqual(['b1', 'b2']);
+    await fixture.reconcile([p1, o, p2, p3, b1, b2]);
+    expect(fixture.keys()).toEqual(['p1', 'o', 'p2', 'p3', 'b1', 'b2']);
+    const rewritten = [p1, o, p3, b1, b2];
+    expect(await fixture.reconcile(rewritten)).toMatchObject({ kind: 'replace', reason: 'missing' });
+    expect(fixture.keys()).toEqual(['o', 'b1', 'b2']);
+    expect(await reopen(fixture, rewritten, 4)).toEqual(['continue', 'continue', 'continue', 'continue']);
+  });
+
+  it('settles after a quota replacement, whose window holds an open item older than the block', async () => {
+    const full = [done('p0'), open('o'), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(...full);
+    await fixture.reconcile(full);
+    expect(fixture.keys()).toEqual(['p0', 'o', 'p3', 'b1', 'b2']);
+    expect(await fixture.reconcile(full, { forceReplace: true, window: 4 })).toMatchObject({ kind: 'replace', reason: 'quota' });
+    expect(fixture.keys()).toEqual(['o', 'b1', 'b2']);
+    expect(await reopen(fixture, full, 4, { window: 4 })).toEqual(['continue', 'continue', 'continue', 'continue']);
+  });
+
+  it('settles after a rewrite, with a provider live-only item older than the block', async () => {
+    const [p1, l, p2, p3, b1, b2] = [done('p1'), kept('l'), big('p2', 0.12), big('p3', 0.12), big('b1', 0.6), big('b2', 0.35)];
+    const fixture = await seed(p1, l, p2, p3, b1, b2);
+    await fixture.reconcile([p1, l, p2, p3, b1, b2]);
+    expect(fixture.keys()).toEqual(['p1', 'l', 'p2', 'p3', 'b1', 'b2']);
+    const rewritten = [p1, l, p3, b1, b2];
+    expect(await fixture.reconcile(rewritten)).toMatchObject({ kind: 'replace', reason: 'missing' });
+    expect(fixture.keys()).toEqual(['l', 'b1', 'b2']);
+    expect(await reopen(fixture, rewritten, 4)).toEqual(['continue', 'continue', 'continue', 'continue']);
   });
 });
 ```
@@ -5878,9 +5941,17 @@ export async function planPublication(
   for (const item of items) {
     const entry = held.get(item.key);
     if (!entry) continue;
-    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === item.liveOnly;
+    // A native copy replaces what the journal held alone only where the order already agrees; elsewhere the item stays
+    // the journal's own, so that it does not look like an insertion on the next reopen.
+    let adopt = !item.liveOnly;
+    if (adopt) {
+      const trial = [];
+      for (const other of items) if (!held.has(other.key) || other.key === item.key) trial.push({ itemKey: other.key, digest: other.complete ? await takeDigest(other) : OPEN_DIGEST });
+      adopt = planReconcile(index, trial).kind === 'continue';
+    }
+    const current = entry.state === 'complete' && item.complete && entry.digest === await takeDigest(item) && entry.liveOnly === !adopt;
     if (current) continue;
-    if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
+    if (!add({ op: 'correct', row: { ...mergedRow(item), ...(adopt ? {} : { liveOnly: true }) }, ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: entry.revision })) unaccepted.push(item.key);
   }
   for (const key of plan.correct) {
     const item = byKey.get(key) as TimelineItem;
@@ -5900,7 +5971,7 @@ export async function planPublication(
 - [ ] **Step 9: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts src/journal-reconcile.test.ts --testTimeout=10000`, then the package (`pnpm --filter @orchardworks/agent-remote-controller run test`, 1507 tests) and its typecheck, then `pnpm compatibility:update` and `pnpm compatibility:check` after `git add` of the new files.
-Expected: PASS (14 tests in `journal-items.test.ts`, 23 in `journal-reconcile.test.ts`, 8 in `journal-reconcile.journal.test.ts`).
+Expected: PASS (16 tests in `journal-items.test.ts`, 23 in `journal-reconcile.test.ts`, 11 in `journal-reconcile.journal.test.ts`).
 
 - [ ] **Step 10: Commit.**
 

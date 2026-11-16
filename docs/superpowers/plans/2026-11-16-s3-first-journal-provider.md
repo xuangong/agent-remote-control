@@ -245,3 +245,29 @@ Continuity across reopen, release and restart: Task 3 recordings. Real transport
 - **Corrections and partial-output tools replace once per session.** That is the measured cost of the relaxed contract until S4 lets the client keep unchanged rows.
 - **Production.** Declaring the capability makes a new Controller ask for `journal=1`. A Relay serves nothing without `AGENT_REMOTE_JOURNALS=1` and the Host's switch. No Controller update is required.
 - **Not in S3:** the client keys (S4), Relay-owned control (S5), Claude, Codex and OpenCode (S6), a large-session measurement (S4), backfill and observation, in-place update, history comparison beyond the window, a different eviction rule.
+
+## 7. S3 measurements
+
+Recorded 2026-11-16 on this checkout's instance (Apple M4, 16 GiB, Chromium 151, Node 22). Production code is that of `5c1cd538`; the instance ran `5c1cd538` for the first checks and `59b05441` (lab runner fixes only) for the runs. One Copilot session of about 24 items made in the instance workspace (a shell tool with an approval, a todo list, a cancelled turn). `ARC_LOCAL_JOURNALS=1` was exported for every `up` and for the runner's own restarts; a run made without it was discarded, because a restart without it turns the Relay's journals off (`PUT smart-reading` then answers 409 `journals_unavailable`). Raw JSON: `.tmp/s3-journal-reopen-mix.json`, `.tmp/s3-journal-open*.json` (not committed).
+
+**Task 6 observed.** The Controller registered with smart reading on for Copilot; `journals.sqlite` exists with mode 0600; the Controller reported no `journal_open_refused`, `journal_session_stopped`, `journal_session_unserved` or `journal_session_restarted`. The page showed the user message, text, `bash` tool, the approval (and, after "Allow once", its record), the `sql` tool, the todo board and the final reply. A release plus reload and a Controller and Relay restart plus reload kept the rows. The Copilot `session release` answered `released: false` (nothing to release).
+
+| Metric (30 opens of `journal-reopen-mix`, 3 reps of `journal-open`) | Result |
+|---|---|
+| Replacements per open, by reason | 0 replacements in 30 opens. 5 `appended` windows, one per Controller restart; 0 `unchanged` (expected `unchanged`), 0 `changed`, 0 `open_item` |
+| Bytes per open | Controller to Relay: 12,422 per restart window (the only windows). Relay to browser: p50 37.1 KB reload and release, 37.9 KB restart, 39.7 KB interruption; `journal-open` 40.5 KB (smart reading off: 33.9 KB) |
+| First-open misses | The runner counts 1 of 3 fresh opens as Controller-answered in every run, on a session of about 24 items. Its signal is a Controller attach finishing before the first message, and a 1 ms resident attach does so; that open showed its first message in 85 ms, like the journal-served ones. Treat the count as unreliable, not as a measured miss |
+| Open or interrupted item replacements | `open_item` 0 of 30 opens; 0 over the 10 release reopens and the 5 interruptions |
+| Open time `journal-open` (ready p50 / p95, ms; known, fresh) | On, throttle 1: 145 / 166, 142 / 146. On, throttle 4: 443 / 453, 389 / 398. Off, throttle 1: 155 / 164, 144 / 146. Off, throttle 4: 406 / 443, 377 / 386 |
+| Content mismatches | 0 `changed` windows; hole check found 0 missing messages in all 30 opens |
+| Fills and older requests per open | 0 and 0 |
+| Quota refusals, `journal_open_refused`, `journal_session_unserved` | 0 |
+
+**Verdicts.**
+
+- I2 (in-place update of an open item): not triggered. 0 percent `open_item` of 30 opens, none on a settled reopen.
+- M3 (history holes): not triggered. 0 of 5 interruptions with a hole. The first hole check reported every open as a hole because it compared Markdown (`alpha`) with the rendered text; the runner ignores Markdown marks now.
+- M6 (incomplete journal while waiting for older pages): not triggered on the evidence, but not proven. The "incomplete for more than 2 seconds" clause has no counter, and the first-open-miss counter is unreliable (above). After a restart the first open waited for the Controller (5.3 s once, before journals were back); that is Relay and Controller startup, not a journal gap. Left deferred; a trustworthy journal-versus-Controller signal per open is the open item for S4.
+- Drop the oldest instead of evicting bodies: not triggered. 0 fills, 0 quota refusals.
+
+**Unexpected.** (1) Every Controller restart ended in an `appended` window of 12,422 bytes, where the plan expected `unchanged`, and the rows' times in the page moved by 1 to 3 seconds after the first restart: the Controller reads Copilot's native timestamps differently from the live ones. Not a defect for correctness (no hole, no replacement), but a cost per restart that S4 should measure with real keys. (2) The page's session stream opens a Controller stream even when the journal serves the rows, so `stream_opening` does not say which side answered. (3) Smart reading on and off differ by 7 KB in page bytes and not in open time for a 24-item session, as the plan said they would for small sessions.

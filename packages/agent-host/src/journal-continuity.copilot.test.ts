@@ -36,9 +36,11 @@ describe('Copilot journal continuity, from the recordings of the real CLI', () =
   it('todos: the live-only snapshot survives the reopen and the reread holds none', async () => {
     const run = recording('todos');
     const journal = await journalOfRun(run.live);
-    expect(journal.liveOnlyKeys()).toEqual(['todo:plan']);
+    const snapshots = journal.liveOnlyKeys();
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots.every(key => key.startsWith('todo:'))).toBe(true);
     expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
-    expect(journal.liveOnlyKeys()).toEqual(['todo:plan']);
+    expect(journal.liveOnlyKeys()).toEqual(snapshots);
     expect(run.reread.some(({ event }) => event.type === 'timeline' && event.item.type === 'todo')).toBe(false);
   });
 

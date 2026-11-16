@@ -121,7 +121,7 @@ export class CopilotAgentSession implements AgentSession {
         if(selected.toolApproval&&self.info.settings?.find(setting=>setting.id==='tool_approval_mode')?.value!==selected.toolApproval) await self.setSessionSetting('tool_approval_mode',selected.toolApproval);
       }
       if (config.planning !== undefined) await self.setPlanning(config.planning);
-      await self.refreshTodos(false); await self.refreshChildren(); self.emitRuntime();
+      await self.refreshTodos(); await self.refreshChildren(); self.emitRuntime();
       self.scheduleUsageRefresh(true); void self.refreshInitialContext();
       return self;
     } catch (error) { await self.dispose(); throw error; }
@@ -181,7 +181,7 @@ export class CopilotAgentSession implements AgentSession {
       this.info.mode = event.data.newMode; this.info.planning = {active: event.data.newMode === 'plan'};
       this.updatePreparedControl({mode:event.data.newMode}); this.emitRuntime();
     }
-    if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos(true);
+    if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos();
     if (delivery === 'live' && !owner && event.type === 'session.model_change') {
       // Preserve every native transition even if the model queue drains before readback.
       this.controlsRevision++;
@@ -358,8 +358,8 @@ export class CopilotAgentSession implements AgentSession {
     if (this.info.planning?.active !== active) throw new Error('Copilot did not confirm the requested planning mode.');
     } finally {finish();}
   }
-  /** Reads the native todo list. Only a live change is announced: a snapshot taken when the session opens has no place in the history a reread returns. */
-  private refreshTodos(announce: boolean): Promise<void> {
+  /** Reads the native todo list and publishes it when it changed. Each snapshot is a live-only item of its own: history has none, and a snapshot taken at open has no place among the items a reread returns. */
+  private refreshTodos(): Promise<void> {
     this.todosRefresh = this.todosRefresh.then(async () => {
       if (this.closed) return;
       const {rows} = await this.call(this.rpc.plan.readSqlTodos(), 'Copilot todos');
@@ -370,7 +370,7 @@ export class CopilotAgentSession implements AgentSession {
       });
       const signature = JSON.stringify(items); if (signature === this.todosSignature) return;
       this.todosSignature = signature;
-      if (announce) this.emit({type: 'timeline', provider, item: {type: 'todo', items}}, {key: 'todo:plan', completes: true, liveOnly: true});
+      this.emit({type: 'timeline', provider, item: {type: 'todo', items}}, {key: `todo:${randomUUID()}`, completes: true, liveOnly: true});
     }).catch(error => this.options.onDiagnostic?.(`Copilot todos unavailable: ${String(error)}`));
     return this.todosRefresh;
   }

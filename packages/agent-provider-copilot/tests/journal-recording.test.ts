@@ -85,10 +85,14 @@ async function scrub(recording: Recording, paths: string[]): Promise<Recording> 
   return JSON.parse(text.replaceAll(homedir(), '/home/user'));
 }
 
+/** One observation per line, so a fixture is read and compared as a list of events. */
+const oneObservationPerLine = (recording: Recording): string =>
+  `{\n${(['live', 'reread'] as const).map(side => ` "${side}": [\n${recording[side].map(observation => `  ${JSON.stringify(observation)}`).join(',\n')}\n ]`).join(',\n')}\n}\n`;
+
 async function check(name: string, recording: Recording, cwd: string, home: string) {
   const path = join(FIXTURES, `${name}.json`);
   const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
-  if (RECORDING) { await mkdir(FIXTURES, {recursive: true}); await writeFile(path, JSON.stringify(clean, null, 1) + '\n'); return; }
+  if (RECORDING) { await mkdir(FIXTURES, {recursive: true}); await writeFile(path, oneObservationPerLine(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
   expect(shape(clean), `the shape of the ${name} recording`).toEqual(shape(JSON.parse(await readFile(path, 'utf8')) as Recording));
 }

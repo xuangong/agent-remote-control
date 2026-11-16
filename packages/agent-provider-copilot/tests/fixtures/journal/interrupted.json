@@ -1,140 +1,14 @@
 {
  "live": [
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:7ec4a604-da03-49ce-8d06-1ee13718e835",
-   "nativeRevision": 1,
-   "occurredAt": 1794826199426,
-   "delivery": "live",
-   "event": {
-    "type": "timeline",
-    "provider": "copilot",
-    "item": {
-     "type": "user_message",
-     "text": "Stream for long",
-     "messageId": "7ec4a604-da03-49ce-8d06-1ee13718e835"
-    },
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   },
-   "itemIdentity": {
-    "key": "user:7ec4a604-da03-49ce-8d06-1ee13718e835",
-    "completes": true
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:c210cfef-db13-43ad-a4f9-d87ac7b020ce",
-   "nativeRevision": 2,
-   "occurredAt": 1794826199427,
-   "delivery": "live",
-   "event": {
-    "type": "turn_started",
-    "provider": "copilot",
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:message:e3e4a93a-0405-4127-83e9-3498dc980b1b",
-   "nativeRevision": 4,
-   "occurredAt": 1794826199435,
-   "delivery": "live",
-   "event": {
-    "type": "timeline",
-    "provider": "copilot",
-    "item": {
-     "type": "assistant_message",
-     "text": "PARTIAL TEXT",
-     "messageId": "e3e4a93a-0405-4127-83e9-3498dc980b1b"
-    },
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   },
-   "itemIdentity": {
-    "key": "assistant:e3e4a93a-0405-4127-83e9-3498dc980b1b"
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:message:e3e4a93a-0405-4127-83e9-3498dc980b1b",
-   "nativeRevision": 5,
-   "occurredAt": 1794826199442,
-   "delivery": "live",
-   "event": {
-    "type": "timeline",
-    "provider": "copilot",
-    "item": {
-     "type": "assistant_message",
-     "text": "",
-     "messageId": "e3e4a93a-0405-4127-83e9-3498dc980b1b"
-    },
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   },
-   "itemIdentity": {
-    "key": "assistant:e3e4a93a-0405-4127-83e9-3498dc980b1b",
-    "completes": true,
-    "liveOnly": true
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:b1487788-aa8b-4114-99e1-ae94f62f44d6",
-   "nativeRevision": 6,
-   "occurredAt": 1794826199442,
-   "delivery": "live",
-   "event": {
-    "type": "turn_canceled",
-    "provider": "copilot",
-    "reason": "Native turn aborted",
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   }
-  }
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","nativeRevision":1,"occurredAt":1794829321413,"delivery":"live","event":{"type":"timeline","provider":"copilot","item":{"type":"user_message","text":"Stream for long","messageId":"ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"itemIdentity":{"key":"user:ccc26395-c2f7-4042-b476-543f1bbe9a8b","completes":true}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:4138015c-790b-4cef-b506-06334c71f220","nativeRevision":2,"occurredAt":1794829321414,"delivery":"live","event":{"type":"turn_started","provider":"copilot","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","nativeRevision":4,"occurredAt":1794829321423,"delivery":"live","event":{"type":"timeline","provider":"copilot","item":{"type":"assistant_message","text":"PARTIAL TEXT","messageId":"f1482c3f-988f-4a0a-8812-37025d2bc621"},"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"itemIdentity":{"key":"assistant:f1482c3f-988f-4a0a-8812-37025d2bc621"}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","nativeRevision":5,"occurredAt":1794829321429,"delivery":"live","event":{"type":"timeline","provider":"copilot","item":{"type":"assistant_message","text":"","messageId":"f1482c3f-988f-4a0a-8812-37025d2bc621"},"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"itemIdentity":{"key":"assistant:f1482c3f-988f-4a0a-8812-37025d2bc621","completes":true,"liveOnly":true}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:e537678f-dc57-4af8-9cbc-41cd9b5fed48","nativeRevision":6,"occurredAt":1794829321429,"delivery":"live","event":{"type":"turn_canceled","provider":"copilot","reason":"Native turn aborted","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"}}
  ],
  "reread": [
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:7ec4a604-da03-49ce-8d06-1ee13718e835",
-   "nativeRevision": 1,
-   "occurredAt": 1794826199426,
-   "delivery": "history",
-   "event": {
-    "type": "timeline",
-    "provider": "copilot",
-    "item": {
-     "type": "user_message",
-     "text": "Stream for long",
-     "messageId": "7ec4a604-da03-49ce-8d06-1ee13718e835"
-    },
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   },
-   "itemIdentity": {
-    "key": "user:7ec4a604-da03-49ce-8d06-1ee13718e835",
-    "completes": true
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:c210cfef-db13-43ad-a4f9-d87ac7b020ce",
-   "nativeRevision": 2,
-   "occurredAt": 1794826199427,
-   "delivery": "history",
-   "event": {
-    "type": "turn_started",
-    "provider": "copilot",
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   }
-  },
-  {
-   "type": "observation",
-   "sourceKey": "copilot:6292d8f3-47e6-4807-b8ac-fca94f3f3a69:b1487788-aa8b-4114-99e1-ae94f62f44d6",
-   "nativeRevision": 3,
-   "occurredAt": 1794826199442,
-   "delivery": "history",
-   "event": {
-    "type": "turn_canceled",
-    "provider": "copilot",
-    "reason": "Native turn aborted",
-    "turnId": "turn:7ec4a604-da03-49ce-8d06-1ee13718e835"
-   }
-  }
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","nativeRevision":1,"occurredAt":1794829321413,"delivery":"history","event":{"type":"timeline","provider":"copilot","item":{"type":"user_message","text":"Stream for long","messageId":"ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"itemIdentity":{"key":"user:ccc26395-c2f7-4042-b476-543f1bbe9a8b","completes":true}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:4138015c-790b-4cef-b506-06334c71f220","nativeRevision":2,"occurredAt":1794829321414,"delivery":"history","event":{"type":"turn_started","provider":"copilot","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"}},
+  {"type":"observation","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:e537678f-dc57-4af8-9cbc-41cd9b5fed48","nativeRevision":3,"occurredAt":1794829321429,"delivery":"history","event":{"type":"turn_canceled","provider":"copilot","reason":"Native turn aborted","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b"}}
  ]
 }

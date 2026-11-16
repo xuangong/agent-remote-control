@@ -52,7 +52,7 @@ export class CopilotChildSession implements AgentSession {
   }
   private project(event: SessionEvent, delivery: 'history' | 'live') {
     if (this.closed || this.seen.has(event.id) || isNativeInteraction(event)) return; this.seen.add(event.id);
-    for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event});
+    for (const projected of this.projector.projectAll(event, delivery)) this.stream.push({type: 'observation', sourceKey: `copilot:child:${this.info.nativeSessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event, ...(projected.identity ? {itemIdentity: projected.identity} : {})});
     if (delivery === 'live') {
       if (event.type === 'assistant.turn_start') this.nativeStatus = 'running';
       else if (event.type === 'assistant.idle' || event.type === 'session.idle' || event.type === 'abort') this.nativeStatus = 'idle';

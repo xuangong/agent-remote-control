@@ -132,8 +132,8 @@ export class Projector {
         const streamed = this.reasoning.get(reasoningId) ?? '';
         this.finalizedReasoning.add(reasoningId); this.reasoning.delete(reasoningId);
         if (!streamed && !content.trim()) return [];
-        // The body is what the item still lacks, or the whole content when it does not continue what streamed; history, which streamed nothing, reads the same.
-        return thought(reasoningId, content.startsWith(streamed) ? content.slice(streamed.length) : content, true);
+        // The body is what the item still lacks; a content that does not continue what streamed completes the item with nothing, as the final text of a message does.
+        return thought(reasoningId, content.startsWith(streamed) ? content.slice(streamed.length) : '', true);
       }
       case 'assistant.turn_start':
         if (this.active) return [];
@@ -152,6 +152,7 @@ export class Projector {
           ...[...this.messages.keys()].flatMap(messageId => message(messageId, `assistant:${messageId}`, `message:${messageId}`, '', true, true)),
           ...[...this.reasoning.keys()].flatMap(reasoningId => thought(reasoningId, '', true)),
         ];
+        this.messages.clear(); this.reasoning.clear();
         return [...finished, ...wrap({ type: 'turn_canceled', provider, reason: 'Native turn aborted', turnId })];
       }
       case 'session.error': this.active = false; this.inputTurnId = undefined; return wrap({ type: 'turn_failed', provider, error: event.data.message, turnId });

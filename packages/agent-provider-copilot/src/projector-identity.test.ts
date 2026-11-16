@@ -56,7 +56,7 @@ describe('the item identity of a Copilot timeline observation', () => {
     const projected = live(events);
     expect(projected.map(p => p.identity)).toEqual([{key: 'reasoning:r', liveOnly: true}, {key: 'reasoning:r', completes: true, liveOnly: true}]);
     const text = (p: Projected) => p.event.type === 'timeline' && p.event.item.type === 'reasoning' ? p.event.item.text : null;
-    expect(text(projected[1]!)).toBe('Rewritten');
+    expect(text(projected[1]!)).toBe('');
     expect(history([events[1]!]).map(text)).toEqual(['Rewritten']);
     expect(live([event('assistant.reasoning', {reasoningId: 'z', content: ' '})])).toEqual([]);
   });

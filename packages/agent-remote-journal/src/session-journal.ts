@@ -368,11 +368,11 @@ export class SessionJournal {
    * when the first difference involves an open item, `changed` when a complete item differs, is missing or is out of order.
    */
   protected extensionOf(window: readonly JournalItemInput[]): JournalItemInput[] | ReplacementReason {
-    const heldOrNew = (reason: ReplacementReason): ReplacementReason => (this.items.some(item => !item.liveOnly) ? reason : 'new');
-    if (window.length === 0) return this.items.some(item => !item.liveOnly) ? 'changed' : [];
+    const heldNative = this.items.some(item => !item.liveOnly);
+    if (window.length === 0) return heldNative ? 'changed' : [];
     const position = new Map(this.items.map((item, at) => [item.itemKey, at] as const));
     const first = window.findIndex(({ row }) => position.has(row.itemKey));
-    if (first < 0) return heldOrNew('changed');
+    if (first < 0) return heldNative ? 'changed' : 'new';
     let at = position.get((window[first] as JournalItemInput).row.itemKey) as number;
     if (first > 0 && this.items.slice(0, at).some(item => !item.liveOnly)) return 'changed';
     const windowKeys = new Set(window.map(({ row }) => row.itemKey));

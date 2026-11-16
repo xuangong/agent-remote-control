@@ -56,10 +56,10 @@ async function settled(relay: Relay): Promise<void> {
 }
 
 /** The session is released and opened again: a new manager reads the native history, and the connection comes back. */
-async function reopenFrom(relay: Relay, publisher: JournalPublisher, history: readonly ProviderObservation[]) {
+async function reopenFrom(relay: Relay, publisher: JournalPublisher, history: readonly ProviderObservation[], live: readonly ProviderObservation[] = []) {
   const before = heads(relay);
   publisher.available(undefined);
-  const run = await follow(publisher, history);
+  const run = await follow(publisher, history, { live });
   relay.connect(publisher);
   await until(() => heads(relay) > before, 'the head of the reopened journal');
   await settle(30);
@@ -132,6 +132,18 @@ describe('a recorded Copilot session that is opened again', () => {
     expect(itemWrites(relay, writes)).toEqual([]);
     expect(windows(relay).slice(-5)).toEqual(Array(5).fill('unchanged'));
     expect((await journalOf(relay)).state().items.some(value => value.liveOnly)).toBe(name !== 'compaction');
+  });
+
+  it('appends the snapshot of the todo list that the reopened session publishes when it opens, and replaces nothing', async () => {
+    const { run, relay, publisher } = await published('todos');
+    const snapshot = run.live.filter(({ itemIdentity }) => itemIdentity?.key.startsWith('todo:')).at(-1)!;
+    const keys = await keysOf(relay);
+    const epoch = (await journalOf(relay)).epoch;
+    const reported = windows(relay).length;
+    await reopenFrom(relay, publisher, run.reread, [{ ...snapshot, sourceKey: 'copilot:local:reopen', itemIdentity: { key: 'todo:reopened', completes: true, liveOnly: true } }]);
+    expect(windows(relay, reported)).toEqual(['appended']);
+    expect((await journalOf(relay)).epoch).toBe(epoch);
+    expect(await keysOf(relay)).toEqual([...keys, 'todo:reopened']);
   });
 
   describe('interrupted', () => {

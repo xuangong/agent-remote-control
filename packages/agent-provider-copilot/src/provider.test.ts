@@ -157,7 +157,7 @@ describe('Copilot native adapter', () => {
     await child.sendMessage('First'); await child.sendMessage('Second'); expect(mock.native.rpc.tasks.sendMessage.mock.calls).toEqual([[{id: 'child', message: 'First'}], [{id: 'child', message: 'Second'}]]);
     expect(mock.client.resumeSession).not.toHaveBeenCalled(); mock.handler(event('assistant.message', {messageId: 'cm2', content: 'Child live'}, {agentId: 'child'}));
     await child.dispose(); await seen.done; expect(mock.native.disconnect).not.toHaveBeenCalled();
-    expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline')).toHaveLength(2);
+    expect(seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'timeline' ? [v.itemIdentity] : [])).toEqual([{key: 'assistant:cm', completes: true}, {key: 'assistant:cm2', completes: true}]);
     expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'runtime_updated' && v.event.runtimeInfo.status === 'idle')).toBe(true); await provider.dispose();
   }, 10000);
   it('resumes native history without creating a second root and closes pending interactions on dispose', async () => {
@@ -209,6 +209,7 @@ it('cancels root approvals without retiring child approvals when SDK callback se
   await session.cancel();
   await expect(session.respondToInteraction('root-approval', {kind: 'tool_approval', decision: 'allow', scope: 'once'})).rejects.toThrow('Unknown');
   await session.respondToInteraction('child-approval', {kind: 'tool_approval', decision: 'allow', scope: 'once'});
+  mock.handler(event('permission.completed', {requestId: 'child-approval', result: {kind: 'approved'}}));
   await provider.dispose(); await seen.done;
   const retired = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event] : []);
   expect(retired.map(v => [v.requestId, v.response])).toEqual([['root-approval', {kind: 'tool_approval', decision: 'cancel'}], ['child-approval', {kind: 'tool_approval', decision: 'allow', scope: 'once'}]]);
@@ -322,6 +323,7 @@ it('derives an untagged child permission owner from native tool identity and sen
   await session.cancel();
   await session.respondToInteraction('child-permission', {kind: 'tool_approval', decision: 'allow', scope: 'once'});
   expect(mock.native.rpc.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({requestId: 'child-permission', result: {kind: 'approve-once', approvedInteractively: true}});
+  mock.handler(event('permission.completed', {requestId: 'child-permission', result: {kind: 'approved'}}));
   await provider.dispose(); await seen.done;
   const retired = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event] : []);
   expect(retired.map(e => [e.requestId, e.response])).toEqual([['root-permission', {kind: 'tool_approval', decision: 'cancel'}], ['child-permission', {kind: 'tool_approval', decision: 'allow', scope: 'once'}]]);
@@ -556,36 +558,42 @@ it('publishes native planning mode and completes identity-bound plan approval', 
   expect(await reply).toEqual({approved: true, selectedAction: 'interactive'});
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
-it('publishes a todo snapshot only for a live change, as a live-only item, and not when the session opens', async () => {
+it('publishes each todo snapshot as a live-only item of its own, including the one taken when the session opens', async () => {
  let rows: any[] = [{id: '1', title: 'Implement', status: 'in_progress'}, {id: '2', title: 'Verify', status: 'done'}];
  mock.native.rpc.plan = {readSqlTodos: vi.fn(async () => ({rows}))};
  const {provider, session} = await open(); const seen = await collect(session);
  try {
   await new Promise(r => setImmediate(r));
-  expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'todo')).toEqual([]);
-  rows = [...rows, {id: '3', title: 'Ship', status: 'pending'}]; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
-  expect(seen.values).toContainEqual(expect.objectContaining({itemIdentity: {key: 'todo:plan', completes: true, liveOnly: true}, event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}, {id: '3', text: 'Ship', completed: false, status: 'pending'}]}})}));
+  const todos = () => seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'todo' ? [{items: v.event.item.items, identity: v.itemIdentity}] : []);
+  expect(todos()).toHaveLength(1);
+  expect(todos()[0]).toMatchObject({items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}], identity: {key: expect.stringMatching(/^todo:[0-9a-f-]{36}$/), completes: true, liveOnly: true}});
   rows = []; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
-  expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: []}})}));
+  expect(todos().map(t => t.items)).toEqual([todos()[0]!.items, []]);
+  expect(new Set(todos().map(t => t.identity?.key)).size).toBe(2);
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
 
-it('tells which resolved interactions and adapter errors a reread cannot reproduce: all but a tool approval', async () => {
+it('waits, within a bound, for the native question callback that a client answered before', async () => {
  const {provider, session} = await open(); const seen = await collect(session);
  try {
-  mock.handler(event('permission.requested', {requestId: 'tool', permissionRequest: {kind: 'shell'}}));
-  mock.handler(event('permission.completed', {requestId: 'tool', result: {kind: 'approved'}}));
-  mock.handler(event('user_input.requested', {requestId: 'ask', question: 'Which?'}));
-  const answer = mock.config.onUserInputRequest({question: 'Which?'}); await new Promise(r => setImmediate(r));
-  await session.respondToInteraction('ask', {kind: 'question', answers: [{questionId: 'answer', selectedValues: [], customText: 'This'}]}); await answer;
-  mock.handler(event('exit_plan_mode.requested', {requestId: 'plan', summary: 'Plan', planContent: 'Do it', actions: ['exit_only'], recommendedAction: 'exit_only'}));
-  mock.handler(event('exit_plan_mode.completed', {requestId: 'plan', approved: true, selectedAction: 'exit_only'}));
-  await expect(mock.config.onUserInputRequest({question: 'Unknown?'})).rejects.toThrow('no unique native request identity');
+  mock.handler(event('user_input.requested', {requestId: 'early', question: 'Which?'}));
+  const answered = session.respondToInteraction('early', {kind: 'question', answers: [{questionId: 'answer', selectedValues: [], customText: 'This'}]});
+  await new Promise(r => setTimeout(r, 50));
+  const reply = mock.config.onUserInputRequest({question: 'Which?'});
+  await answered;
+  expect(await reply).toEqual({answer: 'This', wasFreeform: true});
+ } finally {await provider.dispose(); await seen.done;}
+}, 10000);
+it('takes the scope of a tool approval from the native completion, not from the order of the RPC reply and the event', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  mock.handler(event('permission.requested', {requestId: 'p', permissionRequest: {kind: 'read', path: '/workspace/file'}, promptRequest: {kind: 'read', path: '/workspace/file'}}));
+  await session.respondToInteraction('p', {kind: 'tool_approval', decision: 'allow', scope: 'session'});
+  expect(seen.values.some(v => v.type === 'observation' && v.event.type === 'interaction_resolved')).toBe(false);
+  mock.handler(event('permission.completed', {requestId: 'p', result: {kind: 'approved'}}));
   await new Promise(r => setImmediate(r));
-  const errors = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'error' ? [v.itemIdentity] : []);
-  expect(errors).toEqual([{key: expect.stringMatching(/^error:[0-9a-f-]{36}$/), completes: true, liveOnly: true}]);
-  const resolved = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [[v.event.requestId, v.itemIdentity]] : []);
-  expect(resolved).toEqual([['tool', {key: 'interaction:tool', completes: true}], ['ask', {key: 'interaction:ask', completes: true, liveOnly: true}], ['plan', {key: 'interaction:plan', completes: true, liveOnly: true}]]);
+  const resolved = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event.response] : []);
+  expect(resolved).toEqual([{kind: 'tool_approval', decision: 'allow', scope: 'once'}]);
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
 

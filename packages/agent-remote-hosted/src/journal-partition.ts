@@ -41,7 +41,7 @@ export interface JournalPartitionApi {
   fill(hostId: string, sessionKey: string, items: CompleteItemInput[], read?: JournalPartitionRead): Promise<JournalFilled>;
   page(hostId: string, sessionKey: string, request: JournalPageRequest, olderBeyondJournal: boolean): Promise<JournalPageResult | undefined>;
   status(hostId: string, sessionKey: string): Promise<JournalStatus | undefined>;
-  /** The Controller of `generation` can no longer keep the session's journal current: clears its head. A partition that reports `journal: 2` has this method. */
+  /** The Controller of `generation` can no longer keep the session's journal current: clears its head. */
   unserveHead(hostId: string, sessionKey: string, generation: number): Promise<JournalPublished | undefined>;
   /** The Host's sessions that have a head. */
   servedSessions(hostId: string): Promise<string[]>;
@@ -160,7 +160,12 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   return {
     open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems, reset }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       if (allowed && !allowed()) return { refused: 'unavailable' };
-      if (!await ensureVersion(hostId)) return { refused: 'unavailable' };
+      if (!await ensureVersion(hostId)) {
+        // The partition cannot take this Controller's journal, so the old head must not go on serving the session: streams close and read crude.
+        const wasServed = heads.served(hostId, sessionKey) === true;
+        heads.remove(hostId, sessionKey);
+        return wasServed ? { refused: 'unavailable', unserved: true } : { refused: 'unavailable' };
+      }
       const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems, ...(reset ? { reset: true as const } : {}) });
       if (opened.unserved) heads.remove(hostId, sessionKey);
       return opened;

@@ -357,6 +357,25 @@ describe('the partition contract across a rollout', () => {
   });
 });
 
+describe('a refused open of a served session', () => {
+  it('takes the session out of serving, so its streams close and read crude, and serves it again after a good open and a head', async () => {
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    await inner.open(HOST, SESSION, 'controller-1', LIMITS);
+    await inner.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
+    let broken = true;
+    const journals = createPartitionJournals({ partition: () => ({ ...inner, capabilities: async host => { if (broken) throw new Error('The Durable Object is overloaded.'); return inner.capabilities(host); } }) });
+    expect(await journals.servedSessions(HOST)).toEqual([SESSION]);
+    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable', unserved: true });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable' });
+    broken = false;
+    const opened = await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    expect(opened).toMatchObject({ generation: 2 });
+    await journals.publish(HOST, SESSION, 2, [head(3)]);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+  });
+});
+
 describe('estimateCloneBytes', () => {
   it('covers what V8 serializes for strings, numbers and nesting, and counts a string at two bytes per character', () => {
     const page = { kind: 'page', entries: [{ text: 'x'.repeat(1000), n: 1, ok: true, none: null }, { text: 'é'.repeat(500) }] };

@@ -647,7 +647,7 @@ export class SessionPublication {
         this.restart(0, undefined, false);
         return;
       }
-      // The Relay already took the session out of serving when it refused the open; it is tried again on the next connection.
+      // The Relay took the session out of serving when it refused the open (a head cleared, or the old head forgotten); it is tried again on the next connection.
       this.cycle += 1;
       this.teardown();
       this.phase = 'refused';

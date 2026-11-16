@@ -1,4 +1,5 @@
 import { watchPageResume } from '@orchardworks/agent-remote-web/browser';
+import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
@@ -8,7 +9,7 @@ import { AccessPage } from './components/AccessPage.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { useRecoveryNotice } from './hooks/useRecoveryNotice.js';
-import { WorkspaceReady, confirmWorkspaceAccess, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
+import { WorkspaceReady, scopeFor, confirmWorkspaceAccess, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
 
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
@@ -20,7 +21,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
 }) {
   const [access, setAccess] = useState<WorkspaceAccess | null | undefined>(() => {
     const cached = readWorkspaceAccess();
-    if (cached) setWorkspaceReady(cached.basePath, false);
+    if (cached) setWorkspaceReady(cached.basePath, false, cached.user?.id);
     return cached;
   });
   const display = useRef(access); display.current = access;
@@ -80,6 +81,8 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
         });
         if (stopped || controller.signal.aborted) return;
         if (response.status === 401 || response.status === 403) {
+          // The Relay does not confirm this person: the conversations this device stored for them are not shown again and are removed.
+          void deviceStore.purge(display.current ? scopeFor(display.current.basePath) : undefined).catch(() => { /* Storage may be unavailable. */ });
           stopRequests(); setSecurityOpen(false);
           if (response.status === 401 && claimAutomaticSignIn()) {
             let target = '/';
@@ -109,7 +112,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
         }
         current = value; retries = 0;
         rememberWorkspaceAccess(value);
-        setWorkspaceReady(value.basePath, true);
+        setWorkspaceReady(value.basePath, true, value.user?.id);
         display.current = value; setAccess(value); setReady(true); setFailed(false); setNeedsSignIn(false);
         clearTimeout(expiry);
         expiry = setTimeout(() => { confirmExpiredAccess(); void request(true); }, value.expiresAt - Date.now());

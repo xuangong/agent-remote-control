@@ -62,7 +62,7 @@ import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol
 import type { SessionEntry } from './session-tree.js';
 import { useSessionRelations } from './hooks/useSessionRelations.js';
 import { sessionViewNavigation, type SessionViewNavigation, type SessionViewNavigationActions } from './session-view-navigation.js';
-import { remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
+import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
@@ -72,7 +72,7 @@ import { LayoutDiagnosticsSettings } from './components/LayoutDiagnosticsSetting
 import { stopLayoutDiagnostics } from './layout-diagnostics.js';
 import { conversationLocalStorage, conversationSessionStorage } from './conversation-storage.js';
 import { WorkspaceReady, workspaceFetch, workspaceSocket, readWorkspaceAccess } from './workspace-access.js';
-import { readWorkspaceSnapshot } from './workspace-cache.js';
+import { useStoredDisplay } from './hooks/useStoredDisplay.js';
 import { ControllerUpdates } from './components/ControllerUpdates.js';
 import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from './prompt-edit-intent.js';
 import { useSessionMigrations } from './hooks/useSessionMigrations.js';
@@ -325,11 +325,8 @@ function AppContent({
     catch { return { error: 'Invalid session link.' }; }
   });
   const [initialLayout] = useState(() => readCurrentConversationLayout(baseUrl));
-  const [cachedState] = useState(() => {
-    const cachedAccess = readWorkspaceAccess();
-    return userScoped && cachedAccess && new URL(cachedAccess.basePath, window.location.origin).href === baseUrl
-      ? readWorkspaceSnapshot(baseUrl, requested.target) : undefined;
-  });
+  // The rows this device stored of the requested conversation, from the first frame the Relay has confirmed this person's lease.
+  const cachedState = useStoredDisplay(baseUrl, requested.target);
   const requestedHostId = requested.target?.hostId;
   const [selectedHost, setSelectedHost] = useState<RemoteHost>(() => requestedHostId
     ? { id: requestedHostId, name: 'Requested Host', online: false, providers: [], providerId: '' }
@@ -439,8 +436,9 @@ function AppContent({
   const [providerName, setProviderName] = useState(initialProviderName);
   const [catalogStatus, setCatalogStatus] = useState<ProviderCatalogStatus>(initialState ? 'ready' : 'loading');
   const [catalogError, setCatalogError] = useState<string>();
-  const [storedState, setState] = useState<AgentReplicaState | undefined>(initialState ?? cachedState);
-  const [storedSessionState, setSessionState] = useState<RemoteSessionState>(() => remoteSessionState(initialState ?? cachedState, cachedState ? 'connecting' : initialSessionStatus));
+  const [storedState, setState] = useState<AgentReplicaState | undefined>(initialState);
+  const [storedSessionState, setSessionState] = useState<RemoteSessionState>(() => remoteSessionState(initialState, initialSessionStatus));
+  const cachedSessionState = useMemo(() => cachedState ? remoteSessionState(cachedState, 'connecting') : undefined, [cachedState]);
   const draftStores = useMemo(() => new Map([[baseUrl, messageDrafts]]), [baseUrl, messageDrafts]);
   const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[] }>();
   const teamRosterRef = useRef(teamRoster); teamRosterRef.current = teamRoster;
@@ -593,8 +591,8 @@ function AppContent({
     if (!store) { store = new DraftStore(owner.scope); draftStores.set(owner.scope, store); }
     return { store, key: owner.key };
   }
-  const state = windowSession.empty ? undefined : succession.active ? succession.state : storedState;
-  const sessionState = windowSession.empty ? remoteSessionState(undefined, 'idle') : succession.active ? succession.sessionState : storedSessionState;
+  const state = windowSession.empty ? undefined : succession.active ? succession.state : storedState ?? cachedState;
+  const sessionState = windowSession.empty ? remoteSessionState(undefined, 'idle') : succession.active ? succession.sessionState : storedState || !cachedSessionState ? storedSessionState : cachedSessionState;
   const status = sessionState.connection;
   const handoff = sessionState.handoff;
   function setStatus(connection: RemoteSessionStatus): void { setSessionState(remoteSessionState(replicaRef.current?.getState() ?? state, connection)); }
@@ -1621,7 +1619,9 @@ function AppContent({
   const previewHost = activeHost ?? selectedRemoteHost;
   const hostOffline = activeHost?.online === false;
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? (succession.selected ? providerConnectionName(succession.selected.hostId ?? 'local', succession.selected.providerId) : 'No active Agent');
-  const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed' : sessionStatusLabel(status);
+  // Rows held from the device or across a replacement stand in for the opening words; a broken connection is never hidden.
+  const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed'
+    : holdsUnconfirmedRows(state) && (status === 'connecting' || status === 'catching_up') ? 'Ready' : sessionStatusLabel(status);
 
   async function openPreviewSource(sessionId: string, itemId: string, hostId: string): Promise<void> {
     const source = [...sessionEntries, ...openedSessions].find(item => item.agentId === sessionId && item.hostId === hostId);

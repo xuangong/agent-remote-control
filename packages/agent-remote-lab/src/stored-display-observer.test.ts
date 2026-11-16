@@ -2,8 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { ConversationConnections } from './conversation-connections.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
-import { readWorkspaceSnapshot, saveWorkspaceSnapshot } from './workspace-cache.js';
-import { conversationLocalStorage } from './conversation-storage.js';
+import { readStoredDisplay, saveStoredDisplay } from './stored-display.js';
+import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
 import { replicaState } from './test/fixtures.js';
 
 const scope = 'display-cache';
@@ -27,16 +27,16 @@ function setup() {
   vi.useFakeTimers();
   const replica = new AgentReplica();
   update(replica, 'Previous turn', 1);
-  saveWorkspaceSnapshot(scope, target, replica.getState());
+  saveStoredDisplay(scope, target, replica.getState());
   const pool = new ConversationConnections(transport, scope);
   connections.push(pool);
   const lease = pool.acquire('agent-1', replica, target);
   return { pool, lease, replica };
 }
-function cachedText() { return readWorkspaceSnapshot(scope, target)?.timeline.entries.map(entry => entry.item).filter(item => item.type === 'assistant_message').map(item => item.text).join(''); }
-afterEach(() => {
+function cachedText() { return readStoredDisplay(scope, target)?.timeline.entries.map(entry => entry.item).filter(item => item.type === 'assistant_message').map(item => item.text).join(''); }
+afterEach(async () => {
   for (const pool of connections.splice(0)) pool.clear();
-  vi.useRealTimers(); vi.restoreAllMocks(); clearConversationRecovery(scope);
+  vi.useRealTimers(); vi.restoreAllMocks(); clearConversationRecovery(scope); await deviceStore.purge();
 });
 
 it.each(['pagehide', 'hidden', 'close'] as const)('flushes working content on %s before connection readiness', async event => {
@@ -49,7 +49,7 @@ it.each(['pagehide', 'hidden', 'close'] as const)('flushes working content on %s
     document.dispatchEvent(new Event('visibilitychange'));
   } else window.dispatchEvent(new Event('pagehide'));
   expect(cachedText()).toContain('Latest visible working content');
-  const display = readWorkspaceSnapshot(scope, target)!;
+  const display = readStoredDisplay(scope, target)!;
   expect(display.agent?.activeTurn).toBeNull();
   expect(display.timeline.nextSeq).toBe(0);
   expect(display.pendingInteractions).toEqual([]);
@@ -68,7 +68,7 @@ it('coalesces continuous updates on a fixed deadline rather than waiting for the
 
 it('keeps caching a retained session after its last view closes and shares one writer across views', async () => {
   const { pool, lease, replica } = setup();
-  const write = vi.spyOn(conversationLocalStorage, 'setItem');
+  const write = vi.spyOn(deviceStore, 'put');
   pool.retainSessions('window', [target]);
   const second = pool.acquire('agent-1', new AgentReplica(), target);
   expect(second.replica).toBe(replica);
@@ -77,7 +77,7 @@ it('keeps caching a retained session after its last view closes and shares one w
   update(replica, 'Background working content', 2);
   await vi.advanceTimersByTimeAsync(2000);
   expect(cachedText()).toContain('Background working content');
-  expect(write.mock.calls.filter(([key]) => key.includes(':workspace:'))).toHaveLength(1);
+  expect(write).toHaveBeenCalledTimes(1);
 });
 
 it('flushes the last complete display when replacement history has not arrived', () => {
@@ -103,7 +103,7 @@ it('starts persistence when a shared connection gains its native identity', () =
   pool.acquire('agent-1', replica, { ...target, nativeSessionId: 'other-session' });
   update(replica, 'Content still from the original session', 2);
   window.dispatchEvent(new Event('pagehide'));
-  expect(readWorkspaceSnapshot(scope, { ...target, nativeSessionId: 'other-session' })).toBeUndefined();
+  expect(readStoredDisplay(scope, { ...target, nativeSessionId: 'other-session' })).toBeUndefined();
   expect(cachedText()).toBe('Bound working content');
 });
 
@@ -114,5 +114,23 @@ it('does not recreate display data after recovery storage is cleared', async () 
   update(replica, 'Late content after clear', 3);
   await vi.advanceTimersByTimeAsync(2100);
   window.dispatchEvent(new Event('pagehide')); pool.clear();
-  expect(readWorkspaceSnapshot(scope, target)).toBeUndefined();
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+});
+
+it('does not store rows that no connection has confirmed, and stores them once the first page did', async () => {
+  const seeded = new AgentReplica();
+  update(seeded, 'Stored earlier', 1);
+  saveStoredDisplay(scope, target, seeded.getState());
+  const replica = new AgentReplica();
+  const pool = new ConversationConnections(transport, scope); connections.push(pool);
+  const put = vi.spyOn(deviceStore, 'put');
+  pool.acquire('agent-1', replica, target);
+  // The record seeded this replica; its rows are display until a page confirms them.
+  expect(replica.getState().timeline.restoredFromDevice).toBe(true);
+  window.dispatchEvent(new Event('pagehide'));
+  expect(put).not.toHaveBeenCalled();
+  update(replica, 'Confirmed by the first page', 2);
+  window.dispatchEvent(new Event('pagehide'));
+  expect(put).toHaveBeenCalledTimes(1);
+  expect(readStoredDisplay(scope, target)?.timeline.entries.map(entry => entry.item).filter(item => item.type === 'assistant_message').map(item => item.text).join('')).toContain('Confirmed by the first page');
 });

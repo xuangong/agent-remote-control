@@ -42,7 +42,7 @@ import * as managerComponents from './components/ChatSessionManager.js';
 import * as directoryComponents from './components/SessionDirectory.js';
 import * as favoritesComponents from './components/SessionFavorites.js';
 import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
-import { saveWorkspaceSnapshot } from './workspace-cache.js';
+import { saveStoredDisplay } from './stored-display.js';
 
 function saveSessionComposition(scope: string, value: { path: OpenedSession[]; focus?: string; anchor?: string; addressKey: string }) {
   sessionStorage.setItem(`agent-remote:recovery:${scope}:composition`, JSON.stringify(value));
@@ -480,7 +480,7 @@ it('shows exact cached content while replay and native attachment wait without g
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { holdReplayInitially: true, seed(scope) {
-    for (const nativeSessionId of ['A', 'B']) saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId }, cachedConversation(nativeSessionId));
+    for (const nativeSessionId of ['A', 'B']) saveStoredDisplay(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId }, cachedConversation(nativeSessionId));
   } });
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
   try {
@@ -506,7 +506,7 @@ it('retains edits made beside cached content before initial checks and native at
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   const f = await failureFixture(false, 'B', false, '', { holdReplayInitially: true, seed(scope) {
-    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A' }, cachedConversation('A'));
+    saveStoredDisplay(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'A' }, cachedConversation('A'));
   } });
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('B');
   try {
@@ -538,7 +538,7 @@ it('retains the selected session draft while cached navigation waits for checks 
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   vi.spyOn(workbenchComponents, 'LabWorkbench').mockImplementation(props => { if (props.state?.agent) primary = props; return realWorkbench(props); });
   const f = await failureFixture(false, 'B', false, '', { chain: [], seed(scope) {
-    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
+    saveStoredDisplay(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const releaseReplay = f.pauseReplay(), releaseAttach = f.holdAttach('C');
@@ -571,7 +571,7 @@ it('opens a selected session beside with its cached content at once, and an unca
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
   const f = await failureFixture(false, 'B', false, '', { chain: [], timeline: cachedConversation('A').timeline.entries, seed(scope) {
-    saveWorkspaceSnapshot(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
+    saveStoredDisplay(scope, { hostId: 'host', providerId: 'recorded', nativeSessionId: 'C' }, cachedConversation('C'));
   } });
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('A'));
   const release = f.pauseReplay();

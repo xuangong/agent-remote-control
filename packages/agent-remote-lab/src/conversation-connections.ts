@@ -2,7 +2,8 @@ import { createContext } from 'react';
 import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport, type SessionControlExtension } from '@orchardworks/agent-remote-web';
 import { recoverMessages } from './message-recovery.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
-import { observeWorkspaceDisplay } from './workspace-display-cache.js';
+import { observeStoredDisplay } from './stored-display-observer.js';
+import { restoreReplicaFromDevice } from './stored-display.js';
 
 type Identity = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>;
 interface Connection {
@@ -54,9 +55,11 @@ export class ConversationConnections {
       connection = { agentId, key, ...(session ? { session } : {}), replica, viewers: 0, shown: false,
         client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web', handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
-        stopDisplay: this.recoveryScope && session ? observeWorkspaceDisplay(this.recoveryScope, session, replica) : () => {},
+        stopDisplay: this.recoveryScope && session ? observeStoredDisplay(this.recoveryScope, session, replica) : () => {},
       };
       this.connections.set(agentId, connection);
+      // Rows this device last read show from the first frame; the connection's first page confirms or replaces them.
+      if (this.recoveryScope && session) restoreReplicaFromDevice(this.recoveryScope, session, replica);
       try { connection.client.start(); }
       catch (error) { this.close(connection); throw error; }
     }
@@ -64,7 +67,7 @@ export class ConversationConnections {
       connection.stopDisplay();
       connection.key = sessionKey(session);
       connection.session = session;
-      connection.stopDisplay = this.recoveryScope ? observeWorkspaceDisplay(this.recoveryScope, session, connection.replica) : () => {};
+      connection.stopDisplay = this.recoveryScope ? observeStoredDisplay(this.recoveryScope, session, connection.replica) : () => {};
     }
     connection.viewers += 1;
     this.use(connection);

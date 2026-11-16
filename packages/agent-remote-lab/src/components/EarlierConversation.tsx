@@ -1,8 +1,8 @@
 import './earlier-conversation.css';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useReducer, useState } from 'react';
 import { AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { AgentTimeline, useAgentReplica } from '@orchardworks/agent-remote-web/react';
-import { readWorkspaceSnapshot } from '../workspace-cache.js';
+import { loadStoredDisplay, readStoredDisplay } from '../stored-display.js';
 import { knownTitle, sessionKey, type SessionEntry } from '../session-tree.js';
 
 /** What reading an earlier session needs: HTTP pages only. `connect` is never called, so no stream or control is taken. */
@@ -66,7 +66,17 @@ export function EarlierConversation({ baseUrl, transport, directory, sessions, r
   const [completeKeys, setCompleteKeys] = useState<ReadonlySet<string>>(new Set());
   const shown = sessions.slice(0, revealed);
   const oldest = shown.at(-1);
-  const read = readCached ?? ((session: SessionEntry) => readWorkspaceSnapshot(baseUrl, { hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId }));
+  const locate = (session: SessionEntry) => ({ hostId: session.hostId ?? 'local', providerId: session.providerId, nativeSessionId: session.nativeSessionId });
+  const read = readCached ?? ((session: SessionEntry) => readStoredDisplay(baseUrl, locate(session)));
+  // A record the preload left on disk is loaded when its session is shown.
+  const [, loaded] = useReducer((count: number) => count + 1, 0);
+  const shownKeys = shown.map(sessionKey).join('\n');
+  useEffect(() => {
+    if (readCached) return;
+    let stale = false;
+    void Promise.all(shown.map(session => loadStoredDisplay(baseUrl, locate(session)))).then(() => { if (!stale) loaded(); });
+    return () => { stale = true; };
+  }, [baseUrl, shownKeys, readCached]);
   if (!sessions.length) return null;
   return <div className="lab-earlier-conversation">
     {oldest && completeKeys.has(sessionKey(oldest)) && revealed < sessions.length

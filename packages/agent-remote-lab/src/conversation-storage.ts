@@ -1,4 +1,5 @@
 import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
+import { configureDeviceStorePersistence, deviceStore } from '@orchardworks/agent-remote-web/device-store';
 
 const preferenceKey = 'agent-remote:clear-cache-on-close';
 const contentPrefixes = ['agent-remote:recovery:', 'agent-remote-forks:', 'agent-remote-ask:', 'agent-remote-opened:', 'agent-remote-tracking:', 'arc:prompt-edit'];
@@ -74,7 +75,7 @@ function clearDiskCopies(retain = true): Promise<void> {
   }
   let deadline: ReturnType<typeof setTimeout>;
   const timeout = new Promise<void>((_, reject) => { deadline = setTimeout(() => reject(new Error('Chat cache cleanup timed out.')), 10_000); });
-  const current = Promise.race([clearPersistedImageDrafts(), timeout]).catch(() => { failed = true; }).then(() => {
+  const current = Promise.race([Promise.all([clearPersistedImageDrafts(), deviceStore.clearDisk()]), timeout]).catch(() => { failed = true; }).then(() => {
     clearTimeout(deadline);
     if (cleanup === current) publish({ enabled, clearing: false, failed });
   });
@@ -103,6 +104,7 @@ export async function setClearCacheOnClose(next: boolean): Promise<void> {
 }
 
 configureImageDraftPersistence(() => !clearCacheOnClose());
+configureDeviceStorePersistence(() => !clearCacheOnClose());
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', event => { if (event.key === preferenceKey || event.key === null) clearCacheOnClose(); });
   window.addEventListener('pageshow', () => { clearCacheOnClose(); });

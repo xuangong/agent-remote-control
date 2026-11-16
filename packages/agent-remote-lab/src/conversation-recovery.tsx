@@ -3,6 +3,8 @@ import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite, type Rec
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { clearImageDraftScope } from '@orchardworks/agent-remote-web/browser';
+import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { scopeFor } from './workspace-access.js';
 import type { TimelineReadingPosition } from '@orchardworks/agent-remote-web/react';
 
 const prefix = 'agent-remote:recovery:';
@@ -57,6 +59,8 @@ export function saveDrafts(scope: string, drafts: Record<string, string>, isCurr
 export function clearConversationRecovery(scope?: string): void {
   for (const [key, generation] of generations) if (!scope || key === scope || key.startsWith(`${scope}:`)) generations.set(key, generation + 1);
   cancelRecoveryWrites(scope ? `${prefix}${scope}:` : prefix);
+  // Rows this device stored of the Relay's conversations go with the sign-out, the lost lease and the principal change that call this.
+  void deviceStore.purge(scope ? scopeFor(scope) : undefined).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   if (scope) void clearImageDraftScope(scope).catch(() => { /* Signout still completes when browser storage is unavailable. */ });
   try {
     for (const storage of [conversationSessionStorage, conversationLocalStorage]) {

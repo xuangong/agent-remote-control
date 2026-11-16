@@ -4,7 +4,11 @@ import { createRoot } from 'react-dom/client';
 import { WorkspaceShell } from './components/WorkspaceShell.js';
 import { GatewayController } from './GatewayController.js';
 import { previousWorkspacePath } from './workspace-access.js';
-const loadApp = () => import('./App.js').then(module => ({ default: module.App }));
+import { startDeviceStore } from './device-store-start.js';
+const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
+// The application chunk waits at most a second for the stored conversations, so its first render already reads them.
+const storedConversations = Promise.race([startDeviceStore(gatewayMode), new Promise<void>(resolve => setTimeout(resolve, 1000))]);
+const loadApp = () => Promise.all([import('./App.js'), storedConversations]).then(([module]) => ({ default: module.App }));
 const appModule = previousWorkspacePath() ? loadApp() : undefined;
 const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';
@@ -25,7 +29,6 @@ const fixtureAction = fixtureEndpoint ? async (
   if (!response.ok) throw new Error(`Lab scenario action failed with HTTP ${response.status}.`);
 } : undefined;
 
-const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
 const devbox = document.querySelector('meta[name="agent-remote-devbox"]')?.getAttribute('content') === 'true';
 const shell = <WorkspaceShell />;
 createRoot(root).render(<StrictMode>{gatewayMode

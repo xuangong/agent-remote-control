@@ -10,7 +10,7 @@ import { render, unmount } from './test/setup.js';
 import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
 import { saveLastSession } from './conversation-recovery.js';
-import { saveWorkspaceSnapshot } from './workspace-cache.js';
+import { saveStoredDisplay } from './stored-display.js';
 import { WorkspaceReady } from './workspace-access.js';
 
 function target(id: string) { return { hostId: 'local', providerId: 'recorded', nativeSessionId: `native-${id}`, title: `Session ${id}` }; }
@@ -98,7 +98,7 @@ it('shows the explicit Window binding cache before access checks instead of the 
   const cached = windowFixture('cached', 'one');
   localStorage.setItem(`agent-remote:recovery:${scope}:shared-window:${cached.id}`, JSON.stringify(cached));
   for (const id of ['one', 'stale']) {
-    saveWorkspaceSnapshot(scope, target(id), { ...replicaState, agent: { ...replicaState.agent!, id: `agent-${id}`,
+    saveStoredDisplay(scope, target(id), { ...replicaState, agent: { ...replicaState.agent!, id: `agent-${id}`,
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: `native-${id}` } }, timeline: { ...replicaState.timeline, entries: [{
       providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-19T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
       item: { type: 'assistant_message', text: `${id} cached conversation` },

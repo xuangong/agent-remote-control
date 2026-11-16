@@ -355,11 +355,11 @@ it('hands a session the Host confirms missing to its container instead of offeri
 });
 
 it('keeps the latest observed messages ahead of the old disk preview while history resynchronizes', async () => {
-  const { saveWorkspaceSnapshot } = await import('../workspace-cache.js');
+  const { saveStoredDisplay } = await import('../stored-display.js');
   const session = { hostId: 'local', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1', title: 'Working' };
   const entry = (text: string) => ({ providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-10-17T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'assistant_message' as const, text } });
-  saveWorkspaceSnapshot('http://fixture', session, { ...replicaState, timeline: { ...replicaState.timeline, entries: [entry('Previous turn on disk')] } });
+  saveStoredDisplay('http://fixture', session, { ...replicaState, timeline: { ...replicaState.timeline, entries: [entry('Previous turn on disk')] } });
   const replica = new AgentReplica();
   replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: replicaState.agent! });
   replica.applyHistory({ protocolVersion: '1.8.0', type: 'timeline_page', payload: {
@@ -391,8 +391,8 @@ it('addresses duplicate native sessions by their own composition slots when crea
 });
 
 it.each([false, true])('offers native takeover while opening (preview %s) and restores after authorization', async preview => {
-  const cache = await import('../workspace-cache.js');
-  const cached = vi.spyOn(cache, 'readWorkspaceSnapshot').mockReturnValue(preview ? replicaState : undefined);
+  const cache = await import('../stored-display.js');
+  const cached = vi.spyOn(cache, 'readStoredDisplay').mockReturnValue(preview ? replicaState : undefined);
   const { SessionDirectoryClient, DirectoryError } = await import('../directory-client.js');
   const attach = vi.spyOn(SessionDirectoryClient.prototype, 'attach');
   const owner = { kind: 'native_cli' as const, generation: 'native-generation' };

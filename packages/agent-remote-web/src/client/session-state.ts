@@ -22,6 +22,11 @@ export interface RemoteSessionState {
   readonly operations: Readonly<Record<SessionOperationKind, SessionOperationAvailability>>;
 }
 
+/** Rows are held that the connection has not confirmed as current: they came from this device's store, or a replacement waits for its tail. */
+export function holdsUnconfirmedRows(replica: AgentReplicaState | undefined): boolean {
+  return !!replica && (replica.timeline.restoredFromDevice === true || replica.timeline.pendingEpoch !== undefined);
+}
+
 const operations: readonly SessionOperationKind[] = ['send_message', 'queue_message', 'steer', 'cancel', 'set_planning', 'set_session_setting', 'execute_command', 'interaction_response'];
 
 /** Public session facts for product composition, ARDB and non-rendered consumers. */
@@ -32,7 +37,7 @@ export function remoteSessionState(replica: AgentReplicaState | undefined, conne
   const control = replica?.sessionControl;
   const controlChecking = control?.access === 'checking';
   const readOnly = control !== undefined && !controlChecking && control.access !== 'control';
-  const holdingRows = !!replica && (replica.timeline.restoredFromDevice === true || replica.timeline.pendingEpoch !== undefined);
+  const holdingRows = holdsUnconfirmedRows(replica);
   return {
     connection, synchronized, holdingRows, activity,
     busy: activity === 'running' || activity === 'waiting', controlChecking, readOnly,

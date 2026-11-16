@@ -1,4 +1,4 @@
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
+import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useVisibleClock } from './visible-clock.js';
 import type { AgentReplicaState } from '../replica/types.js';
 
@@ -32,7 +32,7 @@ export function AgentActivityStatus({ state, sessionState, visible = true, disab
     : session.connection === 'catching_up' ? 'Synchronizing'
     : session.connection === 'idle' ? 'Disconnected' : 'Opening session';
   // Rows held but not yet confirmed: the last business label stands in for the opening and synchronizing words. A broken connection is never hidden.
-  const connectionWordHidden = session.holdingRows && !disabledLabel && (session.connection === 'connecting' || session.connection === 'catching_up' || session.controlChecking);
+  const connectionWordHidden = (session.holdingRows || holdsUnconfirmedRows(state)) && !disabledLabel && (session.connection === 'connecting' || session.connection === 'catching_up' || session.controlChecking);
   const label = disabled && !connectionWordHidden ? disabledLabel ?? connectionLabel
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
     : runtimeConnection?.state === 'restoring' ? 'Restoring'

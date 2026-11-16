@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
-import { isUncertainSend, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
+import { holdsUnconfirmedRows, isUncertainSend, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -125,14 +125,16 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     ?? (recoveryNoticeDue ? runtimeNotice ?? reconnectingNotice(state) : undefined) : undefined,
     runtimeError ? 'error' : 'info');
   const activity = session.activity;
+  // Rows held from the device or across a replacement stand in for the opening words with the session's last business label.
+  const rowsHeld = session.holdingRows || holdsUnconfirmedRows(state);
   const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
     : agentFailure ? 'Agent failed'
     : sessionStatus === 'unavailable' ? 'Unavailable'
     : connectionFailure ? 'Connection failed'
     : sessionStatus === 'disconnected' ? 'Reconnecting'
-    : sessionStatus === 'connecting' ? 'Opening session'
-    : session.controlChecking ? 'Checking access'
-    : sessionStatus === 'catching_up' ? 'Synchronizing'
+    : !rowsHeld && sessionStatus === 'connecting' ? 'Opening session'
+    : !rowsHeld && session.controlChecking ? 'Checking access'
+    : !rowsHeld && sessionStatus === 'catching_up' ? 'Synchronizing'
     : sessionStatus === 'idle' ? 'Disconnected'
     : !state?.agent ? 'Opening session'
     : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'

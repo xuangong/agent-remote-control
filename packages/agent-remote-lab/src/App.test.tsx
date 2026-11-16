@@ -1087,16 +1087,17 @@ it('notifies a failed send without clearing the draft or replaying it after dism
   }
 });
 
-it('renders saved conversation content and a usable draft before business access is ready', async () => {
+it('shows no stored conversation content before the Relay confirms access, and shows it once it does', async () => {
   const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./workspace-access.js');
-  const { saveWorkspaceSnapshot } = await import('./workspace-cache.js');
+  const { saveStoredDisplay } = await import('./stored-display.js');
   const { saveLastSession } = await import('./conversation-recovery.js');
   const path = '/u/' + 'a'.repeat(64) + '/';
   const scope = new URL(path, window.location.origin).href;
   const target = { hostId: 'desk', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
   rememberWorkspaceAccess({ basePath: path, expiresAt: Date.now() + 1000 });
   saveLastSession(scope, target);
-  saveWorkspaceSnapshot(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+  setWorkspaceReady(path, true);
+  saveStoredDisplay(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'assistant_message', text: 'Cached conversation, immediately visible.' },
   }] } });
@@ -1104,9 +1105,12 @@ it('renders saved conversation content and a usable draft before business access
   const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
   try {
     const view = await render(<WorkspaceReady.Provider value={false}><App baseUrl={scope} userScoped /></WorkspaceReady.Provider>);
-    expect(view.textContent).toContain('Cached conversation, immediately visible.');
-    expect(view.querySelector('textarea, [contenteditable="true"]')).not.toBeNull();
+    expect(view.textContent).not.toContain('Cached conversation, immediately visible.');
     expect(fetcher).not.toHaveBeenCalled();
+    // The Relay confirms the lease: the stored rows show, with no opening label over them.
+    await act(async () => setWorkspaceReady(path, true));
+    await vi.waitFor(() => expect(view.textContent).toContain('Cached conversation, immediately visible.'));
+    expect(view.textContent).not.toMatch(/Opening session|Synchronizing/);
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
 

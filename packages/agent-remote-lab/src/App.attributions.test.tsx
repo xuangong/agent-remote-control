@@ -8,7 +8,7 @@ import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';
 import { createWindowFeature } from './window-feature-views.js';
-import { saveWorkspaceSnapshot } from './workspace-cache.js';
+import { saveStoredDisplay } from './stored-display.js';
 import { render } from './test/setup.js';
 import { replicaState } from './test/fixtures.js';
 
@@ -63,7 +63,7 @@ async function fixture({ sourceOpen = true, offline = false, compact = false, hi
       runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: agentId, connection: { state: 'connected' } } },
   });
   if (offline) for (const view of first.views) if (view.binding) {
-    saveWorkspaceSnapshot(scope, view.binding, { ...replicaState, agent: snapshot(view.binding.nativeSessionId).payload,
+    saveStoredDisplay(scope, view.binding, { ...replicaState, agent: snapshot(view.binding.nativeSessionId).payload,
       timeline: { ...replicaState.timeline, hasOlder: false, nextSeq: 2, entries: [{ providerId: 'recorded',
         seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], collapsed: [], resources: [],
         timestamp: '2026-10-16T00:00:00Z', item: { type: 'assistant_message', text: `Cached discussion for ${view.binding.title}.` } }] } });

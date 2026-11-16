@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import type { DeviceScope } from '@orchardworks/agent-remote-web/device-store';
 
 export type WorkspaceAccess = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
 export const workspaceDisplayLifetime = 24 * 60 * 60 * 1000;
@@ -59,18 +60,19 @@ export function claimAutomaticSignIn(): boolean {
  * ready: access is confirmed. confirming: the local copy of the lease ran out and the Relay is being asked; live
  * sockets stay open but hold what they send, and requests wait, until the answer.
  */
-type Gate = { ready: boolean; confirming?: boolean; retired?: boolean; listeners: Set<() => void> };
+type Gate = { ready: boolean; confirming?: boolean; retired?: boolean; principalId?: string; listeners: Set<() => void> };
 const gates = new Map<string, Gate>();
-function scopeFor(input: string): string {
+export function scopeFor(input: string): string {
   const url = new URL(input, globalThis.location?.origin ?? 'http://localhost');
   url.protocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
   return url.origin + (url.pathname.match(/^\/u\/[a-f0-9]{64}\//)?.[0] ?? '/');
 }
-export function setWorkspaceReady(basePath: string, ready: boolean): void {
+export function setWorkspaceReady(basePath: string, ready: boolean, principalId?: string): void {
   const scope = scopeFor(basePath);
   const gate = gates.get(scope) ?? { ready: false, listeners: new Set() };
   gates.set(scope, gate);
   gate.ready = ready; gate.confirming = false;
+  if (principalId !== undefined) gate.principalId = principalId;
   if (ready) gate.retired = false;
   for (const listener of [...gate.listeners]) listener();
 }
@@ -164,4 +166,25 @@ export function workspaceSocket(url: string) {
   gate?.listeners.add(update);
   queueMicrotask(update);
   return wrapper;
+}
+
+/** The principal of a workspace that has no accounts: the local fixture and the dedicated local Devbox. */
+const WORKSPACE_PRINCIPAL = 'workspace';
+/**
+ * Where this device's stored conversations of a workspace live, and the only way to reach them: the Relay and the principal, while the Relay has
+ * confirmed the access lease. Before it confirms, while it is being confirmed again, and after the workspace was retired, there is no scope and so
+ * no stored row to read, show or write. A workspace with no gate has no accounts.
+ */
+export function storedRowsScope(baseUrl: string): DeviceScope | undefined {
+  const relayUrl = scopeFor(baseUrl);
+  const gate = gates.get(relayUrl);
+  if (!gate) return { relayUrl, principalId: WORKSPACE_PRINCIPAL };
+  return gate.ready && !gate.confirming && !gate.retired ? { relayUrl, principalId: gate.principalId ?? WORKSPACE_PRINCIPAL } : undefined;
+}
+/** The scope's change signal: true while stored rows may be shown. */
+export function subscribeStoredRows(baseUrl: string, listener: () => void): () => void {
+  const gate = gates.get(scopeFor(baseUrl));
+  if (!gate) return () => {};
+  gate.listeners.add(listener);
+  return () => { gate.listeners.delete(listener); };
 }

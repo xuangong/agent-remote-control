@@ -13,7 +13,8 @@ import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '
 import type { NativeSessionOwner, NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { unavailableSessions } from '../unavailable-sessions.js';
-import { readWorkspaceSnapshot, workspaceDisplayState } from '../workspace-cache.js';
+import { forgetStoredSession, workspaceDisplayState } from '../stored-display.js';
+import { useStoredDisplay } from '../hooks/useStoredDisplay.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { useSharedDraft } from '../hooks/useSharedDraft.js';
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
@@ -120,7 +121,7 @@ export function SessionConversation(props: SessionConversationProps) {
   const canAttach = attachmentEnabled && !disconnected && !retainingInput;
   const connections = useContext(ConversationConnectionScope);
   const enabled = useContext(WorkspaceReady);
-  const preview = useMemo(() => readWorkspaceSnapshot(baseUrl, currentTarget), [baseUrl, currentTarget.hostId, currentTarget.providerId, currentTarget.nativeSessionId]);
+  const preview = useStoredDisplay(baseUrl, currentTarget);
   const localDirectory = useMemo(() => new SessionDirectoryClient(baseUrl, undefined, currentTarget.hostId), [baseUrl, currentTarget.hostId]);
   const directory = props.directoryFor?.(currentTarget.hostId) ?? localDirectory;
   const [session, setSession] = useState<OpenedSession | undefined>(props.attachedSession), [error, setError] = useState(''), [attempt, setAttempt] = useState(0);
@@ -185,6 +186,8 @@ export function SessionConversation(props: SessionConversationProps) {
       if (value.nativeSessionId && value.nativeSessionId !== currentTarget.nativeSessionId) throw new Error('The Host returned a different session. Reopen this subagent from its parent.');
       setSession({ ...currentTarget, agentId: value.agentId }); setNativeOwner(undefined);
     }).catch(error => {
+      // A person who lost access to a conversation keeps nothing of it on this device.
+      if (error instanceof DirectoryError && (error.status === 403 || error.code === 'session_forbidden' || nativeSessionMissing(error))) forgetStoredSession(baseUrl, currentTarget);
       if (!historyRoleId) unavailable.remember(currentTarget, error);
       if (stopped || !availability.current.enabled || availability.current.targetKey !== targetKey) return;
       if (props.familyRoot && props.onSessionUnavailable && nativeSessionMissing(error) && !historyRoleId && !currentTarget.parentNativeSessionId

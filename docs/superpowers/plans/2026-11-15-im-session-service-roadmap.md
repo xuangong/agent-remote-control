@@ -22,6 +22,35 @@ Every plan follows the repository rules in `AGENTS.md`:
 - `pnpm compatibility:update` runs after reviewed changes.
 - Changes to the website, Relay or Controller are verified on `pnpm local`.
 
+## Revised order after the simplification assessment (2026-11-16)
+
+The owner approved the [simplification assessment](../specs/2026-11-16-journal-simplification.md) on 2026-11-16. The order below replaces rows 4 to 9 of the table above for the work still to do.
+
+| Step | Work | Gate |
+|---|---|---|
+| S0 | Freeze: no new journal mechanism. Adopt the rules below. | Done when this section lands. |
+| S1 | Remove dead and duplicate pieces: the grant levels and capability wait, the head-index read discard, `quotaFenced` (once the `sequence_gap` test covers it), sequential idempotent deletion in place of the worker pool, the head lane and the open slots. Stop forwarding interaction frames on journal-served streams and remove the hold, if clients do not need the dedicated frames. | Suites green. The removed state is recorded. |
+| S2 | Server side of "replace when in doubt". On every open the Controller sends its newest window. The Relay compares it with its tail: identical continues, an extension appends, anything else becomes one replacement that the Relay trims to fit its quota. Remove `correct`, `seal`, `expectedRevision`, index paging, the reset open, the quota ladder, per-item skip and renumbering, the replacement-loop guard, rebind re-sending, and live-only adoption by order. | Suites green. The publisher has at most about 20 mutable fields and about 5 recovery outcomes. |
+| S3 | P1-C2 for one provider, under the relaxed contract: stable keys, completion marks and live-only marks. Content mismatches between live and reread are counted, not failed. Enable it on `pnpm local` and measure replacements per open, bytes per open and first-open misses. | Measurements recorded. |
+| S4 | P1-D with the client side of S2. Item keys go on entries behind an opt-in flag, and rows are keyed by item key. The client absorbs a replacement by key. The device store and the label and T1 work stay as planned. Measure T1, T2 and T6 at 4x CPU and 100 ms round trip against P0. | T1, T2 and T6 measured. |
+| S5 | Relay-owned session control, as the first slice of P2. Remove the pending revision, held acquires, the offline-Host amendment, `hostReturned` and the `restoring` override. | Every Controller must be updated. Tell the owner before this step lands. |
+| S6 | The remaining providers under the relaxed contract. A reduced P1-C3: the read-only history capability and behind-marking first; backfill and observation wait until S3's measurements show first-open misses. Then the rest of P2, P3, P4 and P5. | As in the table above. |
+
+**Owner decisions (2026-11-16):**
+- T6 is met by "replace when in doubt" plus a client that keeps unchanged rows across a new epoch. The epoch no longer has to stay the same.
+- An interrupted partial item that native history never recorded may disappear at the next replacement, as it does in crude mode today. `seal` is removed.
+- Relay-owned session control comes before P1-C3 and the remaining providers.
+
+**Rules for all further work:**
+1. **State accounting.** Every plan decision and every fix states the change in state: fields +N/-M and recovery paths +N/-M. A change that only adds says why in one sentence.
+2. **Invariant before guard.** For each failure a review names, first look for an invariant that makes it impossible, or for the universal fallback ("reopen and replace with the newest window that fits"). Add a guard only for a failure shown to be reachable by a log, a recorded fixture or a real-transport test.
+3. **Complexity budgets.** `SessionPublication` has at most 20 mutable fields and 6 recovery outcomes. A change over budget deletes something else or goes to the owner.
+4. **Measure before scale.** A bound, pool, lane, cache or ladder cites a measurement. Otherwise it is one hard cap with a refusal.
+5. **Protocol surface.** A new message, entry type, refusal reason or flag replaces one, or the plan says why it cannot.
+6. **Short plans.** Plans state interfaces, deletions and acceptance tests in under 1,000 lines. They do not carry the full code. A spike on real data comes before a plan where data decides the design.
+7. **A deletion task in every plan.** It lists what earlier work made unnecessary and removes it.
+8. **Reviews ask two questions:** what can go wrong, and what can this make unnecessary.
+
 ## Progress
 
 | Plan | State | Evidence |
@@ -33,7 +62,8 @@ Every plan follows the repository rules in `AGENTS.md`:
 | P1-B3a Journal storage (Node) | Done | SQLite store (`node:sqlite`, benchmarked), bounded service with head index, quota fencing, incremental retention window, atomic fill and page, pulled index pages; smart-reading switch per Host and provider (off by default); durable deletion on revoke; `AGENT_REMOTE_JOURNALS=1` / `ARC_LOCAL_JOURNALS=1`. Suites: hosted 918, lab 2801, cloudflare 219, conformance 31, relay 396, controller 1469 (one pre-existing local-test failure, also on main). Local instance verified with journals on (store file 0600, switch round-trip across a restart, model turn on the crude path). |
 | P1-B3b Cloudflare journal partition | Done | A `JournalPartition` Durable Object per Host in a Worker of its own, reached from `primary` by RPC; contiguous sequences in the core (`sequence_gap`); version negotiation with the partitions Worker; default Relay configs unchanged, with journals enabled by an operator procedure (partitions Worker first). Hosted 947, Cloudflare 238, conformance 31; six wrangler dry runs; cross-Worker RPC driven under `wrangler dev`. Not deployed. |
 | P1-C1 Controller publisher | Done | SDK item identity; protocol grant 2 (`outcome`, `rebind`, optional digests, `attentionItemKey`, `journal_unserve`, `journal_request_refused`, reset open); core amendments and type-checked appends to evicted items; Relay interaction hold, grant per connection with a partition capability check; agent manager tap; stable HMAC resource ids with a persisted index; items, reconcile (live-only order rule, empty and forced replacements, rebinds) and the publisher (per-session state machine, shared budget with head headroom, renumbering, quota/incomplete/reset recovery, prompt requests); host wiring and diagnostic delivery 4; a continuity fixture. Suites: sdk 97, protocol 437, journal 204, journal-sqlite 30, relay 441, hosted 989, Controller 1643, providers 225/485/150/190, cloudflare 240, conformance 31, lab 2801, web 892. Local instance verified (crude path; no provider is journal-capable yet). |
-| P1-C2 Provider item identity | Planning | `2026-11-15-p1c2-provider-item-identity.md` |
+| P1-C2 Provider item identity | Paused for S1 and S2 | Research per provider is recorded. The plan is rewritten under the relaxed contract for S3. |
+| Simplification | Approved | [Assessment](../specs/2026-11-16-journal-simplification.md); S1 next |
 | P1-C3 Current journals | Outline | `2026-11-15-p1c3-current-journals.md` |
 | P1-D Client device store | Planned and reviewed | `2026-11-15-p1d-client-device-store.md`, `2026-11-15-p1d2-client-measurement.md` |
 

@@ -223,3 +223,24 @@ The local instance run (six bots with real sessions, 20 minutes, Chromium 1440 x
 ## Browser baselines on the local instance
 
 `local-baselines.mjs` measures the browser experience of `pnpm local` (open to content, return after hidden, send, release and restart continuity, request counts, provider latencies) and writes JSON; its header lists the options and the definitions of start, content and ready. Results and the method are in `docs/superpowers/plans/2026-11-15-p0-baselines.md`, raw data in `results/p0-*.json`. The sessions it uses must exist in the instance workspace.
+
+## Journal measurements (S3)
+
+`local-baselines.mjs` measures the opens of Copilot sessions on the `pnpm local` instance, with the Relay's journals and the Host's smart-reading switch for `copilot` on or off (`--label journals-on`, `--label journals-off`). Run it from the repository root while the instance runs; it never starts or stops the instance itself, except that `journal-reopen-mix` runs `pnpm local up --no-build` for its Controller restarts.
+
+```sh
+node packages/agent-remote-lab/performance/local-baselines.mjs --scenarios journal-open --label journals-on --throttle 1 --out .tmp/s3-journal-open.json
+node packages/agent-remote-lab/performance/local-baselines.mjs --scenarios journal-reopen-mix --label journals-on --sessions HOST/copilot/SESSION --out .tmp/s3-journal-reopen-mix.json
+```
+
+- `journal-open`: for each Copilot session, `open-known` (a first open that is discarded, then `--reps` reloads) and `open-fresh` (device storage cleared before each open). Per open it records which side answered, the Relay's windows for the session, and the bytes the page received (WebSocket frames plus API responses).
+- `journal-reopen-mix`: one Copilot session, 30 reopens in a fixed order: 10 page reloads, 10 session releases then a reload, 5 Controller restarts then a reload, 5 interruptions (a turn cancelled through `session cancel`, then a release and a reload). After each it records the Relay's windows since the previous step and runs the hole check. `thresholds` applies the S3 plan's thresholds to the 30 opens.
+
+Where the numbers come from, all metadata and no content:
+
+- Which side answered an open: the Relay opens a Controller stream for a forwarded session (a `stream_opening` diagnostic naming the session's public agent id) and none to read a journal-served one. The runner reads the diagnostics with `agent-remote-controller-dev diagnostics --source server` after the scenario, because the Relay delivers them in batches about a second apart.
+- Windows, their reasons and sizes, and the requests for bodies and older history: the Relay's `journal_window` and `journal_request` diagnostics (`agentId` is the journal's session key, `copilot:<native session id>`). Refusals and stops: `journal_quota_exceeded` and the Controller log's `journal_open_refused`, `journal_session_stopped`, `journal_session_unserved`.
+- Page bytes: Chrome DevTools Protocol `Network.webSocketFrameReceived` payloads plus `Network.loadingFinished` for XHR and fetch responses. Scripts, styles, fonts and images are not counted.
+- The hole check compares every user and assistant message of a full native read (`session read`, all pages) with the messages the page shows after it scrolled the conversation to its start. It compares message texts, not tool rows, and depends on the page's scroll container; treat a reported hole as a lead to confirm by reading the session.
+
+The pure parts (statistics, diagnostics into counts, the open's side, the hole check, the thresholds) are in `journal-measurement.mjs` and tested by `src/journal-measurement.test.ts`. There is no large-session scenario: scale is covered by `packages/agent-remote-lab/scripts/journal-benchmark.mjs`.

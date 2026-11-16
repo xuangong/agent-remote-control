@@ -4,7 +4,8 @@
 // Options:
 //   --origin URL          the instance origin (default: `pnpm --silent local status --json`, which signs in once)
 //   --scenarios a,b,c     open-known, open-fresh, open-cold-context, open-released, hidden-short, hidden-long,
-//                         send-resident, send-released, release-continuity, restart-continuity, provider-latency, switch
+//                         send-resident, send-released, release-continuity, restart-continuity, provider-latency, switch,
+//                         journal-open, journal-reopen-mix (the S3 journal measurements; see README.md)
 //   --reps N              samples per session (default 3)
 //   --throttle N          CPU slowdown factor (default 1)
 //   --sessions A,B        session addresses (default: every session `session list` shows in the instance workspace)
@@ -13,6 +14,7 @@
 //   --hidden-short MS / --hidden-long MS   hidden durations (default 30000 / 300000)
 //   --deadline MS         outer deadline for the whole run (default 1500000)
 //   --action MS           deadline of one action (default 30000)
+//   --label TEXT          a name stored in the result, for example journals-on or journals-off
 // Every scenario uses one browser context (one sign-in; the open-cold-context scenario uses one per sample). Results are
 // written as JSON after every scenario, so a run that hits the outer deadline keeps what it finished.
 //
@@ -30,6 +32,7 @@ import { createRequire } from 'node:module';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { agentIdOfSocket, answeredBy, controllerJournalEvents, holeCheck, mixThresholds, stats, windowCounts } from './journal-measurement.mjs';
 
 const root = process.cwd();
 function parseOptions(argv) {
@@ -70,7 +73,7 @@ async function releaseRuntime(session) {
   return released;
 }
 
-const result = { startedAt: new Date().toISOString(), origin, options: { reps, throttle, hiddenShortMs, hiddenLongMs, scenarios: wanted },
+const result = { startedAt: new Date().toISOString(), origin, options: { reps, throttle, hiddenShortMs, hiddenLongMs, scenarios: wanted, label: options.label ?? null },
   sessions: sessions.map(({ address, provider }) => ({ address, provider })), environment: undefined, scenarios: {} };
 const save = () => { mkdirSync(dirname(outFile), { recursive: true }); writeFileSync(outFile, JSON.stringify(result, null, 2)); };
 const outer = setTimeout(() => { result.outerDeadlineHit = true; save(); console.error('Outer deadline reached; partial results saved.'); process.exit(2); }, Number(options.deadline ?? 1_500_000));
@@ -83,13 +86,7 @@ result.environment = {
 };
 save();
 
-// ---- statistics ----
-const pct = (values, p) => {
-  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
-  if (!sorted.length) return null;
-  return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)] * 10) / 10;
-};
-const stats = values => ({ n: values.filter(Number.isFinite).length, p50: pct(values, 0.5), p95: pct(values, 0.95), max: pct(values, 1) });
+// ---- statistics: see journal-measurement.mjs ----
 const withDeadline = (promise, ms, label) => {
   let timer;
   const expired = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Deadline of ${ms} ms passed: ${label}`)), ms); });
@@ -171,7 +168,7 @@ async function instrument(context) {
   await cdp.send('Network.enable');
   await cdp.send('Performance.enable');
   if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
-  cdp.on('Network.webSocketCreated', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'created', path: normalizePath(event.url.replace(/^ws/, 'http')) }));
+  cdp.on('Network.webSocketCreated', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'created', path: normalizePath(event.url.replace(/^ws/, 'http')), agentId: agentIdOfSocket(event.url.replace(/^ws/, 'http')) }));
   cdp.on('Network.webSocketClosed', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'closed' }));
   cdp.on('Network.webSocketFrameSent', event => frames.push({ t: Date.now(), id: event.requestId, dir: 'out', kind: messageKind(event.response.payloadData), bytes: event.response.payloadData.length }));
   cdp.on('Network.webSocketFrameReceived', event => {
@@ -179,10 +176,15 @@ async function instrument(context) {
     if (entry.kind.endsWith('timeline_page')) entry.rows = timelineRows(event.response.payloadData);
     frames.push(entry);
   });
+  // Bytes of the HTTP responses of the API (not scripts, styles, fonts or images), as the browser received them.
+  const apiTypes = new Map();
+  let apiBytes = 0;
+  cdp.on('Network.requestWillBeSent', event => apiTypes.set(event.requestId, event.type));
+  cdp.on('Network.loadingFinished', event => { const type = apiTypes.get(event.requestId); apiTypes.delete(event.requestId); if (type === 'XHR' || type === 'Fetch') apiBytes += event.encodedDataLength; });
   const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(({ name, value }) => [name, value]));
   return {
     page, cdp, metrics,
-    reset() { http.length = 0; sockets.length = 0; frames.length = 0; consoleErrors.length = 0; pending.clear(); },
+    reset() { http.length = 0; sockets.length = 0; frames.length = 0; consoleErrors.length = 0; pending.clear(); apiBytes = 0; },
     /** Observer log, requests and sockets since the last reset, with times relative to `start`. */
     async capture(start) {
       const log = await page.evaluate(() => window.__baseline?.log.slice() ?? []).catch(() => []);
@@ -190,6 +192,7 @@ async function instrument(context) {
         states: log.map(item => ({ ...item, t: item.t - start })),
         requests: summarizeRequests(http, sockets, frames, start),
         timelineReads: timelineReads(frames, start),
+        apiBytes,
         consoleErrors: consoleErrors.slice(0, 5),
       };
     },
@@ -236,6 +239,7 @@ function summarizeRequests(http, sockets, frames, start) {
     httpSlowest: apiHttp.sort((a, b) => b.ms - a.ms).slice(0, 5).map(item => ({ endpoint: `${item.method} ${item.path}`, startMs: item.t - start, ms: item.ms })),
     webSocketsCreated: sockets.filter(item => item.event === 'created').length,
     webSocketPaths: count(sockets.filter(item => item.event === 'created'), item => item.path),
+    webSocketAgentIds: [...new Set(sockets.filter(item => item.event === 'created' && item.agentId).map(item => item.agentId))],
     framesIn: inFrames.length, framesOut: outFrames.length,
     bytesIn: inFrames.reduce((sum, frame) => sum + frame.bytes, 0), bytesOut: outFrames.reduce((sum, frame) => sum + frame.bytes, 0),
     framesInByKind: count(inFrames, frame => frame.kind), framesOutByKind: count(outFrames, frame => frame.kind),
@@ -286,7 +290,7 @@ const openSummary = (capture, start) => {
     contentMs: content, readyMs: ready,
     blockedUntilMs: capture.states.filter(isBlocked).at(-1) ? (capture.states.filter(isBlocked).at(-1).t) : 0,
     states: stateSummary(capture.states, 0, settledAt),
-    requests: capture.requests, timelineReads: capture.timelineReads, consoleErrors: capture.consoleErrors,
+    requests: capture.requests, apiBytes: capture.apiBytes, timelineReads: capture.timelineReads, consoleErrors: capture.consoleErrors,
   };
 };
 
@@ -314,7 +318,7 @@ async function openSample(handle, session, how) {
   await waitForState(handle, isReady, `ready after ${how} of ${session.address}`);
   await delay(600); // trailing requests and states that follow ready
   const capture = await handle.capture(start);
-  return { address: session.address, provider: session.provider, ...openSummary(capture, start) };
+  return { address: session.address, provider: session.provider, startMs: start, endMs: Date.now(), ...openSummary(capture, start) };
 }
 
 const summarizeOpen = samples => ({
@@ -430,11 +434,7 @@ const scenarios = {
         await handle.page.evaluate(() => window.__baseline.mark());
         await handle.clearLog(); handle.reset();
         const start = Date.now();
-        await new Promise((resolveRestart, reject) => {
-          const child = spawn('pnpm', ['--silent', 'local', 'up', '--no-build'], { cwd: root, stdio: 'ignore' });
-          const timer = setTimeout(() => { child.kill(); reject(new Error('Restart took longer than 180 s')); }, 180_000);
-          child.on('exit', code => { clearTimeout(timer); code === 0 ? resolveRestart() : reject(new Error(`up exited with ${code}`)); });
-        });
+        await restartInstance();
         const restartedMs = Date.now() - start;
         let readyAgainMs;
         try { await waitForState(handle, isReady, 'ready after restart', 90_000); readyAgainMs = Date.now() - start; } catch { /* reported as null */ }
@@ -448,6 +448,52 @@ const scenarios = {
       await delay(5000);
     }
     return { method: 'Open the conversation, mark its first entry node, run `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready.', samples };
+  },
+  // S3: the opens of Copilot sessions, journal or Controller. Run it with smart reading on and off (`--label`), at throttle 1 and 4.
+  async 'journal-open'() {
+    const own = copilotSessions();
+    const known = [], fresh = [];
+    const startedAt = Date.now();
+    await inContext(async context => {
+      const handle = await instrument(context);
+      for (const session of own) {
+        await openSample(handle, session, 'goto'); // the first open of this browser profile is not counted
+        for (let i = 0; i < reps; i++) known.push(await openSample(handle, session, 'reload'));
+      }
+      await handle.page.goto(origin + '/?mode=bot', { waitUntil: 'domcontentloaded' });
+      for (let i = 0; i < reps; i++) for (const session of own) { await clearDeviceStorage(handle); fresh.push(await openSample(handle, session, 'goto')); }
+    });
+    const relay = await relayDiagnostics(startedAt);
+    const describe = samples => samples.map(sample => describeOpen(sample, relay));
+    const knownOpens = describe(known), freshOpens = describe(fresh);
+    return { method: 'Copilot sessions only. open-known: the first open is discarded, then reloads in the same context; open-fresh: device storage cleared before each goto. answeredBy is "controller" when the Relay opened a Controller stream for the session during the open (a stream_opening diagnostic), otherwise "journal".',
+      label: options.label ?? null, sessions: own.map(item => item.address), known: openStats(knownOpens), fresh: openStats(freshOpens),
+      firstOpenMisses: freshOpens.filter(sample => sample.answeredBy === 'controller').length, controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
+      knownSamples: knownOpens, freshSamples: freshOpens };
+  },
+  // S3: one Copilot session, 30 reopens in a fixed order, with the Relay's windows and the hole check after each.
+  async 'journal-reopen-mix'() {
+    const session = copilotSessions()[0];
+    const plan = [...Array(10).fill('reload'), ...Array(10).fill('release'), ...Array(5).fill('restart'), ...Array(5).fill('interruption')];
+    const startedAt = Date.now();
+    const steps = [];
+    await inContext(async context => {
+      let handle = await instrument(context);
+      await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
+      await waitForState(handle, isReady, `ready ${session.address}`);
+      for (const kind of plan) {
+        const fromMs = Date.now();
+        const sample = await reopenStep(handle, session, kind);
+        const native = readNative(session.address);
+        const served = await readServed(handle);
+        steps.push({ kind, fromMs, toMs: Date.now(), sample, holes: holeCheck(native, served) });
+      }
+    });
+    const relay = await relayDiagnostics(startedAt);
+    const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `copilot:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay) }));
+    return { method: 'One Copilot session: 10 reloads, 10 releases then a reload, 5 Controller restarts (pnpm local up --no-build) then a reload, 5 interruptions (a turn cancelled through session cancel, then a release and a reload). After each: the Relay windows since the previous step, and a full native read compared with the messages the page shows after scrolling to the start (the hole check).',
+      label: options.label ?? null, address: session.address, thresholds: mixThresholds(described), controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
+      steps: described.map(({ kind, windows, holes, sample }) => ({ kind, windows, holes, answeredBy: sample.answeredBy, pageBytes: sample.pageBytes, readyMs: sample.readyMs })) };
   },
   // CLI latencies per provider: a command line floor, a history read, and the first send after a release.
   async 'provider-latency'() {
@@ -490,6 +536,91 @@ async function waitIdle(address, ms = 120_000) {
     await delay(1500);
   }
   throw new Error(`Deadline of ${ms} ms passed: ${address} did not become idle`);
+}
+
+// ---- journal measurements (S3) ----
+/** What the Relay's diagnostics, delivered to the Controller's log, say since `sinceMs`; they arrive in batches about a second apart. */
+async function relayDiagnostics(sinceMs) {
+  await delay(4000);
+  return controller('diagnostics', '--source', 'server', '--since', new Date(sinceMs).toISOString(), '--limit', '1000').server ?? [];
+}
+const controllerLog = sinceMs => controller('diagnostics', '--source', 'controller', '--since', new Date(sinceMs).toISOString(), '--limit', '1000').controller ?? [];
+
+/** The newest-first entries of a full native read of the session, all pages. */
+function readNative(address) {
+  const entries = [];
+  let cursor;
+  for (let page = 0; page < 40; page++) {
+    const read = controller('session', 'read', address, '--limit', '200', ...(cursor ? ['--cursor', cursor] : []));
+    entries.push(...(read.entries ?? []));
+    cursor = read.nextCursor;
+    if (!cursor) break;
+  }
+  return entries;
+}
+
+/** The messages a page shows after it scrolled the conversation to its start until no older ones appeared. */
+function readServed(handle) {
+  return handle.page.evaluate(async () => {
+    const scrollerOf = node => { for (let at = node?.parentElement; at; at = at.parentElement) if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at; return document.scrollingElement; };
+    const scroller = scrollerOf(document.querySelector('.agent-timeline-entry'));
+    let last = -1;
+    for (let round = 0; round < 60; round++) {
+      scroller.scrollTop = 0;
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const count = document.querySelectorAll('.agent-message').length;
+      if (count === last) break;
+      last = count;
+    }
+    return [...document.querySelectorAll('.agent-message')].map(node => node.textContent ?? '');
+  });
+}
+
+const openStats = samples => ({
+  n: samples.length, readyMs: stats(samples.map(sample => sample.readyMs)), contentMs: stats(samples.map(sample => sample.contentMs)),
+  pageBytes: stats(samples.map(sample => sample.pageBytes)), windowBytes: stats(samples.flatMap(sample => sample.windows.bytes)),
+  answeredBy: samples.reduce((counts, sample) => ({ ...counts, [sample.answeredBy]: (counts[sample.answeredBy] ?? 0) + 1 }), {}),
+  windowReasons: samples.reduce((counts, sample) => { for (const [reason, count] of Object.entries(sample.windows.byReason)) counts[reason] = (counts[reason] ?? 0) + count; return counts; }, {}),
+  requests: { fill: samples.reduce((sum, sample) => sum + sample.windows.requests.fill, 0), older: samples.reduce((sum, sample) => sum + sample.windows.requests.older, 0) },
+});
+
+/** An open with what the Relay did for it: which side answered, the windows of its session, and the bytes the page received. */
+function describeOpen(sample, relay) {
+  const agentId = sample.requests.webSocketAgentIds[0];
+  const range = { fromMs: sample.startMs - 1000, toMs: sample.endMs + 2000 };
+  const sessionKey = `${sample.provider}:${sample.address.split('/').at(-1)}`;
+  return { ...sample, agentId, answeredBy: agentId ? answeredBy(relay, { agentId, ...range }) : 'unknown',
+    pageBytes: sample.requests.bytesIn + (sample.apiBytes ?? 0), windows: windowCounts(relay, { ...range, agentId: sessionKey }) };
+}
+
+const copilotSessions = () => {
+  const own = byProvider('copilot');
+  if (!own.length) throw new Error('The journal scenarios need a Copilot session in the instance workspace; create one with a real model turn first.');
+  return own;
+};
+
+async function restartInstance() {
+  await new Promise((resolveRestart, reject) => {
+    const child = spawn('pnpm', ['--silent', 'local', 'up', '--no-build'], { cwd: root, stdio: 'ignore' });
+    const timer = setTimeout(() => { child.kill(); reject(new Error('Restart took longer than 180 s')); }, 180_000);
+    child.on('exit', code => { clearTimeout(timer); code === 0 ? resolveRestart() : reject(new Error(`up exited with ${code}`)); });
+  });
+}
+
+/** One step of the mix: what makes the Controller open the session's journal again, then a reload that reads it. */
+async function reopenStep(handle, session, kind) {
+  if (kind === 'release') { controller('session', 'release', session.address); await delay(releaseWaitMs); }
+  if (kind === 'restart') { await restartInstance(); await waitForState(handle, isReady, 'ready after restart', 90_000).catch(() => undefined); }
+  if (kind === 'interruption') {
+    controller('session', 'send', session.address, 'Write the numbers from 1 to 400, one per line, with a sentence about each.');
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline && controller('session', 'read', session.address, '--limit', '0').session?.state !== 'running') await delay(500);
+    await delay(1500);
+    controller('session', 'cancel', session.address);
+    await waitIdle(session.address);
+    controller('session', 'release', session.address); await delay(releaseWaitMs);
+  }
+  return openSample(handle, session, 'reload');
 }
 
 async function hiddenScenario(hiddenMs, freeze) {

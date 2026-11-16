@@ -1,7 +1,8 @@
 import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 
+/** A row's identity: its item key when the stream carries them, otherwise the epoch, position and native identity of its first row. */
 export function timelineEntryKey(epoch: string | null, entry: ProjectedTimelineEntry): string {
-  return `${epoch ?? 'uninitialized'}:${entry.providerId}:${entry.seqStart}:${itemIdentity(entry.item)}`;
+  return entry.itemKey ?? `${epoch ?? 'uninitialized'}:${entry.providerId}:${entry.seqStart}:${itemIdentity(entry.item)}`;
 }
 
 function itemIdentity(item: AgentTimelineItem): string {

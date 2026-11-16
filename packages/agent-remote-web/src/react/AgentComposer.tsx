@@ -621,7 +621,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       : <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!draftOnly && !onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
       command={currentDraft.inspectedSkill} resources={state.resources} onRequestResource={onRequestResource}
-      onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, state.timeline.epoch, currentDraft.inspectedSkill.id])}
+      onResolveResource={onResolveResource} resourceScopeKey={JSON.stringify([agentId, currentDraft.inspectedSkill.id])}
       onClose={() => { currentDraft.inspectedSkill = undefined; refresh((value) => value + 1); }} /> : null}
   </section>;
 }

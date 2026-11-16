@@ -30,7 +30,8 @@ export function useSessionCatchUp() {
       const replicaState = replica.getState(), timeline = replicaState.timeline;
       if (historyEpoch !== undefined && direction !== 'before') unavailable = historyEpoch !== target.epoch;
       if (timeline.initialized && timeline.epoch === target.epoch) unavailable = false;
-      if (replicaState.retiredEpochs.includes(target.epoch) || unavailable) {
+      // A replacement the replica has heard of, pending or applied, makes a cursor of the old epoch unreachable.
+      if (replicaState.retiredEpochs.includes(target.epoch) || (timeline.pendingEpoch !== undefined && timeline.pendingEpoch !== target.epoch) || unavailable) {
         setValue({ id, state: 'unavailable', progress });
         return;
       }

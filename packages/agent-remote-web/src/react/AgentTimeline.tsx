@@ -113,7 +113,7 @@ export function AgentTimeline({
   const previews = previewController ?? inheritedPreviewController;
   const contentOnly = useContext(TimelineDisplay) === 'content';
   const lettersVisible = useContext(TimelineLettersVisible);
-  const scopeKey = JSON.stringify([state.agent?.id, state.timeline.epoch]);
+  const scopeKey = JSON.stringify([state.agent?.id]);
   const editPrompt = useTimelineAction(scopeKey, onEditPrompt);
   const inspectEntry = useTimelineAction(scopeKey, onInspectEntry);
   const resolveResource = useTimelineAction(scopeKey, onResourceResolve);
@@ -204,7 +204,7 @@ export function AgentTimeline({
     </header> : null}
 
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
-      key={JSON.stringify([state.agent?.id, state.timeline.epoch])}
+      key={JSON.stringify([state.agent?.id])}
       onLoadOlder={onLoadOlder}
     /> : timelineStart ?? null}
 
@@ -215,7 +215,7 @@ export function AgentTimeline({
             entries={row.entries} count={row.count} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)} renderEntry={renderEntry} /> : <RuntimeNoticeGroup key={row.key}
             entries={row.entries} expanded={notices.isExpanded(row.entries)} toggle={() => notices.toggle(row.entries)}
             renderEntry={renderEntry} />)}
-      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id, state.timeline.epoch]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
+      {outgoing.map(message => <OutgoingMessageItem key={message.id} message={message} resourceContext={onResourceResolve && onResourceRequest ? { scopeKey: JSON.stringify([state.agent?.id]), bindings: [], resources: state.resources, resolveResource: onResourceResolve, requestResource: onResourceRequest } : undefined} onRetry={onRetryMessage} onDelete={onDeleteMessage} />)}
       {timelineEnd ?? null}
     </div>
 

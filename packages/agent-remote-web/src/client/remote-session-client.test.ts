@@ -657,13 +657,16 @@ describe('RemoteSessionClient', () => {
     });
 
     expect(transport.timelineRequests.at(-1)).toEqual({ direction: 'tail', cursor: undefined });
-    expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-two', entries: [] });
+    // The rows stay on screen until the tail of the new epoch is read.
+    expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-one', pendingEpoch: 'epoch-two' });
+    expect(replica.getState().timeline.entries).toHaveLength(2);
 
     transport.resolveTimeline(page('after', [entry(3, 3, 'C')], {
       window: { minSeq: 1, maxSeq: 3, nextSeq: 4 },
     }));
     await transport.settle();
-    expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-two', entries: [] });
+    expect(replica.getState().timeline).toMatchObject({ epoch: 'epoch-one', pendingEpoch: 'epoch-two' });
+    expect(replica.getState().timeline.entries).toHaveLength(2);
     expect(transport.connections).toBe(2);
 
     transport.resolveTimeline(page('tail', [], { epoch: 'epoch-two' }));
@@ -1332,7 +1335,7 @@ it('keeps prepared input uncertain after an epoch change and clears its evidence
     const retained = f.replica.getState().outgoingMessages![0]!;
     expect(retained).toMatchObject({ status: 'unconfirmed', submittedTextSha256: createHash('sha256').update(fullText).digest('hex') });
     f.replica.retryMessage(retained.id, 'new-operation');
-    expect(f.replica.getState().outgoingMessages![0]).toMatchObject({ submittedTextSha256: undefined, consumedEchoSeqs: undefined });
+    expect(f.replica.getState().outgoingMessages![0]).toMatchObject({ submittedTextSha256: undefined, consumedEchoKeys: undefined });
   } finally { f.client.stop(); }
 });
 
@@ -1346,7 +1349,7 @@ it('starts a new attempt after the current cursor instead of reusing a consumed 
     await vi.waitFor(() => expect(f.replica.getState().outgoingMessages).toHaveLength(1));
     f.replica.updateMessage(prepared, 'unconfirmed', 'Unknown previous attempt', true);
     f.replica.retryMessage(prepared, 'new-operation');
-    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id: prepared, afterSeq: 1, status: 'sending', submittedTextSha256: undefined }]);
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id: prepared, afterKey: expect.stringMatching(/:1:/), status: 'sending', submittedTextSha256: undefined }]);
     f.echo(2, 'Continue');
     expect(f.replica.getState().outgoingMessages).toEqual([]);
   } finally { f.client.stop(); }

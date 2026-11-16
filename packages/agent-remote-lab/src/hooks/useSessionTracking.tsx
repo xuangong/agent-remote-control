@@ -116,9 +116,12 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     if ((!value.changed && !value.attention) || !visible.current.has(key) || document.visibilityState === 'hidden') return value;
     if (connections) {
       const session = observed.current.find(item => sessionKey(item.session) === key)?.session;
-      const timeline = session && connections.find(session)?.replica.getState().timeline;
-      // Opening a view is not a read receipt until its replica has received the notified content.
-      if (!timeline?.initialized || (value.cursor && (timeline.epoch !== value.cursor.epoch || timeline.nextSeq - 1 < value.cursor.seq))) return value;
+      const replicaState = session && connections.find(session)?.replica.getState();
+      const timeline = replicaState?.timeline;
+      // Opening a view is not a read receipt until its replica has received the notified content. A cursor in an epoch the
+      // replica retired names content that a replacement carried over, which the replica now holds.
+      const retired = !!value.cursor && !!replicaState?.retiredEpochs.includes(value.cursor.epoch);
+      if (!timeline?.initialized || (value.cursor && !retired && (timeline.epoch !== value.cursor.epoch || timeline.nextSeq - 1 < value.cursor.seq))) return value;
     }
     return { ...value, changed: false, attention: undefined };
   }, [connections]);

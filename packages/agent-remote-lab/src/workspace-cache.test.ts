@@ -14,7 +14,7 @@ it('restores only display data for the exact account and native session', () => 
   expect(readWorkspaceSnapshot(scope, target)).toBeUndefined();
 });
 it('does not restore pending actions, resources or delivery state from display storage', () => {
-  saveWorkspaceSnapshot(scope, target, { ...replicaState, outgoingMessages: [{ id: 'out', agentId: 'agent-1', text: 'no replay', status: 'sending', epoch: null, afterSeq: 0 }], resources: { secret: {} as never } });
+  saveWorkspaceSnapshot(scope, target, { ...replicaState, outgoingMessages: [{ id: 'out', agentId: 'agent-1', text: 'no replay', status: 'sending', afterKey: 'epoch-start:epoch' }], resources: { secret: {} as never } });
   const restored = readWorkspaceSnapshot(scope, target)!;
   expect(restored.outgoingMessages).toEqual([]);
   expect(restored.pendingInteractions).toEqual([]);
@@ -63,7 +63,7 @@ it('never labels a different native session or provider snapshot as the requeste
 });
 it('keeps preview content without carrying live control authority or recovery cursors', () => {
   const live = { ...replicaState, resources: { picture: { status: 'available' as const, sha256: 'a'.repeat(64), mediaType: 'image/png', byteLength: 5, contentBase64: 'aW1hZ2U=' } }, sessionControl: { access: 'control' as const, available: true },
-    outgoingMessages: [{ id: 'out', agentId: 'agent-1', text: 'no replay', status: 'sending' as const, epoch: null, afterSeq: 0 }] };
+    outgoingMessages: [{ id: 'out', agentId: 'agent-1', text: 'no replay', status: 'sending' as const, afterKey: 'epoch-start:epoch' }] };
   const display = workspaceDisplayState(live);
   expect(display.timeline.entries).toBe(live.timeline.entries);
   expect(display.timeline.nextSeq).toBe(0);

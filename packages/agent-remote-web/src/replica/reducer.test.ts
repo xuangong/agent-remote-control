@@ -290,25 +290,23 @@ describe('agent replica reducer', () => {
     expect(older.state.timeline.hasOlder).toBe(false);
   });
 
-  it('atomically resets the Timeline on a replacement epoch and rejects retired epoch delivery', () => {
+  it('keeps the held rows on a replacement epoch until its tail is read, buffers the new epoch and ignores the old one', () => {
     let state = applyHistoryPage(createReplicaState(), page('tail', [
-      entry(1, 1, { type: 'user_message', text: 'Retired row' }),
+      entry(1, 1, { type: 'user_message', text: 'Held row' }),
     ])).state;
     state = applyTimelineReplacement(state, 'epoch-two');
 
-    expect(state.timeline).toMatchObject({ epoch: 'epoch-two', initialized: false, entries: [] });
-    expect(state.retiredEpochs).toEqual(['epoch-one']);
+    expect(state.timeline).toMatchObject({ epoch: 'epoch-one', pendingEpoch: 'epoch-two', initialized: true });
+    expect(state.timeline.entries).toHaveLength(1);
+    expect(state.retiredEpochs).toEqual([]);
 
-    const stale = reduceTimelineEvent(state, stream(2, {
-      type: 'assistant_message', text: 'Late old row',
-    }, 'epoch-one'));
-    expect(stale.status).toBe('stale_epoch');
-    expect(stale.state).toBe(state);
+    const ignored = reduceTimelineEvent(state, stream(2, { type: 'assistant_message', text: 'Late old row' }, 'epoch-one'));
+    expect(ignored.status).toBe('duplicate');
+    expect(ignored.state).toBe(state);
 
-    const buffered = reduceTimelineEvent(state, stream(1, {
-      type: 'assistant_message', text: 'New epoch row',
-    }, 'epoch-two'));
+    const buffered = reduceTimelineEvent(state, stream(1, { type: 'assistant_message', text: 'New epoch row' }, 'epoch-two'));
     expect(buffered.status).toBe('buffered');
+    expect(buffered.state.timeline.pendingLive).toHaveLength(1);
   });
 
   it('treats an authoritative tail page from a new epoch as a replacement boundary', () => {
@@ -324,6 +322,7 @@ describe('agent replica reducer', () => {
     });
 
     const replaced = applyHistoryPage(initial, replacementPage);
+    expect(replaced.status).toBe('applied');
     expect(replaced.state.retiredEpochs).toContain('epoch-one');
     expect(replaced.state.timeline.entries[0]?.item).toMatchObject({ text: 'New epoch' });
     expect(reduceTimelineEvent(replaced.state, stream(2, {
@@ -542,4 +541,129 @@ it('retains lifecycle-only failure through later snapshots, pagination, and dela
   const stale = page('tail', [entry(1, 1, { type: 'assistant_message', text: 'Quiet reply', background })]);
   state = applyHistoryPage(state, stale).state;
   expect(state.timeline.entries[0]?.item.background?.status).toBe('failed');
+});
+
+describe('absorbing a replacement by item key', () => {
+  const keyed = (key: string, seq: number, item: ProjectedTimelineEntry['item'], seqEnd = seq): ProjectedTimelineEntry => ({ ...entry(seq, seqEnd, item), itemKey: key });
+  const assistant = (key: string, text: string, seq: number) => keyed(key, seq, { type: 'assistant_message', text, messageId: key });
+  const tail = (entries: ProjectedTimelineEntry[], epoch: string, options: Partial<HistoryPage['payload']> = {}) => page('tail', entries, {
+    epoch, startCursor: { epoch, seq: entries[0]?.seqStart ?? 0 }, endCursor: { epoch, seq: entries.at(-1)?.seqEnd ?? 0 }, ...options });
+  const held = (...entries: ProjectedTimelineEntry[]) => applyHistoryPage(createReplicaState(), tail(entries, 'epoch-one')).state;
+  const keysOf = (state: ReturnType<typeof createReplicaState>) => state.timeline.entries.map(row => row.itemKey);
+
+  it('keeps unchanged rows as they are, updates a changed row in place, drops a missing row and inserts a new one in order', () => {
+    const state = held(assistant('a', 'A', 1), assistant('b', 'B', 2), assistant('c', 'C', 3), assistant('d', 'D', 4));
+    const [a, , c] = state.timeline.entries;
+    const replaced = applyHistoryPage(applyTimelineReplacement(state, 'epoch-two'), tail([
+      assistant('a', 'A', 1), assistant('b', 'B changed', 2), assistant('n', 'New', 3), assistant('c', 'C', 4),
+    ], 'epoch-two'));
+
+    expect(replaced.status).toBe('applied');
+    expect(keysOf(replaced.state)).toEqual(['a', 'b', 'n', 'c']);
+    expect(replaced.state.timeline.entries[0]).toBe(a);
+    expect(replaced.state.timeline.entries[3]?.item).toBe(c!.item);
+    expect(replaced.state.timeline.entries[3]).toMatchObject({ seqStart: 4, seqEnd: 4, sourceSeqRanges: [{ startSeq: 4, endSeq: 4 }] });
+    expect(replaced.state.timeline.entries[1]?.item).toMatchObject({ text: 'B changed' });
+    expect(replaced.state.timeline).toMatchObject({ epoch: 'epoch-two', nextSeq: 5 });
+    expect(replaced.state.timeline.pendingEpoch).toBeUndefined();
+    expect(replaced.state.retiredEpochs).toEqual(['epoch-one']);
+  });
+
+  it('drops rows older than the new window and never passes through an empty state', () => {
+    const state = held(assistant('old', 'Old', 1), assistant('a', 'A', 2));
+    const marked = applyTimelineReplacement(state, 'epoch-two');
+    expect(marked.timeline.entries).toHaveLength(2);
+    const replaced = applyHistoryPage(marked, tail([assistant('a', 'A', 1)], 'epoch-two', { hasOlder: true }));
+    expect(keysOf(replaced.state)).toEqual(['a']);
+    expect(replaced.state.timeline.hasOlder).toBe(true);
+  });
+
+  it('retires the old epoch only when the tail is applied', () => {
+    const state = held(assistant('a', 'A', 1));
+    const marked = applyTimelineReplacement(state, 'epoch-two');
+    expect(marked.retiredEpochs).toEqual([]);
+    expect(applyHistoryPage(marked, tail([assistant('a', 'A', 1)], 'epoch-two')).state.retiredEpochs).toEqual(['epoch-one']);
+  });
+
+  it('retargets a second replacement while one is pending, with no queue', () => {
+    const state = held(assistant('a', 'A', 1));
+    const second = applyTimelineReplacement(applyTimelineReplacement(state, 'epoch-two'), 'epoch-three');
+    expect(second.timeline.pendingEpoch).toBe('epoch-three');
+    expect(second.retiredEpochs).toEqual(['epoch-two']);
+    const replaced = applyHistoryPage(second, tail([assistant('a', 'A', 1)], 'epoch-three'));
+    expect(replaced.state.timeline.epoch).toBe('epoch-three');
+    expect(replaced.state.timeline.pendingEpoch).toBeUndefined();
+    expect(replaced.state.retiredEpochs).toEqual(['epoch-two', 'epoch-one']);
+  });
+
+  it('buffers every frame of the pending epoch, a gap included, and applies them after the tail', () => {
+    let state = applyTimelineReplacement(held(assistant('a', 'A', 1)), 'epoch-two');
+    for (const seq of [3, 2]) {
+      const result = reduceTimelineEvent(state, stream(seq, { type: 'assistant_message', text: `Frame ${seq}`, messageId: `m${seq}` }, 'epoch-two'));
+      expect(result.status).toBe('buffered');
+      state = result.state;
+    }
+    const replaced = applyHistoryPage(state, tail([assistant('a', 'A', 1)], 'epoch-two'));
+    expect(replaced.status).toBe('applied');
+    expect(replaced.state.timeline.entries.map(row => row.item.type === 'assistant_message' ? row.item.text : '')).toEqual(['A', 'Frame 2', 'Frame 3']);
+    expect(replaced.state.timeline.pendingLive).toEqual([]);
+  });
+
+  it('answers a page that says the cursor is stale or ahead with one replaced reduction that keeps the rows', () => {
+    const state = held(assistant('a', 'A', 1));
+    for (const flags of [{ reset: true, staleCursor: true }, { gap: true }]) {
+      const result = applyHistoryPage(state, page('after', [], { epoch: 'epoch-two', ...flags }));
+      expect(result).toMatchObject({ status: 'replaced', epoch: 'epoch-two' });
+      expect(result.state.timeline.entries).toHaveLength(1);
+    }
+    const sameEpoch = applyHistoryPage(state, page('after', [], { epoch: 'epoch-one', gap: true }));
+    expect(sameEpoch).toMatchObject({ status: 'replaced', epoch: 'epoch-one' });
+    expect(sameEpoch.state.timeline.pendingEpoch).toBeUndefined();
+  });
+
+  it('replaces rows without keys, which key by epoch, through one transition and never an empty state', () => {
+    const state = applyHistoryPage(createReplicaState(), page('tail', [entry(1, 1, { type: 'user_message', text: 'Old' })])).state;
+    const marked = applyTimelineReplacement(state, 'epoch-two');
+    expect(marked.timeline.entries).toHaveLength(1);
+    const replaced = applyHistoryPage(marked, page('tail', [entry(1, 1, { type: 'user_message', text: 'Old' })], { epoch: 'epoch-two' }));
+    expect(replaced.state.timeline.entries).toHaveLength(1);
+    expect(replaced.state.timeline.entries[0]).not.toBe(state.timeline.entries[0]);
+  });
+
+  it('holds one row per key: a live event updates the held row in place and keeps its position', () => {
+    let state = held(assistant('a', 'A', 1), keyed('tool', 2, { type: 'tool_call', callId: 'c', name: 'bash', detail: { type: 'other', description: 'x' }, status: 'running', error: null }), assistant('b', 'B', 3));
+    const frame = (seq: number, itemKey: string, item: ProjectedTimelineEntry['item']): AgentStreamMessage => {
+      const message = stream(seq, item);
+      (message.payload as { event: { itemKey?: string } }).event.itemKey = itemKey;
+      return message;
+    };
+    state = reduceTimelineEvent(state, frame(4, 'tool', { type: 'tool_call', callId: 'c', name: 'bash', detail: { type: 'other', description: 'x' }, status: 'completed', error: null })).state;
+    state = reduceTimelineEvent(state, frame(5, 'b', { type: 'assistant_message', text: ' more', messageId: 'b' })).state;
+    state = reduceTimelineEvent(state, frame(6, 'n', { type: 'assistant_message', text: 'New', messageId: 'n' })).state;
+    expect(keysOf(state)).toEqual(['a', 'tool', 'b', 'n']);
+    expect(state.timeline.entries[1]).toMatchObject({ seqStart: 2, seqEnd: 4, item: { status: 'completed' } });
+    expect(state.timeline.entries[2]?.item).toMatchObject({ text: 'B more' });
+  });
+
+  it('drops the keys an older page repeats, so an item updated above the window neither repeats nor leaves a hole', () => {
+    const state = applyHistoryPage(createReplicaState(), tail([assistant('c', 'C', 3), assistant('d', 'D', 4)], 'epoch-one', { hasOlder: true })).state;
+    const older = applyHistoryPage(state, page('before', [assistant('b', 'B', 2), assistant('c', 'C updated above', 1)], { epoch: 'epoch-one', hasOlder: false }));
+    const keys = keysOf(older.state);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toEqual(['c', 'b', 'd'].sort((x, y) => (older.state.timeline.entries.find(r => r.itemKey === x)!.seqStart - older.state.timeline.entries.find(r => r.itemKey === y)!.seqStart)));
+    expect(older.state.timeline.entries.find(row => row.itemKey === 'c')?.item).toMatchObject({ text: 'C' });
+  });
+
+  it('builds the same row live as from a page: a page of the same epoch leaves the live rows as they are', () => {
+    let state = held();
+    const message = (seq: number, text: string): AgentStreamMessage => {
+      const result = stream(seq, { type: 'assistant_message', text, messageId: 'm' });
+      (result.payload as { event: { itemKey?: string } }).event.itemKey = 'm';
+      return result;
+    };
+    for (const [seq, text] of [[1, 'Hel'], [2, 'lo'], [3, '']] as const) state = reduceTimelineEvent(state, message(seq, text)).state;
+    const [live] = state.timeline.entries;
+    const reread = applyHistoryPage(state, tail([{ ...keyed('m', 1, { type: 'assistant_message', text: 'Hello', messageId: 'm' }, 3), collapsed: ['assistant_merge'] }], 'epoch-one', { window: { minSeq: 1, maxSeq: 3, nextSeq: 4 } }));
+    expect(reread.state.timeline.entries[0]).toBe(live);
+  });
 });

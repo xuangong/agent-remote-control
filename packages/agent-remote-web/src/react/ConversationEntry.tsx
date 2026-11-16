@@ -31,6 +31,19 @@ interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt'
   onSelect?(entryKey: string, extend: boolean): void;
 }
 
+/**
+ * A row renders again when its content, its other props or its identity change, not when only its sequence changes: a replacement
+ * that renumbers the rows must leave an unchanged row alone. The row's sequence is read again from the state when it is used.
+ */
+function sameRow(previous: ConversationEntryProps, next: ConversationEntryProps): boolean {
+  for (const key of new Set([...Object.keys(previous), ...Object.keys(next)]) as Set<keyof ConversationEntryProps>) {
+    if (key !== 'entry' && !Object.is(previous[key], next[key])) return false;
+  }
+  const a = previous.entry, b = next.entry;
+  return a === b || (a.item === b.item && a.resources === b.resources && a.collapsed === b.collapsed
+    && a.timestamp === b.timestamp && a.turnId === b.turnId && a.providerId === b.providerId);
+}
+
 // Unchanged history stays mounted without rebuilding its controls on every delta.
 export const ConversationEntry = memo(function ConversationEntry({ entry, entryKey, messageGroup, contentOnly, agentId,
   scopeKey, resources, onEditPrompt, onInspectEntry, inspected, searchSelected, resolveSessionLink, onResourceResolve, onResourceRequest,
@@ -54,7 +67,7 @@ export const ConversationEntry = memo(function ConversationEntry({ entry, entryK
     {!collapsed ? <ResourceList bindings={contentOnly ? attachments.bindings : entry.resources} labels={attachments.labels}
       resources={resources} onRequest={onResourceRequest} /> : null}
   </TimelineEntry></TimelineSearchReveal.Provider>;
-});
+}, sameRow);
 
 function previewText(item: AgentReplicaState['timeline']['entries'][number]['item']): string {
   switch (item.type) {

@@ -1,5 +1,6 @@
 import { withoutSessionReferenceNote, type ProjectedTimelineEntry, type UserMessagePart } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, OutgoingMessage } from './types.js';
+import { timelineEntryKey } from './timeline-entry-key.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */
 export class MessageOutbox {
@@ -8,21 +9,33 @@ export class MessageOutbox {
 
   create(state: AgentReplicaState, agentId: string, text: string, delivery?: OutgoingMessage['delivery'], operationId?: string, rich?: Pick<OutgoingMessage, 'content' | 'imageDigests'>): OutgoingMessage {
     return { id: `outgoing-${crypto.randomUUID()}`, operationId, agentId, text, ...(rich ? structuredClone(rich) : {}), delivery, status: 'sending',
-      epoch: state.timeline.epoch, afterSeq: state.timeline.nextSeq - 1 };
+      afterKey: anchorNow(state) };
+  }
+
+  /** The anchor a message keeps when it is sent again: its own while that row is held, the newest row otherwise. */
+  anchorFor(state: AgentReplicaState, message: OutgoingMessage): string | undefined {
+    return message.afterKey !== undefined && anchorPosition(state, message.afterKey) !== undefined ? message.afterKey : anchorNow(state);
   }
 
   reconcile(state: AgentReplicaState): AgentReplicaState {
     const outgoing = state.outgoingMessages;
     if (!outgoing?.length) return state;
+    // The rows of a replacement that has not been read yet are not the rows an echo will be found in.
+    if (state.timeline.pendingEpoch !== undefined) return state;
     // Hash only candidate echoes. A completed digest rechecks the current replica,
     // so an asynchronous result cannot settle an obsolete epoch or submission.
     if (!this.prepareDigests(state)) return state;
-    const consumed = new Set<number>();
+    const entries = state.timeline.entries;
+    const keys = entries.map(entry => timelineEntryKey(state.timeline.epoch, entry));
+    const consumed = new Set<string>();
     let changed = false;
     const remaining: OutgoingMessage[] = [];
     for (const message of outgoing) {
       if (message.agentId !== state.agent?.id || message.status === 'failed') { remaining.push(message); continue; }
-      if (message.epoch !== state.timeline.epoch) {
+      const after = message.afterKey === undefined ? undefined : anchorPosition(state, message.afterKey, keys);
+      if (after === undefined) {
+        // The row the message was sent after is gone (a replacement rewrote it), or it was sent before the conversation was read
+        // (or written before row keys): its echo cannot be told from older history.
         if (state.timeline.initialized && message.status !== 'unconfirmed') {
           remaining.push({ ...message, status: 'unconfirmed', error: 'Conversation history changed before delivery could be confirmed.' });
           changed = true;
@@ -30,22 +43,25 @@ export class MessageOutbox {
         continue;
       }
       // A complete echo is assigned once, including mixed prepared and plain text.
-      const echo = state.timeline.entries.find(entry => entry.seqStart > message.afterSeq
-        && !consumed.has(entry.seqStart) && !message.consumedEchoSeqs?.includes(entry.seqStart)
+      const at = entries.findIndex((entry, index) => index > after
+        && !consumed.has(keys[index]!) && !message.consumedEchoKeys?.includes(keys[index]!)
         && this.matches(message, entry));
-      if (echo) {
-        consumed.add(echo.seqStart);
+      if (at >= 0) {
+        consumed.add(keys[at]!);
         changed = true;
       } else remaining.push(message);
     }
     // A late ACK can reveal that a different caller text prepared the same echo.
     // Retain consumed occurrences even before that evidence arrives or after reload.
     const pending = remaining.map(message => {
-      if (message.agentId !== state.agent?.id || message.status === 'failed' || message.epoch !== state.timeline.epoch || !consumed.size) return message;
-      const afterSeq = state.timeline.entries.reduce((seq, entry) => consumed.has(entry.seqStart) && this.matches(message, entry)
-        ? Math.max(seq, entry.seqStart) : seq, message.afterSeq);
-      const consumedEchoSeqs = [...new Set([...(message.consumedEchoSeqs ?? []), ...consumed])].filter(seq => seq > afterSeq);
-      return { ...message, afterSeq, consumedEchoSeqs };
+      if (message.agentId !== state.agent?.id || message.status === 'failed' || message.afterKey === undefined || !consumed.size) return message;
+      const start = anchorPosition(state, message.afterKey, keys);
+      if (start === undefined) return message;
+      let afterAt = start;
+      entries.forEach((entry, index) => { if (consumed.has(keys[index]!) && this.matches(message, entry)) afterAt = Math.max(afterAt, index); });
+      const afterKey = afterAt < 0 ? message.afterKey : keys[afterAt]!;
+      const consumedEchoKeys = [...new Set([...(message.consumedEchoKeys ?? []), ...consumed])].filter(key => keys.indexOf(key) > afterAt);
+      return { ...message, afterKey, consumedEchoKeys };
     });
     return changed ? { ...state, outgoingMessages: pending } : state;
   }
@@ -61,14 +77,16 @@ export class MessageOutbox {
   }
 
   private prepareDigests(state: AgentReplicaState): boolean {
-    const candidates = state.outgoingMessages?.filter(message => message.submittedTextSha256 !== undefined
-      && message.agentId === state.agent?.id && message.epoch === state.timeline.epoch && message.status !== 'failed'
-      && !message.content?.some(part => part.type !== 'text')) ?? [];
+    const keys = state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry));
+    const candidates = (state.outgoingMessages?.filter(message => message.submittedTextSha256 !== undefined
+      && message.agentId === state.agent?.id && message.afterKey !== undefined && message.status !== 'failed'
+      && !message.content?.some(part => part.type !== 'text')) ?? []).map(message => ({ message, after: anchorPosition(state, message.afterKey!, keys) }))
+      .filter((candidate): candidate is { message: OutgoingMessage; after: number } => candidate.after !== undefined);
     if (!candidates.length) return true;
     let ready = true;
-    for (const { item, seqStart } of state.timeline.entries) {
+    for (const [index, { item }] of state.timeline.entries.entries()) {
       if (item.type !== 'user_message' || item.content?.some(part => part.type !== 'text')
-        || !candidates.some(message => seqStart > message.afterSeq && !message.consumedEchoSeqs?.includes(seqStart))) continue;
+        || !candidates.some(({ message, after }) => index > after && !message.consumedEchoKeys?.includes(keys[index]!))) continue;
       let digest = this.digests.get(item);
       if (!digest || digest.text !== item.text) {
         digest = { text: item.text, pending: true };
@@ -82,6 +100,28 @@ export class MessageOutbox {
     }
     return ready;
   }
+}
+
+/**
+ * The anchor of a message sent now: the key of the newest row, `epoch-start:<epoch>` for a conversation read with no rows, undefined
+ * before it was read.
+ */
+export function anchorNow(state: AgentReplicaState): string | undefined {
+  if (!state.timeline.initialized) return undefined;
+  const last = state.timeline.entries.at(-1);
+  return last ? timelineEntryKey(state.timeline.epoch, last) : `${EPOCH_START}${state.timeline.epoch ?? ''}`;
+}
+
+const EPOCH_START = 'epoch-start:';
+
+/**
+ * Where the row of an anchor stands among the rows: its index, -1 for the start of the epoch the anchor names, undefined when the
+ * replica no longer holds the row or the epoch (a replacement rewrote it).
+ */
+export function anchorPosition(state: AgentReplicaState, afterKey: string, keys = state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry))): number | undefined {
+  if (afterKey.startsWith(EPOCH_START)) return afterKey === `${EPOCH_START}${state.timeline.epoch ?? ''}` ? -1 : undefined;
+  const index = keys.indexOf(afterKey);
+  return index < 0 ? undefined : index;
 }
 
 // A Host adds a reference note to the input it delivers; the echo is matched as its sender wrote it.

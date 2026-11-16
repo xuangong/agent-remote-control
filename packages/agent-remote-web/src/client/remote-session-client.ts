@@ -31,6 +31,7 @@ import {
 import { uploadResource, downloadResource, checkResourceAborted, type ResourceTransferOptions, type ResourceUploadRequest } from './resource-upload.js';
 import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
 import { watchMessageEchoes } from './message-echo-sync.js';
+import { anchorPosition } from '../replica/message-outbox.js';
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';
 import {
@@ -79,6 +80,7 @@ interface PendingOperation {
 }
 
 // Memory-only proof shared by views in one page/transport, never by browser storage.
+const TAIL_LIMIT_MAX = 200;
 const controlProofs = new WeakMap<RemoteAgentTransport, Map<string, string>>();
 
 export class RemoteSessionClient {
@@ -222,7 +224,7 @@ export class RemoteSessionClient {
       onOpen: () => {
         if (generation !== this.generation) return;
         this.connectionOpen = true;
-        this.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' });
+        this.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate', itemKeys: true });
       },
       onMessage: (message) => this.receive(generation, message),
       onDisconnect: (closure) => {
@@ -479,7 +481,8 @@ export class RemoteSessionClient {
     const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
     if (!message || !['failed', 'unconfirmed'].includes(message.status)) return Promise.reject(new Error('This message is not available to retry.'));
     if (!this.connectionOpen) return Promise.reject(new RemoteOperationError('connection_not_ready', 'Wait for the session to reconnect, then retry.', true));
-    const operationId = message.status === 'unconfirmed' && !message.retryRequiresNewOperation && message.epoch === state.timeline.epoch && message.operationId
+    const operationId = message.status === 'unconfirmed' && !message.retryRequiresNewOperation && message.afterKey !== undefined
+      && anchorPosition(state, message.afterKey) !== undefined && message.operationId
       ? message.operationId : this.createOperationId();
     this.replica.retryMessage(id, operationId);
     return this.sendOutgoingMessage(id, operationId, message.text, { delivery: message.delivery }, message.content);
@@ -772,7 +775,7 @@ export class RemoteSessionClient {
       if (timeline.epoch) {
         void this.fetchTimeline(generation, 'after', { epoch: timeline.epoch, seq: reduction.expectedSeq - 1 });
       }
-    } else if (reduction.status === 'epoch_changed' || reduction.status === 'reset_required') {
+    } else if (reduction.status === 'replaced') {
       this.retireRecovery();
       void this.fetchTimeline(generation, 'tail');
     }
@@ -793,7 +796,7 @@ export class RemoteSessionClient {
       while (true) {
         const page = await (this.timelineRecovery === 'websocket'
           ? this.fetchSocketTimeline(direction, nextCursor, controller.signal)
-          : this.transport.fetchTimeline(this.agentId, direction, nextCursor, this.historyPageSize, { signal: controller.signal }));
+          : this.transport.fetchTimeline(this.agentId, direction, nextCursor, this.pageLimit(direction), { signal: controller.signal }));
         if (generation !== this.generation || this.recovery !== controller) return;
         const continuation = direction === 'after' && page.payload.hasNewer && page.payload.epoch === nextCursor?.epoch
           ? this.afterContinuation(page, nextCursor)
@@ -827,10 +830,15 @@ export class RemoteSessionClient {
     }
   }
 
+  /** A tail is as long as the rows held (at most 200), so held rows inside the window are not dropped for lack of room. */
+  private pageLimit(direction: TimelineDirection): number {
+    return direction === 'tail' ? Math.min(TAIL_LIMIT_MAX, Math.max(this.historyPageSize, this.replica.getState().timeline.entries.length)) : this.historyPageSize;
+  }
+
   private async fetchSocketTimeline(direction: TimelineDirection, cursor: TimelineCursor | undefined, signal: AbortSignal): Promise<HistoryPage> {
     const requestId = this.createRequestId();
     const pending = this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_request', payload: {
-      requestId, agentId: this.agentId, direction, limit: this.historyPageSize, ...(cursor ? {cursor} : {}),
+      requestId, agentId: this.agentId, direction, limit: this.pageLimit(direction), ...(cursor ? {cursor} : {}),
     } }, 'timeline_page', (message): message is HistoryPage => message.type === 'timeline_page'
       && message.payload.agentId === this.agentId && message.payload.direction === direction, null);
     const abort = () => this.rejectPendingOperation(requestId, 'timeline_page', new RemoteOperationError(

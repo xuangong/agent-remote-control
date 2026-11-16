@@ -3424,7 +3424,7 @@ function AppContent({
     <MovableHostSlot host={askHost} slot={sidebarShortcuts ? askSidebarSlot : askFloatingSlot} />
     <ShortcutPlacement.Provider value={shortcutPlacement}>{createPortal(trackTeamTpmEntries, shortcutHost)}{createPortal(askEntry, askHost)}</ShortcutPlacement.Provider>
     {!compactLayout && contextVisible ? <SidebarResize width={sidebar.width} maximum={sidebar.maximum} onChange={sidebar.setWidth} /> : null}
-    <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId, state?.timeline.epoch])} className="lab-main-stage" {...backgroundInert}>
+    <PreviewWorkspace resourceScope={JSON.stringify([activeOpened?.hostId, activeAgentId])} className="lab-main-stage" {...backgroundInert}>
       {!compactLayout ? <section id="lab-sessions-page" className="lab-sessions-page" aria-label={sessionsPageTitle} hidden={!pageOpen}
         onKeyDown={event => {
           // Text fields keep Escape for themselves (a search field clears on Escape); checkboxes, radios and buttons leave the page.

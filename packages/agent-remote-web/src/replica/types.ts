@@ -32,6 +32,11 @@ export interface TimelineReplicaState {
   readonly nextSeq: number;
   readonly hasOlder: boolean;
   readonly pendingLive: readonly TimelineStreamMessage[];
+  /**
+   * The epoch of a replacement the replica has heard of and not yet read. The held entries stay until the tail of that epoch
+   * is applied; frames of the pending epoch wait in `pendingLive`.
+   */
+  readonly pendingEpoch?: string;
 }
 
 /** Local delivery feedback, separate from the authoritative timeline and its cursor. */
@@ -44,13 +49,13 @@ export interface OutgoingMessage {
   readonly content?: readonly MessagePart[];
   readonly imageDigests?: Readonly<Record<string, string>>;
   readonly submittedTextSha256?: string;
-  /** Echoes already assigned to another local send in this epoch. Retained across reload. */
-  readonly consumedEchoSeqs?: readonly number[];
+  /** Row keys of echoes already assigned to another local send. Retained across reload. */
+  readonly consumedEchoKeys?: readonly string[];
   readonly delivery?: 'immediate' | 'next_turn';
   readonly status: 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
   readonly error?: string;
-  readonly epoch: string | null;
-  readonly afterSeq: number;
+  /** The row key of the newest row when the message was sent (`epoch-start:<epoch>` when there was none); its echo is a later row. Absent when it was sent before the conversation was read, and in a ledger written before keys. */
+  readonly afterKey?: string;
 }
 
 export interface AgentReplicaState {
@@ -70,9 +75,8 @@ export interface AgentReplicaState {
 export type TimelineReduction =
   | { status: 'applied' | 'buffered' | 'duplicate'; state: AgentReplicaState }
   | { status: 'gap'; state: AgentReplicaState; expectedSeq: number }
-  | { status: 'epoch_changed'; state: AgentReplicaState; epoch: string }
-  | { status: 'stale_epoch'; state: AgentReplicaState }
-  | { status: 'reset_required'; state: AgentReplicaState; epoch: string };
+  | { status: 'replaced'; state: AgentReplicaState; epoch: string }
+  | { status: 'stale_epoch'; state: AgentReplicaState };
 
 export interface SnapshotApplicationOptions {
   readonly interactionBaseline?: number;

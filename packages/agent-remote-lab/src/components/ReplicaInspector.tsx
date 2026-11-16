@@ -33,6 +33,7 @@ export function ReplicaInspector({ state, sessionStatus, providerName }: { state
     <p className="lab-eyebrow">Timeline synchronization</p>
     <dl className="lab-state-grid">
       <div><dt>Epoch</dt><dd data-testid="timeline-epoch">{timeline?.epoch ? <code title={timeline.epoch}>{timeline.epoch}</code> : '—'}</dd></div>
+      <div><dt>Pending epoch</dt><dd data-testid="timeline-pending-epoch">{timeline?.pendingEpoch ? <code title={timeline.pendingEpoch}>{timeline.pendingEpoch}</code> : 'none'}</dd></div>
       <div><dt>Contiguous sequence</dt><dd>{Math.max(0, (timeline?.nextSeq ?? 1) - 1)}</dd></div>
       <div><dt>Pending live</dt><dd>{timeline?.pendingLive.length ?? 0}</dd></div>
       <div><dt>Pending interactions</dt><dd>{state?.pendingInteractions.length ?? 0}</dd></div>

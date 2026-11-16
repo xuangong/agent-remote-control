@@ -230,7 +230,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     </div>
     {selectedCommand && state ? <AgentCommandDetails key={`${state.agent?.id}:${selectedCommand.id}`} command={selectedCommand} resources={state.resources}
       onRequestResource={actions.requestResource} onResolveResource={actions.resolveResource}
-      resourceScopeKey={JSON.stringify([state.agent?.id, state.timeline.epoch, selectedCommand.id])}
+      resourceScopeKey={JSON.stringify([state.agent?.id, selectedCommand.id])}
       onClose={() => setInspected(undefined)} /> : null}
   </SessionViewFrame>}</SessionAttributions></TimelineLettersVisible.Provider></TimelineDisplay.Provider>;
 }
@@ -297,7 +297,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const lettersVisible = useContext(TimelineLettersVisible);
   useLayoutEffect(() => { setSearchSelection(undefined); }, [lettersVisible]);
   const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
-  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id, state?.timeline.epoch]), visible, readingPositions, undefined,
+  const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id]), visible, readingPositions, undefined,
     actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision, 'bottom');
   const consumedReveal = useRef<string>();
   useLayoutEffect(() => {

@@ -539,7 +539,7 @@ it.each([true, false])('groups Host, Provider, cwd and native Session ID in Info
 });
 
 it('leaves an uncertain retry to the message, which says what to check, and reports other retry failures', async () => {
-  const outgoing = { id: 'outgoing-1', agentId: replicaState.agent!.id, text: 'Deploy the fix', status: 'unconfirmed' as const, epoch: replicaState.timeline.epoch, afterSeq: 0,
+  const outgoing = { id: 'outgoing-1', agentId: replicaState.agent!.id, text: 'Deploy the fix', status: 'unconfirmed' as const, afterKey: 'epoch-start:epoch',
     retryRequiresNewOperation: true, error: 'This message may not have arrived. If it is not in the conversation, Retry sends it again.' };
   const state = { ...replicaState, pendingInteractions: [], outgoingMessages: [outgoing], agent: { ...replicaState.agent!, status: 'idle' as const, activeTurn: null } };
   const retryMessage = vi.fn(async () => {

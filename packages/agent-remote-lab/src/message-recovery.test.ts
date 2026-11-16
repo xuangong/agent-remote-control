@@ -30,16 +30,29 @@ it('restores the ordered image content and identity needed for an exact retry', 
 });
 
 it('validates retained prepared-text evidence without discarding other recoverable input', () => {
-  const message = { id: 'prepared', agentId: 'old-agent', text: 'Continue', epoch: 'epoch-one', afterSeq: 0,
-    status: 'awaiting_echo', submittedTextSha256: 'a'.repeat(64), consumedEchoSeqs: [1, 3] };
+  const message = { id: 'prepared', agentId: 'old-agent', text: 'Continue', afterKey: 'epoch-start:epoch-one',
+    status: 'awaiting_echo', submittedTextSha256: 'a'.repeat(64), consumedEchoKeys: ['row-1', 'row-3'] };
   localStorage.setItem('agent-remote:recovery:relay:outbox:prepared-session', JSON.stringify([
     message, { ...message, id: 'bad-digest', submittedTextSha256: 'bad' },
-    { ...message, id: 'bad-sequences', consumedEchoSeqs: '1' },
-    { ...message, id: 'bad-sequence', consumedEchoSeqs: [-1] },
+    { ...message, id: 'bad-keys', consumedEchoKeys: 'row-1' },
+    { ...message, id: 'bad-key', consumedEchoKeys: [1] },
   ]));
   const restored = new AgentReplica();
   recoverMessages(restored, 'relay', 'prepared-session', 'new-agent')();
   expect(restored.getState().outgoingMessages).toEqual([expect.objectContaining({
-    id: 'prepared', agentId: 'new-agent', submittedTextSha256: 'a'.repeat(64), consumedEchoSeqs: [1, 3],
+    id: 'prepared', agentId: 'new-agent', submittedTextSha256: 'a'.repeat(64), consumedEchoKeys: ['row-1', 'row-3'],
   })]);
+});
+
+it('reads a ledger written before row keys once as unconfirmed and writes it back without the old fields', () => {
+  const legacy = { id: 'legacy', agentId: 'old-agent', text: 'Continue', epoch: 'epoch-one', afterSeq: 4, status: 'awaiting_echo', consumedEchoSeqs: [5] };
+  localStorage.setItem('agent-remote:recovery:relay:outbox:legacy-session', JSON.stringify([legacy]));
+  const restored = new AgentReplica();
+  const stop = recoverMessages(restored, 'relay', 'legacy-session', 'new-agent');
+  const [message] = restored.getState().outgoingMessages ?? [];
+  expect(message).toMatchObject({ id: 'legacy', agentId: 'new-agent', status: 'unconfirmed' });
+  expect(message).not.toHaveProperty('afterSeq');
+  restored.updateMessage('legacy', 'unconfirmed', 'Still unconfirmed');
+  expect(JSON.parse(localStorage.getItem('agent-remote:recovery:relay:outbox:legacy-session')!)[0]).not.toHaveProperty('afterSeq');
+  stop();
 });

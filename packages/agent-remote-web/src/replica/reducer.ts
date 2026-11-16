@@ -22,6 +22,7 @@ import type {
   TimelineReduction,
   TimelineStreamMessage,
 } from './types.js';
+import { timelineEntryKey } from './timeline-entry-key.js';
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -171,22 +172,28 @@ export function applyTimelineResourceBindingReplacement(
   return { ...state, timeline: { ...state.timeline, entries, pendingLive } };
 }
 
+/**
+ * Records that the timeline continues in another epoch. The held entries stay on screen: the tail of the new epoch is merged
+ * into them by key when it is read (`absorbTail`). Before any content was read there is nothing to keep, so the replica
+ * takes the epoch at once.
+ */
 export function applyTimelineReplacement(state: AgentReplicaState, epoch: string): AgentReplicaState {
-  if (state.timeline.epoch === epoch && !state.timeline.initialized) return state;
-  const retiredEpochs = state.timeline.epoch && state.timeline.epoch !== epoch
-    ? unique([...state.retiredEpochs, state.timeline.epoch])
-    : state.retiredEpochs;
+  const timeline = state.timeline;
+  if (timeline.epoch === epoch && timeline.pendingEpoch === undefined) return state;
+  if (timeline.pendingEpoch === epoch) return state;
+  const retired = (...epochs: Array<string | null | undefined>) => unique([...state.retiredEpochs, ...epochs.filter((value): value is string => !!value && value !== epoch)]);
+  if (!timeline.initialized) {
+    return {
+      ...state,
+      retiredEpochs: retired(timeline.epoch, timeline.pendingEpoch),
+      timeline: { ...timeline, epoch, entries: [], nextSeq: 1, hasOlder: false, pendingEpoch: undefined,
+        pendingLive: timeline.pendingLive.filter((message) => message.payload.epoch === epoch) },
+    };
+  }
   return {
     ...state,
-    retiredEpochs,
-    timeline: {
-      epoch,
-      initialized: false,
-      entries: [],
-      nextSeq: 1,
-      hasOlder: false,
-      pendingLive: [],
-    },
+    retiredEpochs: retired(timeline.pendingEpoch),
+    timeline: { ...timeline, pendingEpoch: epoch, pendingLive: timeline.pendingLive.filter((message) => message.payload.epoch === epoch) },
   };
 }
 
@@ -213,49 +220,132 @@ export function applyInteractionInvalidatedMessage(
 
 export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, options?: { preserveLive?: boolean }): TimelineReduction {
   const payload = page.payload;
+  const timeline = state.timeline;
   if (payload.reset || payload.staleCursor || payload.gap) {
-    const reset = applyTimelineReplacement(state, payload.epoch);
-    return { status: 'reset_required', state: reset, epoch: payload.epoch };
-  }
-  if (state.timeline.epoch && state.timeline.epoch !== payload.epoch) {
     if (state.retiredEpochs.includes(payload.epoch)) return { status: 'stale_epoch', state };
-    if (payload.direction !== 'tail') {
-      return {
-        status: 'epoch_changed',
-        state: applyTimelineReplacement(state, payload.epoch),
-        epoch: payload.epoch,
-      };
-    }
+    return { status: 'replaced', state: applyTimelineReplacement(state, payload.epoch), epoch: payload.epoch };
   }
+  const epochChanged = timeline.epoch !== null && timeline.epoch !== payload.epoch;
+  if (epochChanged && state.retiredEpochs.includes(payload.epoch)) return { status: 'stale_epoch', state };
+  if (payload.direction === 'tail') return absorbTail(state, page);
+  if (epochChanged) return { status: 'replaced', state: applyTimelineReplacement(state, payload.epoch), epoch: payload.epoch };
 
-  const authorityState = state.timeline.epoch && state.timeline.epoch !== payload.epoch
-    ? applyTimelineReplacement(state, payload.epoch)
-    : state;
-
-  const base = !authorityState.timeline.initialized || payload.direction === 'tail'
-    ? []
-    : authorityState.timeline.entries;
-  const incoming = options?.preserveLive ? payload.entries.filter(candidate => !base.some(existing =>
-    existing.seqEnd > candidate.seqEnd && rangesOverlap(existing.sourceSeqRanges, candidate.sourceSeqRanges))) : payload.entries;
-  const entries = mergeAuthoritative(base, incoming);
+  if (timeline.pendingEpoch !== undefined) {
+    // The tail of the pending epoch replaces what an `after` page would update; older rows of the held epoch may still be read.
+    if (payload.direction !== 'before') return { status: 'duplicate', state };
+    const older = applyBackgroundEntries(mergePage(timeline.epoch, timeline.entries, page, false), timeline.backgroundActivities);
+    return { status: 'applied', state: { ...state, timeline: { ...timeline, entries: older, hasOlder: payload.hasOlder } } };
+  }
+  const base = timeline.initialized ? timeline.entries : [];
+  const entries = mergePage(timeline.epoch, base, page, options?.preserveLive === true);
   const nextSeq = options?.preserveLive
-    ? Math.max(authorityState.timeline.nextSeq, nextSequenceForPage(authorityState, page))
-    : nextSequenceForPage(authorityState, page);
+    ? Math.max(timeline.nextSeq, nextSequenceForPage(state, page))
+    : nextSequenceForPage(state, page);
   const prepared: AgentReplicaState = {
-    ...authorityState,
+    ...state,
     timeline: {
+      ...timeline,
       epoch: payload.epoch,
-      backgroundActivities: authorityState.timeline.backgroundActivities,
       initialized: true,
-      entries: applyBackgroundEntries(entries, authorityState.timeline.backgroundActivities),
+      entries: applyBackgroundEntries(entries, timeline.backgroundActivities),
       nextSeq,
-      hasOlder: payload.direction === 'before' ? payload.hasOlder : payload.hasOlder || authorityState.timeline.hasOlder,
-      pendingLive: authorityState.timeline.pendingLive
+      hasOlder: payload.direction === 'before' ? payload.hasOlder : payload.hasOlder || timeline.hasOlder,
+      pendingLive: timeline.pendingLive
         .filter((message) => message.payload.epoch === payload.epoch)
         .sort((left, right) => left.payload.seq - right.payload.seq),
     },
   };
   return drainPending(prepared);
+}
+
+/**
+ * The tail of an epoch is the newest window of its timeline. It replaces what the replica holds without an empty state in
+ * between: a held row whose key and content are in the window stays as it is (only its sequence changes), a row the window lacks
+ * leaves (including rows older than the window, which `loadOlder` reads again), and a new row is inserted in the window's order.
+ * The old epoch retires here, and the frames buffered for the new epoch are applied after the window.
+ */
+function absorbTail(state: AgentReplicaState, page: HistoryPage): TimelineReduction {
+  const payload = page.payload;
+  const timeline = state.timeline;
+  const held = new Map(timeline.entries.map((entry) => [timelineEntryKey(timeline.epoch, entry), entry]));
+  const seen = new Set<string>();
+  const entries = payload.entries.flatMap((incoming) => {
+    const key = timelineEntryKey(payload.epoch, incoming);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [absorbEntry(held.get(key), incoming)];
+  });
+  const retiredEpochs = unique([...state.retiredEpochs, ...[timeline.epoch, timeline.pendingEpoch].filter((epoch): epoch is string => !!epoch && epoch !== payload.epoch)]);
+  const prepared: AgentReplicaState = {
+    ...state,
+    retiredEpochs,
+    timeline: {
+      epoch: payload.epoch,
+      backgroundActivities: timeline.backgroundActivities,
+      initialized: true,
+      entries: applyBackgroundEntries(entries, timeline.backgroundActivities),
+      nextSeq: nextSequenceForPage(state, page),
+      hasOlder: payload.hasOlder,
+      pendingLive: timeline.pendingLive
+        .filter((message) => message.payload.epoch === payload.epoch)
+        .sort((left, right) => left.payload.seq - right.payload.seq),
+    },
+  };
+  return drainPending(prepared);
+}
+
+/** The entry a page brings for a key the replica may hold: the held one when its content is equal, the page's otherwise. */
+function absorbEntry(held: ProjectedTimelineEntry | undefined, incoming: ProjectedTimelineEntry): ProjectedTimelineEntry {
+  if (!held || !sameContent(held, incoming)) return clone(incoming);
+  if (held.seqStart === incoming.seqStart && held.seqEnd === incoming.seqEnd && JSON.stringify(held.sourceSeqRanges) === JSON.stringify(incoming.sourceSeqRanges)) return held;
+  return { ...held, seqStart: incoming.seqStart, seqEnd: incoming.seqEnd, sourceSeqRanges: clone(incoming.sourceSeqRanges) };
+}
+
+const contentOf = new WeakMap<ProjectedTimelineEntry, string>();
+/** Row equality is content: the item without its background outcome and client message id, and the ids of its resources. */
+function sameContent(left: ProjectedTimelineEntry, right: ProjectedTimelineEntry): boolean {
+  return entryContent(left) === entryContent(right);
+}
+function entryContent(entry: ProjectedTimelineEntry): string {
+  let content = contentOf.get(entry);
+  if (content === undefined) {
+    const { background: _background, clientMessageId: _clientMessageId, ...item } = entry.item as ProjectedTimelineEntry['item'] & { clientMessageId?: string };
+    content = canonicalJson({ item, resources: entry.resources.map((resource) => resource.resourceId) });
+    contentOf.set(entry, content);
+  }
+  return content;
+}
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const fields = Object.entries(value as Record<string, unknown>).filter(([, field]) => field !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${fields.map(([key, field]) => `${JSON.stringify(key)}:${canonicalJson(field)}`).join(',')}}`;
+}
+
+/**
+ * A page of the epoch the replica holds, other than its tail. Keyed entries are one row per key: an `after` page updates a held row in
+ * place and inserts the others; a `before` page drops every key already held, so an item updated above the window cannot appear twice.
+ * Entries without keys keep the older rule of replacing the rows whose source sequences they overlap.
+ */
+function mergePage(epoch: string | null, held: readonly ProjectedTimelineEntry[], page: HistoryPage, preserveLive: boolean): ProjectedTimelineEntry[] {
+  const incoming = page.payload.entries;
+  const keyed = incoming.filter((entry) => entry.itemKey !== undefined);
+  const unkeyed = incoming.filter((entry) => entry.itemKey === undefined);
+  const position = new Map(held.map((entry, index) => [timelineEntryKey(epoch, entry), index]));
+  const next = held.slice();
+  const inserted: ProjectedTimelineEntry[] = [];
+  for (const entry of keyed) {
+    const index = position.get(timelineEntryKey(epoch, entry));
+    if (index === undefined) { inserted.push(clone(entry)); continue; }
+    if (page.payload.direction === 'before') continue;
+    const current = next[index]!;
+    if (preserveLive && current.seqEnd > entry.seqEnd) continue;
+    next[index] = absorbEntry(current, entry);
+  }
+  const accepted = preserveLive ? unkeyed.filter((candidate) => !held.some((existing) =>
+    existing.seqEnd > candidate.seqEnd && rangesOverlap(existing.sourceSeqRanges, candidate.sourceSeqRanges))) : unkeyed;
+  return sortEntries([...(accepted.length ? mergeAuthoritative(next, accepted) : next), ...inserted]);
 }
 
 export function reduceTimelineEvent(state: AgentReplicaState, message: AgentStreamMessage): TimelineReduction {
@@ -265,13 +355,14 @@ export function reduceTimelineEvent(state: AgentReplicaState, message: AgentStre
   const payload = message.payload;
   const epoch = payload.epoch;
   if (state.retiredEpochs.includes(epoch)) return { status: 'stale_epoch', state };
-  if (state.timeline.epoch && state.timeline.epoch !== epoch) {
-    const reset = applyTimelineReplacement(state, epoch);
-    return {
-      status: 'epoch_changed',
-      state: bufferLive(reset, message),
-      epoch,
-    };
+  const { pendingEpoch } = state.timeline;
+  if (pendingEpoch !== undefined) {
+    if (epoch === pendingEpoch) return { status: 'buffered', state: bufferLive(state, message) };
+    // Frames of the epoch being replaced are ignored: the tail of the pending epoch replaces what they would change.
+    if (epoch === state.timeline.epoch) return { status: 'duplicate', state };
+  }
+  if (state.timeline.epoch && state.timeline.epoch !== epoch || pendingEpoch !== undefined) {
+    return { status: 'replaced', state: bufferLive(applyTimelineReplacement(state, epoch), message), epoch };
   }
   if (!state.timeline.initialized) {
     const withEpoch = state.timeline.epoch === null
@@ -378,6 +469,7 @@ function liveEntry(message: TimelineStreamMessage): ProjectedTimelineEntry {
   const payload = message.payload;
   return {
     providerId: payload.event.providerId,
+    ...(payload.event.itemKey === undefined ? {} : { itemKey: payload.event.itemKey }),
     item: clone(payload.event.item),
     ...(payload.event.turnId === undefined ? {} : { turnId: payload.event.turnId }),
     timestamp: payload.timestamp,
@@ -389,10 +481,39 @@ function liveEntry(message: TimelineStreamMessage): ProjectedTimelineEntry {
   };
 }
 
+/** A live row of a keyed stream continues the one row that holds its key, in place; a new key is a new row. */
+function coalesceKeyed(entries: readonly ProjectedTimelineEntry[], incoming: ProjectedTimelineEntry): ProjectedTimelineEntry[] {
+  let index = -1;
+  for (let at = entries.length - 1; at >= 0; at -= 1) if (entries[at]!.itemKey === incoming.itemKey) { index = at; break; }
+  if (index < 0) return sortEntries([...entries, incoming]);
+  const held = entries[index]!;
+  const item = incoming.item;
+  const merged: ProjectedTimelineEntry = { ...held, collapsed: [...held.collapsed], item: held.item };
+  if (item.type === 'assistant_message' && held.item.type === 'assistant_message') {
+    merged.item = { ...held.item, text: held.item.text + item.text, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
+    extendEntry(merged, incoming, 'assistant_merge');
+  } else if (item.type === 'reasoning' && held.item.type === 'reasoning') {
+    merged.item = { ...held.item, text: held.item.text + item.text, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
+    extendEntry(merged, incoming, 'reasoning_merge');
+  } else if (item.type === 'tool_call' || item.type === 'todo') {
+    merged.item = { ...item, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
+    extendEntry(merged, incoming, item.type === 'tool_call' ? 'tool_lifecycle' : undefined);
+  } else if (item.type === 'compaction' && held.item.type === 'compaction') {
+    merged.item = { ...held.item, ...item };
+    extendEntry(merged, incoming);
+  } else {
+    extendEntry(merged, incoming);
+  }
+  const next = entries.slice();
+  next[index] = merged;
+  return next;
+}
+
 function coalesceEntry(
   entries: readonly ProjectedTimelineEntry[],
   incoming: ProjectedTimelineEntry,
 ): ProjectedTimelineEntry[] {
+  if (incoming.itemKey !== undefined) return coalesceKeyed(entries, incoming);
   const next = entries.slice();
   const incomingItem = incoming.item;
   if (incomingItem.type === 'assistant_message') {
@@ -427,7 +548,7 @@ function coalesceEntry(
       next[next.indexOf(existing)] = updated;
       return sortEntries(next);
     }
-  } else if (incomingItem.type === 'compaction' && incomingItem.status === 'completed') {
+  } else if (incomingItem.type === 'compaction' && incomingItem.status !== 'loading') {
     for (let index = next.length - 1; index >= 0; index -= 1) {
       const candidate = next[index];
       if (candidate?.item.type !== 'compaction' || !sameContext(candidate, incoming)) continue;

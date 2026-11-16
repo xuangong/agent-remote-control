@@ -1,5 +1,7 @@
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplica } from '../replica/store.js';
+import type { AgentReplicaState } from '../replica/types.js';
+import { anchorPosition } from '../replica/message-outbox.js';
 import type { RemoteAgentTransport } from './transport.js';
 
 /** Read-only repair for accepted input whose live Timeline echo has not arrived. */
@@ -12,7 +14,7 @@ export function watchMessageEchoes(agentId: string, transport: RemoteAgentTransp
   const waiting = () => {
     const state = replica.getState();
     return (state.outgoingMessages ?? []).filter(message => message.agentId === agentId
-      && message.status === 'awaiting_echo' && message.epoch === state.timeline.epoch);
+      && message.status === 'awaiting_echo' && anchorSeq(state, message.afterKey) !== undefined);
   };
   const update = () => {
     if (stopped) return;
@@ -29,7 +31,8 @@ export function watchMessageEchoes(agentId: string, transport: RemoteAgentTransp
     const messages = waiting();
     const epoch = replica.getState().timeline.epoch;
     if (stopped || !messages.length || !epoch) return;
-    const start = Math.min(...messages.map(message => message.afterSeq));
+    const state = replica.getState();
+    const start = Math.min(...messages.map(message => anchorSeq(state, message.afterKey) ?? 0));
     let cursor = scan?.start === start && scan.cursor.epoch === epoch ? scan.cursor : { epoch, seq: start };
     const controller = new AbortController();
     request = controller;
@@ -67,4 +70,11 @@ export function watchMessageEchoes(agentId: string, transport: RemoteAgentTransp
     clearTimeout(timer);
     request?.abort();
   };
+}
+
+/** The sequence a message was sent after: that of the row it names (0 for the start), undefined when the replica no longer holds the row. */
+function anchorSeq(state: AgentReplicaState, afterKey: string | undefined): number | undefined {
+  if (afterKey === undefined) return undefined;
+  const position = anchorPosition(state, afterKey);
+  return position === undefined ? undefined : position < 0 ? 0 : state.timeline.entries[position]?.seqEnd;
 }

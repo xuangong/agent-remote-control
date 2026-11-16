@@ -114,6 +114,10 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
         const adjustment = (textTop ?? entry.getBoundingClientRect().top) - viewport.getBoundingClientRect().top
           - (textTop !== undefined ? saved.text!.top : saved.offset);
         if (Math.abs(adjustment) > 1) viewport.scrollTop += adjustment;
+      } else if (viewport.querySelector('[data-entry-key]')) {
+        // The row the reader was on is gone: a replacement kept only a window that starts after it. The reader lands on the
+        // window's first row, and older history reads from there as before.
+        viewport.scrollTop = scrollOrigin === 'bottom' ? -Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0;
       }
     } else if (pendingScrollTop.current !== undefined && viewport.querySelector('[data-entry-key]')) {
       viewport.scrollTop = pendingScrollTop.current - (scrollOrigin === 'bottom' ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0);

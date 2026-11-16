@@ -162,25 +162,28 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('starts fresh history loading after an epoch replacement without accepting stale errors', async () => {
+  it('keeps its history control through an epoch replacement, so a load in flight finishes there and a failure stays retryable', async () => {
     const previous = deferred<void>();
-    const current = deferred<void>();
+    const retry = deferred<void>();
     const initial = state([entry(5, { type: 'assistant_message', text: 'Recent answer' })]);
     const withHistory = { ...initial, timeline: { ...initial.timeline, hasOlder: true } };
     const container = await render(<AgentTimeline state={withHistory} onLoadOlder={() => previous.promise} />);
-    await act(async () => container.querySelector<HTMLButtonElement>('.agent-load-older')?.click());
+    const button = container.querySelector<HTMLButtonElement>('.agent-load-older')!;
+    await act(async () => button.click());
     await rerender(container, <AgentTimeline
       state={{ ...withHistory, timeline: { ...withHistory.timeline, epoch: 'replacement' } }}
-      onLoadOlder={() => current.promise}
+      onLoadOlder={() => retry.promise}
     />);
-    const button = container.querySelector<HTMLButtonElement>('.agent-load-older')!;
+    // The same control: the load that began before the replacement is still its pending one.
+    expect(container.querySelector<HTMLButtonElement>('.agent-load-older')).toBe(button);
+    expect(button.disabled).toBe(true);
+    await act(async () => { previous.reject(new Error('Earlier history failed.')); await previous.promise.catch(() => undefined); });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Earlier history failed.');
     expect(button.disabled).toBe(false);
     await act(async () => button.click());
-    await act(async () => { previous.reject(new Error('Stale history failure.')); await previous.promise.catch(() => undefined); });
-
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(button.disabled).toBe(true);
-    await act(async () => { current.resolve(); await current.promise; });
+    await act(async () => { retry.resolve(); await retry.promise; });
     expect(button.disabled).toBe(false);
   });
 

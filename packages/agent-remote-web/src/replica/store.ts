@@ -26,7 +26,7 @@ import {
   reduceTimelineEvent,
 } from './reducer.js';
 import type { AgentReplicaState, OutgoingMessage, SnapshotApplicationOptions, TimelineReduction } from './types.js';
-import { MessageOutbox } from './message-outbox.js';
+import { anchorNow, MessageOutbox } from './message-outbox.js';
 
 export class AgentReplica {
   private state = createReplicaState();
@@ -59,22 +59,25 @@ export class AgentReplica {
     return message.id;
   }
 
+  /** A ledger written before row keys (`epoch`, `afterSeq`, `consumedEchoSeqs`) is read once as unconfirmed and kept in the new form. */
   restoreMessages(messages: readonly OutgoingMessage[]): void {
     if (this.state.outgoingMessages?.length) return;
-    this.replace({ ...this.state, outgoingMessages: messages.map(message => ({ ...message,
-      status: message.status === 'failed' ? 'failed' : 'unconfirmed',
-      error: message.error ?? 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',
-    })) });
+    this.replace({ ...this.state, outgoingMessages: messages.map(message => {
+      const { epoch: _epoch, afterSeq: _afterSeq, consumedEchoSeqs: _consumed, ...kept } = message as OutgoingMessage & { epoch?: unknown; afterSeq?: unknown; consumedEchoSeqs?: unknown };
+      return { ...kept,
+        status: message.status === 'failed' ? 'failed' : 'unconfirmed',
+        error: message.error ?? 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',
+      };
+    }) });
   }
 
   retryMessage(id: string, operationId: string): void {
     this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id
       ? { ...message, operationId, retryRequiresNewOperation: false, status: 'sending', error: undefined,
           submittedTextSha256: message.operationId === operationId ? message.submittedTextSha256 : undefined,
-          consumedEchoSeqs: message.operationId === operationId ? message.consumedEchoSeqs : undefined,
-          epoch: this.state.timeline.epoch,
-          afterSeq: message.operationId === operationId && message.epoch === this.state.timeline.epoch && message.status === 'unconfirmed'
-            ? message.afterSeq : this.state.timeline.nextSeq - 1 }
+          consumedEchoKeys: message.operationId === operationId ? message.consumedEchoKeys : undefined,
+          afterKey: message.operationId === operationId && message.status === 'unconfirmed'
+            ? this.outbox.anchorFor(this.state, message) : anchorNow(this.state) }
       : message) });
   }
 

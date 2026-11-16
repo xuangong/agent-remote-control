@@ -23,14 +23,19 @@ function validMessage(value: unknown): value is OutgoingMessage {
   if (!value || typeof value !== 'object') return false;
   const message = value as OutgoingMessage;
   return typeof message.id === 'string' && typeof message.text === 'string'
-    && (message.epoch === null || typeof message.epoch === 'string') && Number.isSafeInteger(message.afterSeq)
+    && ledgerAnchored(message)
     && ['sending', 'awaiting_echo', 'unconfirmed', 'failed'].includes(message.status)
     && (message.retryRequiresNewOperation === undefined || typeof message.retryRequiresNewOperation === 'boolean')
     && (message.operationId === undefined || typeof message.operationId === 'string')
     && (message.submittedTextSha256 === undefined || typeof message.submittedTextSha256 === 'string' && /^[a-f0-9]{64}$/.test(message.submittedTextSha256))
-    && (message.consumedEchoSeqs === undefined || Array.isArray(message.consumedEchoSeqs) && message.consumedEchoSeqs.every(seq => Number.isSafeInteger(seq) && seq > 0))
+    && (message.consumedEchoKeys === undefined || Array.isArray(message.consumedEchoKeys) && message.consumedEchoKeys.every(key => typeof key === 'string'))
     && (message.delivery === undefined || ['immediate', 'next_turn'].includes(message.delivery))
     && (message.content === undefined || (Array.isArray(message.content) && message.content.every(part => part && (part.type === 'text' ? typeof part.text === 'string' : part.type === 'image' && typeof part.attachmentId === 'string' && typeof part.label === 'string'))))
     && (message.imageDigests === undefined || (message.imageDigests !== null && typeof message.imageDigests === 'object' && Object.values(message.imageDigests).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))))
     && (message.error === undefined || typeof message.error === 'string');
+}
+
+/** A ledger entry names the row it was sent after by key. It has none when it was sent before the conversation was read, or was written before row keys; either is read as unconfirmed. */
+function ledgerAnchored(message: OutgoingMessage): boolean {
+  return message.afterKey === undefined || typeof message.afterKey === 'string';
 }

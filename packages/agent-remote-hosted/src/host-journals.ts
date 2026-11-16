@@ -247,8 +247,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const chains = new Map<string, Promise<void>>();
   /** Sessions whose last publication failed to apply or store: nothing more is accepted until the session is opened again. */
   const needsReopen = new Set<string>();
-  /** Sessions whose publisher generation had a publication refused for a limit: the generation publishes nothing more. A new generation is not fenced; a Host's deletion clears its fences, because generations restart at 1. */
-  const quotaFenced = new Map<string, number>();
   const heads = new JournalHeadIndex();
   const hostsLoaded = new Set<string>();
   const usage = new Map<string, HostUsage>();
@@ -529,7 +527,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const fenced = (): JournalPublished => ({ events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'fenced' } });
       const key = storeKey(hostId, sessionKey);
       if (needsReopen.has(key)) return fenced();
-      if (quotaFenced.get(key) === generation) return { events: [], watermark: 0, refusal: { sequence: entries[0]?.sequence ?? 0, reason: 'quota_exceeded' } };
       const published: JournalPublished = { events: [], watermark: 0 };
       let journal!: SessionJournal;
       let bytes = 0;
@@ -556,8 +553,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
             if (!refusal) throw error;
             published.refusal = refusal;
             if (error instanceof JournalQuotaRefused) {
-              // The refused row is missing from the journal: it is not served, and this generation publishes nothing more.
-              quotaFenced.set(key, generation);
+              // The refused row is missing from the journal: it is not served, and every later entry is a gap or incomplete.
               journal.markIncomplete();
               if (journal.hasHead) {
                 journal.clearHead();
@@ -689,7 +685,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const known = [...(usage.get(hostId)?.sessions.keys() ?? [])];
       for (const key of [...cache.keys()]) if (key.startsWith(prefix)) drop(key);
       for (const key of [...needsReopen]) if (key.startsWith(prefix)) needsReopen.delete(key);
-      for (const key of [...quotaFenced.keys()]) if (key.startsWith(prefix)) quotaFenced.delete(key);
       if (store.catalog) await store.catalog.deletePrefix(prefix);
       else for (const sessionKey of known) await store.delete(storeKey(hostId, sessionKey));
       heads.clearHost(hostId);

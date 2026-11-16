@@ -283,16 +283,26 @@ describe('a quota refusal and the live-only cap', () => {
     expect(restarted.served(HOST, SESSION)).toBe(true);
   });
 
-  it('refuses everything the generation publishes after a quota refusal, so a head cannot serve a journal with a hole', async () => {
-    const { journals } = fixture({ limits: { sessionItems: 1 } });
+  it('applies nothing after a quota refusal: the rest of the message is dropped, the next sequence is a gap, the refused sequence is incomplete, and a replacement from the same generation recovers', async () => {
+    const { journals, store } = fixture({ limits: { sessionItems: 1 } });
     await open(journals, HOST, SESSION);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
-    expect((await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b')])).refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
-    const later = await journals.publish(HOST, SESSION, 1, [head(4)]);
-    expect(later.refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
-    expect(later.hasHead).toBeUndefined();
+    const refused = await journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'b'), head(4)]);
+    expect(refused.refusal).toEqual({ sequence: 3, reason: 'quota_exceeded' });
+    expect(refused.watermark).toBe(2);
     expect(journals.served(HOST, SESSION)).toBe(false);
-    expect((await journals.publish(HOST, SESSION, 1, [append(4, 'm1', 'more')])).refusal).toEqual({ sequence: 4, reason: 'quota_exceeded' });
+    const gap = await journals.publish(HOST, SESSION, 1, [head(4)]);
+    expect(gap.refusal).toEqual({ sequence: 4, reason: 'sequence_gap' });
+    expect(gap.hasHead).toBe(false);
+    const resent = await journals.publish(HOST, SESSION, 1, [append(3, 'm1', 'more')]);
+    expect(resent.refusal).toEqual({ sequence: 3, reason: 'incomplete' });
+    expect((await journals.publish(HOST, SESSION, 1, [head(3)])).refusal).toEqual({ sequence: 3, reason: 'incomplete' });
+    expect(journals.served(HOST, SESSION)).toBe(false);
+    expect((await store.load(KEY))?.items.map(item => item.itemKey)).toEqual(['m1']);
+    const rebuilt = await journals.publish(HOST, SESSION, 1, [{ sequence: 3, op: 'replace', items: [{ row: rowOf('m1', 'a'), digest: 'digest-m1' }] }, head(4)]);
+    expect(rebuilt.refusal).toBeUndefined();
+    expect(rebuilt.hasHead).toBe(true);
+    expect(journals.served(HOST, SESSION)).toBe(true);
   });
 
   it('refuses the head of an incomplete journal on its own, without fencing the reopened generation, and accepts the replacement that follows', async () => {
@@ -310,16 +320,6 @@ describe('a quota refusal and the live-only cap', () => {
     expect(rebuilt.refusal).toBeUndefined();
     expect(rebuilt.hasHead).toBe(true);
     expect(restarted.served(HOST, SESSION)).toBe(true);
-  });
-
-  it('forgets the fence of a deleted Host, so the fresh generation 1 of the same Host id publishes', async () => {
-    const { journals } = fixture({ limits: { sessionItems: 1 } });
-    await open(journals, HOST, SESSION);
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')]);
-    expect((await journals.publish(HOST, SESSION, 1, [append(2, 'm2', 'b')])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
-    await journals.deleteHost(HOST);
-    expect((await open(journals, HOST, SESSION)).generation).toBe(1);
-    expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a')])).refusal).toBeUndefined();
   });
 
   it('does not serve a journal that lost a row before it had a head, until a replacement rebuilds it', async () => {

@@ -104,6 +104,8 @@ export type JournalLiveEvent =
 export interface JournalStatus {
   cursor: TimelineCursor;
   head?: JournalHead;
+  /** The journal's oldest item that is not live-only: where a request for older history starts. Absent when the journal has none. */
+  oldestItemKey?: string;
 }
 
 export interface JournalPublished {
@@ -121,6 +123,10 @@ export interface JournalPublished {
   unserved?: true;
   /** Live-only items removed because the session passed its cap. */
   droppedLiveOnly?: number;
+  /** How the Controller's window joined the journal, when the publication carried one; `trimmed` counts the window items left out for the room (only a replacement trims). */
+  window?: { outcome: 'unchanged' | 'appended' | 'replaced'; trimmed: number };
+  /** A quota refused prepended older history: nothing else changed, the journal stays served and complete, and older history for the session has ended. */
+  prependRefused?: true;
 }
 
 export interface JournalFilled {
@@ -362,16 +368,17 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
   }
 
   /**
-   * Checks each entry that grows the journal against the limits. A replacement is admitted by its own size plus what it
-   * carries over, without evicting first; the other entries evict bodies to make room before they are refused. An entry
-   * larger than the room is refused before anything is evicted. The size is measured once and then counted up by the entries.
+   * Checks each entry that grows the journal against the limits. A window is never refused: the journal trims it to the
+   * room. The growing entries evict bodies to make room before they are refused; an entry larger than the room is
+   * refused before anything is evicted. The size is measured once and then counted up by the entries.
    */
   function admission(hostId: string, sessionKey: string, journal: SessionJournal): (entry: JournalPublishEntry) => void {
     let size: number | undefined;
     return entry => {
-      // A journal that is missing rows takes a replacement before anything else, the head included.
-      if (entry.op !== 'replace' && journal.incomplete) throw new JournalIncompleteRefused();
+      // A journal that is missing rows takes a window or a replacement before anything else, the head included.
+      if (entry.op !== 'window' && entry.op !== 'replace' && journal.incomplete) throw new JournalIncompleteRefused();
       if (entry.op === 'head') return;
+      if (entry.op === 'window') { size = undefined; return; }
       if (entry.op === 'replace') {
         const carried = journal.carriedOnReplace(entry.items);
         if (entry.items.length + carried.count > limits.sessionItems) throw new JournalQuotaRefused('items');
@@ -381,7 +388,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         size = undefined;
         return;
       }
-      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend' && entry.op !== 'rebind') return;
+      if (entry.op !== 'append' && entry.op !== 'correct' && entry.op !== 'prepend') return;
       const itemsAfter = entry.op === 'append' ? journal.itemCount + (journal.has(entry.row.itemKey) ? 0 : 1)
         : entry.op === 'prepend' ? journal.itemCount + entry.items.length : journal.itemCount;
       if (itemsAfter > limits.sessionItems) throw new JournalQuotaRefused('items');
@@ -404,7 +411,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     windows.set(journal, { epoch: journal.epoch, start });
   }
 
-  function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished): void {
+  function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished, roomBytes: number): void {
     switch (entry.op) {
       case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row }); break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
@@ -415,6 +422,13 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         const before = journal.epoch;
         const epoch = journal.replace(publication, entry.items, now());
         if (epoch !== before) published.events.push({ kind: 'replaced', epoch });
+        break;
+      }
+      case 'window': {
+        const result = journal.sync(publication, entry.items, { roomBytes });
+        published.window = { outcome: result.outcome, trimmed: result.outcome === 'replaced' ? result.trimmed : 0 };
+        if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row });
+        else if (result.outcome === 'replaced') published.events.push({ kind: 'replaced', epoch: result.epoch });
         break;
       }
       case 'prepend': journal.prepend(publication, entry.items); break;
@@ -533,17 +547,20 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
           const fresh = current !== null && current.generation === generation && entry.sequence === current.watermark + 1;
           try {
             if (fresh) admit(entry);
-            apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published);
+            apply(journal, { publisherId, generation, sequence: entry.sequence }, entry, published, roomOf(hostId, sessionKey));
             if (fresh) {
-              if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || (entry.op === 'append' && entry.row.liveOnly === true)
+              if (entry.op === 'complete' || entry.op === 'seal' || entry.op === 'replace' || entry.op === 'window' || (entry.op === 'append' && entry.row.liveOnly === true)
                 || (entry.op === 'prepend' && entry.items.some(({ row: { liveOnly } }) => liveOnly === true))) liveOnlyChanged = true;
             }
           } catch (error) {
             const refusal = refusalOf(error, entry.sequence);
             if (!refusal) throw error;
             published.refusal = refusal;
-            if (error instanceof JournalQuotaRefused) {
-              // The refused row is missing from the journal: it is not served, and every later entry is a gap or incomplete.
+            if (error instanceof JournalQuotaRefused && entry.op === 'prepend') {
+              // Older history leaves no hole: the journal stays complete and served, and has no more older history to take.
+              published.prependRefused = true;
+            } else if (error instanceof JournalQuotaRefused && entry.op === 'append') {
+              // The refused live row is missing from the journal: it is not served until a window rebuilds it, and every later entry is a gap or incomplete.
               journal.markIncomplete();
               if (journal.hasHead) {
                 journal.clearHead();
@@ -613,7 +630,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       const journal = await load(hostId, sessionKey, false);
       if (!journal) return undefined;
       const head = journal.head;
-      return { cursor: journal.cursor, ...(head ? { head } : {}) };
+      const oldestItemKey = journal.oldestItemKey;
+      return { cursor: journal.cursor, ...(head ? { head } : {}), ...(oldestItemKey === undefined ? {} : { oldestItemKey }) };
     }),
 
     forget: hostId => serialized<void>(hostId, async () => {

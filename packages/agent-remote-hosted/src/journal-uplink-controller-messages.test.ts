@@ -71,7 +71,7 @@ describe('the Controller\'s unserve and request refusals', () => {
   it('rejects a pending fill or older-history request at once when the Controller refuses it', async () => {
     const { connection, sent } = fixture();
     const fill = connection.requestFill(SESSION, ['m1']);
-    const older = connection.requestOlder(SESSION, 20);
+    const older = connection.requestOlder(SESSION, 20, 'm1');
     const ids = sent.flatMap(message => 'requestId' in message ? [[message.type, message.requestId] as const] : []);
     const fillId = ids.find(([type]) => type === 'journal_fill_request')![1];
     const olderId = ids.find(([type]) => type === 'journal_older_request')![1];

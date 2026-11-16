@@ -37,8 +37,8 @@ export interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, and live-only items the journal removed. */
-  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped'): void;
+  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, live-only items the journal removed, and a window that replaced the journal or was trimmed to the room. */
+  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped' | 'journal_window_replaced' | 'journal_window_trimmed'): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
@@ -58,8 +58,8 @@ export interface JournalConnection {
    * `read`, the journal also reads the page in the same step as it takes the bodies, and the result carries it.
    */
   requestFill(sessionKey: string, itemKeys: readonly string[], read?: JournalReadRequest): Promise<JournalFilled>;
-  /** Asks the Host's Controller to read older history and publish it as prepended items. */
-  requestOlder(sessionKey: string, limit: number): Promise<{ olderAvailable: boolean }>;
+  /** Asks the Host's Controller to read the history older than `beforeItemKey` and publish it as prepended items. */
+  requestOlder(sessionKey: string, limit: number, beforeItemKey: string): Promise<{ olderAvailable: boolean }>;
   /** Ends the connection: pending requests fail and its sessions need opening again. */
   close(): void;
 }
@@ -182,6 +182,8 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             catch { options.diagnostic?.('journal_fanout_failed'); }
           }
           if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
+          if (stored && result.window?.outcome === 'replaced') options.diagnostic?.('journal_window_replaced');
+          if (stored && result.window && result.window.trimmed > 0) options.diagnostic?.('journal_window_trimmed');
           if (result.refusal?.reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
           if (!options.current()) return;
           if (result.cursor && stored) {
@@ -245,11 +247,11 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
         resolve => ({ kind: 'fill', itemKeys: new Set(itemKeys), ...(read ? { read } : {}), applying: false, resolve }));
     },
 
-    requestOlder(sessionKey, limit) {
+    requestOlder(sessionKey, limit, beforeItemKey) {
       if (!Number.isInteger(limit) || limit < 1 || limit > JOURNAL_OLDER_MAX_LIMIT) {
         return Promise.reject(new JournalRequestError('invalid', `An older-history read asks for 1 to ${JOURNAL_OLDER_MAX_LIMIT} items.`));
       }
-      return request<{ olderAvailable: boolean }>('older', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, limit }),
+      return request<{ olderAvailable: boolean }>('older', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, beforeItemKey, limit }),
         resolve => ({ kind: 'older', resolve }));
     },
 

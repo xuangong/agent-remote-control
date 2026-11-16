@@ -192,7 +192,7 @@ it('asks the Controller for older history, which it publishes as prepended items
   await open();
   send({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [{ sequence: 1, op: 'append', row: row('m2', 'Now') }] });
   await take('journal_ack');
-  const older = broker.requestOlder(host.hostId, SESSION, 20);
+  const older = broker.requestOlder(host.hostId, SESSION, 20, 'm1');
   const request = await take('journal_older_request');
   expect(request).toMatchObject({ sessionKey: SESSION, limit: 20 });
   send({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [{ sequence: 2, op: 'prepend', items: [{ row: row('m1', 'Before'), digest: DIGEST }] }] });
@@ -204,19 +204,19 @@ it('asks the Controller for older history, which it publishes as prepended items
 
 it('rejects an unanswered request after the deadline and allows the next one', async () => {
   const { broker, host, take } = await connectedHost({ requestTimeoutMs: 50 });
-  const silent = broker.requestOlder(host.hostId, SESSION, 5);
+  const silent = broker.requestOlder(host.hostId, SESSION, 5, 'm1');
   await take('journal_older_request');
   await expect(silent).rejects.toMatchObject({ code: 'timeout' });
-  const next = broker.requestOlder(host.hostId, SESSION, 5);
+  const next = broker.requestOlder(host.hostId, SESSION, 5, 'm1');
   await take('journal_older_request');
   await expect(next).rejects.toMatchObject({ code: 'timeout' });
 });
 
 it('allows one request of a kind per session at a time', async () => {
   const { broker, host, take } = await connectedHost({ requestTimeoutMs: 100 });
-  const first = broker.requestOlder(host.hostId, SESSION, 5);
+  const first = broker.requestOlder(host.hostId, SESSION, 5, 'm1');
   await take('journal_older_request');
-  await expect(broker.requestOlder(host.hostId, SESSION, 5)).rejects.toMatchObject({ code: 'in_flight' });
+  await expect(broker.requestOlder(host.hostId, SESSION, 5, 'm1')).rejects.toMatchObject({ code: 'in_flight' });
   await expect(first).rejects.toMatchObject({ code: 'timeout' });
 });
 
@@ -233,7 +233,7 @@ it('fails pending requests when the Controller disconnects', async () => {
 it('refuses requests for a Host that cannot publish journals or does not exist', async () => {
   const plain = await connectedHost({ query: '' });
   await expect(plain.broker.requestFill(plain.host.hostId, SESSION, ['m1'])).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
-  await expect(plain.broker.requestOlder(plain.host.hostId, SESSION, 5)).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
+  await expect(plain.broker.requestOlder(plain.host.hostId, SESSION, 5, 'm1')).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
   await expect(plain.broker.requestOlder('no-such-host', SESSION, 5)).rejects.toMatchObject({ status: 404, code: 'host_not_found' });
 });
 

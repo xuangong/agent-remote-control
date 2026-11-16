@@ -217,7 +217,7 @@ describe('createHostJournals', () => {
     const opened = await openSession(journals, HOST, SESSION, 'controller-1');
     expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch: opened.epoch, seq: 0 } });
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), { sequence: 2, op: 'head', head: { snapshot, observedAt: 5 } }]);
-    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch: opened.epoch, seq: 1 }, head: { snapshot, observedAt: 5 } });
+    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch: opened.epoch, seq: 1 }, head: { snapshot, observedAt: 5 }, oldestItemKey: 'm1' });
   });
 
   it('does not return before the store holds the changes', async () => {

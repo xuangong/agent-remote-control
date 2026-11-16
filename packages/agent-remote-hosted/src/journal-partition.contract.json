@@ -183,6 +183,50 @@
     }
   },
   {
+    "method": "publish",
+    "args": [
+      "host-1",
+      "codex:thread-1",
+      1,
+      [
+        {
+          "sequence": 4,
+          "op": "window",
+          "items": [
+            {
+              "row": {
+                "itemKey": "m1",
+                "providerId": "codex",
+                "sourceKey": "m1:5",
+                "occurredAt": 1725000000000,
+                "turnId": "turn-1",
+                "item": {
+                  "type": "assistant_message",
+                  "text": "Hello",
+                  "messageId": "m1"
+                }
+              },
+              "digest": "digest-m1"
+            }
+          ]
+        }
+      ]
+    ],
+    "reply": {
+      "events": [],
+      "watermark": 4,
+      "cursor": {
+        "epoch": "<epoch>",
+        "seq": 1
+      },
+      "hasHead": true,
+      "window": {
+        "outcome": "unchanged",
+        "trimmed": 0
+      }
+    }
+  },
+  {
     "method": "indexPage",
     "args": [
       "host-1",
@@ -311,7 +355,8 @@
           }
         },
         "observedAt": 5
-      }
+      },
+      "oldestItemKey": "m1"
     }
   },
   {

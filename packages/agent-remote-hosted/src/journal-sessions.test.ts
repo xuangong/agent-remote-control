@@ -46,7 +46,7 @@ describe('the journal sessions of a Relay', () => {
   });
 
   /** A session over a real journal whose bodies can be evicted, with fills and older reads that wait for the test. */
-  async function journalSessions(options: { evict?: boolean } = {}) {
+  async function journalSessions(options: { evict?: boolean; anchored?: boolean } = {}) {
     const journal = SessionJournal.create('host-1:codex:thread-1');
     const { generation } = journal.claim('controller-1');
     let sequence = 0;
@@ -56,19 +56,19 @@ describe('the journal sessions of a Relay', () => {
     journal.setHead(at(), { snapshot: headSnapshot, observedAt: 1 });
     if (options.evict !== false) journal.evict(0);
     const fills: Array<{ keys: string[]; finish(): void }> = [];
-    const olderReads: Array<{ answer(olderAvailable: boolean): void }> = [];
+    const olderReads: Array<{ beforeItemKey: string; answer(olderAvailable: boolean): void }> = [];
     const olderArguments: boolean[] = [];
     const sessions = createJournalSessions({
       gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
       journals: {
         unserve: () => undefined,
-        status: async () => ({ cursor: journal.cursor, head: journal.head! }),
+        status: async () => ({ cursor: journal.cursor, head: journal.head!, ...(options.anchored === false ? {} : { oldestItemKey: journal.oldestItemKey! }) }),
         page: async (_host, _key, request, olderBeyondJournal) => { olderArguments.push(olderBeyondJournal); return journal.page(request, { olderBeyondJournal }); },
       },
       requestFill: (_host, _key, keys, read) => new Promise(resolve => {
         fills.push({ keys, finish: () => { for (const key of keys) journal.fill(key, bodyFromRow(row(key)), 'a'.repeat(64)); resolve({ filled: keys, mismatched: [], unknown: [], page: journal.page(read.request, { olderBeyondJournal: read.olderBeyondJournal() }) }); } });
       }),
-      requestOlder: () => new Promise(resolve => { olderReads.push({ answer: olderAvailable => resolve({ olderAvailable }) }); }),
+      requestOlder: (_host, _key, _limit, beforeItemKey) => new Promise(resolve => { olderReads.push({ beforeItemKey, answer: olderAvailable => resolve({ olderAvailable }) }); }),
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
     });
     const open = async (limit: number, direction: 'tail' | 'before' = 'tail') => {
@@ -109,6 +109,27 @@ describe('the journal sessions of a Relay', () => {
     await vi.waitFor(() => expect(f.fills).toHaveLength(2));
     f.fills[1]!.finish();
     await vi.waitFor(() => expect(reloaded.sent.at(-1)?.type).toBe('timeline_page'));
+  });
+
+  it('asks for older history anchored at the journal\'s oldest item, and not again once a quota refused a prepend', async () => {
+    const f = await journalSessions({ evict: false });
+    await f.open(100, 'before');
+    await vi.waitFor(() => expect(f.olderReads).toHaveLength(1));
+    expect(f.olderReads[0]!.beforeItemKey).toBe('k1');
+    f.olderReads[0]!.answer(true);
+    await vi.waitFor(() => expect(f.olderArguments.length).toBeGreaterThanOrEqual(2));
+    f.sessions.published('host-1', 'codex:thread-1', { events: [], watermark: 0, prependRefused: true });
+    await f.open(100, 'before');
+    await vi.waitFor(() => expect(f.olderArguments.at(-1)).toBe(false));
+    expect(f.olderReads).toHaveLength(1);
+  });
+
+  it('answers that no older history exists, without asking the Controller, for a journal that has no item to anchor on', async () => {
+    const f = await journalSessions({ evict: false, anchored: false });
+    await f.open(100, 'before');
+    await vi.waitFor(() => expect(f.olderArguments.length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(f.olderArguments.at(-1)).toBe(false));
+    expect(f.olderReads).toHaveLength(0);
   });
 
   it('does not mark a replaced journal as exhausted because of an answer about the one it replaced', async () => {

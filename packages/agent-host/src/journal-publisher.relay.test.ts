@@ -124,7 +124,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     await follow(publisher, [item('history', 'm3', 'Three'), item('history', 'm4', 'Four')], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     await settle(30);
-    expect(await relay.connection.requestOlder(SESSION, 10)).toEqual({ olderAvailable: false });
+    expect(await relay.connection.requestOlder(SESSION, 10, 'm3')).toEqual({ olderAvailable: false });
     expect(await texts(relay)).toEqual(['One', 'Two', 'Three', 'Four']);
     const journal = (await relay.journal(SESSION))!;
     expect(journal.index().map(value => value.seqStart)).toEqual([-1, 0, 1, 2]);
@@ -403,7 +403,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     } });
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     await settle(30);
-    await relay.connection.requestOlder(SESSION, 5);
+    await relay.connection.requestOlder(SESSION, 5, 'm3');
     await until(async () => (await imageRow(relay, 'm1')) !== undefined && settledOf(manager) !== undefined, 'the prepended row');
     await until(async () => (await imageRow(relay, 'm1'))?.status === 'available', 'the settled binding in the prepended row');
     expect(await imageRow(relay, 'm1')).toEqual(settledOf(manager));

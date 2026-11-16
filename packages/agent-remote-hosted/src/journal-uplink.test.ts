@@ -409,15 +409,15 @@ describe('a journal connection', () => {
 
     it('asks for older history and resolves when the Host says it is done', async () => {
       const f = fixture();
-      const pending = f.connection.requestOlder(SESSION, 25);
-      expect(f.sent.at(-1)).toMatchObject({ type: 'journal_older_request', sessionKey: SESSION, limit: 25 });
+      const pending = f.connection.requestOlder(SESSION, 25, 'm1');
+      expect(f.sent.at(-1)).toMatchObject({ type: 'journal_older_request', sessionKey: SESSION, beforeItemKey: 'm1', limit: 25 });
       await f.connection.receive(wire({ type: 'journal_older_done', requestId: requestIdOf(f.sent, 'journal_older_request'), sessionKey: SESSION, olderAvailable: false }));
       await expect(pending).resolves.toEqual({ olderAvailable: false });
     });
 
     it('ignores an answer it did not ask for, or one for another session or kind', async () => {
       const f = fixture();
-      const pending = f.connection.requestOlder(SESSION, 25);
+      const pending = f.connection.requestOlder(SESSION, 25, 'm1');
       const requestId = requestIdOf(f.sent, 'journal_older_request');
       await f.connection.receive(wire({ type: 'journal_older_done', requestId: 'unknown', sessionKey: SESSION, olderAvailable: true }));
       await f.connection.receive(wire({ type: 'journal_older_done', requestId, sessionKey: 'codex:other', olderAvailable: true }));
@@ -431,19 +431,19 @@ describe('a journal connection', () => {
       const f = fixture();
       const first = f.connection.requestFill(SESSION, ['m1']);
       await expect(f.connection.requestFill(SESSION, ['m2'])).rejects.toMatchObject({ code: 'in_flight' });
-      const older = f.connection.requestOlder(SESSION, 10);
-      const rest = Array.from({ length: JOURNAL_REQUEST_LIMIT - 2 }, (_, at) => f.connection.requestOlder(`codex:s${at}`, 10));
-      await expect(f.connection.requestOlder('codex:one-more', 10)).rejects.toMatchObject({ code: 'busy' });
+      const older = f.connection.requestOlder(SESSION, 10, 'm1');
+      const rest = Array.from({ length: JOURNAL_REQUEST_LIMIT - 2 }, (_, at) => f.connection.requestOlder(`codex:s${at}`, 10, 'm1'));
+      await expect(f.connection.requestOlder('codex:one-more', 10, 'm1')).rejects.toMatchObject({ code: 'busy' });
       f.connection.close();
       for (const pending of [first, older, ...rest]) await expect(pending).rejects.toMatchObject({ code: 'closed' });
     });
 
     it('rejects an unanswered request after the deadline and then accepts a new one', async () => {
       const f = fixture();
-      const pending = f.connection.requestOlder(SESSION, 10);
+      const pending = f.connection.requestOlder(SESSION, 10, 'm1');
       f.expireOldestTimer();
       await expect(pending).rejects.toMatchObject({ code: 'timeout' });
-      const again = f.connection.requestOlder(SESSION, 10);
+      const again = f.connection.requestOlder(SESSION, 10, 'm1');
       f.connection.close();
       await expect(again).rejects.toMatchObject({ code: 'closed' });
     });
@@ -452,12 +452,12 @@ describe('a journal connection', () => {
       const f = fixture();
       await expect(f.connection.requestFill(SESSION, [])).rejects.toMatchObject({ code: 'invalid' });
       await expect(f.connection.requestFill(SESSION, ['a', 'a'])).rejects.toMatchObject({ code: 'invalid' });
-      await expect(f.connection.requestOlder(SESSION, 0)).rejects.toMatchObject({ code: 'invalid' });
+      await expect(f.connection.requestOlder(SESSION, 0, 'm1')).rejects.toMatchObject({ code: 'invalid' });
       f.failSends(new Error('socket closed'));
-      await expect(f.connection.requestOlder(SESSION, 10)).rejects.toThrow('socket closed');
+      await expect(f.connection.requestOlder(SESSION, 10, 'm1')).rejects.toThrow('socket closed');
       expect(f.timers.size).toBe(0);
       f.endConnection();
-      await expect(f.connection.requestOlder(SESSION, 10)).rejects.toMatchObject({ code: 'unavailable' });
+      await expect(f.connection.requestOlder(SESSION, 10, 'm1')).rejects.toMatchObject({ code: 'unavailable' });
     });
   });
 });

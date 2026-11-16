@@ -87,6 +87,8 @@ export const JournalPublishEntry = Type.Union([
   /** The item takes the row's content. With a digest it is complete; without one it stays open, as an item still streaming does. */
   Type.Object({ sequence, op: Type.Literal('correct'), row: JournalRowInput, digest: Type.Optional(digest), expectedRevision: revision }, object),
   Type.Object({ sequence, op: Type.Literal('replace'), items }, object),
+  /** The Controller's newest window of native history, oldest first. The Relay compares it with the journal and leaves it, appends to it or replaces it, and trims it to the room. */
+  Type.Object({ sequence, op: Type.Literal('window'), items }, object),
   Type.Object({ sequence, op: Type.Literal('prepend'), items }, object),
   Type.Object({ sequence, op: Type.Literal('head'), head: JournalHead }, object),
   /** A resource binding of an item was replaced; the journal replaces it in place and tells subscribers. */
@@ -141,7 +143,8 @@ export const JournalOpenRefused = Type.Object({ requestId, sessionKey, reason: T
 export const JournalAck = Type.Object({ sessionKey, generation, watermark: SafeNonNegativeInteger, cursor: TimelineCursor }, object);
 export const JournalRefused = Type.Object({ sessionKey, generation, sequence: SafeNonNegativeInteger, reason: JournalRefusalReason, itemKey: Type.Optional(itemKey) }, object);
 export const JournalFillRequest = Type.Object({ requestId, sessionKey, itemKeys: Type.Array(itemKey, { minItems: 1, maxItems: JOURNAL_FILL_MAX_ITEMS }) }, object);
-export const JournalOlderRequest = Type.Object({ requestId, sessionKey, limit: Type.Integer({ minimum: 1, maximum: JOURNAL_OLDER_MAX_LIMIT }) }, object);
+/** `beforeItemKey` is the journal's oldest item that is not live-only: the Controller answers with the complete items older than it. */
+export const JournalOlderRequest = Type.Object({ requestId, sessionKey, beforeItemKey: itemKey, limit: Type.Integer({ minimum: 1, maximum: JOURNAL_OLDER_MAX_LIMIT }) }, object);
 
 const encoder = new (globalThis as unknown as { TextEncoder: new () => { encode(value: string): Uint8Array } }).TextEncoder();
 const distinct = (keys: readonly string[]) => new Set(keys).size === keys.length;

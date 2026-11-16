@@ -34,6 +34,7 @@ const valid: Array<Record<string, unknown>> = [
     { sequence: 11, op: 'outcome', providerId: 'codex', turnId: 'turn-1', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1_725_000_000_000 },
     { sequence: 12, op: 'replace', items: [{ row }] },
     { sequence: 13, op: 'prepend', items: [{ row, digest: DIGEST }, { row: { ...row, itemKey: 'item-2' } }] },
+    { sequence: 14, op: 'window', items: [{ row }, { row: { ...row, itemKey: 'item-2' } }] },
   ]),
   publish([
     { sequence: 1, op: 'outcome', providerId: 'codex', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1 },
@@ -60,7 +61,7 @@ const valid: Array<Record<string, unknown>> = [
   message({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 8, cursor: { epoch: 'epoch-1', seq: 4 } }),
   message({ type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 3, reason: 'stale_revision', itemKey: 'item-1' }),
   message({ type: 'journal_fill_request', requestId: 'fill-1', sessionKey: SESSION, itemKeys: ['item-1', 'item-2'] }),
-  message({ type: 'journal_older_request', requestId: 'older-1', sessionKey: SESSION, limit: 50 }),
+  message({ type: 'journal_older_request', requestId: 'older-1', sessionKey: SESSION, beforeItemKey: 'item-1', limit: 50 }),
 ];
 
 describe('journal uplink envelopes', () => {
@@ -112,8 +113,9 @@ describe('journal uplink envelopes', () => {
       items: Array.from({ length: JOURNAL_FILL_MAX_ITEMS + 1 }, (_, at) => ({ row: { ...row, itemKey: `item-${at}` }, digest: DIGEST })) })],
     ['a fill request with no items', message({ type: 'journal_fill_request', requestId: 'f', sessionKey: SESSION, itemKeys: [] })],
     ['a fill request that repeats an item', message({ type: 'journal_fill_request', requestId: 'f', sessionKey: SESSION, itemKeys: ['a', 'a'] })],
-    ['an older request with limit zero', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, limit: 0 })],
-    ['an older request above the limit', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, limit: 201 })],
+    ['an older request without a boundary item', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, limit: 50 })],
+    ['an older request with limit zero', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, beforeItemKey: 'item-1', limit: 0 })],
+    ['an older request above the limit', message({ type: 'journal_older_request', requestId: 'o', sessionKey: SESSION, beforeItemKey: 'item-1', limit: 201 })],
     ['an index entry whose range is reversed', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [{ ...indexEntry, seqStart: 3, seqEnd: 2 }] })],
     ['a first page with a cursor that is not a position', message({ type: 'journal_opened', requestId: 'o', sessionKey: SESSION, generation: 1, watermark: 0, epoch: 'e', index: [], indexAfter: 1.5 })],
     ['an index request without a position', message({ type: 'journal_index_request', requestId: 'i', sessionKey: SESSION, generation: 1, epoch: 'e' })],

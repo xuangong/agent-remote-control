@@ -64,7 +64,7 @@ describe('the journal grant on the Host uplink', () => {
     const { messages, relaySocket } = await connect({ acknowledge: true, journal: true });
     const send = (message: Record<string, unknown>) => relaySocket().send(JSON.stringify({ uplinkVersion: 2, ...message }));
     send({ type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 3, cursor: { epoch: 'epoch-1', seq: 2 } });
-    send({ type: 'journal_older_request', requestId: 'older-1', sessionKey: 'codex:thread-1', limit: 50 });
+    send({ type: 'journal_older_request', requestId: 'older-1', sessionKey: 'codex:thread-1', beforeItemKey: 'item-1', limit: 50 });
     send({ type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'codex:thread-1', itemKeys: ['a'] });
     send({ type: 'journal_refused', sessionKey: 'codex:thread-1', generation: 1, sequence: 4, reason: 'body_missing', itemKey: 'a' });
     send({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: 'codex:thread-1', reason: 'index_too_large' });

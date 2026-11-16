@@ -781,7 +781,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       loadServed: async hostId => { await journals.servedSessions(hostId); },
     },
     requestFill: async (hostId, sessionKey, itemKeys, read) => requireJournal(hostId).requestFill(sessionKey, itemKeys, read),
-    requestOlder: async (hostId, sessionKey, limit) => requireJournal(hostId).requestOlder(sessionKey, limit),
+    requestOlder: async (hostId, sessionKey, limit, beforeItemKey) => requireJournal(hostId).requestOlder(sessionKey, limit, beforeItemKey),
   });
   function send(host: Host, message: RemoteHostUplinkMessage) {
     assertHostCurrent(host);
@@ -2416,7 +2416,7 @@ export function createHostBroker(options: HostBrokerOptions) {
      */
     async requestFill(hostId: string, sessionKey: string, itemKeys: string[], read?: JournalReadRequest) { return requireJournal(hostId).requestFill(sessionKey, itemKeys, read); },
     /** Asks a connected Host's Controller to read older history and publish it as prepended items. */
-    async requestOlder(hostId: string, sessionKey: string, limit: number) { return requireJournal(hostId).requestOlder(sessionKey, limit); },
+    async requestOlder(hostId: string, sessionKey: string, limit: number, beforeItemKey: string) { return requireJournal(hostId).requestOlder(sessionKey, limit, beforeItemKey); },
     tunnelHost: (token: string) => [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token)?.id,
     acceptTunnel(token: string, socket: TunnelSocket) {
       const host = [...hosts.values()].find(host => host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN && host.tunnelToken === token);

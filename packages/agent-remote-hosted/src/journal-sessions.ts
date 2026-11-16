@@ -27,7 +27,7 @@ export interface JournalSessionsOptions {
   /** Asks the Host's Controller to read bodies again; rejects when it is offline or cannot. */
   requestFill(hostId: string, sessionKey: string, itemKeys: string[], read: JournalReadRequest): Promise<JournalFilled>;
   /** Asks the Host's Controller to read older history and publish it; rejects when it is offline or cannot. */
-  requestOlder(hostId: string, sessionKey: string, limit: number): Promise<{ olderAvailable: boolean }>;
+  requestOlder(hostId: string, sessionKey: string, limit: number, beforeItemKey: string): Promise<{ olderAvailable: boolean }>;
   scheduler: BrokerScheduler;
 }
 
@@ -135,7 +135,9 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
           if (shared.older === undefined) {
             const began = shared.replacements;
             shared.pending += 1;
-            shared.older = options.requestOlder(hostId, sessionKey, limit)
+            // The journal's oldest item anchors the request; a journal without one has nothing to read older than.
+            shared.older = options.journals.status(hostId, sessionKey)
+              .then(status => status?.oldestItemKey === undefined ? { olderAvailable: false } : options.requestOlder(hostId, sessionKey, limit, status.oldestItemKey))
               .then(({ olderAvailable }) => { if (!olderAvailable && shared.replacements === began) shared.olderExhausted = true; })
               .finally(() => { shared.older = undefined; shared.pending -= 1; release(key, shared); });
           }
@@ -166,6 +168,7 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
       if (!shared) return;
       if (result.unserved) { closeClients(shared, 'Journal unavailable'); return; }
       if (result.events.some(event => event.kind === 'replaced')) { shared.olderExhausted = false; shared.replacements += 1; }
+      if (result.prependRefused) shared.olderExhausted = true;
       for (const stream of [...shared.streams]) {
         try { stream.deliver(result); }
         catch { /* One stream's failure does not stop the others. */ }

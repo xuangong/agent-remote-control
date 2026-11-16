@@ -1,7 +1,7 @@
 import { decodeServerMessage, PROTOCOL_VERSION, type HistoryPage } from '@orchardworks/agent-remote-protocol';
 import {
   applyAgentSnapshot, applyHistoryPage, applyInteractionRequested, applyInteractionResolved,
-  applyResourceUpdate, applyTimelineReplacement, createReplicaState,
+  applyResourceUpdate, createReplicaState,
   type AgentReplicaState, type RemoteSessionStatus,
 } from '@orchardworks/agent-remote-web/headless';
 import type { DebuggerRecord } from './records.js';
@@ -112,7 +112,12 @@ function entryPage(record: Extract<DebuggerRecord, { kind: 'timeline_upsert' }>,
 function applyRecord(state: AgentReplicaState, record: DebuggerRecord): AgentReplicaState {
   switch (record.kind) {
     case 'agent': return applyAgentSnapshot(state, { protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: record.agent });
-    case 'timeline_reset': return record.epoch === null ? { ...state, timeline: createReplicaState().timeline } : applyTimelineReplacement(state, record.epoch);
+    case 'timeline_reset': {
+      // A recording is the observer's own view: its reset cleared the timeline, and the entries that follow rebuild it.
+      if (record.epoch === null) return { ...state, timeline: createReplicaState().timeline };
+      const retired = state.timeline.epoch && state.timeline.epoch !== record.epoch ? [...new Set([...state.retiredEpochs, state.timeline.epoch])] : state.retiredEpochs;
+      return { ...state, retiredEpochs: retired, timeline: { ...createReplicaState().timeline, epoch: record.epoch } };
+    }
     case 'timeline_upsert': return applyHistoryPage(state, entryPage(record, Math.max(state.timeline.nextSeq, record.entry.seqEnd + 1))).state;
     case 'interaction_requested': return applyInteractionRequested(state, record.request);
     case 'interaction_resolved': return applyInteractionResolved(state, record.requestId);

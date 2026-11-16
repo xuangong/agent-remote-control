@@ -320,7 +320,7 @@ describe('a journal connection', () => {
     const pending = f.connection.requestFill(SESSION, ['m1']);
     await f.connection.receive(wire({ type: 'journal_fill', requestId: requestIdOf(f.sent, 'journal_fill_request'), sessionKey: SESSION, items: [{ row: row('m1', 'Hello'), digest: DIGEST }] }));
     await expect(pending).rejects.toThrow('disk full');
-    expect(events).toEqual(['journal_store_failed']);
+    expect(events).toEqual(['journal_request', 'journal_store_failed']);
   });
 
   it('sends nothing once the uplink connection is no longer current', async () => {

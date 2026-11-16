@@ -50,7 +50,7 @@ describe('a window published to a journal', () => {
     const binding: ResourceBinding = { locator: 'file:a', resourceId: 'r1', status: 'available' };
     let first = await open(journals);
     let result = await journals.publish(HOST, SESSION, first.generation, [window(1, withBackground), head(2)]);
-    expect(result.window).toEqual({ outcome: 'replaced' });
+    expect(result.window).toMatchObject({ outcome: 'replaced' });
     const epoch = result.cursor!.epoch;
     const baseline = writes.length;
     let sequence = 3;
@@ -64,7 +64,7 @@ describe('a window published to a journal', () => {
         head(sequence + 3),
       ]);
       expect(result.refusal).toBeUndefined();
-      expect(result.window).toEqual({ outcome: 'unchanged' });
+      expect(result.window).toMatchObject({ outcome: 'unchanged' });
       expect(result.events.map(event => event.kind)).toEqual(['head']);
       expect(result.cursor?.epoch).toBe(epoch);
     }
@@ -78,7 +78,7 @@ describe('a window published to a journal', () => {
     await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a')]), head(2)]);
     opened = await open(journals);
     const result = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, [done('a'), done('b'), done('c')])]);
-    expect(result.window).toEqual({ outcome: 'appended' });
+    expect(result.window).toMatchObject({ outcome: 'appended' });
     expect(result.events.map(event => event.kind)).toEqual(['row', 'row']);
     expect(result.cursor?.seq).toBe(3);
   });
@@ -89,7 +89,7 @@ describe('a window published to a journal', () => {
     await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a'), liveItem('l'), done('b')])]);
     opened = await open(journals);
     const result = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, [done('a', 'rewritten'), done('b')])]);
-    expect(result.window).toEqual({ outcome: 'replaced' });
+    expect(result.window).toMatchObject({ outcome: 'replaced' });
     expect(result.events.map(event => event.kind)).toEqual(['replaced']);
     expect(await keys(memory)).toEqual(['a', 'l', 'b']);
   });
@@ -98,11 +98,11 @@ describe('a window published to a journal', () => {
     const items = ['a', 'b', 'c', 'd'].map((key, at) => done(key, key.repeat(400), { turnId: `turn-${at}` }));
     const { journals, memory } = fixture({ limits: { sessionBytes: 3600 }, retention: { turns: 1, minItems: 0 } });
     let opened = await open(journals);
-    expect((await journals.publish(HOST, SESSION, opened.generation, [window(1, items.slice(0, 3))])).window).toEqual({ outcome: 'replaced' });
+    expect((await journals.publish(HOST, SESSION, opened.generation, [window(1, items.slice(0, 3))])).window).toMatchObject({ outcome: 'replaced' });
     opened = await open(journals);
     const grown = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, items)]);
     expect(grown.refusal).toBeUndefined();
-    expect(grown.window).toEqual({ outcome: 'appended' });
+    expect(grown.window).toMatchObject({ outcome: 'appended' });
     expect(await keys(memory)).toEqual(['a', 'b', 'c', 'd']);
     const bodies = (await memory.load(KEY))!.items.map(item => item.body !== null);
     expect(bodies.at(-1)).toBe(true);
@@ -152,7 +152,7 @@ describe('a window published to a journal', () => {
     opened = await open(journals);
     const again = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, items), head(opened.watermark + 2)]);
     expect(again.refusal).toBeUndefined();
-    expect(again.window).toEqual({ outcome: 'unchanged' });
+    expect(again.window).toMatchObject({ outcome: 'unchanged' });
     expect(again.hasHead).toBe(true);
     expect(journals.served(HOST, SESSION)).toBe(true);
   });
@@ -191,7 +191,7 @@ describe('a window published to a journal', () => {
     expect(await keys(memory)).toEqual(['a', 'b']);
     const recovered = await journals.publish(HOST, SESSION, opened.generation, [window(3, [done('a'), done('b'), done('c')]), head(4)]);
     expect(recovered.refusal).toBeUndefined();
-    expect(recovered.window).toEqual({ outcome: 'replaced' });
+    expect(recovered.window).toMatchObject({ outcome: 'replaced' });
     expect(recovered.hasHead).toBe(true);
     expect(await keys(memory)).toEqual(['a', 'b', 'c']);
   });
@@ -270,11 +270,13 @@ describe('a window published to a journal', () => {
 });
 
 describe('the Relay\'s diagnostics for a window', () => {
-  it('tells when a window replaced the journal, and nothing for an unchanged or appended one', async () => {
+  function connected() {
     const { journals } = fixture({ limits: { sessionBytes: 3000 } });
-    const events: string[] = [];
+    const events: Array<{ event: string; details?: Record<string, unknown> }> = [];
+    const sent: Array<{ type: string; requestId?: string }> = [];
     const connection = createJournalConnection({
-      hostId: HOST, journals, current: () => true, send: () => undefined, diagnostic: event => events.push(event),
+      hostId: HOST, journals, current: () => true, send: message => sent.push(message as { type: string; requestId?: string }),
+      diagnostic: (event, details) => events.push({ event, ...(details ? { details } : {}) }),
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
     });
     const wire = (fields: Record<string, unknown>) => {
@@ -283,14 +285,34 @@ describe('the Relay\'s diagnostics for a window', () => {
       return decoded.value;
     };
     const send = async (sequence: number, items: JournalItemInput[]) => connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [window(sequence, items)] }));
+    return { connection, events, sent, wire, send, journals };
+  }
+  const reasons = (events: Array<{ details?: Record<string, unknown> }>) => events.map(({ details }) => details?.reason);
+
+  it('tells every outcome of a window with its reason and size, and no content', async () => {
+    const { connection, events, wire, send } = connected();
     await connection.receive(wire({ type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' }));
     await send(1, [done('a')]);
-    expect(events).toEqual(['journal_window_replaced']);
-    events.length = 0;
     await send(2, [done('a')]);
     await send(3, [done('a'), done('b')]);
-    expect(events).toEqual([]);
     await send(4, [done('c', 'rewritten')]);
-    expect(events).toEqual(['journal_window_replaced']);
+    await send(5, [{ row: rowOf('c', 'rewritten') }, done('d')]);
+    await send(6, [done('c', 'rewritten'), done('d')]);
+    expect(reasons(events)).toEqual(['new', 'unchanged', 'appended', 'changed', 'open_item', 'open_item']);
+    expect(events.every(({ event, details }) => event === 'journal_window' && details?.agentId === SESSION && Number.isSafeInteger(details.bytes) && (details.bytes as number) > 0)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain('rewritten');
+  });
+
+  it('tells a complete item that differs as changed, and a requested fill or older read as one request each', async () => {
+    const { connection, events, sent, wire, send } = connected();
+    await connection.receive(wire({ type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' }));
+    await send(1, [done('a'), done('b')]);
+    await send(2, [done('a', 'edited'), done('b')]);
+    expect(reasons(events)).toEqual(['new', 'changed']);
+    events.length = 0;
+    void connection.requestFill(SESSION, ['a']).catch(() => undefined);
+    void connection.requestOlder(SESSION, 10, 'a').catch(() => undefined);
+    expect(events).toEqual([{ event: 'journal_request', details: { agentId: SESSION, reason: 'fill' } }, { event: 'journal_request', details: { agentId: SESSION, reason: 'older' } }]);
+    expect(sent.map(message => message.type)).toEqual(expect.arrayContaining(['journal_fill_request', 'journal_older_request']));
   });
 });

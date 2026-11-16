@@ -214,7 +214,8 @@
       },
       "hasHead": true,
       "window": {
-        "outcome": "unchanged"
+        "outcome": "unchanged",
+        "bytes": 237
       }
     }
   },

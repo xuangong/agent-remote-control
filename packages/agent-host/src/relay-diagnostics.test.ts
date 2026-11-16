@@ -17,10 +17,19 @@ it('appends complete private records with the original event timestamp', async (
   expect((await stat(path)).mode & 0o777).toBe(0o600);
 });
 
-it.each(['journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped', 'journal_window_replaced'] as const)('appends the journal diagnostic %s that Controllers of delivery version 4 receive', async event => {
+it.each(['journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped', 'journal_window', 'journal_request'] as const)('appends the journal diagnostic %s that Controllers of delivery version 4 receive', async event => {
   const path = await location(); const sink = createRelayDiagnosticSink({ path });
   await sink.append([{ ...entry, event }]);
   expect(JSON.parse((await readFile(path, 'utf8')).trim())).toEqual({ ...entry, event });
+});
+
+it('appends the journal window and request diagnostics with their reason and size, and nothing else', async () => {
+  const path = await location(); const sink = createRelayDiagnosticSink({ path });
+  const window = { ...entry, event: 'journal_window' as const, agentId: 'copilot:session-1', reason: 'open_item' as const, bytes: 2048 };
+  const request = { ...entry, id: 'event-2', event: 'journal_request' as const, agentId: 'copilot:session-1', reason: 'older' as const };
+  await sink.append([window, request]);
+  expect((await readFile(path, 'utf8')).trim().split('\n').map(line => JSON.parse(line))).toEqual([window, request]);
+  await expect(sink.append([{ ...window, body: 'content' } as typeof window])).rejects.toThrow();
 });
 
 it('rotates complete records within both file size and archive count bounds', async () => {

@@ -97,7 +97,14 @@ export interface JournalChanges {
 export type SyncResult =
   | { outcome: 'unchanged' }
   | { outcome: 'appended'; rows: JournalRow[] }
-  | { outcome: 'replaced'; epoch: string };
+  | { outcome: 'replaced'; epoch: string; reason: ReplacementReason };
+
+/**
+ * Why a window replaced the journal: it held no native item (`new`), it was missing rows (`incomplete`), the first item
+ * that differs is open in the journal or in the window (`open_item`), or a complete item differs, is missing or is out of
+ * order (`changed`).
+ */
+export type ReplacementReason = 'new' | 'incomplete' | 'open_item' | 'changed';
 
 /** What a store reports about one stored journal without loading it. */
 export interface JournalListing {

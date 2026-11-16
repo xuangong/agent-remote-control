@@ -1,6 +1,6 @@
 import {
   bodyFromRow, JournalFencedError, JournalInvalidPublicationError, JournalSequenceGapError, SessionJournal, utf8ByteLength,
-  type JournalHead, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
+  type JournalHead, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore, type ReplacementReason,
 } from '@orchardworks/agent-remote-journal';
 import { JOURNAL_MESSAGE_MAX_BYTES, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
@@ -104,7 +104,7 @@ export interface JournalPublished {
   /** Live-only items removed because the session passed its cap. */
   droppedLiveOnly?: true;
   /** How the Controller's window joined the journal, when the publication carried one. */
-  window?: { outcome: 'unchanged' | 'appended' | 'replaced' };
+  window?: { bytes: number /* the window's encoded size */ } & ({ outcome: 'unchanged' | 'appended' } | { outcome: 'replaced'; reason: ReplacementReason });
   /** A quota refused prepended older history: nothing else changed, the journal stays served and complete, and older history for the session has ended. */
   prependRefused?: true;
 }
@@ -401,7 +401,8 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
       case 'window': {
         const result = journal.sync(publication, entry.items, { roomBytes });
-        published.window = { outcome: result.outcome };
+        const bytes = utf8ByteLength(JSON.stringify(entry));
+        published.window = result.outcome === 'replaced' ? { outcome: 'replaced', reason: result.reason, bytes } : { outcome: result.outcome, bytes };
         if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row });
         else if (result.outcome === 'replaced') published.events.push({ kind: 'replaced', epoch: result.epoch });
         break;

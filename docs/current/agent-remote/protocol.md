@@ -507,7 +507,7 @@ The Relay refuses a publication with `journal_refused`, whose `reason` is one of
 - A provider observation without `itemIdentity` stops the session (`journal_session_stopped`, reason `identity_missing`) and unserves it.
 - A row or item the wire refuses is dropped with a `journal_row_rejected` diagnostic; the session continues.
 - A session whose head cannot be encoded, or whose provider breaks the identity contract, is stopped and `journal_unserve` tells the Relay to clear the head, so browsers read it through the Controller again.
-- The Relay records `journal_window_replaced` when a window replaced a journal, and `journal_quota_exceeded` when it refused a publication for its quota.
+- The Relay records a `journal_window` for every window (`agentId` is the session key, `reason` is `unchanged`, `appended`, `new`, `incomplete`, `open_item` or `changed`, and `bytes` is the window's encoded size), a `journal_request` for every fill or older-history request (`reason` is `fill` or `older`), and `journal_quota_exceeded` when it refused a publication for its quota. The diagnostics carry no content.
 
 A Controller advertises diagnostic delivery 4, which delivers the journal diagnostics of the Relay and of the publisher (`journal_session_stopped`, `journal_row_rejected`); `GET /remote/controller-update` reports it as `diagnosticDelivery: 4`.
 

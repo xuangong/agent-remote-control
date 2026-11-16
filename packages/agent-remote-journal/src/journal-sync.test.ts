@@ -288,3 +288,36 @@ describe('oldestItemKey', () => {
     expect(seeded().journal.oldestItemKey).toBeUndefined();
   });
 });
+
+describe('why sync replaces a journal', () => {
+  const reasonOf = (journalWindow: readonly JournalItemInput[], next: readonly JournalItemInput[]) => {
+    const { sync } = seeded(journalWindow);
+    const result = sync(next);
+    return result.outcome === 'replaced' ? result.reason : result.outcome;
+  };
+
+  it('is new for a journal that holds no native item', () => {
+    expect(reasonOf([], [done('a')])).toBe('new');
+    expect(reasonOf([live('l')], [done('a')])).toBe('new');
+  });
+
+  it('is incomplete for a journal that is missing rows', () => {
+    const { journal, publish } = openJournal();
+    journal.sync(publish(), [done('a')], { roomBytes: ROOM });
+    journal.markIncomplete();
+    expect(journal.sync(publish(), [done('a')], { roomBytes: ROOM })).toMatchObject({ outcome: 'replaced', reason: 'incomplete' });
+  });
+
+  it('is open_item when the first difference involves an item that is open in the journal or in the window', () => {
+    expect(reasonOf([open('a'), done('b')], [done('a'), done('b')])).toBe('open_item');
+    expect(reasonOf([done('a'), done('b')], [open('a'), done('b')])).toBe('open_item');
+  });
+
+  it('is changed when a complete item differs, is missing or is out of order', () => {
+    expect(reasonOf([done('a'), done('b')], [done('a', 'edited'), done('b')])).toBe('changed');
+    expect(reasonOf([done('a'), done('b')], [done('a')])).toBe('changed');
+    expect(reasonOf([done('a'), done('b')], [done('b'), done('a')])).toBe('changed');
+    expect(reasonOf([done('a')], [done('x')])).toBe('changed');
+    expect(reasonOf([done('a')], [])).toBe('changed');
+  });
+});

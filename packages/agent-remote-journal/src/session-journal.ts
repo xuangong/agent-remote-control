@@ -12,7 +12,7 @@ import { utf8ByteLength } from './utf8-size.js';
 import {
   JournalFencedError, JournalInvalidPublicationError, JournalSequenceGapError,
   type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalItem, type JournalMeta, type JournalPublication,
-  type JournalBody, type JournalRow, type JournalRowInput, type JournalState, type SyncResult,
+  type JournalBody, type JournalRow, type JournalRowInput, type JournalState, type ReplacementReason, type SyncResult,
 } from './types.js';
 
 /** The item types whose rows replace the item's content instead of adding to it. */
@@ -337,12 +337,12 @@ export class SessionJournal {
   sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number }): SyncResult {
     if (this.duplicate(publication)) return { outcome: 'unchanged' };
     this.requireDistinct(window);
-    const extension = this.incomplete ? undefined : this.extensionOf(window);
-    if (extension && extension.length === 0) {
+    const extension = this.incomplete ? 'incomplete' : this.extensionOf(window);
+    if (typeof extension !== 'string' && extension.length === 0) {
       this.advance(publication);
       return { outcome: 'unchanged' };
     }
-    if (extension && this.residentBytes() + this.extensionBytes(window)! <= options.roomBytes) {
+    if (typeof extension !== 'string' && this.residentBytes() + this.extensionBytes(window)! <= options.roomBytes) {
       this.advance(publication);
       const rows = extension.map(item => {
         this.insertLast(this.completeItem(this.meta.epoch, item, this.meta.nextSeq));
@@ -350,7 +350,7 @@ export class SessionJournal {
       });
       return { outcome: 'appended', rows };
     }
-    return { outcome: 'replaced', epoch: this.rebuild(publication, window) };
+    return { outcome: 'replaced', epoch: this.rebuild(publication, window), reason: typeof extension === 'string' ? extension : 'changed' };
   }
 
   /**
@@ -359,34 +359,36 @@ export class SessionJournal {
    */
   extensionBytes(window: readonly JournalItemInput[]): number | undefined {
     const extension = this.incomplete ? undefined : this.extensionOf(window);
-    return extension?.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0);
+    return typeof extension === 'string' ? undefined : extension?.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0);
   }
 
   /**
    * The items of `window` that the journal lacks at its end, when everything else of the window is already in the
-   * journal as it is; undefined when the journal must be replaced.
+   * journal as it is; otherwise why the journal must be replaced: `new` when it holds no native item yet, `open_item`
+   * when the first difference involves an open item, `changed` when a complete item differs, is missing or is out of order.
    */
-  protected extensionOf(window: readonly JournalItemInput[]): JournalItemInput[] | undefined {
-    if (window.length === 0) return this.items.some(item => !item.liveOnly) ? undefined : [];
+  protected extensionOf(window: readonly JournalItemInput[]): JournalItemInput[] | ReplacementReason {
+    const heldOrNew = (reason: ReplacementReason): ReplacementReason => (this.items.some(item => !item.liveOnly) ? reason : 'new');
+    if (window.length === 0) return this.items.some(item => !item.liveOnly) ? 'changed' : [];
     const position = new Map(this.items.map((item, at) => [item.itemKey, at] as const));
     const first = window.findIndex(({ row }) => position.has(row.itemKey));
-    if (first < 0) return undefined;
+    if (first < 0) return heldOrNew('changed');
     let at = position.get((window[first] as JournalItemInput).row.itemKey) as number;
-    if (first > 0 && this.items.slice(0, at).some(item => !item.liveOnly)) return undefined;
+    if (first > 0 && this.items.slice(0, at).some(item => !item.liveOnly)) return 'changed';
     const windowKeys = new Set(window.map(({ row }) => row.itemKey));
     let next = first;
     for (; at < this.items.length; at += 1) {
       const held = this.items[at] as JournalItem;
       const wanted = window[next];
       if (wanted && held.itemKey === wanted.row.itemKey) {
-        if (!sameItem(held, wanted)) return undefined;
+        if (!sameItem(held, wanted)) return held.state === 'open' || wanted.digest === undefined ? 'open_item' : 'changed';
         next += 1;
       } else if (!held.liveOnly || windowKeys.has(held.itemKey)) {
-        return undefined;
+        return held.state === 'open' ? 'open_item' : 'changed';
       }
     }
     const extension = window.slice(next);
-    return extension.some(({ row }) => position.has(row.itemKey)) ? undefined : extension;
+    return extension.some(({ row }) => position.has(row.itemKey)) ? 'changed' : extension;
   }
 
   /** Starts the new epoch of a replacement: the items in order with the carried ones, and resets what depended on the old epoch. */

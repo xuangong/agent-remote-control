@@ -4,8 +4,8 @@ export const MAX_RELAY_DIAGNOSTICS = 4096;
 export const MAX_HOST_DIAGNOSTICS = 256;
 export const RELAY_DIAGNOSTIC_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_DIAGNOSTIC_BATCH = 32;
-const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout', 'authority_refresh_started', 'authority_refresh_completed', 'journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped', 'journal_window_replaced'] as const;
-const reasons = ['socket_closed', 'heartbeat_timeout', 'heartbeat_delivery_failed', 'transport_error', 'connection_replaced', 'authority_unavailable', 'access_revoked', 'relay_closed', 'relay_state_unavailable', 'credential_expired', 'protocol_error', 'stream_timeout', 'host_backpressure', 'write_failed', 'runtime_rejected', 'authority_active', 'authority_timeout', 'authority_http_error', 'authority_transport_error', 'authority_invalid_response'] as const;
+const events = ['relay_started', 'host_registered', 'host_disconnected', 'rpc_timeout', 'rpc_failed', 'stream_opening', 'stream_ready', 'stream_closed', 'stream_open_timeout', 'authority_refresh_started', 'authority_refresh_completed', 'journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped', 'journal_window', 'journal_request'] as const;
+const reasons = ['socket_closed', 'heartbeat_timeout', 'heartbeat_delivery_failed', 'transport_error', 'connection_replaced', 'authority_unavailable', 'access_revoked', 'relay_closed', 'relay_state_unavailable', 'credential_expired', 'protocol_error', 'stream_timeout', 'host_backpressure', 'write_failed', 'runtime_rejected', 'authority_active', 'authority_timeout', 'authority_http_error', 'authority_transport_error', 'authority_invalid_response', 'unchanged', 'appended', 'new', 'incomplete', 'open_item', 'changed', 'fill', 'older'] as const;
 const operations = ['catalog', 'attach', 'create', 'session_read', 'session_control', 'controller_update', 'preview', 'other'] as const;
 const startReasons = ['runtime_start', 'core_recovery'] as const;
 export interface RelayDiagnosticContext {
@@ -35,6 +35,7 @@ export interface RelayDiagnostic extends RelayDiagnosticContext {
   heartbeatAgeMs?: number;
   leaseRemainingMs?: number;
   retryDelayMs?: number;
+  bytes?: number;
 }
 export interface RelayDiagnosticStore {
   initial?: unknown;
@@ -43,7 +44,7 @@ export interface RelayDiagnosticStore {
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const identifier = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_:.-]{1,128}$/.test(value);
 const identifiers = ['connectionId', 'requestId', 'streamId', 'agentId', 'runtimeInstanceId', 'workerVersionId'] as const;
-const counts = ['status', 'closeCode', 'durationMs', 'pendingRequests', 'streams', 'heartbeatAgeMs', 'leaseRemainingMs', 'retryDelayMs'] as const;
+const counts = ['status', 'closeCode', 'durationMs', 'pendingRequests', 'streams', 'heartbeatAgeMs', 'leaseRemainingMs', 'retryDelayMs', 'bytes'] as const;
 const fields = new Set(['id', 'timestamp', 'source', 'hostId', 'relayInstanceId', 'event', 'operation', 'reason', 'startReason', 'wasClean', ...identifiers, ...counts]);
 export function isRelayDiagnostic(value: unknown): value is RelayDiagnostic {
   if (!record(value) || Object.keys(value).some(key => !fields.has(key)) || value.source !== 'relay' || !identifier(value.id) || !identifier(value.hostId) || !identifier(value.relayInstanceId)) return false;

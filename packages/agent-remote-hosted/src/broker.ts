@@ -893,7 +893,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const journalHost = host;
       host.journal ??= journalRequested && journals && !journalDeletions.includes(host.id)
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
-          send: message => send(journalHost, message), diagnostic: event => diagnostic(journalHost, { event }),
+          send: message => send(journalHost, message), diagnostic: (event, details) => diagnostic(journalHost, { event, ...details }),
           published: (sessionKey, result) => journalSessions?.published(journalHost.id, sessionKey, result) })
         : undefined;
       send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });

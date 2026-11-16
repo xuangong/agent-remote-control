@@ -5,6 +5,7 @@ import {
   type JournalRefusalReason, type RemoteHostUplinkMessage,
 } from '@orchardworks/agent-remote-protocol';
 
+import type { RelayDiagnostic } from './relay-diagnostics.js';
 import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 
 /** The most requests one connection has open to its Host at a time. */
@@ -36,8 +37,12 @@ interface JournalConnectionOptions {
   current(): boolean;
   scheduler: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   requestTimeoutMs?: number;
-  /** Told about journal failures: a message that does not encode, a store that fails, a fan-out that throws, a publication the quota refused, live-only items the journal removed, and a window that replaced the journal. */
-  diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped' | 'journal_window_replaced'): void;
+  /**
+   * Told about journal failures (a message that does not encode, a store that fails, a fan-out that throws, a publication the
+   * quota refused, live-only items the journal removed) and about each window and each request for bodies or older history,
+   * with the session key as `agentId`, the outcome as `reason` and the window's size as `bytes`. Never any content.
+   */
+  diagnostic?(event: Extract<RelayDiagnostic['event'], `journal_${string}`>, details?: Pick<RelayDiagnostic, 'agentId' | 'reason' | 'bytes'>): void;
   /**
    * Called with the result of every publication the journal stored, after the store holds it and whether or not this
    * connection is still current: the rows are durable, so subscribers must see them. It is not called for a refused
@@ -159,7 +164,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
             catch { options.diagnostic?.('journal_fanout_failed'); }
           }
           if (stored && result.droppedLiveOnly) options.diagnostic?.('journal_live_only_dropped');
-          if (stored && result.window?.outcome === 'replaced') options.diagnostic?.('journal_window_replaced');
+          if (stored && result.window) options.diagnostic?.('journal_window', { agentId: sessionKey, reason: result.window.outcome === 'replaced' ? result.window.reason : result.window.outcome, bytes: result.window.bytes });
           if (result.refusal?.reason === 'quota_exceeded') options.diagnostic?.('journal_quota_exceeded');
           if (!options.current()) return;
           if (result.cursor && stored) {
@@ -218,6 +223,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
       if (itemKeys.length < 1 || itemKeys.length > JOURNAL_FILL_MAX_ITEMS || new Set(itemKeys).size !== itemKeys.length) {
         return Promise.reject(new JournalRequestError('invalid', `A fill asks for 1 to ${JOURNAL_FILL_MAX_ITEMS} distinct items.`));
       }
+      options.diagnostic?.('journal_request', { agentId: sessionKey, reason: 'fill' });
       return request<JournalFilled>('fill', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill_request', requestId, sessionKey, itemKeys: [...itemKeys] }),
         resolve => ({ kind: 'fill', itemKeys: new Set(itemKeys), ...(read ? { read } : {}), applying: false, resolve }));
     },
@@ -226,6 +232,7 @@ export function createJournalConnection(options: JournalConnectionOptions): Jour
       if (!Number.isInteger(limit) || limit < 1 || limit > JOURNAL_OLDER_MAX_LIMIT) {
         return Promise.reject(new JournalRequestError('invalid', `An older-history read asks for 1 to ${JOURNAL_OLDER_MAX_LIMIT} items.`));
       }
+      options.diagnostic?.('journal_request', { agentId: sessionKey, reason: 'older' });
       return request<{ olderAvailable: boolean }>('older', sessionKey, requestId => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_request', requestId, sessionKey, beforeItemKey, limit }),
         resolve => ({ kind: 'older', resolve }));
     },

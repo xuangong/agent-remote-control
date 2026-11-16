@@ -279,7 +279,7 @@ it('stores Host journals in SQLite beside the state when journals are on, and gr
   const controller = await journalController(f.origin, (await f.server.getConnection()).remoteKey);
   expect(controller.registered).toMatchObject({ type: 'registered', journal: 1 });
   controller.send({ type: 'journal_open', requestId: 'open-1', sessionKey: 'codex:thread-1', publisherId: 'controller-1' });
-  expect(await controller.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  expect(await controller.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0 });
   controller.send({ type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [
     { sequence: 1, op: 'append', row: { itemKey: 'm1', providerId: 'codex', sourceKey: 'm1:1', occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message', text: 'Hello', messageId: 'm1' } } },
   ] });

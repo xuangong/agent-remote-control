@@ -97,6 +97,12 @@ export interface JournalChanges {
   bytes: number;
 }
 
+/** How a Controller's window joined the journal: nothing changed, items were appended at the end, or one replacement started a new epoch. */
+export type SyncResult =
+  | { outcome: 'unchanged' }
+  | { outcome: 'appended'; rows: JournalRow[] }
+  | { outcome: 'replaced'; epoch: string; trimmed: number };
+
 /** What a store reports about one stored journal without loading it. */
 export interface JournalListing {
   sessionKey: string;

@@ -32,7 +32,7 @@ describe('amendments published to a journal', () => {
   it('applies a rebind and an outcome in place, stores them, and lists what subscribers hear in order', async () => {
     const { store, journals } = await seeded();
     const entries: JournalPublishEntry[] = [
-      { sequence: 1, op: 'append', row: row('a', 'Alpha', [pending]) },
+      { sequence: 1, op: 'append', row: { ...row('a', 'Alpha', [pending]), item: { type: 'assistant_message', text: 'Alpha', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'pending' } } } },
       { sequence: 2, op: 'rebind', itemKey: 'a', previous: pending, replacement: settled },
       { sequence: 3, op: 'outcome', providerId: 'codex', turnId: 'turn-1', background: { id: 'review-1', kind: 'review', status: 'visible' }, occurredAt: 1_725_000_000_500 },
     ];

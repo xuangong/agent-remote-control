@@ -81,7 +81,7 @@ describe('a background outcome applied in place', () => {
     journal.evict(1);
     expect(journal.index().map(entry => entry.resident)).toEqual([false, false, true]);
     expect(journal.outcome(publish(), { ...review, status: 'visible', summary: 'Found two issues.' })).toBe(true);
-    expect(journal.outcome(publish(), { ...review, status: 'silent' })).toBe(true);
+    expect(journal.outcome(publish(), { ...review, status: 'silent' })).toBe(false);
     journal.fill('a', { item: { type: 'assistant_message', text: 'Alpha', messageId: 'a' }, timestamp: '2024-08-30T00:00:00.000Z', collapsed: [], resources: [pending] }, DIGEST);
     journal.fill('b', { item: { type: 'assistant_message', text: 'Beta', messageId: 'b' }, timestamp: '2024-08-30T00:00:00.000Z', collapsed: [], resources: [] }, DIGEST);
     const page = journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false });

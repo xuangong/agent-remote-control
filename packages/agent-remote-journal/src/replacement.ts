@@ -13,17 +13,17 @@ function sealedCopy(item: JournalItem): JournalItem {
 
 /**
  * The order of a new epoch: the reread items, with every old item the reread cannot reproduce, which is a live-only
- * item or an open one (carried sealed), kept right after the nearest preceding old item that survives, or before the
- * first reread item when none does. Carried items keep their relative order.
+ * item (or, with `sealOpen`, an open one, carried sealed), kept right after the nearest preceding old item that
+ * survives, or before the first reread item when none does. Carried items keep their relative order.
  */
-export function replacementOrder(previous: readonly JournalItem[], reread: readonly JournalItemInput[]): ReplacementEntry[] {
+export function replacementOrder(previous: readonly JournalItem[], reread: readonly JournalItemInput[], sealOpen = true): ReplacementEntry[] {
   const rereadKeys = new Set(reread.map(({ row }) => row.itemKey));
   const carriedAfter = new Map<string | null, JournalItem[]>();
   let anchor: string | null = null;
   for (const item of previous) {
     if (rereadKeys.has(item.itemKey)) {
       anchor = item.itemKey;
-    } else if (item.liveOnly || item.state === 'open') {
+    } else if (item.liveOnly || (sealOpen && item.state === 'open')) {
       const carried = carriedAfter.get(anchor);
       if (carried) carried.push(sealedCopy(item));
       else carriedAfter.set(anchor, [sealedCopy(item)]);

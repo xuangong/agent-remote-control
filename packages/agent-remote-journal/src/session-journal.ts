@@ -4,6 +4,7 @@ import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/
 import {
   canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, mergeResources, residentEntry, stampRow,
 } from './journal-items.js';
+import { canonicalContent, canonicalJson } from './item-digest.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
 import { evictable, retainedFrom } from './retention.js';
 import { replacementOrder } from './replacement.js';
@@ -12,7 +13,7 @@ import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError, JournalSequenceGapError,
   JournalStaleRevisionError, JournalUnknownItemError,
   type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
-  type JournalBody, type JournalRow, type JournalRowInput, type JournalState,
+  type JournalBody, type JournalRow, type JournalRowInput, type JournalState, type SyncResult,
 } from './types.js';
 
 /** The item types whose rows replace the item's content instead of adding to it. */
@@ -111,6 +112,9 @@ export class SessionJournal {
 
   /** How many live-only items the journal holds. */
   get liveOnlyCount(): number { return this.liveOnlyKeys.size; }
+
+  /** The key of the first item that is not live-only: where a request for older history starts. */
+  get oldestItemKey(): string | undefined { return this.items.find(item => !item.liveOnly)?.itemKey; }
 
   /** Whether the item's body is in memory; false for an evicted or unknown item. */
   resident(itemKey: string): boolean { return this.byKey.get(itemKey)?.body != null; }
@@ -330,19 +334,25 @@ export class SessionJournal {
     return { epoch: this.meta.epoch, seq: item.seqEnd };
   }
 
-  /** Applies a background outcome in place to every item of that background, evicted ones included; an outcome never regresses. False for a duplicate publication. */
+  /**
+   * Applies a background outcome in place to every item of that background, evicted ones included; an outcome never
+   * regresses. False when nothing changed: a duplicate publication, or items that already have that outcome.
+   */
   outcome(publication: JournalPublication, background: BackgroundActivity): boolean {
     if (this.duplicate(publication)) return false;
     this.advance(publication);
+    let changed = false;
     for (const item of this.items) {
       const current = item.body ? item.body.item.background : item.background;
       if (current?.id !== background.id) continue;
       const merged = structuredClone(mergeBackgroundActivity(current, background));
+      if (canonicalJson(merged) === canonicalJson(current)) continue;
       if (item.body) item.body.item.background = merged;
       else item.background = merged;
       this.touch(item.itemKey);
+      changed = true;
     }
-    return true;
+    return changed;
   }
 
   /**
@@ -383,14 +393,90 @@ export class SessionJournal {
 
   /**
    * Starts a new epoch from a reread of native history: one sequence per item, oldest first. Live-only items, which a
-   * reread cannot reproduce, are carried over in place.
+   * reread cannot reproduce, are carried over in place, and open items the reread lacks are carried sealed.
    */
   replace(publication: JournalPublication, items: readonly JournalItemInput[], now: number): string {
     if (this.duplicate(publication)) return this.meta.epoch;
     this.requireDistinct(items);
+    const retired = this.meta.epoch;
+    const epoch = this.rebuild(publication, items, true);
+    this.meta.retiredEpochs = [
+      ...this.meta.retiredEpochs.filter(({ retiredAt }) => now - retiredAt < RETIRED_EPOCH_MS),
+      { epoch: retired, retiredAt: now },
+    ];
+    return epoch;
+  }
+
+  /**
+   * Compares the Controller's newest window of native history with the journal and brings the journal to it with the least
+   * change: `unchanged` when it already holds the window, `appended` when the window only adds items at the end, otherwise
+   * one `replaced` epoch that carries the live-only items. The window is trimmed first to the newest items that fit
+   * `roomBytes`; items older than the journal's first shared item are not a change, because older history is not
+   * uploaded until it is asked for. A journal that is missing rows is always replaced.
+   */
+  sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number }): SyncResult {
+    if (this.duplicate(publication)) return { outcome: 'unchanged' };
+    this.requireDistinct(window);
+    const fixed = this.residentBytes() - (this.sizedTotal - this.liveOnlyTotal);
+    let budget = options.roomBytes - fixed;
+    let start = window.length;
+    while (start > 0) {
+      const size = utf8ByteLength(JSON.stringify(window[start - 1]));
+      if (size > budget) break;
+      budget -= size;
+      start -= 1;
+    }
+    const kept = window.slice(start);
+    const extension = this.incomplete ? undefined : this.extensionOf(kept);
+    if (extension && extension.length === 0) {
+      this.advance(publication);
+      return { outcome: 'unchanged' };
+    }
+    if (extension && this.residentBytes() + extension.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0) <= options.roomBytes) {
+      this.advance(publication);
+      const rows = extension.map(item => {
+        const created = this.completeItem(this.meta.epoch, item, this.meta.nextSeq);
+        created.revision = this.nextRevision();
+        this.insertLast(created);
+        return stampRow(this.meta.epoch, this.meta.nextSeq++, item.row);
+      });
+      return { outcome: 'appended', rows };
+    }
+    return { outcome: 'replaced', epoch: this.rebuild(publication, kept, false), trimmed: start };
+  }
+
+  /**
+   * The items of `window` that the journal lacks at its end, when everything else of the window is already in the
+   * journal as it is; undefined when the journal must be replaced.
+   */
+  protected extensionOf(window: readonly JournalItemInput[]): JournalItemInput[] | undefined {
+    if (window.length === 0) return this.items.some(item => !item.liveOnly) ? undefined : [];
+    const position = new Map(this.items.map((item, at) => [item.itemKey, at] as const));
+    const first = window.findIndex(({ row }) => position.has(row.itemKey));
+    if (first < 0) return undefined;
+    let at = position.get((window[first] as JournalItemInput).row.itemKey) as number;
+    if (first > 0 && this.items.slice(0, at).some(item => !item.liveOnly)) return undefined;
+    const windowKeys = new Set(window.map(({ row }) => row.itemKey));
+    let next = first;
+    for (; at < this.items.length; at += 1) {
+      const held = this.items[at] as JournalItem;
+      const wanted = window[next];
+      if (wanted && held.itemKey === wanted.row.itemKey) {
+        if (!sameItem(held, wanted)) return undefined;
+        next += 1;
+      } else if (!held.liveOnly || windowKeys.has(held.itemKey)) {
+        return undefined;
+      }
+    }
+    const extension = window.slice(next);
+    return extension.some(({ row }) => position.has(row.itemKey)) ? undefined : extension;
+  }
+
+  /** Starts the new epoch of a replacement: the items in order with the carried ones, and resets what depended on the old epoch. */
+  protected rebuild(publication: JournalPublication, items: readonly JournalItemInput[], sealOpen: boolean): string {
     const epoch = crypto.randomUUID();
     const resealed = new Set<JournalItem>();
-    const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
+    const next = replacementOrder(this.items, items, sealOpen).map((entry, offset): JournalItem => {
       const seq = offset + 1;
       if (entry.kind === 'carried') {
         const carried = { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
@@ -402,10 +488,6 @@ export class SessionJournal {
       return item;
     });
     this.advance(publication);
-    this.meta.retiredEpochs = [
-      ...this.meta.retiredEpochs.filter(({ retiredAt }) => now - retiredAt < RETIRED_EPOCH_MS),
-      { epoch: this.meta.epoch, retiredAt: now },
-    ];
     this.meta.epoch = epoch;
     this.meta.nextSeq = next.length + 1;
     this.meta.minSeq = 1;
@@ -614,6 +696,13 @@ export class SessionJournal {
     this.byKey.set(item.itemKey, item);
     this.touch(item.itemKey);
   }
+}
+
+/** Whether the journal's item is the window's item: the same key and live-only mark, and the same digest when complete or the same resident content when open. */
+function sameItem(held: JournalItem, wanted: JournalItemInput): boolean {
+  if (held.liveOnly !== (wanted.row.liveOnly === true)) return false;
+  if (wanted.digest !== undefined) return held.state === 'complete' && held.digest === wanted.digest;
+  return held.state === 'open' && held.body !== null && canonicalContent(held.body.item) === canonicalContent(wanted.row.item);
 }
 
 function sameBinding(a: ResourceBinding, b: ResourceBinding): boolean {

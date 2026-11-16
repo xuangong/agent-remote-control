@@ -88,3 +88,43 @@ export function mixThresholds(steps) {
     evictionTriggered: (percentile(steps.map(step => step.windows.requests.fill), 0.5) ?? 0) > 1 || steps.some(step => step.windows.quotaRefusals > 0),
   };
 }
+
+/** The timeline epoch and next sequence in a journal's `meta` record, from its chunks (hex of each chunk, in order); null when there is none. */
+export function parseJournalMeta(chunkHexes) {
+  if (!chunkHexes.length) return null;
+  try {
+    const meta = JSON.parse(Buffer.concat(chunkHexes.map(hex => Buffer.from(hex, 'hex'))).toString('utf8'));
+    return typeof meta.epoch === 'string' ? { epoch: meta.epoch, nextSeq: meta.nextSeq } : null;
+  } catch { return null; }
+}
+
+/**
+ * Whether the page was served from the Relay's journal. With the item-key flag (S4 builds) the stream echoes it, and a
+ * Controller-answered stream never does. The control build has no flag: its page's `timeline_page` epochs must equal the
+ * journal's epoch both before and after the sample, because the journal can be replaced while the sample runs.
+ */
+export function journalServed({ signal, itemKeysEchoed, pageEpochs, metaBefore, metaAfter }) {
+  if (signal === 'flag') return itemKeysEchoed === true;
+  if (!metaBefore || !metaAfter || !pageEpochs.length) return false;
+  return pageEpochs.every(epoch => epoch === metaBefore.epoch && epoch === metaAfter.epoch);
+}
+
+/** The states of the observer log in which the conversation had shown rows and then showed none. */
+export function rowlessStates(states) {
+  const first = states.findIndex(state => state.entries > 0);
+  return first < 0 ? 0 : states.slice(first).filter(state => state.entries === 0).length;
+}
+
+/** The composer before and after an action: the same text, the same focus, the same selection, and never disabled. */
+export function composerUnchanged(before, after, disabledStates = 0) {
+  return before.text === after.text && before.focused === after.focused && before.selectionStart === after.selectionStart && before.selectionEnd === after.selectionEnd && disabledStates === 0;
+}
+
+/**
+ * Whether a table cell may state a percentile. A condition with fewer samples than `minimum` states the maximum and the count.
+ * The minimum is 20, or 10 for the conditions that restart the instance for every sample.
+ */
+export function reportable(values, minimum = 20) {
+  const own = stats(values);
+  return own.n >= minimum ? { n: own.n, p50: own.p50, p95: own.p95, max: own.max } : { n: own.n, p50: null, p95: null, max: own.max, belowMinimum: minimum };
+}

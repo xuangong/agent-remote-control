@@ -9,3 +9,8 @@ export function answeredBy(controllerEntries: DiagnosticEntry[], open: { fromMs:
 export function controllerJournalEvents(entries: DiagnosticEntry[], range?: { fromMs?: number; toMs?: number }): Record<string, number>;
 export function holeCheck(nativeEntries: Array<{ id?: unknown; role?: string; text?: string }>, servedTexts: string[]): HoleCheck;
 export function mixThresholds(steps: MixStep[]): Record<string, number | boolean | null>;
+export function parseJournalMeta(chunkHexes: string[]): { epoch: string; nextSeq: number } | null;
+export function journalServed(sample: { signal: 'flag' | 'meta'; itemKeysEchoed: boolean; pageEpochs: string[]; metaBefore: { epoch: string } | null; metaAfter: { epoch: string } | null }): boolean;
+export function rowlessStates(states: Array<{ entries: number }>): number;
+export function composerUnchanged(before: { text: string; focused: boolean; selectionStart: number; selectionEnd: number }, after: { text: string; focused: boolean; selectionStart: number; selectionEnd: number }, disabledStates?: number): boolean;
+export function reportable(values: number[], minimum?: number): { n: number; p50: number | null; p95: number | null; max: number | null; belowMinimum?: number };

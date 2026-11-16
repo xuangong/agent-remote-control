@@ -5,7 +5,8 @@
 //   --origin URL          the instance origin (default: `pnpm --silent local status --json`, which signs in once)
 //   --scenarios a,b,c     open-known, open-fresh, open-cold-context, open-released, hidden-short, hidden-long,
 //                         send-resident, send-released, release-continuity, restart-continuity, provider-latency, switch,
-//                         journal-open, journal-reopen-mix (the S3 journal measurements; see README.md)
+//                         journal-open, journal-reopen-mix (the S3 journal measurements), replacement-absorbed, runtime-release
+//                         (the S4a measurements; see README.md)
 //   --reps N              samples per session (default 3)
 //   --throttle N          CPU slowdown factor (default 1)
 //   --sessions A,B        session addresses (default: every session `session list` shows in the instance workspace)
@@ -14,7 +15,13 @@
 //   --hidden-short MS / --hidden-long MS   hidden durations (default 30000 / 300000)
 //   --deadline MS         outer deadline for the whole run (default 1500000)
 //   --action MS           deadline of one action (default 30000)
-//   --label TEXT          a name stored in the result, for example journals-on or journals-off
+//   --label TEXT          a name stored in the result, for example control, s4a or s4a-crude
+//   --rtt MS              emulated round trip between the browser and the instance, through a delaying proxy that delays HTTP and
+//                         WebSocket traffic (default 0: direct). The command line still talks to the instance directly. A run
+//                         marked invalid when no WebSocket crossed the proxy.
+//   --journal-signal S    how a sample is classified as served from the Relay's journal: `flag` (the stream echoed the item-key
+//                         flag; S4 builds) or `meta` (the page's timeline epochs equal the epoch in journals.sqlite; the control
+//                         build, which has no flag). Default `flag`.
 // Every scenario uses one browser context (one sign-in; the open-cold-context scenario uses one per sample). Results are
 // written as JSON after every scenario, so a run that hits the outer deadline keeps what it finished.
 //
@@ -32,7 +39,8 @@ import { createRequire } from 'node:module';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { answeredBy, controllerJournalEvents, holeCheck, mixThresholds, stats, windowCounts } from './journal-measurement.mjs';
+import { answeredBy, composerUnchanged, controllerJournalEvents, holeCheck, journalServed, mixThresholds, parseJournalMeta, rowlessStates, stats, windowCounts } from './journal-measurement.mjs';
+import { startLatencyProxy } from './latency-proxy.mjs';
 
 const root = process.cwd();
 function parseOptions(argv) {
@@ -49,12 +57,18 @@ const hiddenShortMs = Number(options['hidden-short'] ?? 30_000);
 const hiddenLongMs = Number(options['hidden-long'] ?? 300_000);
 const outFile = resolve(options.out ?? '.tmp/local-baselines.json');
 const wanted = (options.scenarios ?? 'open-known,open-fresh,open-released,hidden-short,send-resident,send-released,release-continuity,provider-latency,switch').split(',');
-const origin = options.origin ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
+const directOrigin = options.origin ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
+const rttMs = Number(options.rtt ?? 0);
+const journalSignal = options['journal-signal'] ?? 'flag';
+// The browser goes through a proxy that delays every exchange, WebSocket frames included, when a round trip is asked for.
+const proxy = rttMs > 0 ? await startLatencyProxy({ target: directOrigin, rttMs }) : undefined;
+const origin = proxy?.origin ?? directOrigin;
 const { chromium } = createRequire(join(root, 'packages/agent-remote-lab/package.json'))('@playwright/test');
 
 const controller = (...args) => JSON.parse(execFileSync('agent-remote-controller-dev', args, { cwd: root, encoding: 'utf8', timeout: 180_000 }));
 const sessions = (options.sessions ? options.sessions.split(',') : controller('session', 'list', '--limit', '50').sessions.map(item => item.address))
-  .map(address => ({ address, provider: address.split('/')[1], url: controller('session', 'link', address).url }));
+  .map(address => ({ address, provider: address.split('/')[1], url: controller('session', 'link', address).url.replace(directOrigin, origin) }));
+if (proxy && sessions.some(item => !item.url.startsWith(origin))) throw new Error(`A session link does not start with the proxy origin ${origin}; the page would bypass the latency proxy.`);
 if (!sessions.length) throw new Error('The instance has no sessions; create some with real model turns first.');
 const byProvider = provider => sessions.filter(item => item.provider === provider);
 // Sessions whose runtime a release can unload: Claude Code has none to release, and a long wait is only meaningful for Codex.
@@ -73,7 +87,7 @@ async function releaseRuntime(session) {
   return released;
 }
 
-const result = { startedAt: new Date().toISOString(), origin, options: { reps, throttle, hiddenShortMs, hiddenLongMs, scenarios: wanted, label: options.label ?? null },
+const result = { startedAt: new Date().toISOString(), origin, options: { reps, throttle, rttMs, journalSignal, hiddenShortMs, hiddenLongMs, scenarios: wanted, label: options.label ?? null },
   sessions: sessions.map(({ address, provider }) => ({ address, provider })), environment: undefined, scenarios: {} };
 const save = () => { mkdirSync(dirname(outFile), { recursive: true }); writeFileSync(outFile, JSON.stringify(result, null, 2)); };
 const outer = setTimeout(() => { result.outerDeadlineHit = true; save(); console.error('Outer deadline reached; partial results saved.'); process.exit(2); }, Number(options.deadline ?? 1_500_000));
@@ -131,8 +145,32 @@ const observerSource = `(() => {
   window.__baseline = {
     log,
     read,
-    mark: () => { const node = document.querySelector('.agent-timeline-entry'); window.__baselineMark = node; return !!node; },
-    markAlive: () => !!window.__baselineMark && window.__baselineMark.isConnected,
+    // Every row node is marked: a row that was re-keyed leaves the document, and its replacement node is not marked.
+    mark: () => { const nodes = [...document.querySelectorAll('.agent-timeline-entry')]; window.__baselineMarks = nodes; return nodes.length > 0; },
+    markAlive: () => !!window.__baselineMarks?.length && window.__baselineMarks.every(node => node.isConnected),
+    survivors: () => ({ total: window.__baselineMarks?.length ?? 0, alive: (window.__baselineMarks ?? []).filter(node => node.isConnected).length }),
+    scroller: () => {
+      for (let at = document.querySelector('.agent-timeline-entry')?.parentElement; at; at = at.parentElement) if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at;
+      return document.scrollingElement;
+    },
+    scrollToMiddle: () => { const scroller = window.__baseline.scroller(); scroller.scrollTop = Math.max(0, (scroller.scrollHeight - scroller.clientHeight) / 2); return scroller.scrollTop; },
+    // The first row in view and its offset from the top of the scroller.
+    anchor: () => {
+      const scroller = window.__baseline.scroller(), top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+      const row = [...document.querySelectorAll('.agent-timeline-entry')].find(node => node.getBoundingClientRect().bottom > top + 1);
+      return row ? { key: row.getAttribute('data-entry-key'), offset: Math.round((row.getBoundingClientRect().top - top) * 10) / 10 } : null;
+    },
+    offsetOf: key => {
+      const scroller = window.__baseline.scroller(), top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
+      const row = [...document.querySelectorAll('.agent-timeline-entry')].find(node => node.getAttribute('data-entry-key') === key);
+      return row ? Math.round((row.getBoundingClientRect().top - top) * 10) / 10 : null;
+    },
+    composer: () => {
+      const editor = document.querySelector('[data-testid="prompt-input"]');
+      if (!editor) return null;
+      const selection = window.getSelection(), inside = !!selection?.anchorNode && editor.contains(selection.anchorNode);
+      return { text: editor.textContent ?? '', focused: editor.contains(document.activeElement) || document.activeElement === editor, selectionStart: inside ? selection.anchorOffset : -1, selectionEnd: inside ? selection.focusOffset : -1 };
+    },
     setHidden: hidden => {
       Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hidden ? 'hidden' : 'visible' });
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
@@ -159,6 +197,8 @@ async function instrument(context) {
   page.setDefaultTimeout(actionMs);
   await page.addInitScript(observerSource);
   const http = [], sockets = [], frames = [], consoleErrors = [];
+  // What says the stream was served from the Relay's journal: the item-key flag the stream echoed, and the epochs of its pages.
+  const served = { itemKeysEchoed: false, pageEpochs: [] };
   const pending = new Map();
   page.on('request', request => pending.set(request, { t: Date.now(), method: request.method(), path: normalizePath(request.url()), type: request.resourceType() }));
   page.on('requestfinished', request => { const entry = pending.get(request); if (entry) { entry.ms = Date.now() - entry.t; http.push(entry); pending.delete(request); } });
@@ -173,7 +213,8 @@ async function instrument(context) {
   cdp.on('Network.webSocketFrameSent', event => frames.push({ t: Date.now(), id: event.requestId, dir: 'out', kind: messageKind(event.response.payloadData), bytes: event.response.payloadData.length }));
   cdp.on('Network.webSocketFrameReceived', event => {
     const entry = { t: Date.now(), id: event.requestId, dir: 'in', kind: messageKind(event.response.payloadData), bytes: event.response.payloadData.length };
-    if (entry.kind.endsWith('timeline_page')) entry.rows = timelineRows(event.response.payloadData);
+    if (entry.kind.endsWith('timeline_page')) { entry.rows = timelineRows(event.response.payloadData); const epoch = pageEpoch(event.response.payloadData); if (epoch) served.pageEpochs.push(epoch); }
+    if (entry.kind.endsWith('negotiated') && negotiatedItemKeys(event.response.payloadData)) served.itemKeysEchoed = true;
     frames.push(entry);
   });
   // Bytes of the HTTP responses of the API (not scripts, styles, fonts or images), as the browser received them.
@@ -184,7 +225,7 @@ async function instrument(context) {
   const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(({ name, value }) => [name, value]));
   return {
     page, cdp, metrics,
-    reset() { http.length = 0; sockets.length = 0; frames.length = 0; consoleErrors.length = 0; pending.clear(); apiBytes = 0; },
+    reset() { http.length = 0; sockets.length = 0; frames.length = 0; consoleErrors.length = 0; pending.clear(); apiBytes = 0; served.itemKeysEchoed = false; served.pageEpochs.length = 0; },
     /** Observer log, requests and sockets since the last reset, with times relative to `start`. */
     async capture(start) {
       const log = await page.evaluate(() => window.__baseline?.log.slice() ?? []).catch(() => []);
@@ -193,12 +234,17 @@ async function instrument(context) {
         requests: summarizeRequests(http, sockets, frames, start),
         timelineReads: timelineReads(frames, start),
         apiBytes,
+        itemKeysEchoed: served.itemKeysEchoed, pageEpochs: [...served.pageEpochs],
         consoleErrors: consoleErrors.slice(0, 5),
       };
     },
     clearLog: () => page.evaluate(() => { window.__baseline.log.length = 0; }),
   };
 }
+
+const parseMessage = payloadData => { try { return JSON.parse(payloadData).message; } catch { return undefined; } };
+const pageEpoch = payloadData => parseMessage(payloadData)?.payload?.epoch;
+const negotiatedItemKeys = payloadData => parseMessage(payloadData)?.itemKeys === true;
 
 /** Sizes of the rows of one timeline page: bytes per item type. */
 function timelineRows(payloadData) {
@@ -230,8 +276,13 @@ function timelineReads(frames, start) {
 function summarizeRequests(http, sockets, frames, start) {
   const count = (items, keyOf) => { const out = {}; for (const item of items) { const key = keyOf(item); out[key] = (out[key] ?? 0) + 1; } return out; };
   const inFrames = frames.filter(frame => frame.dir === 'in'), outFrames = frames.filter(frame => frame.dir === 'out');
+  // The attach: the page's first request to take the session (the session control request on the channel; an HTTP attach on older paths).
+  const attachFrame = outFrames.find(frame => frame.kind.endsWith('session_control_request'));
+  const attachHttp = http.find(item => item.method === 'POST' && /\/attach$/.test(item.path));
+  const attachAt = attachFrame?.t ?? attachHttp?.t;
   const apiHttp = http.filter(item => item.type !== 'script' && item.type !== 'stylesheet' && item.type !== 'font' && item.type !== 'image' && item.type !== 'document');
   return {
+    firstAttachMs: attachAt === undefined ? null : attachAt - start,
     httpTotal: http.length,
     httpAssets: http.length - apiHttp.length,
     httpApi: apiHttp.length,
@@ -281,15 +332,28 @@ async function waitForState(handle, predicate, label, ms = actionMs) {
   throw new Error(`Deadline of ${ms} ms passed: ${label}; last state ${JSON.stringify(last)}`);
 }
 
+// T1 counts observed states (the observer records every change at 8 ms resolution) from the moment the conversation mounts: its
+// first label, placeholder or message. They are counts, never clock thresholds.
+const OPENING_LABELS = ['Opening session', 'Loading conversation', 'Awaiting Agent', 'Start with a Provider'];
+const showsOpening = state => [...state.labels, ...state.loading].some(text => OPENING_LABELS.some(label => text.includes(label)));
 const openSummary = (capture, start) => {
   const content = firstAt(capture.states, state => state.messages > 0);
   const ready = firstAt(capture.states, isReady);
   const settledAt = ready ?? capture.states.at(-1)?.t ?? 0;
+  const mounted = firstAt(capture.states, state => state.labels.length > 0 || state.loading.length > 0 || state.messages > 0);
+  const sinceMount = mounted === undefined ? [] : capture.states.filter(state => state.t >= mounted && (ready === undefined || state.t <= ready));
+  const attachMs = capture.requests.firstAttachMs;
   return {
     contentMs: content, readyMs: ready,
+    mountMs: mounted ?? null,
+    contentSinceMountMs: content !== undefined && mounted !== undefined ? content - mounted : null,
+    contentSinceAttachMs: content !== undefined && attachMs !== null && attachMs !== undefined ? content - attachMs : null,
+    openingLabelFrames: sinceMount.filter(showsOpening).length,
+    rowlessFramesSinceMount: sinceMount.filter(state => state.entries === 0).length,
     blockedUntilMs: capture.states.filter(isBlocked).at(-1) ? (capture.states.filter(isBlocked).at(-1).t) : 0,
     states: stateSummary(capture.states, 0, settledAt),
     requests: capture.requests, apiBytes: capture.apiBytes, timelineReads: capture.timelineReads, consoleErrors: capture.consoleErrors,
+    itemKeysEchoed: capture.itemKeysEchoed, pageEpochs: capture.pageEpochs,
   };
 };
 
@@ -308,21 +372,37 @@ async function inContext(body) {
   }
 }
 
+/** The epoch and next sequence of the session's journal in the instance's journal store; null without a journal or for another signal. */
+function journalMeta(session) {
+  if (journalSignal !== 'meta') return null;
+  try {
+    const key = session.address.replace(/\//g, ':');
+    const file = join(result.environment.build.directory, 'relay/relay/journals.sqlite');
+    const chunks = execFileSync('sqlite3', ['-readonly', `file:${file}?mode=ro`, `select hex(bytes) from journal_chunks where session_key='${key}' and part='m' order by ordinal`], { encoding: 'utf8', timeout: 10_000 });
+    return parseJournalMeta(chunks.split('\n').filter(Boolean));
+  } catch { return null; }
+}
+
 async function openSample(handle, session, how) {
   handle.reset();
   await handle.clearLog().catch(() => {});
+  const metaBefore = journalMeta(session);
   const start = Date.now();
   if (how === 'reload') await handle.page.reload({ waitUntil: 'domcontentloaded' });
   else await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
   await waitForState(handle, isReady, `ready after ${how} of ${session.address}`);
   await delay(600); // trailing requests and states that follow ready
   const capture = await handle.capture(start);
-  return { address: session.address, provider: session.provider, startMs: start, endMs: Date.now(), ...openSummary(capture, start) };
+  const summary = openSummary(capture, start);
+  const served = journalServed({ signal: journalSignal, itemKeysEchoed: summary.itemKeysEchoed, pageEpochs: summary.pageEpochs, metaBefore, metaAfter: journalMeta(session) });
+  return { address: session.address, provider: session.provider, startMs: start, endMs: Date.now(), journalServed: served, ...summary };
 }
 
 const summarizeOpen = samples => ({
   n: samples.length,
   contentMs: stats(samples.map(sample => sample.contentMs)), readyMs: stats(samples.map(sample => sample.readyMs)),
+  contentSinceMountMs: stats(samples.map(sample => sample.contentSinceMountMs)), contentSinceAttachMs: stats(samples.map(sample => sample.contentSinceAttachMs)),
+  openingLabelFrames: stats(samples.map(sample => sample.openingLabelFrames)), rowlessFramesSinceMount: stats(samples.map(sample => sample.rowlessFramesSinceMount)),
   httpApi: stats(samples.map(sample => sample.requests.httpApi)), webSockets: stats(samples.map(sample => sample.requests.webSocketsCreated)),
   framesIn: stats(samples.map(sample => sample.requests.framesIn)), framesOut: stats(samples.map(sample => sample.requests.framesOut)),
   bytesIn: stats(samples.map(sample => sample.requests.bytesIn)),
@@ -399,54 +479,75 @@ const scenarios = {
   async 'send-resident'() { return sendScenario(false); },
   async 'send-released'() { return sendScenario(true); },
   // T6: the open conversation across a runtime release.
-  async 'release-continuity'() {
-    return inContext(async context => {
-      const samples = [];
-      for (const session of sessions) {
-        await makeResident(session);
-        const handle = await instrument(context);
-        await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
-        await waitForState(handle, isReady, `ready ${session.address}`);
-        await handle.page.evaluate(() => window.__baseline.mark());
-        await handle.clearLog(); handle.reset();
-        const start = Date.now();
-        const released = controller('session', 'release', session.address).released;
-        await delay(Math.max(15_000, releaseWaitMs + 15_000));
-        const alive = await handle.page.evaluate(() => window.__baseline.markAlive());
-        const capture = await handle.capture(start);
-        samples.push({ address: session.address, provider: session.provider, released, markedEntryStillInDocument: alive,
-          minMessagesAfterRelease: capture.states.length ? Math.min(...capture.states.map(state => state.messages)) : (await handle.page.evaluate(() => window.__baseline.read())).messages, blankMoments: capture.states.filter(state => !state.messages).length,
-          stateChanges: capture.states.length, states: stateSummary(capture.states, 0, 15_000), stateLog: capture.states.slice(0, 40), requests: capture.requests });
-        await handle.page.close();
-      }
-      return { method: 'Open the conversation, mark its first entry node, release the runtime, watch at least 15 s (release wait plus 15 s) without acting. Codex gets one tiny turn first, so there is a runtime to release.', samples };
-    });
-  },
-  // T6: the open conversation across a Controller (and Relay) restart, `pnpm local up --no-build`.
+  async 'release-continuity'() { return releaseContinuity(sessions, false); },
+  // T6 for the sessions that read from the Relay's journal: the same release, with the windows the Relay recorded.
+  async 'runtime-release'() { return releaseContinuity(copilotSessions(), true); },
+  // T6: the open conversations across a Controller (and Relay) restart, `pnpm local up --no-build`. Every session is open in its own page
+  // of one context, so one restart gives one sample per session; `--reps` restarts.
   async 'restart-continuity'() {
-    const samples = [];
-    for (const session of [byProvider('claude')[0], byProvider('codex')[0]].filter(Boolean)) {
-      samples.push(await inContext(async context => {
-        const handle = await instrument(context);
-        await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
-        await waitForState(handle, isReady, `ready ${session.address}`);
-        await handle.page.evaluate(() => window.__baseline.mark());
-        await handle.clearLog(); handle.reset();
+    const samples = [], steps = [];
+    const startedAt = Date.now();
+    await inContext(async context => {
+      for (let rep = 0; rep < reps; rep++) {
+        const opened = await openMarked(context, sessions);
+        for (const item of opened) { await item.handle.clearLog(); item.handle.reset(); }
         const start = Date.now();
         await restartInstance();
-        const restartedMs = Date.now() - start;
-        let readyAgainMs;
-        try { await waitForState(handle, isReady, 'ready after restart', 90_000); readyAgainMs = Date.now() - start; } catch { /* reported as null */ }
+        const restartCommandMs = Date.now() - start;
+        for (const item of opened) item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${item.session.address}`, 90_000).then(() => Date.now() - start, () => null);
         await delay(1000);
-        const alive = await handle.page.evaluate(() => window.__baseline.markAlive()).catch(() => undefined);
-        const capture = await handle.capture(start);
-        return { address: session.address, provider: session.provider, restartCommandMs: restartedMs, readyAgainMs: readyAgainMs ?? null,
-          markedEntryStillInDocument: alive, minMessagesAfterRestart: capture.states.length ? Math.min(...capture.states.map(state => state.messages)) : null,
-          blankMoments: capture.states.filter(state => !state.messages).length, states: stateSummary(capture.states, 0), requests: capture.requests, stateLog: capture.states.slice(0, 60) };
-      }));
-      await delay(5000);
-    }
-    return { method: 'Open the conversation, mark its first entry node, run `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready.', samples };
+        for (const item of opened) samples.push({ rep, ...(await settledRows(item, start)), restartCommandMs });
+        steps.push({ rep, fromMs: start, toMs: Date.now() });
+        for (const item of opened) await item.handle.page.close();
+        await delay(5000);
+      }
+    });
+    return { method: 'Every session open in its own page, every row node marked, `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready. rows.alive of rows.total marked nodes remain in the document; rowlessStates counts observer states that showed no rows after the first rows. journalServed per the journal signal.',
+      label: options.label ?? null, samples, windowsByRep: await windowsByRep(steps, startedAt) };
+  },
+  // T6: a forced replacement. A turn with a long tool runs in each Copilot session when the instance restarts, so the Controller's
+  // window differs from the journal's open item and the Relay replaces the journal (reason `open_item`). Each page holds a draft in its
+  // composer and a scroll position; every row node is marked.
+  async 'replacement-absorbed'() {
+    const own = copilotSessions();
+    const samples = [], steps = [];
+    const startedAt = Date.now();
+    await inContext(async context => {
+      for (let rep = 0; rep < reps; rep++) {
+        for (const session of own) startLongTool(session);
+        for (const session of own) await approveToolAndWait(session);
+        const opened = await openMarked(context, own, state => state.entries > 0 && !state.loading.length);
+        for (const [index, item] of opened.entries()) {
+          await item.handle.page.evaluate(() => window.__baseline.scrollToMiddle());
+          await item.handle.page.locator('[data-testid="prompt-input"]').click();
+          await item.handle.page.keyboard.type(`draft ${rep}-${index}`);
+          await delay(400);
+          item.anchor = await item.handle.page.evaluate(() => window.__baseline.anchor());
+          item.composerBefore = await item.handle.page.evaluate(() => window.__baseline.composer());
+          await item.handle.clearLog(); item.handle.reset();
+        }
+        const start = Date.now();
+        await restartInstance();
+        for (const item of opened) item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${item.session.address}`, 90_000).then(() => Date.now() - start, () => null);
+        await delay(1000);
+        for (const item of opened) {
+          const sample = await settledRows(item, start);
+          const composerAfter = await item.handle.page.evaluate(() => window.__baseline.composer()).catch(() => null);
+          const anchorOffset = item.anchor ? await item.handle.page.evaluate(key => window.__baseline.offsetOf(key), item.anchor.key).catch(() => null) : null;
+          samples.push({ rep, ...sample,
+            composerUnchanged: !!composerAfter && !!item.composerBefore && composerUnchanged(item.composerBefore, composerAfter),
+            composerBefore: item.composerBefore, composerAfter,
+            anchorKey: item.anchor?.key ?? null, anchorSurvived: anchorOffset !== null, anchorShiftPx: anchorOffset !== null && item.anchor ? Math.abs(anchorOffset - item.anchor.offset) : null });
+        }
+        steps.push({ rep, fromMs: start, toMs: Date.now() });
+        for (const item of opened) await item.handle.page.close();
+        await delay(5000);
+      }
+    });
+    const windows = await windowsByRep(steps, startedAt);
+    for (const sample of samples) sample.replacementForced = (windows[sample.rep]?.[sample.address]?.byReason.open_item ?? 0) + (windows[sample.rep]?.[sample.address]?.byReason.changed ?? 0) > 0;
+    return { method: 'Per rep: every Copilot session runs a turn whose shell command takes two minutes; every row node is marked, a draft is typed in the composer and the timeline is scrolled to its middle; `pnpm local up --no-build` restarts the instance during the tool, so the Relay replaces the journal. replacementForced says the Relay recorded a `changed` or `open_item` window for the session; only those samples count.',
+      label: options.label ?? null, samples, windowsByRep: windows };
   },
   // S3: the opens of Copilot sessions, journal or Controller. Run it with smart reading on and off (`--label`), at throttle 1 and 4.
   async 'journal-open'() {
@@ -524,8 +625,8 @@ const scenarios = {
   // Window and Bot switches with the existing runner, cold and warm.
   async switch() {
     const run = rate => JSON.parse(execFileSync(process.execPath, [join(root, 'packages/agent-remote-lab/performance/local-switch.mjs'), `baseline-${rate}x`],
-      { cwd: root, encoding: 'utf8', env: { ...process.env, ...(rate > 1 ? { THROTTLE: String(rate) } : {}) }, timeout: 240_000 }));
-    return { method: 'local-switch.mjs: Bot mode, click a bot row until its conversation shows entries; each bot twice (cold, then warm).', normal: run(1), throttled4x: run(4) };
+      { cwd: root, encoding: 'utf8', env: { ...process.env, ARC_ORIGIN: origin, ...(rate > 1 ? { THROTTLE: String(rate) } : {}) }, timeout: 240_000 }));
+    return { method: 'local-switch.mjs: Bot mode, click a bot row until its conversation shows entries; each bot twice (cold, then warm), with the HTTP API requests and the opening-label and row-less states of each switch.', throttle, switch: run(throttle) };
   },
 };
 
@@ -621,6 +722,81 @@ async function reopenStep(handle, session, kind) {
     controller('session', 'release', session.address); await delay(releaseWaitMs);
   }
   return openSample(handle, session, 'reload');
+}
+
+/** Opens each session in its own page of one context, waits until it shows rows, marks every row node and records how it was served. */
+async function openMarked(context, list, ready = isReady) {
+  const opened = [];
+  for (const session of list) {
+    const handle = await instrument(context);
+    const metaBefore = journalMeta(session);
+    await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
+    await waitForState(handle, ready, `ready ${session.address}`);
+    await delay(600);
+    const capture = await handle.capture(Date.now());
+    const served = journalServed({ signal: journalSignal, itemKeysEchoed: capture.itemKeysEchoed, pageEpochs: capture.pageEpochs, metaBefore, metaAfter: journalMeta(session) });
+    await handle.page.evaluate(() => window.__baseline.mark());
+    opened.push({ session, handle, served });
+  }
+  return opened;
+}
+
+/** What an opened page shows after the action that began at `start`: survivors of the marked rows, states without rows, composer states. */
+async function settledRows(item, start) {
+  const capture = await item.handle.capture(start);
+  return { address: item.session.address, provider: item.session.provider, journalServed: item.served, readyAgainMs: item.readyAgainMs ?? null,
+    rows: await item.handle.page.evaluate(() => window.__baseline.survivors()).catch(() => undefined),
+    rowlessStates: rowlessStates(capture.states), composerDisabledStates: capture.states.filter(state => state.composer === 'disabled').length,
+    minEntries: capture.states.length ? Math.min(...capture.states.map(state => state.entries)) : null,
+    states: stateSummary(capture.states, 0), requests: capture.requests, consoleErrors: capture.consoleErrors };
+}
+
+/** The Relay's windows of each session, by reason, for each step `{ rep, fromMs, toMs }`: `{ [rep]: { [address]: windowCounts } }`. */
+async function windowsByRep(steps, startedAt) {
+  const relay = await relayDiagnostics(startedAt);
+  return Object.fromEntries(steps.map(step => [step.rep, Object.fromEntries(sessions.filter(item => item.provider === 'copilot').map(item =>
+    [item.address, windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 3000, agentId: `copilot:${item.address.split('/').at(-1)}` })]))]));
+}
+
+/** T6: every session open in its own page with its rows marked, its runtime released, and what the pages kept. */
+async function releaseContinuity(list, withWindows) {
+  const samples = [], steps = [];
+  const startedAt = Date.now();
+  await inContext(async context => {
+    for (const session of list) {
+      await makeResident(session);
+      const [item] = await openMarked(context, [session]);
+      await item.handle.clearLog(); item.handle.reset();
+      const start = Date.now();
+      const released = controller('session', 'release', session.address).released;
+      await delay(Math.max(15_000, releaseWaitMs + 15_000));
+      const alive = await item.handle.page.evaluate(() => window.__baseline.markAlive());
+      const sample = await settledRows(item, start);
+      samples.push({ ...sample, released, markedEntryStillInDocument: alive, stateLog: (await item.handle.capture(start)).states.slice(0, 40) });
+      steps.push({ rep: samples.length - 1, fromMs: start, toMs: Date.now() });
+      await item.handle.page.close();
+    }
+  });
+  return { method: 'Open the conversation, mark every row node, release the runtime, watch at least 15 s (release wait plus 15 s) without acting. Codex gets one tiny turn first, so there is a runtime to release. released says whether the Controller had one (always false for Claude Code and Copilot).',
+    label: options.label ?? null, samples, ...(withWindows ? { windows: await windowsByRep(steps, startedAt) } : {}) };
+}
+
+const LONG_TOOL_PROMPT = 'Run this exact shell command and wait for it to finish: for i in $(seq 1 24); do echo line-$i; sleep 5; done. Then reply with the single word DONE.';
+const startLongTool = session => { controller('session', 'send', session.address, LONG_TOOL_PROMPT); };
+/** Answers the tool approval of a session that was just sent the long-tool prompt, then waits until the tool runs. */
+async function approveToolAndWait(session) {
+  const deadline = Date.now() + 90_000;
+  while (Date.now() < deadline) {
+    const inspected = controller('session', 'inspect', session.address);
+    const request = inspected.pendingInteractions?.find(item => item.kind === 'tool_approval');
+    if (request) { controller('session', 'answer', session.address, request.requestId, '--response', JSON.stringify({ kind: 'tool_approval', decision: 'allow', scope: 'once' })); break; }
+    await delay(1000);
+  }
+  while (Date.now() < deadline) {
+    if (controller('session', 'read', session.address, '--limit', '0').session?.state === 'running') { await delay(2000); return; }
+    await delay(1000);
+  }
+  throw new Error(`The long tool of ${session.address} did not start`);
 }
 
 async function hiddenScenario(hiddenMs, freeze) {
@@ -732,6 +908,12 @@ try {
 } finally {
   clearTimeout(outer);
   result.finishedAt = new Date().toISOString();
+  if (proxy) {
+    result.proxy = { rttMs, ...proxy.counts };
+    // A page that bypassed the proxy would make every latency number a loopback number.
+    if (!proxy.counts.webSocketsCrossed) result.invalid = 'No WebSocket crossed the latency proxy; these numbers are not latency numbers.';
+    await proxy.close();
+  }
   save();
   await browser.close();
 }

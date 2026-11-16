@@ -244,3 +244,24 @@ Where the numbers come from, all metadata and no content:
 - The hole check compares every user and assistant message of a full native read (`session read`, all pages) with the messages the page shows after it scrolled the conversation to its start. It compares message texts, not tool rows, and depends on the page's scroll container; treat a reported hole as a lead to confirm by reading the session.
 
 The pure parts (statistics, diagnostics into counts, the open's side, the hole check, the thresholds) are in `journal-measurement.mjs` and tested by `src/journal-measurement.test.ts`. There is no large-session scenario: scale is covered by `packages/agent-remote-lab/scripts/journal-benchmark.mjs`.
+
+## Measurements under latency (S4)
+
+`--rtt MS` puts a delaying proxy (`latency-proxy.mjs`) between the headless browser and the instance. It delays every HTTP exchange and every WebSocket byte by half a round trip in each direction, rewrites the browser's origin to the instance's, and counts the WebSocket upgrades that crossed it; a run in which none crossed is marked `invalid`. The command line (`session`, `diagnostics`) talks to the instance directly. `--throttle 4` is the 4x CPU slowdown; the four conditions of the S4 plans are no emulation, `--throttle 4`, `--rtt 100` and both.
+
+```sh
+export ARC_LOCAL_JOURNALS=1   # the runner restarts the instance with `pnpm local up --no-build`; without it journals turn off
+node packages/agent-remote-lab/performance/local-baselines.mjs --scenarios restart-continuity,replacement-absorbed,runtime-release,switch \
+  --sessions HOST/copilot/A,HOST/copilot/B --rtt 100 --throttle 4 --reps 5 --label s4a --journal-signal flag --out .tmp/s4/s4a-4x-rtt100.json
+node packages/agent-remote-lab/performance/summarize-p1d.mjs .tmp/s4
+```
+
+- **Journal-served signal.** A sample counts only when its stream was served from the Relay's journal. `--journal-signal flag`: the `negotiated` frame echoed the item-key flag (a Controller-answered stream never does). `--journal-signal meta`: the control build has no flag, so the page's `timeline_page` epochs must equal the epoch in the instance's `journals.sqlite` before and after the sample.
+- **`restart-continuity`.** Every given session is open in its own page, every row node is marked, the instance restarts, and the runner counts the marked nodes still in the document and the states without rows. `--reps` restarts give `reps` samples per session.
+- **`replacement-absorbed`.** Every Copilot session runs a turn whose shell command takes two minutes (the runner answers its tool approval), a draft is typed in the composer, the timeline is scrolled to its middle and every row node is marked; the instance restarts during the tool, which makes the Controller's window differ from the journal's open item, and the Relay replaces the journal (`open_item`). A sample counts only when the Relay's `journal_window` diagnostics show a `changed` or `open_item` replacement for the session. The runner reports marked nodes, composer text, focus and selection, and the offset of the first visible row.
+- **`runtime-release`.** `release-continuity` for the Copilot sessions, with the Relay's windows. Copilot has no runtime to release (`released: false`), so it shows that rows are kept while nothing happens.
+- **`switch`.** `local-switch.mjs` for the one `--throttle` rate, through the proxy (`ARC_ORIGIN`), with the HTTP API requests, the states that showed an opening label and the states without rows of each switch.
+- **Counted T1 fields** of every open (`open-known`, `open-fresh`): `contentSinceMountMs`, `contentSinceAttachMs` (from the page's first session control request), `openingLabelFrames` and `rowlessFramesSinceMount`.
+- **Sample counts.** A percentile is stated from 20 samples (10 for the conditions that restart the instance for each sample); with fewer the summary prints the maximum and the count.
+
+`summarize-p1d.mjs` is tested by `src/summarize-p1d.test.ts`; the proxy by `src/latency-proxy.test.ts` over real HTTP and WebSocket.

@@ -28,7 +28,7 @@ class Stream implements AsyncIterable<ProviderStreamItem> {
   }
 }
 
-interface Options { journalContract?: boolean; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
+interface Options { journalContract?: boolean; hold?: Promise<void>; onHistoryRead?: () => void; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
 
 function session(stream: Stream, options: Options = {}): AgentSession {
   const runtime: AgentRuntimeInfo = { providerId: 'fake', sessionId: 'session-1', status: 'idle', persistence: { providerId: 'fake', sessionId: 'session-1', opaque: 'resume-1' } };
@@ -39,7 +39,7 @@ function session(stream: Stream, options: Options = {}): AgentSession {
     async sendMessage() {}, async respondToInteraction() {},
     async runtimeInfo() { return runtime; },
     async dispose() { stream.finish(); },
-    ...(options.older ? { async readTimelineHistory() { return pages.shift() ?? { observations: [] }; } } : {}),
+    ...(options.older ? { async readTimelineHistory() { options.onHistoryRead?.(); await options.hold; return pages.shift() ?? { observations: [] }; } } : {}),
     ...(options.readResource ? { readResource: options.readResource } : {}),
   };
 }
@@ -255,6 +255,92 @@ describe('the journal tap of an agent manager', () => {
     release({ status: 'available', mediaType: 'image/png', bytes: png });
     await flush();
     expect(events.find(event => event.type === 'timeline_resource_binding_replaced')).toMatchObject({ itemKey: 'tool:write-1', seq: 2 });
+    await manager.close();
+  });
+  it('shares one older-history read between a viewer and the journal tap', async () => {
+    const stream = new Stream();
+    const history = (n: number) => ({ ...observation(`history:${n}`, `Row ${n}`, `m${n}`, { delivery: 'history' }), itemIdentity: { key: `m${n}`, completes: true } });
+    stream.push(history(5));
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    const manager = await attach(stream, { older: [
+      { observations: [history(4)], nextCursor: 'page-3' }, { observations: [history(3)], nextCursor: 'page-4' }, { observations: [history(2)] },
+    ] });
+    await manager.ready;
+    const viewer = manager.loadTimeline({ requestId: 'v', agentId: 'agent-1', direction: 'before', cursor: { epoch: 'epoch-1', seq: 1 }, limit: 100 });
+    const tap = manager.loadOlderHistory();
+    expect(await tap).toEqual({ added: 1, more: true });
+    await viewer;
+    expect(manager.timelineRows().map(row => row.identity?.key)).toEqual(['m4', 'm5']);
+    await manager.close();
+  });
+
+  it('reads no history once the manager closed', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    let reads = 0;
+    const manager = await attach(stream, { older: [{ observations: [] }], onHistoryRead: () => { reads += 1; } });
+    await manager.ready;
+    const original = manager.hasOlderHistory();
+    expect(original).toBe(true);
+    await manager.close();
+    expect(await manager.loadOlderHistory()).toEqual({ added: 0, more: false });
+    expect(reads).toBe(0);
+  });
+
+  it('never reports a negative count when the timeline was replaced while a page was read', async () => {
+    const stream = new Stream();
+    stream.push({ ...observation('history:5', 'Newest', 'm5', { delivery: 'history' }), itemIdentity: { key: 'm5', completes: true } });
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    let release!: () => void;
+    const manager = await attach(stream, { older: [{ observations: [] }], hold: new Promise<void>(resolve => { release = resolve; }) });
+    await manager.ready;
+    const loading = manager.loadOlderHistory();
+    manager.replaceTimeline('epoch-2');
+    release();
+    const result = await loading;
+    expect(result.added).toBe(0);
+    await manager.close();
+  });
+
+  it('does not point the attention cursor at a row prepended before the timeline began', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    const manager = await attach(stream, { older: [{ observations: [{ ...observation('history:1', 'Older', 'm1', { delivery: 'history' }), itemIdentity: { key: 'm1', completes: true } }] }] });
+    await manager.ready;
+    await manager.loadOlderHistory();
+    expect(manager.timelineRows().map(row => row.seq)).toEqual([0]);
+    expect(manager.attentionItemKey()).toBeUndefined();
+    await manager.close();
+  });
+
+  it('tells a tap that throws on an event that it was removed, and keeps serving the others', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream);
+    await manager.ready;
+    let closed = 0;
+    const seen: AgentManagerEvent[] = [];
+    manager.subscribeJournal({ event: () => { throw new Error('The tap failed.'); }, closed: () => { closed += 1; } });
+    manager.subscribeJournal({ event: event => seen.push(event), closed: () => undefined });
+    stream.push(observation('stream:1', 'Hi', 'm1'));
+    stream.push(observation('stream:2', 'There', 'm2'));
+    await flush();
+    expect(closed).toBe(1);
+    expect(seen.length).toBeGreaterThan(1);
+    await manager.close();
+    expect(closed).toBe(1);
+  });
+
+  it('does not tell a tap that released, or the manager closed, about an identity breach it would have heard', async () => {
+    const stream = new Stream();
+    stream.push({ ...observation('history:1', 'Old', 'm1', { delivery: 'history' }), itemIdentity: undefined });
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream, { journalContract: true });
+    await manager.ready;
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } }).release();
+    await flush();
+    expect(told).toBe(0);
     await manager.close();
   });
 });

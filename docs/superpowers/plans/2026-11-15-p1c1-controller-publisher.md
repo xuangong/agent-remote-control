@@ -54,7 +54,7 @@ Also decided here: taps are not viewers (the publisher follows the manager throu
 | `agent_stream` `background_activity_updated` | `agent_stream` without epoch | Dropped | Published as `outcome`, applied in place to every item of that background, stored, and sent as the same frame; said again by every reconcile |
 | `agent_stream` `interaction_*` | Not sent (the dedicated frames carry them) | n/a | Not published |
 | `timeline_replacement` | `timeline_replacement` | From the `replaced` event | The publisher reconciles again after `timeline_rebuilt`; the journal replaces only on a genuine rewrite |
-| `timeline_resource_binding_replaced` | `timeline_resource_binding_replaced` | Dropped (no amendment path) | Published as `rebind`, applied in place, sent with the item's epoch and sequence; settled resources get stable ids, so this fires once per resource |
+| `timeline_resource_binding_replaced` | `timeline_resource_binding_replaced` | Dropped (no amendment path) | Published as `rebind`, applied in place, sent with the item's epoch and sequence; the journal matches the binding by locator and applies nothing, stores nothing and tells no one when the row already holds the replacement. A resource settles once per row that names it, so a rebind arrives for each such row, and again after a restart or a key change |
 | `resource_update` | `resource_update` | Forwarded from the Controller stream | Unchanged; it needs the Controller stream, like resource reads |
 | `interaction_requested`, `interaction_resolved`, `interaction_invalidated` | The dedicated frames | Forwarded from the Controller stream | Forwarded once the head agrees (Decision 9) |
 
@@ -2662,7 +2662,7 @@ class Stream implements AsyncIterable<ProviderStreamItem> {
   }
 }
 
-interface Options { journalContract?: boolean; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
+interface Options { journalContract?: boolean; hold?: Promise<void>; onHistoryRead?: () => void; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }>; readResource?: () => Promise<AgentResourceReadResult> }
 
 function session(stream: Stream, options: Options = {}): AgentSession {
   const runtime: AgentRuntimeInfo = { providerId: 'fake', sessionId: 'session-1', status: 'idle', persistence: { providerId: 'fake', sessionId: 'session-1', opaque: 'resume-1' } };
@@ -2673,7 +2673,7 @@ function session(stream: Stream, options: Options = {}): AgentSession {
     async sendMessage() {}, async respondToInteraction() {},
     async runtimeInfo() { return runtime; },
     async dispose() { stream.finish(); },
-    ...(options.older ? { async readTimelineHistory() { return pages.shift() ?? { observations: [] }; } } : {}),
+    ...(options.older ? { async readTimelineHistory() { options.onHistoryRead?.(); await options.hold; return pages.shift() ?? { observations: [] }; } } : {}),
     ...(options.readResource ? { readResource: options.readResource } : {}),
   };
 }
@@ -2889,6 +2889,92 @@ describe('the journal tap of an agent manager', () => {
     release({ status: 'available', mediaType: 'image/png', bytes: png });
     await flush();
     expect(events.find(event => event.type === 'timeline_resource_binding_replaced')).toMatchObject({ itemKey: 'tool:write-1', seq: 2 });
+    await manager.close();
+  });
+  it('shares one older-history read between a viewer and the journal tap', async () => {
+    const stream = new Stream();
+    const history = (n: number) => ({ ...observation(`history:${n}`, `Row ${n}`, `m${n}`, { delivery: 'history' }), itemIdentity: { key: `m${n}`, completes: true } });
+    stream.push(history(5));
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    const manager = await attach(stream, { older: [
+      { observations: [history(4)], nextCursor: 'page-3' }, { observations: [history(3)], nextCursor: 'page-4' }, { observations: [history(2)] },
+    ] });
+    await manager.ready;
+    const viewer = manager.loadTimeline({ requestId: 'v', agentId: 'agent-1', direction: 'before', cursor: { epoch: 'epoch-1', seq: 1 }, limit: 100 });
+    const tap = manager.loadOlderHistory();
+    expect(await tap).toEqual({ added: 1, more: true });
+    await viewer;
+    expect(manager.timelineRows().map(row => row.identity?.key)).toEqual(['m4', 'm5']);
+    await manager.close();
+  });
+
+  it('reads no history once the manager closed', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    let reads = 0;
+    const manager = await attach(stream, { older: [{ observations: [] }], onHistoryRead: () => { reads += 1; } });
+    await manager.ready;
+    const original = manager.hasOlderHistory();
+    expect(original).toBe(true);
+    await manager.close();
+    expect(await manager.loadOlderHistory()).toEqual({ added: 0, more: false });
+    expect(reads).toBe(0);
+  });
+
+  it('never reports a negative count when the timeline was replaced while a page was read', async () => {
+    const stream = new Stream();
+    stream.push({ ...observation('history:5', 'Newest', 'm5', { delivery: 'history' }), itemIdentity: { key: 'm5', completes: true } });
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    let release!: () => void;
+    const manager = await attach(stream, { older: [{ observations: [] }], hold: new Promise<void>(resolve => { release = resolve; }) });
+    await manager.ready;
+    const loading = manager.loadOlderHistory();
+    manager.replaceTimeline('epoch-2');
+    release();
+    const result = await loading;
+    expect(result.added).toBe(0);
+    await manager.close();
+  });
+
+  it('does not point the attention cursor at a row prepended before the timeline began', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary', olderCursor: 'page-2' });
+    const manager = await attach(stream, { older: [{ observations: [{ ...observation('history:1', 'Older', 'm1', { delivery: 'history' }), itemIdentity: { key: 'm1', completes: true } }] }] });
+    await manager.ready;
+    await manager.loadOlderHistory();
+    expect(manager.timelineRows().map(row => row.seq)).toEqual([0]);
+    expect(manager.attentionItemKey()).toBeUndefined();
+    await manager.close();
+  });
+
+  it('tells a tap that throws on an event that it was removed, and keeps serving the others', async () => {
+    const stream = new Stream();
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream);
+    await manager.ready;
+    let closed = 0;
+    const seen: AgentManagerEvent[] = [];
+    manager.subscribeJournal({ event: () => { throw new Error('The tap failed.'); }, closed: () => { closed += 1; } });
+    manager.subscribeJournal({ event: event => seen.push(event), closed: () => undefined });
+    stream.push(observation('stream:1', 'Hi', 'm1'));
+    stream.push(observation('stream:2', 'There', 'm2'));
+    await flush();
+    expect(closed).toBe(1);
+    expect(seen.length).toBeGreaterThan(1);
+    await manager.close();
+    expect(closed).toBe(1);
+  });
+
+  it('does not tell a tap that released, or the manager closed, about an identity breach it would have heard', async () => {
+    const stream = new Stream();
+    stream.push({ ...observation('history:1', 'Old', 'm1', { delivery: 'history' }), itemIdentity: undefined });
+    stream.push({ type: 'history_boundary' });
+    const manager = await attach(stream, { journalContract: true });
+    await manager.ready;
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } }).release();
+    await flush();
+    expect(told).toBe(0);
     await manager.close();
   });
 });
@@ -3412,14 +3498,20 @@ Taps hear every event and are told when the manager closes:
 - [ ] **Step 5: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/agent-manager-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all (the relay package has 418 tests after Task 6; 12 of them are in `agent-manager-journal.test.ts`). Rebuild the package so `agent-remote-journal`, `agent-remote-hosted` and `agent-host` see `rowItemKey` and `subscribeJournal`.
+Expected: PASS for all (the relay package has 432 tests after Task 6; 18 of them are in `agent-manager-journal.test.ts`). Rebuild the package so `agent-remote-journal`, `agent-remote-hosted` and `agent-host` see `rowItemKey` and `subscribeJournal`.
 
 Two details differ from what an earlier draft said. The manager reads `journalContract` in its constructor (`private readonly journalContract = false`, passed by `attach` as `options.journalContract === true`), and `checkIdentity(observation)` runs right after `isDuplicate`. A breach in a history observation is told to a tap that subscribes later through the microtask in `subscribeJournal`; history cannot be delivered after the boundary, so the test for it pushes the observation before the boundary.
+
+Four more rules of the manager, each with a test in `agent-manager-journal.test.ts`. A tap whose `event` throws is removed and told `closed()`. The microtask that tells a late subscriber about a breach does nothing for a tap that was released or closed meanwhile. `attentionItemKey()` is undefined for a cursor sequence of 0 or less, because a prepend onto an empty timeline takes sequence 0. `loadOlderHistory()` reads nothing once the manager is closed, and when the timeline was replaced while a page was read it reports `added: 0` instead of a difference of two timelines.
+
+The Controller wraps every provider adapter twice for its relay (`relayAdapters` in `createAgentHostRuntime` and the `relay.registerProvider` call of `addRegistration` in `packages/agent-host/src/host.ts`), and each wrapper carries `journal` as `relay.ts`'s `ownAdapter` does (Task 6 shows that edit); without it a journal-capable provider is not told to the tap and its rows get `controller:` keys. `host-resource-ids.test.ts` (Task 6) proves both wrappers through `createAgentHostRuntime`.
 
 - [ ] **Step 6: Commit.**
 
 ```bash
-git add packages/agent-remote-relay/src
+git add packages/agent-remote-relay/src packages/agent-host/src
+pnpm compatibility:update && pnpm compatibility:check
+git add packages/agent-remote-lab/compatibility.json
 git commit -m "feat(relay): carry item identity on timeline rows and let the journal publisher tap an agent manager" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
@@ -3431,7 +3523,17 @@ The id is a keyed hash (HMAC-SHA-256) of the agent id, the normalized locator an
 
 Access stays as it is: every read checks that the record belongs to the asking agent, and the agent id is part of the hash, so two agents never share an id even for the same file. An input image's normalized locator already names its session scope, so the same bytes in two scopes get two ids and the manager's per-scope check on `imageResourceScopes` still separates them.
 
+An id that is stable is only useful if its bytes can be read after a restart, and the relay's resource store is memory. The Controller therefore also keeps a bounded index from each timeline resource's id to where its bytes came from and their sha256 (`resource-id-index.json`, next to the key). A read of an id that has no record and has an index entry answers `pending`, reads the bytes again through the session's resource reader, and serves them only when their sha256 is the remembered one; otherwise the answer is `unavailable` with the reason `Resource content changed.`. Journal-served history never asks a timeline to read an image again, so this read is what keeps old images alive; the web treats `unavailable` as final.
+
+The provisional id of an acquisition is kept as an alias of the stable id inside the ingestor (per agent, bounded), so a reader that holds it keeps reading. The alias is not a store record: `findAvailableRecord` never sees it.
+
+The journal matches a rebind by locator, so a row whose binding carries an id from before a restart or a key change still takes the replacement. `rebind.previous` stays on the wire and is required (it is not optional in the landed schema); the journal reads only its locator, and the frame sent to journal-served clients still carries it. A rebind that leaves the row as it is returns undefined from the journal core and is neither stored nor told; the publication watermark still advances so a repeated publication is recognised.
+
 **Files:**
+- Modify: `packages/agent-remote-journal/src/session-journal.ts`, `journal-amendments.test.ts`
+- Create: `packages/agent-remote-relay/src/resources/resource-id-index.ts`
+- Create: `packages/agent-host/src/resource-id-index-file.ts`, `resource-id-index-file.test.ts`, `resource-id-key-creation.test.ts`
+- Modify: `packages/agent-host/src/host.ts`, `packages/agent-remote-relay/src/index.ts`
 - Modify: `packages/agent-remote-relay/src/resources/resource-ingestor.ts`
 - Modify: `packages/agent-remote-relay/src/agent-manager.ts`, `relay.ts`
 - Create: `packages/agent-host/src/host-resource-ids.test.ts`
@@ -3444,10 +3546,12 @@ Access stays as it is: every read checks that the record belongs to the asking a
 <!-- write: packages/agent-remote-relay/src/resources/stable-resource-ids.test.ts -->
 ```ts
 import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { createAgentRemoteRelay } from '../relay.js';
 import { ResourceIngestor } from './resource-ingestor.js';
+import type { DurableResourceEntry, ResourceIdIndex } from './resource-id-index.js';
 import { InMemoryResourceStore } from './resource-store.js';
 
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
@@ -3457,7 +3561,9 @@ const reader = (bytes: Uint8Array) => async () => ({ status: 'available' as cons
 async function settle(ingestor: ResourceIngestor, agentId: string, locator: string, bytes: Uint8Array) {
   const acquisition = ingestor.acquire({ agentId, locator, reader: reader(bytes) });
   expect(acquisition?.binding.status).toBe('pending');
-  return { provisional: acquisition!.binding.resourceId, settled: await acquisition!.settled };
+  const settled = await acquisition!.settled;
+  expect(settled.status).toBe('available');
+  return { provisional: acquisition!.binding.resourceId, settled };
 }
 
 describe('resource ids with a key', () => {
@@ -3518,6 +3624,12 @@ describe('resource ids without a key', () => {
     expect(a.settled.resourceId).not.toBe(b.settled.resourceId);
   });
 });
+
+class MapIndex implements ResourceIdIndex {
+  readonly entries = new Map<string, DurableResourceEntry>();
+  get(agentId: string, resourceId: string) { return this.entries.get(`${agentId}\0${resourceId}`); }
+  put(entry: DurableResourceEntry) { this.entries.set(`${entry.agentId}\0${entry.resourceId}`, entry); }
+}
 
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 10));
 
@@ -3592,6 +3704,110 @@ describe('the journal contract of a provider that a relay owns', () => {
     await flush();
     expect(told).toBe(1);
     await relay.close();
+  });
+});
+
+describe('the provisional id of a settled resource', () => {
+  it('keeps reading the bytes under the stable id, for its own agent only, and leaves no record for the dedupe to find', async () => {
+    const store = new InMemoryResourceStore();
+    const ingestor = new ResourceIngestor({ store, resourceIdKey: 'secret-one' });
+    const { provisional, settled } = await settle(ingestor, 'agent-1', 'shot.png', png);
+    expect(provisional).not.toBe(settled.resourceId);
+    expect(ingestor.readState('agent-1', provisional)).toMatchObject({ status: 'available' });
+    const response = ingestor.readResponse('r', 'agent-1', provisional);
+    expect(response.payload).toMatchObject({ resourceId: provisional, state: { status: 'available' } });
+    expect(ingestor.readState('agent-2', provisional)).toMatchObject({ status: 'unavailable' });
+    expect(store.getRecord('agent-1', provisional)).toBeUndefined();
+    expect(store.findAvailableRecord('agent-1', 'shot.png', createHash('sha256').update(png).digest('hex'))?.resourceId).toBe(settled.resourceId);
+  });
+
+  it('is also an alias of the record that an equal resource already settled', async () => {
+    const ingestor = new ResourceIngestor({ store: new InMemoryResourceStore() });
+    const first = await settle(ingestor, 'agent-1', 'shot.png', png);
+    const second = await settle(ingestor, 'agent-1', 'shot.png', png);
+    expect(second.settled.resourceId).toBe(first.settled.resourceId);
+    expect(ingestor.readState('agent-1', second.provisional)).toMatchObject({ status: 'available' });
+  });
+});
+
+describe('restoring a resource after a restart', () => {
+  const durable = (ingestor: ResourceIngestor, bytes: Uint8Array = png) => ingestor.acquire({ agentId: 'agent-1', locator: 'shot.png', reader: reader(bytes), durable: true })!.settled;
+
+  it('answers pending at once, then serves the bytes when the content is the one remembered', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'unavailable' });
+    const restoring = after.restore('agent-1', before.resourceId, reader(png));
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'pending' });
+    await restoring;
+    expect(after.readResponse('r', 'agent-1', before.resourceId).payload.state).toMatchObject({ status: 'available', contentBase64: Buffer.from(png).toString('base64') });
+  });
+
+  it('shares one read between callers, and does not read a resource that has a record', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    let reads = 0;
+    const counting = async () => { reads += 1; return { status: 'available' as const, bytes: png, mediaType: 'image/png' }; };
+    const first = after.restore('agent-1', before.resourceId, counting);
+    expect(after.restore('agent-1', before.resourceId, counting)).toBe(first);
+    await first;
+    expect(after.restore('agent-1', before.resourceId, counting)).toBeUndefined();
+    expect(reads).toBe(1);
+  });
+
+  it('refuses the bytes when the content changed, and says so', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await after.restore('agent-1', before.resourceId, reader(otherPng));
+    expect(after.readState('agent-1', before.resourceId)).toEqual({ status: 'unavailable', reason: 'Resource content changed.' });
+  });
+
+  it('has nothing to restore for an unknown id, another agent, or a resource that was not durable', async () => {
+    const index = new MapIndex();
+    const ingestor = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    const transient = await settle(ingestor, 'agent-1', 'other.png', png);
+    const kept = await durable(ingestor);
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    expect(after.restore('agent-1', 'rid_unknown', reader(png))).toBeUndefined();
+    expect(after.restore('agent-2', kept.resourceId, reader(png))).toBeUndefined();
+    expect(after.restore('agent-1', transient.settled.resourceId, reader(png))).toBeUndefined();
+  });
+
+  it('tries again after a read that failed, and keeps a vanished file unavailable', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await after.restore('agent-1', before.resourceId, async () => { throw new Error('Disk error.'); });
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'failed', retryable: true });
+    await after.restore('agent-1', before.resourceId, reader(png));
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'available' });
+  });
+});
+
+describe('a restored session through the relay', () => {
+  it('serves the image of an earlier run to a manager that never read it again', async () => {
+    const index = new MapIndex();
+    const first = createAgentRemoteRelay({ providers: [imageProvider(false)], resourceIdKey: 'secret-one', resourceIdIndex: index });
+    const create = (relay: typeof first) => relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: { requestId: 'r', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent-1', providerId: 'fake', config: { sessionId: 'session-1' } } });
+    await create(first);
+    await flush();
+    const id = first.requireAgent('agent-1').fetchTimeline({ requestId: 'h', agentId: 'agent-1', direction: 'tail', limit: 10 }).payload.entries[0]?.resources?.[0]?.resourceId;
+    await first.close();
+    // After the restart the session's history no longer reaches the image: nothing asks for it again.
+    const empty: AgentProviderAdapter = { ...imageProvider(false), createSession: async () => ({ ...(await imageProvider(false).createSession({ sessionId: 'session-1' })), async *observe() { yield { type: 'history_boundary' as const }; } }) };
+    const second = createAgentRemoteRelay({ providers: [empty], resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await create(second);
+    const manager = second.requireAgent('agent-1');
+    const updates: unknown[] = [];
+    manager.subscribe(event => { if (event.type === 'resource_update') updates.push(event); });
+    expect((await manager.readResource('a', id!)).payload.state.status).toBe('pending');
+    await flush();
+    expect(updates).toHaveLength(1);
+    expect((await manager.readResource('b', id!)).payload.state).toMatchObject({ status: 'available', mediaType: 'image/png' });
+    await second.close();
   });
 });
 ```
@@ -3836,13 +4052,13 @@ The relay's adapter wrapper (`ownAdapter`) names only `descriptor`, `createSessi
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/resources/stable-resource-ids.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all (418 tests). Without a key nothing changes, so the existing resource and manager tests are unaffected. `stable-resource-ids.test.ts` also holds the relay-level restart test (a second relay with the same key gives the restored session's image the same id and can read it), the cross-agent read refusal, and the test that the journal contract reaches a manager the relay creates.
+Expected: PASS for all (432 tests). Without a key nothing changes, so the existing resource and manager tests are unaffected. `stable-resource-ids.test.ts` also holds the relay-level restart test (a second relay with the same key gives the restored session's image the same id and can read it), the cross-agent read refusal, and the test that the journal contract reaches a manager the relay creates.
 
 - [ ] **Step 5: Write the failing test of the key file.** Create `packages/agent-host/src/resource-id-key.test.ts`:
 
 <!-- write: packages/agent-host/src/resource-id-key.test.ts -->
 ```ts
-import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -3862,16 +4078,32 @@ it('creates a private random key the first time and returns the same key afterwa
   if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
 });
 
-it('makes a new key, and keeps nothing of the old content, when the file holds something that is not a key', async () => {
-  const file = await location();
-  await writeFile(file, 'not a key');
-  const key = loadResourceIdKey(file);
-  expect(key).toMatch(/^[0-9a-f]{64}$/);
-  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
-});
-
 it('gives different Controllers different keys', async () => {
   expect(loadResourceIdKey(await location())).not.toBe(loadResourceIdKey(await location()));
+});
+
+it('creates the directory and leaves no staging file behind', async () => {
+  const file = join(dirname(await location()), 'nested', 'resource-id.key');
+  const key = loadResourceIdKey(file);
+  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
+  expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+});
+
+it('refuses to start, and leaves the file alone, when it holds something that is not a key', async () => {
+  for (const content of ['not a key', '', 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64), 'A'.repeat(64)]) {
+    const file = await location();
+    await writeFile(file, content);
+    expect(() => loadResourceIdKey(file), JSON.stringify(content)).toThrow(/does not hold a key/);
+    expect(await readFile(file, 'utf8')).toBe(content);
+    expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+  }
+});
+
+it('accepts a key without its trailing newline', async () => {
+  const file = await location();
+  const key = 'ab'.repeat(32);
+  await writeFile(file, key);
+  expect(loadResourceIdKey(file)).toBe(key);
 });
 
 it('tightens the permissions of a key file that is readable by others, without changing the key', async () => {
@@ -3883,11 +4115,11 @@ it('tightens the permissions of a key file that is readable by others, without c
   expect((await stat(file)).mode & 0o777).toBe(0o600);
 });
 
-it('creates the directory and leaves no staging file behind', async () => {
-  const file = join(dirname(await location()), 'nested', 'resource-id.key');
-  const key = loadResourceIdKey(file);
-  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
-  expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+it('does not read a file it cannot open as a missing one', async () => {
+  const file = await location();
+  // A directory where the file belongs is neither missing nor a key.
+  await mkdir(file);
+  expect(() => loadResourceIdKey(file)).toThrow();
 });
 ```
 
@@ -3900,33 +4132,67 @@ Expected: FAIL (`./resource-id-key.js` does not exist).
 
 <!-- write: packages/agent-host/src/resource-id-key.ts -->
 ```ts
-import { randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { chmodSync, closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const KEY_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
  * The secret behind stable resource ids, kept in the Controller's state directory so ids survive a restart. It is 32 random
- * bytes readable only by the Controller's user. A missing or damaged file is replaced by a new key; ids made under the old
- * key are then replaced as the resources settle again.
+ * bytes readable only by the Controller's user.
+ *
+ * The key is created only when the file does not exist: written to a private temporary file, flushed, and linked into place,
+ * so the file never exists with partial content and a Controller that starts at the same time adopts the key that won. A
+ * file that exists but does not hold a key stops the Controller with an error; replacing it would silently change every
+ * resource id the journals already name.
  */
 export function loadResourceIdKey(file: string): string {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  const existing = readKey(file);
+  if (existing !== undefined) return existing;
+  const staging = `${file}.${randomUUID()}.tmp`;
+  let failure: unknown;
+  let key: string | undefined;
   try {
-    const saved = readFileSync(file, 'utf8').trim();
-    if (KEY_PATTERN.test(saved)) {
-      chmodSync(file, 0o600);
-      return saved;
-    }
-  } catch { /* No key yet. */ }
-  const key = randomBytes(32).toString('hex');
-  mkdirSync(dirname(file), { recursive: true });
-  // The key never exists at its final path with other content or looser permissions.
-  const staging = `${file}.${process.pid}.tmp`;
-  writeFileSync(staging, `${key}\n`, { mode: 0o600 });
-  chmodSync(staging, 0o600);
-  renameSync(staging, file);
+    const descriptor = openSync(staging, 'wx', 0o600);
+    try {
+      writeSync(descriptor, `${randomBytes(32).toString('hex')}\n`);
+      fsyncSync(descriptor);
+    } finally { closeSync(descriptor); }
+    try { linkSync(staging, file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    syncDirectory(dirname(file));
+    key = readKey(file);
+  } catch (error) { failure = error; }
+  try { unlinkSync(staging); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && failure === undefined) failure = error;
+  }
+  if (failure !== undefined) throw failure;
+  if (key === undefined) throw new Error(`The resource id key file ${file} disappeared while it was created.`);
   return key;
+}
+
+/** The key in the file, or undefined when there is no file. A file with anything else in it is an error. */
+function readKey(file: string): string | undefined {
+  let content: string;
+  try { content = readFileSync(file, 'utf8'); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  const key = content.trim();
+  if (!KEY_PATTERN.test(key)) {
+    throw new Error(`The resource id key file ${file} does not hold a key (64 hexadecimal characters). Move it away to make a new key; resource ids made under the old one stop resolving.`);
+  }
+  // Tightening permissions is a courtesy; a key that is readable but cannot be tightened is still the key.
+  try { chmodSync(file, 0o600); } catch { /* Best effort. */ }
+  return key;
+}
+
+function syncDirectory(directory: string): void {
+  try {
+    const descriptor = openSync(directory, 'r');
+    try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
+  } catch { /* Some platforms cannot flush a directory. */ }
 }
 ```
 
@@ -3979,13 +4245,553 @@ import { loadResourceIdKey } from './resource-id-key.js';
 - [ ] **Step 8: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/resource-id-key.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
-Expected: PASS (5 tests). The Controller-level restart test, `host-resource-ids.test.ts`, attaches a session through `createAgentHostRuntime` twice with the same `resourceIdKeyFile` and expects the same image id; the restart test with a journal under it is in Task 9.
+Expected: PASS (resource-id-key 7 tests, resource-id-key-creation 5, resource-id-index-file 7, host-resource-ids 5). The Controller-level restart test, `host-resource-ids.test.ts`, attaches a session through `createAgentHostRuntime` twice with the same `resourceIdKeyFile` and expects the same image id; the restart test with a journal under it is in Task 9.
+
+- [ ] **Step 8a: Keep images readable across a restart, alias the provisional id, and match rebinds by locator.** The journal core's `rebind` (replacing the version of Task 3; `journal-amendments.test.ts` gains the three tests that match by locator, that change nothing for a binding that already is the replacement, and that leave another locator alone):
+
+<!-- edit: packages/agent-remote-journal/src/session-journal.ts -->
+```ts
+  /**
+   * Replaces the binding of the item's resource with the previous binding's locator, in its body or, while that is evicted,
+   * in what the item keeps of it. It matches by locator, not by the previous id, so a binding whose id changed since (a
+   * restart, a new key) still takes the replacement. Returns the epoch and sequence clients know the item by, or undefined
+   * for a duplicate publication, an item the journal does not know and a binding that already is the replacement: none of
+   * them changes anything, so nothing is stored or told. An amendment does not move the item's revision.
+   */
+  rebind(publication: JournalPublication, itemKey: string, previous: ResourceBinding, replacement: ResourceBinding): { epoch: string; seq: number } | undefined {
+    if (this.duplicate(publication)) return undefined;
+    this.advance(publication);
+    const item = this.byKey.get(itemKey);
+    if (!item) return undefined;
+    const resources = item.body ? item.body.resources : item.keptBody?.resources;
+    let changed = false;
+    resources?.forEach((resource, at) => {
+      if (resource.locator !== previous.locator || sameBinding(resource, replacement)) return;
+      resources[at] = structuredClone(replacement);
+      changed = true;
+    });
+    if (!changed) return undefined;
+    this.touch(itemKey);
+    return { epoch: this.meta.epoch, seq: item.seqEnd };
+  }
+```
+
+with `sameBinding(a, b)` comparing locator, resource id and status, at the end of the file. Create the index port:
+
+<!-- write: packages/agent-remote-relay/src/resources/resource-id-index.ts -->
+```ts
+/**
+ * What a Controller remembers about a settled resource so that its id stays readable after a restart: where the bytes came
+ * from and which bytes they were. The id itself is derived, so the index holds nothing that makes an id guessable.
+ */
+export interface DurableResourceEntry {
+  agentId: string;
+  resourceId: string;
+  normalizedLocator: string;
+  /** What the session's resource reader is asked for. */
+  readLocator: string;
+  sha256: string;
+}
+
+export interface ResourceIdIndex {
+  get(agentId: string, resourceId: string): DurableResourceEntry | undefined;
+  put(entry: DurableResourceEntry): void;
+}
+```
+
+In `resource-ingestor.ts`, `ResourceIngestorOptions` gains `resourceIdIndex?: ResourceIdIndex`, `acquire` takes `durable?: boolean` (the timeline's acquisitions pass `durable: true`; a settled resource of a durable acquisition is `put` into the index), the ingestor keeps `aliases` (provisional to settled id, per agent, at most 50,000, set where the provisional record is deleted, in both the stable and the deduplicated branch) and these methods; `readResponse` and `readState` resolve the alias first, and a settled record that a restore already created takes the state instead of failing to be created:
+
+<!-- edit: packages/agent-remote-relay/src/resources/resource-ingestor.ts -->
+```ts
+  /** The id a resource is stored under: the stable id that a provisional id settled as, or the id itself. */
+  canonicalId(agentId: string, resourceId: string): string {
+    return this.aliases.get(`${agentId}\0${resourceId}`) ?? resourceId;
+  }
+
+  /**
+   * Reads a resource this Controller settled before a restart again, when nothing holds its id now. The record is pending
+   * until the bytes arrive; they are served only if their sha256 is the one remembered, so changed content is never shown
+   * under the old id. Returns undefined when there is nothing to restore; the promise settles when the record does.
+   */
+  restore(agentId: string, resourceId: string, reader: ResourceReader): Promise<void> | undefined {
+    const id = this.canonicalId(agentId, resourceId);
+    const entry = this.options.resourceIdIndex?.get(agentId, id);
+    if (!entry) return undefined;
+    const running = this.restoring.get(`${agentId}\0${id}`);
+    if (running) return running;
+    const record = this.options.store.getRecord(agentId, id);
+    if (record && !(record.state.status === 'failed' && record.state.retryable)) return undefined;
+    const pending: StoredResourceState = { status: 'pending', retryAfterMs: this.retryAfterMs };
+    if (record) this.options.store.updateRecordState(agentId, id, pending);
+    else this.options.store.createRecord({ resourceId: id, agentId, locator: entry.normalizedLocator, normalizedLocator: entry.normalizedLocator, state: pending });
+    const settled = this.readRemembered(agentId, id, entry.readLocator, entry.sha256, reader)
+      .then(state => { this.options.store.updateRecordState(agentId, id, state); })
+      .finally(() => this.restoring.delete(`${agentId}\0${id}`));
+    this.restoring.set(`${agentId}\0${id}`, settled);
+    return settled;
+  }
+
+  private async readRemembered(agentId: string, resourceId: string, readLocator: string, sha256: string, reader: ResourceReader): Promise<StoredResourceState> {
+    try {
+      const result = await reader(readLocator);
+      if (result.status === 'unavailable') return { status: 'unavailable', reason: result.reason };
+      if (result.bytes.byteLength === 0 || result.bytes.byteLength > this.maxBytes) {
+        return { status: 'failed', message: 'Resource cannot be restored.', retryable: false };
+      }
+      const detectedMediaType = detectMediaType(result.bytes);
+      const actual = createHash('sha256').update(result.bytes).digest('hex');
+      if (actual !== sha256 || normalizeMediaType(result.mediaType) !== detectedMediaType) {
+        return { status: 'unavailable', reason: 'Resource content changed.' };
+      }
+      this.options.store.putBlob({ sha256, mediaType: detectedMediaType, bytes: result.bytes });
+      const imageDimensions = readImageDimensions(result.bytes, detectedMediaType);
+      return { ...(imageDimensions ? { imageDimensions } : {}), status: 'available', mediaType: detectedMediaType, byteLength: result.bytes.byteLength, sha256 };
+    } catch {
+      return { status: 'failed', message: 'Resource restoration failed.', retryable: true };
+    }
+  }
+```
+
+`AgentManager` takes `resourceIdIndex` wherever it takes `resourceIdKey` (`attach`, `create`, `resume`, and `relay.ts` passes the relay's option), and answers a read of an id with no record by starting the restore:
+
+<!-- edit: packages/agent-remote-relay/src/agent-manager.ts -->
+```ts
+  async readResource(requestId: string, resourceId: string, scope?: string): Promise<ResourceResponse> {
+    const imageScope = this.imageResourceScopes.get(this.resourceIngestor.canonicalId(this.agentId, resourceId));
+    if (imageScope !== undefined && imageScope !== this.imageScope(scope)) throw new Error('Image attachment belongs to another session scope.');
+    const document = this.commandResources.get(resourceId);
+    if (document && !this.closed) {
+      const commands = await this.listCommands();
+      if (commands.some((command) => command.id === document.commandId && command.documentation?.resourceId === resourceId)) {
+        const acquisition = this.resourceIngestor.acquire({ agentId: this.agentId, locator: document.locator,
+          reader: (locator) => this.session.readResource!(locator) });
+        if (acquisition) {
+          const binding = await acquisition.settled;
+          const response = this.resourceIngestor.readResponse(requestId, this.agentId, binding.resourceId);
+          return { ...response, payload: { ...response.payload, resourceId } };
+        }
+      }
+    }
+    this.restoreResource(resourceId);
+    return this.resourceIngestor.readResponse(requestId, this.agentId, resourceId);
+  }
+
+  /** A resource settled before a restart has no record now; the first read starts reading it again and answers pending. */
+  private restoreResource(resourceId: string): void {
+    if (this.closed || !this.session.capabilities.readResource || !this.session.readResource) return;
+    const restoring = this.resourceIngestor.restore(this.agentId, resourceId, locator => this.session.readResource!(locator));
+    restoring?.then(() => {
+      if (this.closed) return;
+      const id = this.resourceIngestor.canonicalId(this.agentId, resourceId);
+      this.emit({ type: 'resource_update', agentId: this.agentId, resourceId: id, state: this.resourceIngestor.readState(this.agentId, id) });
+    }).catch(() => undefined);
+  }
+```
+
+where the private `restoreResource(resourceId)` returns unless the session can read resources, calls `resourceIngestor.restore(agentId, id, locator => session.readResource(locator))`, and emits `resource_update` when the restore settles. `relay.ts` also exports the option `resourceIdIndex` and `index.ts` exports `resource-id-index.js`.
+
+The file behind the index, `FileResourceIdIndex` (at most 10,000 entries, least recently used first, written 250 ms after a change and at shutdown, atomically, mode 0600; a missing or damaged file starts empty):
+
+<!-- write: packages/agent-host/src/resource-id-index-file.ts -->
+```ts
+import { randomUUID } from 'node:crypto';
+import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+import type { DurableResourceEntry, ResourceIdIndex } from '@orchardworks/agent-remote-relay';
+
+export const RESOURCE_ID_INDEX_CAPACITY = 10_000;
+const FLUSH_DELAY_MS = 250;
+
+/**
+ * The resources whose ids stay readable across a restart, kept in the Controller's state directory. The least recently used
+ * entries go first, at most `capacity` stay, and the file is private to the Controller's user and replaced atomically.
+ * It is a cache: a missing or damaged file starts empty.
+ */
+export class FileResourceIdIndex implements ResourceIdIndex {
+  private readonly entries = new Map<string, DurableResourceEntry>();
+  private timer: NodeJS.Timeout | undefined;
+  private dirty = false;
+
+  constructor(private readonly file: string, private readonly capacity = RESOURCE_ID_INDEX_CAPACITY) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1) throw new Error('The resource id index needs a positive capacity.');
+    for (const entry of readEntries(file)) this.entries.set(keyOf(entry.agentId, entry.resourceId), entry);
+    while (this.entries.size > capacity) this.entries.delete(this.entries.keys().next().value!);
+  }
+
+  get(agentId: string, resourceId: string): DurableResourceEntry | undefined {
+    const key = keyOf(agentId, resourceId);
+    const entry = this.entries.get(key);
+    if (!entry) return undefined;
+    this.entries.delete(key);
+    this.entries.set(key, entry);
+    return { ...entry };
+  }
+
+  put(entry: DurableResourceEntry): void {
+    const key = keyOf(entry.agentId, entry.resourceId);
+    const known = this.entries.get(key);
+    this.entries.delete(key);
+    this.entries.set(key, { ...entry });
+    while (this.entries.size > this.capacity) this.entries.delete(this.entries.keys().next().value!);
+    if (known && known.readLocator === entry.readLocator && known.sha256 === entry.sha256 && known.normalizedLocator === entry.normalizedLocator) return;
+    this.dirty = true;
+    this.timer ??= setTimeout(() => this.flush(), FLUSH_DELAY_MS).unref();
+  }
+
+  /** Writes what changed since the last write. A write that fails is tried again with the next change. */
+  flush(): void {
+    if (this.timer) { clearTimeout(this.timer); this.timer = undefined; }
+    if (!this.dirty) return;
+    const staging = `${this.file}.${randomUUID()}.tmp`;
+    try {
+      mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
+      const descriptor = openSync(staging, 'wx', 0o600);
+      try {
+        writeSync(descriptor, JSON.stringify({ version: 1, entries: [...this.entries.values()] }));
+        fsyncSync(descriptor);
+      } finally { closeSync(descriptor); }
+      renameSync(staging, this.file);
+      try { chmodSync(this.file, 0o600); } catch { /* Best effort. */ }
+      this.dirty = false;
+    } catch {
+      try { unlinkSync(staging); } catch { /* Nothing was staged. */ }
+    }
+  }
+}
+
+const keyOf = (agentId: string, resourceId: string) => `${agentId}\0${resourceId}`;
+
+function readEntries(file: string): DurableResourceEntry[] {
+  try {
+    const value = JSON.parse(readFileSync(file, 'utf8')) as { version?: unknown; entries?: unknown };
+    if (value.version !== 1 || !Array.isArray(value.entries)) return [];
+    return value.entries.filter((entry): entry is DurableResourceEntry => isEntry(entry));
+  } catch { return []; }
+}
+
+function isEntry(value: unknown): value is DurableResourceEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Record<string, unknown>;
+  return ['agentId', 'resourceId', 'normalizedLocator', 'readLocator'].every(name => typeof entry[name] === 'string' && (entry[name] as string).length > 0)
+    && typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256);
+}
+```
+
+<!-- write: packages/agent-host/src/resource-id-index-file.test.ts -->
+```ts
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, expect, it } from 'vitest';
+
+import { FileResourceIdIndex, RESOURCE_ID_INDEX_CAPACITY } from './resource-id-index-file.js';
+
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+const location = async () => { const root = await mkdtemp(join(tmpdir(), 'resource-id-index-')); roots.push(root); return join(root, 'resource-id-index.json'); };
+const sha256 = 'ab'.repeat(32);
+const entry = (n: number, agentId = 'agent-1') => ({ agentId, resourceId: `rid_${n}`, normalizedLocator: `file-${n}.png`, readLocator: `/work/file-${n}.png`, sha256 });
+
+it('keeps what it was given across instances, in a private file that is replaced whole', async () => {
+  const file = await location();
+  const index = new FileResourceIdIndex(file);
+  index.put(entry(1));
+  index.flush();
+  expect(new FileResourceIdIndex(file).get('agent-1', 'rid_1')).toEqual(entry(1));
+  expect(await readdir(dirname(file))).toEqual(['resource-id-index.json']);
+  if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
+});
+
+it('writes by itself shortly after a change, so a crash loses little', async () => {
+  const file = await location();
+  new FileResourceIdIndex(file).put(entry(1));
+  await expect.poll(async () => readFile(file, 'utf8').catch(() => ''), { timeout: 3000 }).toContain('rid_1');
+});
+
+it('is keyed by agent and id together', async () => {
+  const index = new FileResourceIdIndex(await location());
+  index.put(entry(1));
+  expect(index.get('agent-2', 'rid_1')).toBeUndefined();
+  expect(index.get('agent-1', 'rid_2')).toBeUndefined();
+});
+
+it('drops the least recently used entries beyond its capacity, and a read counts as a use', async () => {
+  const file = await location();
+  const index = new FileResourceIdIndex(file, 3);
+  [1, 2, 3].forEach(n => index.put(entry(n)));
+  expect(index.get('agent-1', 'rid_1')).toBeDefined();
+  index.put(entry(4));
+  expect(index.get('agent-1', 'rid_2')).toBeUndefined();
+  expect([1, 3, 4].map(n => index.get('agent-1', `rid_${n}`) !== undefined)).toEqual([true, true, true]);
+  index.flush();
+  expect(JSON.parse(await readFile(file, 'utf8')).entries).toHaveLength(3);
+  // The file keeps the order of use, so a smaller index drops the entries used longest ago.
+  const smaller = new FileResourceIdIndex(file, 2);
+  expect([1, 3, 4].map(n => smaller.get('agent-1', `rid_${n}`) !== undefined)).toEqual([false, true, true]);
+});
+
+it('is bounded at ten thousand entries by default', async () => {
+  expect(RESOURCE_ID_INDEX_CAPACITY).toBe(10_000);
+  const index = new FileResourceIdIndex(await location());
+  for (let n = 0; n < RESOURCE_ID_INDEX_CAPACITY + 5; n += 1) index.put(entry(n));
+  expect(index.get('agent-1', 'rid_0')).toBeUndefined();
+  expect(index.get('agent-1', `rid_${RESOURCE_ID_INDEX_CAPACITY + 4}`)).toBeDefined();
+});
+
+it('starts empty from a damaged file or one with entries it cannot use, and keeps the good entries', async () => {
+  const file = await location();
+  await writeFile(file, '{not json');
+  expect(new FileResourceIdIndex(file).get('agent-1', 'rid_1')).toBeUndefined();
+  await writeFile(file, JSON.stringify({ version: 1, entries: [entry(1), { ...entry(2), sha256: 'short' }, { agentId: 'agent-1' }, null] }));
+  const index = new FileResourceIdIndex(file);
+  expect(index.get('agent-1', 'rid_1')).toBeDefined();
+  expect(index.get('agent-1', 'rid_2')).toBeUndefined();
+  await writeFile(file, JSON.stringify({ version: 2, entries: [entry(1)] }));
+  expect(new FileResourceIdIndex(file).get('agent-1', 'rid_1')).toBeUndefined();
+});
+
+it('writes nothing for an entry it already holds', async () => {
+  const file = await location();
+  const index = new FileResourceIdIndex(file);
+  index.put(entry(1));
+  index.flush();
+  await rm(file);
+  index.put(entry(1));
+  index.flush();
+  await expect(stat(file)).rejects.toThrow();
+});
+```
+
+The key file is created as `session-succession-service.ts` creates its cursor key: only when the file does not exist, written to a private staging file with `wx`, flushed, and linked into place (a Controller that lost the race adopts the key that won). A file that does not hold a key stops the Controller with an error and is not touched; a chmod that fails never makes a new key. `resource-id-key-creation.test.ts` interrupts the creation to prove the staging, the adoption and the best-effort chmod:
+
+<!-- write: packages/agent-host/src/resource-id-key-creation.test.ts -->
+```ts
+import { writeFileSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, expect, it, vi } from 'vitest';
+
+// The creation path is raced and failed on purpose, so the file system calls it makes are the ones a test may interrupt.
+const interruptions = vi.hoisted(() => ({ beforeLink: undefined as undefined | ((target: string) => void), chmodFails: false, writes: [] as string[] }));
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    linkSync: (existing: string, target: string) => { interruptions.beforeLink?.(target); return actual.linkSync(existing, target); },
+    chmodSync: (path: string, mode: number) => { if (interruptions.chmodFails) throw Object.assign(new Error('Not permitted.'), { code: 'EPERM' }); return actual.chmodSync(path, mode); },
+    openSync: (path: string, flags: string, mode?: number) => { if (typeof flags === 'string' && flags.includes('w')) interruptions.writes.push(String(path)); return actual.openSync(path, flags, mode); },
+  };
+});
+
+const { loadResourceIdKey } = await import('./resource-id-key.js');
+
+const roots: string[] = [];
+afterEach(async () => {
+  interruptions.beforeLink = undefined; interruptions.chmodFails = false; interruptions.writes.length = 0;
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+const location = async () => { const root = await mkdtemp(join(tmpdir(), 'resource-id-key-')); roots.push(root); return join(root, 'resource-id.key'); };
+
+it('writes the key to a staging file and links it into place, never writing the final path itself', async () => {
+  const file = await location();
+  const key = loadResourceIdKey(file);
+  expect(interruptions.writes).toHaveLength(1);
+  expect(interruptions.writes[0]).not.toBe(file);
+  expect(interruptions.writes[0]).toMatch(/\.tmp$/);
+  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
+});
+
+it('adopts the key of a Controller that created the file first, and leaves nothing behind', async () => {
+  const file = await location();
+  const winner = 'cd'.repeat(32);
+  interruptions.beforeLink = target => { interruptions.beforeLink = undefined; writeFileSync(target, `${winner}\n`); };
+  expect(loadResourceIdKey(file)).toBe(winner);
+  expect(await readFile(file, 'utf8')).toBe(`${winner}\n`);
+  expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+});
+
+it('stops with an error, without a key of its own, when the file that won is not a key', async () => {
+  const file = await location();
+  interruptions.beforeLink = target => { interruptions.beforeLink = undefined; writeFileSync(target, 'garbage'); };
+  expect(() => loadResourceIdKey(file)).toThrow(/does not hold a key/);
+  expect(await readFile(file, 'utf8')).toBe('garbage');
+  expect(await readdir(dirname(file))).toEqual(['resource-id.key']);
+});
+
+it('keeps the key when its permissions cannot be tightened', async () => {
+  const file = await location();
+  const key = loadResourceIdKey(file);
+  interruptions.chmodFails = true;
+  expect(loadResourceIdKey(file)).toBe(key);
+  expect(await readFile(file, 'utf8')).toBe(`${key}\n`);
+});
+
+it('creates a key even when its permissions cannot be tightened', async () => {
+  const file = await location();
+  interruptions.chmodFails = true;
+  expect(loadResourceIdKey(file)).toMatch(/^[0-9a-f]{64}$/);
+});
+```
+
+`host.ts`: `AgentHostRuntimeOptions.resourceIdIndexFile` (derived as `resource-id-index.json` in the state directory), the index is made only together with the key, handed to `createAgentRemoteRelay`, and flushed after the shutdown cleanup. Both relay adapter wrappers carry `journal`. The Controller-level restart tests:
+
+<!-- write: packages/agent-host/src/host-resource-ids.test.ts -->
+```ts
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { afterEach, expect, it } from 'vitest';
+
+import { createAgentHostRuntime, type AgentHostDirectory, type AgentHostRuntime } from './host.js';
+
+const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+const flush = () => new Promise<void>(resolve => setTimeout(resolve, 20));
+
+interface SessionOptions { history: boolean; live?: ProviderStreamItem[]; reads?: { count: number }; changed?: boolean }
+
+function session(options: SessionOptions): AgentSession {
+  let disposed: () => void = () => undefined;
+  const ended = new Promise<void>(resolve => { disposed = resolve; });
+  return {
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: true, interactions: { question: false, planApproval: false, toolApproval: false } },
+    async *observe() {
+      if (options.history) {
+        yield { type: 'observation' as const, sourceKey: 'history:1', occurredAt: 1_725_000_000_000, delivery: 'history' as const, itemIdentity: { key: 'm1', completes: true },
+          event: { type: 'timeline' as const, provider: 'codex', item: { type: 'assistant_message' as const, text: 'See [shot](shot.png).', messageId: 'm1' } } };
+      }
+      yield { type: 'history_boundary' as const };
+      for (const item of options.live ?? []) yield item;
+      await ended;
+    },
+    async sendMessage() {}, async respondToInteraction() {},
+    async readResource() {
+      if (options.reads) options.reads.count += 1;
+      return { status: 'available' as const, mediaType: 'image/png', bytes: options.changed ? Uint8Array.from([...png.slice(0, -1), 0]) : png };
+    },
+    async runtimeInfo() { return { providerId: 'codex', sessionId: 'native', status: 'idle' as const, persistence: { providerId: 'codex', sessionId: 'native', opaque: '{}' } }; },
+    async dispose() { disposed(); },
+  };
+}
+
+function runtime(options: SessionOptions, extra: Parameters<typeof createAgentHostRuntime>[0] extends infer T ? Partial<T> : never = {}, journal = false): AgentHostRuntime {
+  const directory: AgentHostDirectory = { providerId: 'codex', list: async () => [], workspaces: async () => [], async create() { return 'native'; }, async open() { return session(options); }, async close() {} };
+  const adapter: AgentProviderAdapter = { descriptor: { providerId: 'codex', displayName: 'Codex' }, ...(journal ? { journal: { itemIdentity: 1 as const } } : {}),
+    async createSession() { throw new Error('unused'); }, async resumeSession() { throw new Error('unused'); } };
+  return createAgentHostRuntime({ registrations: [{ adapter, directory }], ...extra });
+}
+
+async function attach(host: AgentHostRuntime) {
+  const attached = await host.control({ method: 'POST', path: '/remote/attach', sessionId: 'agent-1', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'native' }) });
+  expect(attached.status).toBe(200);
+  await flush();
+  return host.resolveSession('agent-1')!;
+}
+
+const imageOf = (manager: Awaited<ReturnType<typeof attach>>) =>
+  manager.fetchTimeline({ requestId: 'h', agentId: 'agent-1', direction: 'tail', limit: 10 }).payload.entries[0]?.resources?.[0]?.resourceId;
+
+async function files() {
+  const root = await mkdtemp(join(tmpdir(), 'host-resource-ids-'));
+  roots.push(root);
+  return { resourceIdKeyFile: join(root, 'resource-id.key'), resourceIdIndexFile: join(root, 'resource-id-index.json') };
+}
+
+it('gives the image of a session the same id after the Controller restarts, when it keeps its resource key', async () => {
+  const keep = await files();
+  const first = runtime({ history: true }, keep);
+  let before: string | undefined;
+  try { before = imageOf(await attach(first)); } finally { await first.close(); }
+  expect(before).toMatch(/^rid_/);
+  const second = runtime({ history: true }, keep);
+  try { expect(imageOf(await attach(second))).toBe(before); } finally { await second.close(); }
+  const unkeyed = runtime({ history: true });
+  try {
+    const id = imageOf(await attach(unkeyed));
+    expect(id).toBeDefined();
+    expect(id).not.toMatch(/^rid_/);
+  } finally { await unkeyed.close(); }
+});
+
+it('serves an image id from before the restart without any timeline reading it again', async () => {
+  const keep = await files();
+  const first = runtime({ history: true }, keep);
+  let before: string | undefined;
+  try { before = imageOf(await attach(first)); } finally { await first.close(); }
+  expect(JSON.parse(await readFile(keep.resourceIdIndexFile, 'utf8')).entries).toMatchObject([{ agentId: 'agent-1', resourceId: before, readLocator: 'shot.png' }]);
+  if (process.platform !== 'win32') expect((await stat(keep.resourceIdIndexFile)).mode & 0o777).toBe(0o600);
+
+  // The session's history no longer holds the image, so only a read of its id can bring the bytes back.
+  const reads = { count: 0 };
+  const second = runtime({ history: false, reads }, keep);
+  try {
+    const manager = await attach(second);
+    expect(reads.count).toBe(0);
+    expect((await manager.readResource('a', before!)).payload.state.status).toBe('pending');
+    await flush();
+    expect(reads.count).toBe(1);
+    expect((await manager.readResource('b', before!)).payload.state).toMatchObject({ status: 'available', mediaType: 'image/png', byteLength: png.byteLength });
+  } finally { await second.close(); }
+});
+
+it('does not serve an old id when the file now holds other bytes, and does not for another session', async () => {
+  const keep = await files();
+  const first = runtime({ history: true }, keep);
+  let before: string | undefined;
+  try { before = imageOf(await attach(first)); } finally { await first.close(); }
+  const second = runtime({ history: false, changed: true }, keep);
+  try {
+    const manager = await attach(second);
+    await manager.readResource('a', before!);
+    await flush();
+    expect((await manager.readResource('b', before!)).payload.state).toMatchObject({ status: 'unavailable', reason: 'Resource content changed.' });
+  } finally { await second.close(); }
+});
+
+it('tells the Controller\'s own journal tap when a journal-capable provider omits item identity', async () => {
+  const live = [{ type: 'observation' as const, sourceKey: 'stream:2', occurredAt: 1_725_000_000_001, delivery: 'live' as const,
+    event: { type: 'timeline' as const, provider: 'codex', item: { type: 'assistant_message' as const, text: 'No identity', messageId: 'm2' } } }];
+  for (const [journal, expected] of [[true, 1], [false, 0]] as const) {
+    const host = runtime({ history: false, live }, {}, journal);
+    try {
+      const manager = await attach(host);
+      let told = 0;
+      manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+      await flush();
+      expect(told).toBe(expected);
+    } finally { await host.close(); }
+  }
+});
+
+it('carries the journal declaration of a provider registered after start', async () => {
+  const live = [{ type: 'observation' as const, sourceKey: 'stream:2', occurredAt: 1_725_000_000_001, delivery: 'live' as const,
+    event: { type: 'timeline' as const, provider: 'codex', item: { type: 'assistant_message' as const, text: 'No identity', messageId: 'm2' } } }];
+  const other: AgentHostDirectory = { providerId: 'other', list: async () => [], workspaces: async () => [], async create() { return 'x'; }, async open() { throw new Error('unused'); }, async close() {} };
+  const host = createAgentHostRuntime({ registrations: [{ adapter: { descriptor: { providerId: 'other', displayName: 'Other' }, async createSession() { throw new Error('unused'); }, async resumeSession() { throw new Error('unused'); } }, directory: other }] });
+  try {
+    const directory: AgentHostDirectory = { providerId: 'codex', list: async () => [], workspaces: async () => [], async create() { return 'native'; }, async open() { return session({ history: false, live }); }, async close() {} };
+    const adapter: AgentProviderAdapter = { descriptor: { providerId: 'codex', displayName: 'Codex' }, journal: { itemIdentity: 1 },
+      async createSession() { throw new Error('unused'); }, async resumeSession() { throw new Error('unused'); } };
+    host.addRegistration({ adapter, directory });
+    const manager = await attach(host);
+    let told = 0;
+    manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { told += 1; } });
+    await flush();
+    expect(told).toBe(1);
+  } finally { await host.close(); }
+});
+```
 
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add packages/agent-remote-relay/src packages/agent-host/src
+git add packages/agent-remote-journal/src packages/agent-remote-relay/src packages/agent-host/src
 pnpm compatibility:update && pnpm compatibility:check
+git add packages/agent-remote-lab/compatibility.json
 git commit -m "feat(relay): give a settled resource an id that is stable for its agent, locator and bytes, under a secret the Controller keeps" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

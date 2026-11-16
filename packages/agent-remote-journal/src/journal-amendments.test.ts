@@ -174,4 +174,30 @@ describe('the attention cursor of the head', () => {
     journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'a' });
     expect(journal.takeChanges()?.meta.head?.attentionItemKey).toBe('a');
   });
+  it('finds the binding by its locator, so an id that changed since (a restart, a new key) still takes the replacement', () => {
+    const { journal, publish } = withTwoItems();
+    const staleKeyed: ResourceBinding = { locator: 'docs/plan.md', resourceId: 'resource-from-before-restart', status: 'pending' };
+    expect(journal.rebind(publish(), 'a', staleKeyed, settled)).toEqual({ epoch: 'epoch-1', seq: 1 });
+    expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false })).toMatchObject({ page: { payload: { entries: [{ resources: [settled] }, {}] } } });
+  });
+
+  it('changes nothing, stores no item and tells no one when the binding already is the replacement', () => {
+    const { journal, publish } = withTwoItems();
+    journal.rebind(publish(), 'a', pending, settled);
+    journal.takeChanges();
+    const revision = journal.index()[0]!.revision;
+    const repeated = publish();
+    expect(journal.rebind(repeated, 'a', pending, settled)).toBeUndefined();
+    expect(journal.rebind(publish(), 'a', settled, settled)).toBeUndefined();
+    expect(journal.publisher?.watermark).toBe(repeated.sequence + 1);
+    expect(journal.index()[0]!.revision).toBe(revision);
+    const changes = journal.takeChanges();
+    expect(changes?.upsert ?? []).toEqual([]);
+  });
+
+  it('leaves a resource with another locator alone', () => {
+    const { journal, publish } = withTwoItems();
+    expect(journal.rebind(publish(), 'a', { ...pending, locator: 'other.md' }, { ...settled, locator: 'other.md' })).toBeUndefined();
+    expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false })).toMatchObject({ page: { payload: { entries: [{ resources: [pending] }, {}] } } });
+  });
 });

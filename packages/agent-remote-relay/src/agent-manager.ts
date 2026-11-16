@@ -37,6 +37,7 @@ import type { AgentManagerEvent } from './agent-manager-events.js';
 import { discoverTimelineLocators, normalizeFileLocator } from './resources/markdown-locators.js';
 import { createLocalFileResourceReader, type LocalFileResourceReader } from './resources/local-file-reader.js';
 import { ResourceIngestor } from './resources/resource-ingestor.js';
+import type { ResourceIdIndex } from './resources/resource-id-index.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
 import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
 import { rowItemKey, TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
@@ -57,6 +58,8 @@ export interface AgentManagerAttachOptions {
   settingIntent?: OperationLifecycle['settingIntent'];
   /** See `ResourceIngestorOptions.resourceIdKey`. */
   resourceIdKey?: string;
+  /** See `ResourceIngestorOptions.resourceIdIndex`. */
+  resourceIdIndex?: ResourceIdIndex;
 }
 
 export interface AgentManagerCreateOptions {
@@ -71,6 +74,8 @@ export interface AgentManagerCreateOptions {
   settingIntent?: OperationLifecycle['settingIntent'];
   /** See `ResourceIngestorOptions.resourceIdKey`. */
   resourceIdKey?: string;
+  /** See `ResourceIngestorOptions.resourceIdIndex`. */
+  resourceIdIndex?: ResourceIdIndex;
 }
 
 export interface AgentManagerResumeOptions {
@@ -85,6 +90,8 @@ export interface AgentManagerResumeOptions {
   settingIntent?: OperationLifecycle['settingIntent'];
   /** See `ResourceIngestorOptions.resourceIdKey`. */
   resourceIdKey?: string;
+  /** See `ResourceIngestorOptions.resourceIdIndex`. */
+  resourceIdIndex?: ResourceIdIndex;
 }
 
 export type AgentManagerListener = (event: AgentManagerEvent) => void;
@@ -240,7 +247,7 @@ export class AgentManager {
       (options.clock ?? (() => new Date()))().toISOString(),
       runtimeInfo,
       options.clock ?? (() => new Date()),
-      new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore(), ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }) }),
+      new ResourceIngestor({ store: options.resourceStore ?? new InMemoryResourceStore(), ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }), ...(options.resourceIdIndex === undefined ? {} : { resourceIdIndex: options.resourceIdIndex }) }),
       options.inputImageStore,
       options.settingIntent,
       options.inputResourceStore,
@@ -281,6 +288,7 @@ export class AgentManager {
         ...(options.inputImageStore === undefined ? {} : { inputImageStore: options.inputImageStore }),
         ...(options.settingIntent === undefined ? {} : { settingIntent: options.settingIntent }),
         ...(options.resourceIdKey === undefined ? {} : { resourceIdKey: options.resourceIdKey }),
+        ...(options.resourceIdIndex === undefined ? {} : { resourceIdIndex: options.resourceIdIndex }),
       });
       await manager.ready;
       return manager;
@@ -370,10 +378,13 @@ export class AgentManager {
 
   /** Reads one older page of native history into the timeline, as a reader scrolling back would. */
   async loadOlderHistory(): Promise<{ added: number; more: boolean }> {
-    if (!this.hasOlderHistory()) return { added: 0, more: false };
-    const before = this.timeline.rowCount();
+    if (this.closed || !this.hasOlderHistory()) return { added: 0, more: false };
+    const timeline = this.timeline;
+    const before = timeline.rowCount();
     await this.readOlderPage();
-    return { added: this.timeline.rowCount() - before, more: this.hasOlderHistory() };
+    // A replacement while the page was read starts another timeline; what was read belongs to the old one.
+    if (this.timeline !== timeline) return { added: 0, more: this.hasOlderHistory() };
+    return { added: Math.max(0, timeline.rowCount() - before), more: this.hasOlderHistory() };
   }
 
   subscribe(listener: AgentManagerListener): () => void {
@@ -391,7 +402,7 @@ export class AgentManager {
       return { rows: [], snapshot: this.snapshot(), release: () => undefined };
     }
     this.taps.add(tap);
-    if (this.identityBroken) queueMicrotask(() => { try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ } });
+    if (this.identityBroken) queueMicrotask(() => { if (!this.taps.has(tap)) return; try { tap.identityMissing?.(); } catch { /* A tap cannot keep the manager open. */ } });
     return { rows: this.timelineRows(), snapshot: this.snapshot(), release: () => { this.taps.delete(tap); } };
   }
 
@@ -407,7 +418,8 @@ export class AgentManager {
 
   /** The key of the item the attention cursor points at, when that row is still in the timeline. */
   attentionItemKey(): string | undefined {
-    return this.attentionCursor.epoch === this.timeline.epoch ? this.timeline.itemKeyAt(this.attentionCursor.seq) : undefined;
+    // A prepended row can take sequence 0 or below; the attention cursor never points at one.
+    return this.attentionCursor.epoch === this.timeline.epoch && this.attentionCursor.seq > 0 ? this.timeline.itemKeyAt(this.attentionCursor.seq) : undefined;
   }
 
   replaceTimeline(epoch: string): void {
@@ -667,7 +679,7 @@ export class AgentManager {
   }
 
   async readResource(requestId: string, resourceId: string, scope?: string): Promise<ResourceResponse> {
-    const imageScope = this.imageResourceScopes.get(resourceId);
+    const imageScope = this.imageResourceScopes.get(this.resourceIngestor.canonicalId(this.agentId, resourceId));
     if (imageScope !== undefined && imageScope !== this.imageScope(scope)) throw new Error('Image attachment belongs to another session scope.');
     const document = this.commandResources.get(resourceId);
     if (document && !this.closed) {
@@ -682,7 +694,19 @@ export class AgentManager {
         }
       }
     }
+    this.restoreResource(resourceId);
     return this.resourceIngestor.readResponse(requestId, this.agentId, resourceId);
+  }
+
+  /** A resource settled before a restart has no record now; the first read starts reading it again and answers pending. */
+  private restoreResource(resourceId: string): void {
+    if (this.closed || !this.session.capabilities.readResource || !this.session.readResource) return;
+    const restoring = this.resourceIngestor.restore(this.agentId, resourceId, locator => this.session.readResource!(locator));
+    restoring?.then(() => {
+      if (this.closed) return;
+      const id = this.resourceIngestor.canonicalId(this.agentId, resourceId);
+      this.emit({ type: 'resource_update', agentId: this.agentId, resourceId: id, state: this.resourceIngestor.readState(this.agentId, id) });
+    }).catch(() => undefined);
   }
 
   async resolveResource(
@@ -873,6 +897,7 @@ export class AgentManager {
             agentId: this.agentId,
             locator,
             ...(readLocator === undefined ? {} : { readLocator }),
+            durable: true,
             ...(this.session.capabilities.readResource && this.session.readResource
               ? { reader: (target: string) => this.session.readResource!(target) }
               : {}),
@@ -1071,6 +1096,7 @@ export class AgentManager {
         tap.event(structuredClone(event));
       } catch {
         this.taps.delete(tap);
+        try { tap.closed(); } catch { /* A tap cannot keep the manager open. */ }
       }
     }
   }

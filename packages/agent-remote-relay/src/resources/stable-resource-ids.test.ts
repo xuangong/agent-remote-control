@@ -1,8 +1,10 @@
 import type { AgentProviderAdapter, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { createAgentRemoteRelay } from '../relay.js';
 import { ResourceIngestor } from './resource-ingestor.js';
+import type { DurableResourceEntry, ResourceIdIndex } from './resource-id-index.js';
 import { InMemoryResourceStore } from './resource-store.js';
 
 const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
@@ -12,7 +14,9 @@ const reader = (bytes: Uint8Array) => async () => ({ status: 'available' as cons
 async function settle(ingestor: ResourceIngestor, agentId: string, locator: string, bytes: Uint8Array) {
   const acquisition = ingestor.acquire({ agentId, locator, reader: reader(bytes) });
   expect(acquisition?.binding.status).toBe('pending');
-  return { provisional: acquisition!.binding.resourceId, settled: await acquisition!.settled };
+  const settled = await acquisition!.settled;
+  expect(settled.status).toBe('available');
+  return { provisional: acquisition!.binding.resourceId, settled };
 }
 
 describe('resource ids with a key', () => {
@@ -73,6 +77,12 @@ describe('resource ids without a key', () => {
     expect(a.settled.resourceId).not.toBe(b.settled.resourceId);
   });
 });
+
+class MapIndex implements ResourceIdIndex {
+  readonly entries = new Map<string, DurableResourceEntry>();
+  get(agentId: string, resourceId: string) { return this.entries.get(`${agentId}\0${resourceId}`); }
+  put(entry: DurableResourceEntry) { this.entries.set(`${entry.agentId}\0${entry.resourceId}`, entry); }
+}
 
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 10));
 
@@ -147,5 +157,109 @@ describe('the journal contract of a provider that a relay owns', () => {
     await flush();
     expect(told).toBe(1);
     await relay.close();
+  });
+});
+
+describe('the provisional id of a settled resource', () => {
+  it('keeps reading the bytes under the stable id, for its own agent only, and leaves no record for the dedupe to find', async () => {
+    const store = new InMemoryResourceStore();
+    const ingestor = new ResourceIngestor({ store, resourceIdKey: 'secret-one' });
+    const { provisional, settled } = await settle(ingestor, 'agent-1', 'shot.png', png);
+    expect(provisional).not.toBe(settled.resourceId);
+    expect(ingestor.readState('agent-1', provisional)).toMatchObject({ status: 'available' });
+    const response = ingestor.readResponse('r', 'agent-1', provisional);
+    expect(response.payload).toMatchObject({ resourceId: provisional, state: { status: 'available' } });
+    expect(ingestor.readState('agent-2', provisional)).toMatchObject({ status: 'unavailable' });
+    expect(store.getRecord('agent-1', provisional)).toBeUndefined();
+    expect(store.findAvailableRecord('agent-1', 'shot.png', createHash('sha256').update(png).digest('hex'))?.resourceId).toBe(settled.resourceId);
+  });
+
+  it('is also an alias of the record that an equal resource already settled', async () => {
+    const ingestor = new ResourceIngestor({ store: new InMemoryResourceStore() });
+    const first = await settle(ingestor, 'agent-1', 'shot.png', png);
+    const second = await settle(ingestor, 'agent-1', 'shot.png', png);
+    expect(second.settled.resourceId).toBe(first.settled.resourceId);
+    expect(ingestor.readState('agent-1', second.provisional)).toMatchObject({ status: 'available' });
+  });
+});
+
+describe('restoring a resource after a restart', () => {
+  const durable = (ingestor: ResourceIngestor, bytes: Uint8Array = png) => ingestor.acquire({ agentId: 'agent-1', locator: 'shot.png', reader: reader(bytes), durable: true })!.settled;
+
+  it('answers pending at once, then serves the bytes when the content is the one remembered', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'unavailable' });
+    const restoring = after.restore('agent-1', before.resourceId, reader(png));
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'pending' });
+    await restoring;
+    expect(after.readResponse('r', 'agent-1', before.resourceId).payload.state).toMatchObject({ status: 'available', contentBase64: Buffer.from(png).toString('base64') });
+  });
+
+  it('shares one read between callers, and does not read a resource that has a record', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    let reads = 0;
+    const counting = async () => { reads += 1; return { status: 'available' as const, bytes: png, mediaType: 'image/png' }; };
+    const first = after.restore('agent-1', before.resourceId, counting);
+    expect(after.restore('agent-1', before.resourceId, counting)).toBe(first);
+    await first;
+    expect(after.restore('agent-1', before.resourceId, counting)).toBeUndefined();
+    expect(reads).toBe(1);
+  });
+
+  it('refuses the bytes when the content changed, and says so', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await after.restore('agent-1', before.resourceId, reader(otherPng));
+    expect(after.readState('agent-1', before.resourceId)).toEqual({ status: 'unavailable', reason: 'Resource content changed.' });
+  });
+
+  it('has nothing to restore for an unknown id, another agent, or a resource that was not durable', async () => {
+    const index = new MapIndex();
+    const ingestor = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    const transient = await settle(ingestor, 'agent-1', 'other.png', png);
+    const kept = await durable(ingestor);
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    expect(after.restore('agent-1', 'rid_unknown', reader(png))).toBeUndefined();
+    expect(after.restore('agent-2', kept.resourceId, reader(png))).toBeUndefined();
+    expect(after.restore('agent-1', transient.settled.resourceId, reader(png))).toBeUndefined();
+  });
+
+  it('tries again after a read that failed, and keeps a vanished file unavailable', async () => {
+    const index = new MapIndex();
+    const before = await durable(new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index }));
+    const after = new ResourceIngestor({ store: new InMemoryResourceStore(), resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await after.restore('agent-1', before.resourceId, async () => { throw new Error('Disk error.'); });
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'failed', retryable: true });
+    await after.restore('agent-1', before.resourceId, reader(png));
+    expect(after.readState('agent-1', before.resourceId)).toMatchObject({ status: 'available' });
+  });
+});
+
+describe('a restored session through the relay', () => {
+  it('serves the image of an earlier run to a manager that never read it again', async () => {
+    const index = new MapIndex();
+    const first = createAgentRemoteRelay({ providers: [imageProvider(false)], resourceIdKey: 'secret-one', resourceIdIndex: index });
+    const create = (relay: typeof first) => relay.createAgent({ protocolVersion: '1.8.0', type: 'create_agent', payload: { requestId: 'r', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent-1', providerId: 'fake', config: { sessionId: 'session-1' } } });
+    await create(first);
+    await flush();
+    const id = first.requireAgent('agent-1').fetchTimeline({ requestId: 'h', agentId: 'agent-1', direction: 'tail', limit: 10 }).payload.entries[0]?.resources?.[0]?.resourceId;
+    await first.close();
+    // After the restart the session's history no longer reaches the image: nothing asks for it again.
+    const empty: AgentProviderAdapter = { ...imageProvider(false), createSession: async () => ({ ...(await imageProvider(false).createSession({ sessionId: 'session-1' })), async *observe() { yield { type: 'history_boundary' as const }; } }) };
+    const second = createAgentRemoteRelay({ providers: [empty], resourceIdKey: 'secret-one', resourceIdIndex: index });
+    await create(second);
+    const manager = second.requireAgent('agent-1');
+    const updates: unknown[] = [];
+    manager.subscribe(event => { if (event.type === 'resource_update') updates.push(event); });
+    expect((await manager.readResource('a', id!)).payload.state.status).toBe('pending');
+    await flush();
+    expect(updates).toHaveLength(1);
+    expect((await manager.readResource('b', id!)).payload.state).toMatchObject({ status: 'available', mediaType: 'image/png' });
+    await second.close();
   });
 });

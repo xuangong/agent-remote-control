@@ -307,9 +307,11 @@ export class SessionJournal {
   }
 
   /**
-   * Replaces a resource binding of an item in place, in its body or, while that is evicted, in what the item keeps of it.
-   * Returns the epoch and sequence clients know the item by, or undefined for a duplicate publication and for an item the
-   * journal does not know, which has nothing to amend. An amendment does not move the item's revision.
+   * Replaces the binding of the item's resource with the previous binding's locator, in its body or, while that is evicted,
+   * in what the item keeps of it. It matches by locator, not by the previous id, so a binding whose id changed since (a
+   * restart, a new key) still takes the replacement. Returns the epoch and sequence clients know the item by, or undefined
+   * for a duplicate publication, an item the journal does not know and a binding that already is the replacement: none of
+   * them changes anything, so nothing is stored or told. An amendment does not move the item's revision.
    */
   rebind(publication: JournalPublication, itemKey: string, previous: ResourceBinding, replacement: ResourceBinding): { epoch: string; seq: number } | undefined {
     if (this.duplicate(publication)) return undefined;
@@ -317,9 +319,13 @@ export class SessionJournal {
     const item = this.byKey.get(itemKey);
     if (!item) return undefined;
     const resources = item.body ? item.body.resources : item.keptBody?.resources;
+    let changed = false;
     resources?.forEach((resource, at) => {
-      if (resource.locator === previous.locator && resource.resourceId === previous.resourceId) resources[at] = structuredClone(replacement);
+      if (resource.locator !== previous.locator || sameBinding(resource, replacement)) return;
+      resources[at] = structuredClone(replacement);
+      changed = true;
     });
+    if (!changed) return undefined;
     this.touch(itemKey);
     return { epoch: this.meta.epoch, seq: item.seqEnd };
   }
@@ -608,4 +614,8 @@ export class SessionJournal {
     this.byKey.set(item.itemKey, item);
     this.touch(item.itemKey);
   }
+}
+
+function sameBinding(a: ResourceBinding, b: ResourceBinding): boolean {
+  return a.locator === b.locator && a.resourceId === b.resourceId && a.status === b.status;
 }

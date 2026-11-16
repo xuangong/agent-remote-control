@@ -5,6 +5,7 @@ export * from './remote-host-catalog.js';
 export * from './resources/markdown-locators.js';
 export * from './resources/resource-ingestor.js';
 export * from './resources/resource-store.js';
+export * from './resources/resource-id-index.js';
 export * from './session-wire.js';
 export type { TimelinePageRequest } from './timeline-projector.js';
 export * from './transport/http-server.js';

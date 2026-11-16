@@ -106,7 +106,7 @@ export function serveJournalPartition(journals: HostJournals, options: { replyMa
   };
 }
 
-export interface PartitionJournalsOptions {
+interface PartitionJournalsOptions {
   /** The partition of a Host: a Durable Object stub. */
   partition(hostId: string): JournalPartitionApi;
 }

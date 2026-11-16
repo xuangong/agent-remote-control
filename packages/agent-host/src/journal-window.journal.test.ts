@@ -225,7 +225,7 @@ describe('the quota and a journal that is missing rows', () => {
     expect(relay.fromPublisher.filter(message => message.type === 'journal_unserve')).toEqual([]);
   });
 
-  it('serves nothing and retries only with backoff while the Relay has no room for the whole window, then serves it when room appears', async () => {
+  it('serves nothing and retries only with backoff while the Relay has no room for the whole window', async () => {
     const relay = relayLoopback(clock, { limits: { sessionBytes: 9_000 } });
     const diagnostics: Array<{ event: string; reason?: string }> = [];
     const publisher = start(relay, {}, diagnostics);

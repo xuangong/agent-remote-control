@@ -1,6 +1,6 @@
 import type { JournalItem, JournalItemInput } from './types.js';
 
-export type ReplacementEntry =
+type ReplacementEntry =
   | { kind: 'reread'; complete: JournalItemInput }
   | { kind: 'carried'; item: JournalItem };
 

@@ -236,7 +236,7 @@ describe('a quota refusal and the live-only cap', () => {
     const { journals, store } = fixture({ limits: { liveOnlyItems: 2 } });
     await open(journals, HOST, SESSION);
     const result = await journals.publish(HOST, SESSION, 1, [live(1, 'l1'), live(2, 'l2'), live(3, 'l3'), complete(4, 'l1'), complete(5, 'l2'), complete(6, 'l3'), append(7, 'm1', 'kept', 1)]);
-    expect(result.droppedLiveOnly).toBe(1);
+    expect(result.droppedLiveOnly).toBe(true);
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l2', 'l3', 'm1']);
     expect((await journals.publish(HOST, SESSION, 1, [append(8, 'm1', 'more', 1)])).droppedLiveOnly).toBeUndefined();
   });
@@ -248,7 +248,7 @@ describe('a quota refusal and the live-only cap', () => {
     expect(open3.droppedLiveOnly).toBeUndefined();
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l1', 'l2', 'l3', 'm1']);
     const completed = await journals.publish(HOST, SESSION, 1, [complete(5, 'l1')]);
-    expect(completed.droppedLiveOnly).toBe(1);
+    expect(completed.droppedLiveOnly).toBe(true);
     expect((await store.load(KEY))!.items.map(item => item.itemKey)).toEqual(['l2', 'l3', 'm1']);
   });
 });

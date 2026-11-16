@@ -2,10 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { expectNoChange, indexOf, openJournal, PUBLISHER, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
-import {
-  JournalDuplicateItemError, JournalFencedError, JournalInvalidRowError, JournalItemTypeChangedError, JournalSequenceGapError,
-  type JournalRowInput,
-} from './types.js';
+import { JournalInvalidPublicationError, JournalFencedError, JournalSequenceGapError, type JournalRowInput } from './types.js';
 
 describe('SessionJournal', () => {
   it('stamps dense sequences and folds deltas into one item', () => {
@@ -96,7 +93,7 @@ describe('SessionJournal', () => {
     it('for an invalid timestamp', () => {
       const { journal, publish } = openJournal();
       journal.append(publish(), text('m1', 'd1', 'Hel'));
-      expectNoChange(journal, () => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt: Number.NaN }), JournalInvalidRowError);
+      expectNoChange(journal, () => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt: Number.NaN }), JournalInvalidPublicationError);
     });
 
     it('for a row that changes its item\'s type', () => {
@@ -104,7 +101,7 @@ describe('SessionJournal', () => {
       journal.append(publish(), text('m1', 'd1', 'Hel'));
       expectNoChange(journal, () => journal.append(publish(), {
         itemKey: 'm1', providerId: 'codex', sourceKey: 'r1', occurredAt: 0, item: { type: 'reasoning', text: 'x' },
-      }), JournalItemTypeChangedError);
+      }), JournalInvalidPublicationError);
     });
 
     it('for a replacement with an invalid timestamp', () => {
@@ -113,7 +110,7 @@ describe('SessionJournal', () => {
       expectNoChange(journal, () => journal.sync(publish(), [
         { row: text('m2', 'h2', 'a'), digest: 'd2' },
         { row: { ...text('m3', 'h3', 'b'), occurredAt: 9e15 }, digest: 'd3' },
-      ], { roomBytes: Number.MAX_SAFE_INTEGER }), JournalInvalidRowError);
+      ], { roomBytes: Number.MAX_SAFE_INTEGER }), JournalInvalidPublicationError);
     });
 
     it('for a replacement that repeats an item key', () => {
@@ -122,7 +119,7 @@ describe('SessionJournal', () => {
       expectNoChange(journal, () => journal.sync(publish(), [
         { row: text('m2', 'h2', 'a'), digest: 'd2' },
         { row: text('m2', 'h3', 'b'), digest: 'd3' },
-      ], { roomBytes: Number.MAX_SAFE_INTEGER }), JournalDuplicateItemError);
+      ], { roomBytes: Number.MAX_SAFE_INTEGER }), JournalInvalidPublicationError);
     });
 
     it('for a prepend that exhausts positions', () => {

@@ -48,7 +48,7 @@ describe('what sync decides', () => {
     expect(journal.sync(publication, [done('a')], { roomBytes: ROOM }).outcome).toBe('replaced');
     expect(journal.sync(publication, [done('a'), done('b')], { roomBytes: ROOM })).toEqual({ outcome: 'unchanged' });
     expect(keys(journal)).toEqual(['a']);
-    expect(() => journal.sync(publish(), [done('a'), done('a')], { roomBytes: ROOM })).toThrow(/repeats item a/);
+    expect(() => journal.sync(publish(), [done('a'), done('a')], { roomBytes: ROOM })).toThrow(/Item a is repeated/);
   });
 
   it('appends the items a window adds at the end, one sequence each, and keeps the epoch', () => {

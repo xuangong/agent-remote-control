@@ -4,9 +4,7 @@ import { bodyFromRow } from './journal-items.js';
 import { MemoryJournalStore } from './journal-store.js';
 import { expectNoChange, openJournal, PUBLISHER, scribble, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
-import {
-  JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, type JournalHead, type JournalPublication, type JournalRowInput,
-} from './types.js';
+import { JournalFencedError, JournalInvalidPublicationError, type JournalHead, type JournalPublication, type JournalRowInput } from './types.js';
 
 describe('appending at scale', () => {
   it('folds 20,000 deltas into one item', () => {
@@ -62,12 +60,12 @@ describe('rows and publications that cannot be applied', () => {
     const { journal, publish } = openJournal();
     journal.append(publish(), text('m1', 'd1', 'Hel'));
     for (const occurredAt of [Number.NaN, 9e15, Number.POSITIVE_INFINITY]) {
-      expectNoChange(journal, () => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt }), JournalInvalidRowError);
-      expectNoChange(journal, () => journal.append(publish(), { ...text('m1', 'd2', 'x'), occurredAt }), JournalInvalidRowError);
+      expectNoChange(journal, () => journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt }), JournalInvalidPublicationError);
+      expectNoChange(journal, () => journal.append(publish(), { ...text('m1', 'd2', 'x'), occurredAt }), JournalInvalidPublicationError);
     }
     let thrown: unknown;
     try { journal.append(publish(), { ...text('m2', 'd2', 'x'), occurredAt: Number.NaN }); } catch (error) { thrown = error; }
-    expect(thrown).toMatchObject({ itemKey: 'm2', reason: expect.stringContaining('occurredAt') });
+    expect(thrown).toMatchObject({ reason: expect.stringContaining('occurredAt') });
   });
 
   it('rejects a publication sequence that is not a positive safe integer', () => {

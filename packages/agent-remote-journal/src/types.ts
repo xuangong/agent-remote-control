@@ -128,44 +128,10 @@ export class JournalSequenceGapError extends Error {
   }
 }
 
-export class JournalBodyMissingError extends Error {
-  constructor(readonly itemKey: string) {
-    super(`Journal item ${itemKey} has no resident body.`);
-    this.name = 'JournalBodyMissingError';
-  }
-}
-
-export class JournalUnknownItemError extends Error {
-  constructor(readonly itemKey: string) {
-    super(`Journal item ${itemKey} is unknown.`);
-    this.name = 'JournalUnknownItemError';
-  }
-}
-
-export class JournalItemTypeChangedError extends Error {
-  constructor(readonly itemKey: string, readonly from: string, readonly to: string) {
-    super(`Journal item ${itemKey} changed from ${from} to ${to}.`);
-    this.name = 'JournalItemTypeChangedError';
-  }
-}
-
-export class JournalDuplicateItemError extends Error {
-  constructor(readonly itemKey: string) {
-    super(`Journal batch repeats item ${itemKey}.`);
-    this.name = 'JournalDuplicateItemError';
-  }
-}
-
-export class JournalInvalidRowError extends Error {
-  constructor(readonly itemKey: string, readonly reason: string) {
-    super(`Journal row of ${itemKey} is invalid: ${reason}.`);
-    this.name = 'JournalInvalidRowError';
-  }
-}
-
+/** A publication the journal cannot apply: an unknown item, a missing body, a changed type, a repeated key, a row that cannot be stamped, or a bad sequence. */
 export class JournalInvalidPublicationError extends Error {
-  constructor(readonly sequence: number) {
-    super(`Journal publication sequence ${String(sequence)} is not a positive safe integer.`);
+  constructor(readonly reason: string) {
+    super(`Journal publication is invalid: ${reason}`);
     this.name = 'JournalInvalidPublicationError';
   }
 }

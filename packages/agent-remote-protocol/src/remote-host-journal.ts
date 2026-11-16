@@ -70,7 +70,7 @@ export const JournalPublishEntry = Type.Union([
   Type.Object({ sequence, op: Type.Literal('append'), row: JournalRowInput }, object),
   Type.Object({ sequence, op: Type.Literal('complete'), itemKey, digest }, object),
   Type.Object({ sequence, op: Type.Literal('alias'), itemKey, clientMessageId: identity }, object),
-  /** The Controller's newest window of native history, oldest first. The Relay compares it with the journal and leaves it, appends to it or replaces it, and trims it to the room. */
+  /** The Controller's newest window of native history, oldest first. The Relay compares it with the journal and leaves it, appends to it or replaces it. */
   Type.Object({ sequence, op: Type.Literal('window'), items }, object),
   Type.Object({ sequence, op: Type.Literal('prepend'), items }, object),
   Type.Object({ sequence, op: Type.Literal('head'), head: JournalHead }, object),

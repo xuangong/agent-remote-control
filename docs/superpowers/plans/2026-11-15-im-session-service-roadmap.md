@@ -86,6 +86,7 @@ The owner approved the [simplification assessment](../specs/2026-11-16-journal-s
   - a 5-turn window for sessions nobody has used for a while;
   - a retention sweep for sessions that receive no publications;
   - retries of pending journal deletions on a timer (the loop of S1 Task 4);
+  - Host-level reclamation when a Host's journals fill its budget: evict the bodies of other sessions, least recently used first, so a full Host recovers and a refused window can fit (today a refused window evicts only its own journal's bodies);
   - eviction of prepended (older-history) bodies, which the incremental window never evicts because they were never inside it. Only a cap-driven shrink or a fill's trim removes them today.
   - a sweep of orphaned journals: list the store's Host prefixes and delete those of Hosts the Relay no longer knows. Pending deletions that overflowed their bound (1024, oldest dropped with a diagnostic) or failed for good are cleaned up this way.
 

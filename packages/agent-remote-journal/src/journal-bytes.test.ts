@@ -89,7 +89,7 @@ describe('live-only items', () => {
     expect(journal.liveOnlyBytes()).toBeLessThan(journal.residentBytes() - 10_000);
   });
 
-  it('removes the oldest beyond the byte cap as well, and never an open one', () => {
+  it('removes the oldest beyond the byte cap as well, and an open one only when asked', () => {
     const { journal, publish } = openJournal();
     for (const key of ['l1', 'l2', 'l3']) {
       journal.append(publish(), live(key));
@@ -101,6 +101,7 @@ describe('live-only items', () => {
     expect(indexOf(journal).map(entry => entry.itemKey)).toEqual(['l3', 'open']);
     expect(journal.dropOldestLiveOnly(10, 0)).toEqual(['l3']);
     expect(journal.has('open')).toBe(true);
+    expect(journal.dropOldestLiveOnly(10, 0, true)).toEqual(['open']);
   });
 
   it('removes the oldest beyond the cap, item and body, and tells the store', () => {

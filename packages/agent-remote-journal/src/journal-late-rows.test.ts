@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { expectNoChange, indexOf, openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
-import { JournalBodyMissingError, JournalItemTypeChangedError, type JournalRowInput } from './types.js';
+import { JournalInvalidPublicationError, type JournalRowInput } from './types.js';
 
 const DIGEST = 'a'.repeat(64);
 const one: ResourceBinding = { locator: 'one.md', resourceId: 'r1', status: 'available' };
@@ -73,13 +73,13 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
     journal.append(publish(), text('later', 'later:1', 'Next turn', 'turn-2'));
     journal.complete(publish(), 'later', DIGEST);
     journal.evict(1);
-    expectNoChange(journal, () => journal.append(publish(), { itemKey: 'c', providerId: 'codex', sourceKey: 'c:2', occurredAt: 1_725_000_002_000, turnId: 'turn-1', item: { type: 'compaction', status: 'completed' } }), JournalBodyMissingError);
+    expectNoChange(journal, () => journal.append(publish(), { itemKey: 'c', providerId: 'codex', sourceKey: 'c:2', occurredAt: 1_725_000_002_000, turnId: 'turn-1', item: { type: 'compaction', status: 'completed' } }), JournalInvalidPublicationError);
   });
 
   it('refuses a row of another type for an evicted item, which remembers its type', () => {
     const { journal, publish } = withEvictedTool();
-    expectNoChange(journal, () => journal.append(publish(), { ...text('tool:w1', 'w1:text', 'Text'), turnId: 'turn-1' }), JournalItemTypeChangedError);
-    expectNoChange(journal, () => journal.append(publish(), todoRow('tool:w1')), JournalItemTypeChangedError);
+    expectNoChange(journal, () => journal.append(publish(), { ...text('tool:w1', 'w1:text', 'Text'), turnId: 'turn-1' }), JournalInvalidPublicationError);
+    expectNoChange(journal, () => journal.append(publish(), todoRow('tool:w1')), JournalInvalidPublicationError);
   });
 
   it('still accepts a late row for an item stored without a type', () => {
@@ -117,6 +117,6 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
     journal.append(publish(), text('b', 'b:1', 'Beta', 'turn-2'));
     journal.complete(publish(), 'b', DIGEST);
     journal.evict(1);
-    expectNoChange(journal, () => journal.append(publish(), text('a', 'a:2', ' more', 'turn-1')), JournalBodyMissingError);
+    expectNoChange(journal, () => journal.append(publish(), text('a', 'a:2', ' more', 'turn-1')), JournalInvalidPublicationError);
   });
 });

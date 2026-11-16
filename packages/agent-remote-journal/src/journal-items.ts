@@ -2,11 +2,11 @@ import type { AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry, Tim
 import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
 import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 
-import { JournalBodyMissingError, JournalInvalidRowError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
+import { JournalInvalidPublicationError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
 
 export function rowTimestamp(itemKey: string, occurredAt: number): string {
   const time = new Date(occurredAt);
-  if (Number.isNaN(time.getTime())) throw new JournalInvalidRowError(itemKey, 'occurredAt is not a time that can be stamped');
+  if (Number.isNaN(time.getTime())) throw new JournalInvalidPublicationError(`Row of ${itemKey}: occurredAt is not a time that can be stamped.`);
   return time.toISOString();
 }
 
@@ -32,7 +32,7 @@ export function canonicalRow(row: JournalRow): CanonicalTimelineRow {
 
 /** The projected entry of a resident item, as pages show it and live rows merge into it. */
 export function itemEntry(item: JournalItem): ProjectedTimelineEntry {
-  if (item.body === null) throw new JournalBodyMissingError(item.itemKey);
+  if (item.body === null) throw new JournalInvalidPublicationError(`Item ${item.itemKey} has no resident body.`);
   return {
     providerId: item.providerId, item: structuredClone(item.body.item),
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
@@ -47,7 +47,7 @@ export function itemEntry(item: JournalItem): ProjectedTimelineEntry {
  * into the body in place. Its sequence ranges are empty: the caller extends the item's own.
  */
 export function residentEntry(item: JournalItem): ProjectedTimelineEntry {
-  if (item.body === null) throw new JournalBodyMissingError(item.itemKey);
+  if (item.body === null) throw new JournalInvalidPublicationError(`Item ${item.itemKey} has no resident body.`);
   return {
     providerId: item.providerId, item: item.body.item,
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),

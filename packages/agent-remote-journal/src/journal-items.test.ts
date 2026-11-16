@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { bodyFromRow, itemEntry, stampRow } from './journal-items.js';
-import { JournalBodyMissingError, type JournalItem } from './types.js';
+import { JournalInvalidPublicationError, type JournalItem } from './types.js';
 
 describe('journal items', () => {
   it('stamps a row with its epoch, sequence and timestamp without sharing the input', () => {
@@ -14,7 +14,7 @@ describe('journal items', () => {
 
   it('refuses to project an evicted item', () => {
     const evicted: JournalItem = { itemKey: 'm1', providerId: 'codex', seqStart: 1, seqEnd: 1, sourceSeqRanges: [{ startSeq: 1, endSeq: 1 }], state: 'complete', liveOnly: false, body: null };
-    expect(() => itemEntry(evicted)).toThrow(JournalBodyMissingError);
+    expect(() => itemEntry(evicted)).toThrow(JournalInvalidPublicationError);
   });
 
   it('builds the body of a complete item read again from history', () => {

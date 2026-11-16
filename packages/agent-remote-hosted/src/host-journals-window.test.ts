@@ -115,12 +115,14 @@ describe('a window published to a journal', () => {
     const opened = await open(journals);
     await journals.publish(HOST, SESSION, opened.generation, [window(1, items.slice(0, 2)), head(2)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
-    const refused = await journals.publish(HOST, SESSION, opened.generation, [window(3, items)]);
+    const rewritten = [done('a', 'rewritten'.repeat(60)), ...items.slice(1)];
+    const refused = await journals.publish(HOST, SESSION, opened.generation, [window(3, rewritten)]);
     expect(refused.refusal).toMatchObject({ reason: 'quota_exceeded', sequence: 3 });
     expect(refused).toMatchObject({ unserved: true, hasHead: false });
     expect(journals.served(HOST, SESSION)).toBe(false);
     expect((await memory.load(KEY))!.meta.incomplete).toBe(true);
     expect(await keys(memory)).toEqual(['a', 'b']);
+    expect((await memory.load(KEY))!.items.every(item => item.body === null)).toBe(true);
   });
 
   it('refuses the window of a Host whose other sessions fill its budget, and serves nothing from the session', async () => {
@@ -137,6 +139,46 @@ describe('a window published to a journal', () => {
     const retried = await journals.publish(HOST, SESSION, again.generation, [window(1, ['a', 'b', 'c'].map(key => done(key, key.repeat(600)))), head(2)]);
     expect(retried.refusal).toMatchObject({ reason: 'quota_exceeded' });
     expect(journals.served(HOST, SESSION)).toBe(false);
+  });
+
+  it('leaves a window the journal already holds unchanged and served when other sessions fill the Host and bodies were evicted', async () => {
+    const { journals, memory } = fixture({ limits: { hostBytes: 8000 }, retention: { turns: 1, minItems: 0 } });
+    const items = ['a', 'b', 'c'].map((key, at) => done(key, key.repeat(800), { turnId: `turn-${at}` }));
+    let opened = await open(journals);
+    await journals.publish(HOST, SESSION, opened.generation, [window(1, items), head(2)]);
+    expect((await memory.load(KEY))!.items.map(item => item.body !== null)).toEqual([false, false, true]);
+    const other = await journals.open(HOST, 'codex:other', 'controller-1', {}) as JournalOpened;
+    expect((await journals.publish(HOST, 'codex:other', other.generation, [{ sequence: 1, op: 'append', row: { ...rowOf('big', 'x'.repeat(5000)), turnId: 'turn-9' } }])).refusal).toBeUndefined();
+    opened = await open(journals);
+    const again = await journals.publish(HOST, SESSION, opened.generation, [window(opened.watermark + 1, items), head(opened.watermark + 2)]);
+    expect(again.refusal).toBeUndefined();
+    expect(again.window).toEqual({ outcome: 'unchanged' });
+    expect(again.hasHead).toBe(true);
+    expect(journals.served(HOST, SESSION)).toBe(true);
+  });
+
+  it('drops an open live-only item over the byte cap when the window is admitted, so the session settles instead of staying refused', async () => {
+    const { journals, memory } = fixture({ limits: { sessionBytes: 40_000 } });
+    const opened = await open(journals);
+    const first = await journals.publish(HOST, SESSION, opened.generation, [{ sequence: 1, op: 'append', row: { ...rowOf('l', 'l'.repeat(36_000)), liveOnly: true } }]);
+    expect(first.refusal).toBeUndefined();
+    const result = await journals.publish(HOST, SESSION, opened.generation, [window(2, [done('a', 'a'.repeat(6000)), done('b', 'b'.repeat(6000))]), head(3)]);
+    expect(result.refusal).toBeUndefined();
+    expect(result.hasHead).toBe(true);
+    expect(await keys(memory)).toEqual(['a', 'b']);
+  });
+
+  it('keeps an incomplete journal incomplete and unserved across a Relay restart', async () => {
+    const { journals, store, memory } = fixture({ limits: { sessionBytes: 3000 } });
+    const opened = await open(journals);
+    await journals.publish(HOST, SESSION, opened.generation, [window(1, [done('a')]), head(2)]);
+    expect((await journals.publish(HOST, SESSION, opened.generation, [{ sequence: 3, op: 'append', row: rowOf('big', 'x'.repeat(5000)) }])).refusal).toMatchObject({ reason: 'quota_exceeded' });
+    const restarted = createHostJournals({ store });
+    expect(await restarted.servedSessions(HOST)).toEqual([]);
+    expect((await memory.catalog.list(`${HOST}:`)).map(entry => entry.hasHead)).toEqual([false]);
+    expect((await memory.load(KEY))!.meta.incomplete).toBe(true);
+    const again = await restarted.open(HOST, SESSION, 'controller-1', {}) as JournalOpened;
+    expect((await restarted.publish(HOST, SESSION, again.generation, [head(again.watermark + 1)])).refusal).toMatchObject({ reason: 'incomplete' });
   });
 
   it('refuses a live row too large for the room without emptying the journal, and the next window rebuilds it whole', async () => {
@@ -164,7 +206,7 @@ describe('a window published to a journal', () => {
         { sequence: at * 2 + 1, op: 'append', row: live(key).row }, { sequence: at * 2 + 2, op: 'complete', itemKey: key, digest: `digest-${key}` },
       ]);
       expect(result.refusal).toBeUndefined();
-      dropped += result.droppedLiveOnly ?? 0;
+      dropped += result.droppedLiveOnly ? 1 : 0;
     }
     expect(dropped).toBeGreaterThan(0);
     const kept = await keys(memory);

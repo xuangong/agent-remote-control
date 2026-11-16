@@ -8,7 +8,7 @@ import { entryFromRow, mergeRowIntoEntry, rowItemKey, type CanonicalTimelineRow 
 export const MESSAGE_BUDGET_BYTES = 4 * 1024 * 1024;
 
 /** The key prefix of items the Controller makes itself, such as a question it asks. A provider never supplies a key that starts with it. */
-export const CONTROLLER_ITEM_KEY_PREFIX = 'controller:';
+const CONTROLLER_ITEM_KEY_PREFIX = 'controller:';
 
 /** One item of the Controller's timeline: its rows in order, and what the provider said about it. */
 export interface TimelineItem {
@@ -68,7 +68,7 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
 export const digestOf = (item: TimelineItem): Promise<string> => itemDigest(mergedRow(item).item);
 
 /** What a message carries besides its entries, under the longest session key; counted once per message. */
-export const MESSAGE_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1, entries: [] })) - 2;
+const MESSAGE_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1, entries: [] })) - 2;
 
 /** The longest session key the wire accepts, so an entry measured here encodes under any real key. */
 const PROBE = { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1 } as const;

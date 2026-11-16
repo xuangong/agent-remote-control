@@ -9,9 +9,9 @@ import {
 export type { JournalPublisherDiagnostic, JournalSource, PublisherLimits } from './journal-publication.js';
 
 /** The connection's way to write journal messages, held while the Relay's grant holds. */
-export interface JournalWriter { send(json: string): void }
+interface JournalWriter { send(json: string): void }
 
-export interface JournalPublisherOptions {
+interface JournalPublisherOptions {
   /** The providers whose adapters declare journal support. Sessions of any other provider are not published. */
   providers(): Iterable<string>;
   /** Names this Controller process to the Relay. A restart is a different publisher, and a reconnect is the same one. */
@@ -23,7 +23,7 @@ export interface JournalPublisherOptions {
   diagnostic?(entry: JournalPublisherDiagnostic): void;
 }
 
-export interface PublishedSession {
+interface PublishedSession {
   agentId: string;
   providerId: string;
   nativeSessionId: string;

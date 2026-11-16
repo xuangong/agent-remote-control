@@ -10,8 +10,7 @@ import { evictable, retainedFrom } from './retention.js';
 import { replacementOrder } from './replacement.js';
 import { utf8ByteLength } from './utf8-size.js';
 import {
-  JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError, JournalSequenceGapError,
-  JournalUnknownItemError,
+  JournalFencedError, JournalInvalidPublicationError, JournalSequenceGapError,
   type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState, type SyncResult,
 } from './types.js';
@@ -142,17 +141,18 @@ export class SessionJournal {
   }
 
   /**
-   * Removes the oldest complete live-only items until at most `keep` live-only items and `keepBytes` of them remain, skeleton
-   * and body: nothing can rebuild them, so their place in the sequence goes with them. An open item is never removed: the next
-   * append would recreate it with only the new text. Returns the keys removed.
+   * Removes the oldest live-only items until at most `keep` live-only items and `keepBytes` of them remain, skeleton and
+   * body: nothing can rebuild them, so their place in the sequence goes with them. An open item is removed only when
+   * `includeOpen` is set (the byte cap, which must always be reachable): the next append recreates it with only the new text.
+   * Returns the keys removed.
    */
-  dropOldestLiveOnly(keep: number, keepBytes = Number.POSITIVE_INFINITY): string[] {
+  dropOldestLiveOnly(keep: number, keepBytes = Number.POSITIVE_INFINITY, includeOpen = false): string[] {
     let count = this.liveOnlyCount;
     let bytes = this.liveOnlyBytes();
     const doomed = new Set<string>();
     for (const item of this.items) {
       if (count <= Math.max(0, keep) && bytes <= keepBytes) break;
-      if (!item.liveOnly || item.state !== 'complete') continue;
+      if (!item.liveOnly || (item.state !== 'complete' && !includeOpen)) continue;
       doomed.add(item.itemKey);
       count -= 1;
       bytes -= this.sizes.get(item.itemKey) ?? 0;
@@ -191,13 +191,13 @@ export class SessionJournal {
     const existing = this.byKey.get(input.itemKey);
     if (existing && existing.body === null) {
       const keptType = existing.keptBody?.itemType;
-      if (keptType !== undefined && keptType !== input.item.type) throw new JournalItemTypeChangedError(input.itemKey, keptType, input.item.type);
-      if (!CONTENT_REPLACING_TYPES.has(input.item.type)) throw new JournalBodyMissingError(input.itemKey);
+      if (keptType !== undefined && keptType !== input.item.type) throw new JournalInvalidPublicationError(`Item ${input.itemKey} changed from ${keptType} to ${input.item.type}.`);
+      if (!CONTENT_REPLACING_TYPES.has(input.item.type)) throw new JournalInvalidPublicationError(`Item ${input.itemKey} has no resident body.`);
       return this.appendToEvicted(publication, existing, row, input.liveOnly === true);
     }
     const existingType = existing?.body?.item.type;
     if (existingType !== undefined && existingType !== input.item.type) {
-      throw new JournalItemTypeChangedError(input.itemKey, existingType, input.item.type);
+      throw new JournalInvalidPublicationError(`Item ${input.itemKey} changed from ${existingType} to ${input.item.type}.`);
     }
     if (!existing) {
       const opened = this.openItem(structuredClone(row), input.liveOnly === true);
@@ -232,7 +232,7 @@ export class SessionJournal {
    */
   protected appendToEvicted(publication: JournalPublication, existing: JournalItem, row: JournalRow, liveOnly: boolean): JournalRow {
     const kept = existing.keptBody;
-    if (!kept) throw new JournalBodyMissingError(existing.itemKey);
+    if (!kept) throw new JournalInvalidPublicationError(`Item ${existing.itemKey} has no resident body.`);
     const entry: ProjectedTimelineEntry = {
       providerId: existing.providerId,
       item: { ...structuredClone(row.item), ...(existing.background ? { background: structuredClone(existing.background) } : {}) } as AgentTimelineItem,
@@ -448,7 +448,7 @@ export class SessionJournal {
   protected requireDistinct(items: readonly JournalItemInput[]): void {
     const seen = new Set<string>();
     for (const { row } of items) {
-      if (seen.has(row.itemKey)) throw new JournalDuplicateItemError(row.itemKey);
+      if (seen.has(row.itemKey)) throw new JournalInvalidPublicationError(`Item ${row.itemKey} is repeated.`);
       seen.add(row.itemKey);
     }
   }
@@ -555,7 +555,7 @@ export class SessionJournal {
     if (!publisher || publisher.publisherId !== publication.publisherId || publisher.generation !== publication.generation) {
       throw new JournalFencedError(this.meta.sessionKey);
     }
-    if (!Number.isSafeInteger(publication.sequence) || publication.sequence < 1) throw new JournalInvalidPublicationError(publication.sequence);
+    if (!Number.isSafeInteger(publication.sequence) || publication.sequence < 1) throw new JournalInvalidPublicationError(`sequence ${String(publication.sequence)} is not a positive safe integer.`);
     if (publication.sequence > publisher.watermark + 1) throw new JournalSequenceGapError(publication.sequence, publisher.watermark);
     return publication.sequence <= publisher.watermark;
   }
@@ -567,7 +567,7 @@ export class SessionJournal {
 
   protected require(itemKey: string): JournalItem {
     const item = this.byKey.get(itemKey);
-    if (!item) throw new JournalUnknownItemError(itemKey);
+    if (!item) throw new JournalInvalidPublicationError(`Item ${itemKey} is unknown.`);
     return item;
   }
 

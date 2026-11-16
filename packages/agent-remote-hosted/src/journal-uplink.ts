@@ -28,7 +28,7 @@ export class JournalRequestError extends Error {
   }
 }
 
-export interface JournalConnectionOptions {
+interface JournalConnectionOptions {
   hostId: string;
   journals: HostJournals;
   send(message: RemoteHostUplinkMessage): void;

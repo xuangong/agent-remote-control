@@ -97,7 +97,7 @@ describe('amendments published to a journal', () => {
     const { journals } = await seeded({ liveOnlyItems: 1 });
     const live = (itemKey: string) => ({ row: { ...row(itemKey, itemKey), liveOnly: true }, digest: 'd'.repeat(64) });
     const result = await journals.publish(HOST, SESSION, 1, [{ sequence: 1, op: 'prepend', items: [live('q1'), live('q2')] }]);
-    expect(result.droppedLiveOnly).toBe(1);
+    expect(result.droppedLiveOnly).toBe(true);
   });
 });
 

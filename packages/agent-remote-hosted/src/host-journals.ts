@@ -1,6 +1,5 @@
 import {
-  bodyFromRow, JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, JournalItemTypeChangedError, JournalSequenceGapError,
-  JournalUnknownItemError, SessionJournal, utf8ByteLength,
+  bodyFromRow, JournalFencedError, JournalInvalidPublicationError, JournalSequenceGapError, SessionJournal, utf8ByteLength,
   type JournalHead, type JournalListing, type JournalPageRequest, type JournalPageResult, type JournalPublication, type JournalRow, type JournalStore,
 } from '@orchardworks/agent-remote-journal';
 import { JOURNAL_MESSAGE_MAX_BYTES, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
@@ -103,7 +102,7 @@ export interface JournalPublished {
   /** A quota refusal cleared the journal's head: the session is no longer served from it until a later head is published. */
   unserved?: true;
   /** Live-only items removed because the session passed its cap. */
-  droppedLiveOnly?: number;
+  droppedLiveOnly?: true;
   /** How the Controller's window joined the journal, when the publication carried one. */
   window?: { outcome: 'unchanged' | 'appended' | 'replaced' };
   /** A quota refused prepended older history: nothing else changed, the journal stays served and complete, and older history for the session has ended. */
@@ -357,12 +356,22 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       if (entry.op !== 'window' && journal.incomplete) throw new JournalIncompleteRefused();
       if (entry.op === 'head') return;
       if (entry.op === 'window') {
-        const entryBytes = utf8ByteLength(JSON.stringify(entry));
-        const room = roomOf(hostId, sessionKey);
-        if (journal.keptBytes() + entryBytes > room) throw new JournalQuotaRefused(room < limits.sessionBytes ? 'host' : 'session');
-        const growth = journal.extensionBytes(entry.items);
-        if (growth && journal.residentBytes() + growth > room) shrink(journal, room - growth);
+        // What sync will do decides what is checked: nothing for a window the journal already holds, the growth for an
+        // extension (after bodies are evicted for it), and what a replacement keeps plus the whole window for a replacement.
         size = undefined;
+        const room = roomOf(hostId, sessionKey);
+        const growth = journal.extensionBytes(entry.items);
+        if (growth === 0) return;
+        if (growth !== undefined) {
+          if (journal.residentBytes() + growth > room) shrink(journal, room - growth);
+          if (journal.residentBytes() + growth <= room) return;
+        }
+        journal.dropOldestLiveOnly(limits.liveOnlyItems, liveOnlyBytesMax, true);
+        if (journal.keptBytes() + utf8ByteLength(JSON.stringify(entry)) > room) {
+          // A refused window leaves the journal behind its Controller, so its bodies stop holding room the Host needs.
+          journal.evict(0);
+          throw new JournalQuotaRefused(room < limits.sessionBytes ? 'host' : 'session');
+        }
         return;
       }
       if (entry.op !== 'append' && entry.op !== 'prepend') return;
@@ -416,7 +425,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         break;
       }
       // An operation this service does not know is refused, never skipped: skipping it would advance the watermark and lose it.
-      default: throw new JournalInvalidPublicationError((entry as { sequence: number }).sequence);
+      default: throw new JournalInvalidPublicationError(`unknown operation at sequence ${String((entry as { sequence: number }).sequence)}`);
     }
   }
 
@@ -425,8 +434,6 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
     if (error instanceof JournalQuotaRefused) return { sequence, reason: 'quota_exceeded' };
     if (error instanceof JournalIncompleteRefused) return { sequence, reason: 'incomplete' };
     if (error instanceof JournalFencedError) return { sequence, reason: 'fenced' };
-    if (error instanceof JournalUnknownItemError || error instanceof JournalBodyMissingError || error instanceof JournalItemTypeChangedError
-      || error instanceof JournalDuplicateItemError || error instanceof JournalInvalidRowError) return { sequence, reason: 'invalid' };
     // Entries before the gap were lost: the publisher must open the journal again, and must not skip this refusal.
     if (error instanceof JournalSequenceGapError) return { sequence, reason: 'sequence_gap' };
     if (error instanceof JournalInvalidPublicationError) return { sequence, reason: 'invalid' };
@@ -497,7 +504,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
         }
         if (liveOnlyChanged) {
           const dropped = journal.dropOldestLiveOnly(limits.liveOnlyItems, liveOnlyBytesMax);
-          if (dropped.length > 0) published.droppedLiveOnly = dropped.length;
+          if (dropped.length > 0) published.droppedLiveOnly = true;
         }
         evictLeavers(journal);
         bytes = (await persist(hostId, sessionKey, journal)) ?? journal.residentBytes();

@@ -196,11 +196,10 @@ A journal belongs to one public session, that is, one binding of Host, provider 
   - its key and sequence range;
   - whether it is `open` or `complete`, and its content digest;
   - whether it is live-only;
-  - the `clientMessageId` alias of an echo;
-  - its revision in the journal.
+  - the `clientMessageId` alias of an echo.
 
   The index is the journal's skeleton.
-- **Retired epochs.** They are kept for seven days after a replacement, for diagnostics only. Clients never read them; a cursor on a retired epoch is reset.
+- **Epochs.** A replacement starts a new epoch and the old one is forgotten. A cursor on an epoch the journal no longer holds is reset.
 
 Pages come from the existing projector and store. `packages/agent-remote-relay/src/timeline-projector.ts` and `timeline-store.ts` use no Node APIs and can run in a Worker, so live rows and pages keep the same granularity.
 
@@ -220,35 +219,30 @@ Finalized items are stable, however: record and message ids, call ids, native it
   - The completion row carries the digest, and the Host partition stores it in the index.
   - An item interrupted mid-stream stays `open`.
   - A content row for a `complete` item reopens it: the item is `open` again and loses its digest until it completes again.
-- **Corrections.** The Controller publishes a **correction** row with the full content when a reread finds an `open` item, or a `complete` item whose digest differs. The projector uses it as the item's content and counts the earlier rows as contributors.
 - **Echoes.** A user message's item key is its native identity, never the `operationId`.
   - The Controller attaches the `operationId` as `clientMessageId` when it publishes the echo.
   - When the native id is not known at send time, the Controller records the alias the first time it observes the echo, and the index keeps it.
   - A reread therefore matches the echo by its native key and adds nothing.
 - **Items without a native identity**, such as Controller-made errors, get a key that the Controller assigns and the journal keeps.
-- **Live-only items.** Adapters mark the provider's live-only items (interaction records); the Controller marks its own (Controller errors). A reread cannot reproduce them, so the journal holds their only copy. Sealing an item makes it live-only too.
+- **Live-only items.** Adapters mark the provider's live-only items (interaction records); the Controller marks its own (Controller errors). A reread cannot reproduce them, so the journal holds their only copy. An item that was interrupted and that native history never recorded is not carried by a replacement; it may disappear (owner decision of 2026-11-16).
 
 ### Continuing a journal across reopens
 
-After every open, the Controller reconciles the history it read with the journal. An open is a first attach, a restart, a wake after release, or a provider refresh.
+After every open, the Controller sends its newest window and the Relay compares it with the journal. An open is a first attach, a restart, a wake after release, a provider refresh, or a recovery. Reopening is the one recovery for every refusal and every doubt (S2 of `docs/superpowers/plans/2026-11-16-s1-s2-journal-simplification.md`, 2026-11-16).
 
-1. **Fence.** Each uplink connection is a new publisher generation. The Host partition accepts rows only from the current generation, so a stale connection cannot write.
-2. **Read the index.** The Controller asks the Host partition for the session's item index, with each item's revision.
-3. **Keep history before live.** The adapter already delivers the reread before its single history boundary and holds live output until after it (blueprint, Provider Contract).
-   - The Controller publishes live rows only after its reconcile is committed.
-   - A correction names the item revision it was computed against. The Host partition rejects it if the item has moved, and the Controller reads that item again.
-4. **Compare only inside the reread's window.** A reread covers all history for Claude and Copilot, but only the latest page for Codex and OpenCode. Its oldest item is the anchor. Journal items older than the anchor are outside the window and stay as they are. A reread can also reach further back than the journal: when its leading items are unknown and end right before the journal's oldest item, they are older history and are prepended.
-5. **Walk the window.**
-   - An unknown item is appended.
-   - An `open` item, or a `complete` item whose digest differs, gets a correction.
-   - An identical item is skipped.
-   - A live-only item, sealed ones included, is never counted as missing. A reread that does contain one adopts the native copy through a correction.
-6. **Replace only on a genuine rewrite.** An item known inside the window but missing from the reread, or a change of order inside the window, means the native history was rewritten. Examples are an OpenCode reorder or revert, a Codex recovery, or history that shrank. The Controller then publishes a **replacement**, and the Host partition starts a new journal epoch from the reread and announces `timeline_replacement`. Live-only items carry over into the new epoch, each placed after the item that preceded it, because nothing else can rebuild them. In every other case the epoch continues.
-7. **Close a gap.** If the anchor is not in the journal, more than one page of activity went unobserved. The Controller reads further back through native history until it reaches a known item, within a bound. Past the bound it publishes a replacement.
+1. **Fence.** Each uplink connection is a new publisher generation. The Host partition accepts entries only from the current generation, so a stale connection cannot write.
+2. **Window.** The Controller sends the newest items of its timeline that fit one message, oldest first, with digests for complete items, and then the outcomes, resource bindings and head of its whole timeline. It reads no index. The adapter already delivers the reread before its single history boundary and holds live output until after it, and the Controller publishes live rows only after the window and the head are acknowledged.
+3. **The Relay compares and decides, in one place.**
+   - **Unchanged.** The journal already holds the window: an identical item has the same digest, an `open` item has the same resident content, and live-only items are skipped. Nothing is written but the watermark and the head.
+   - **Appended.** The window only adds items at the end. Each becomes a row with the next sequence, and the epoch continues.
+   - **Replaced.** Anything else is doubt: a different digest, a missing or moved item, an unknown item inside the window, an open item against a complete one, or a journal that is missing rows. The Relay starts a new epoch from the window, carries the live-only items over (each after the item that preceded it, because nothing else can rebuild them), and announces `timeline_replacement`. An interrupted open item that is not live-only is not carried.
+   A window that reaches further back than the journal is not a doubt: its leading items are older history, which the Relay does not ask for until a reader scrolls up.
+4. **Room.** The Relay admits a window whole or refuses it. Live-only items are capped so that a window always fits beside them. When the meta, the live-only items and the window do not fit the session's or the Host's budget, the window is refused, the journal is marked incomplete and taken out of serving, and the session reads through the Controller until a window fits. Bodies outside the retained window are evicted first, so an extension that fits after eviction appends.
+5. **Recover by reopening.** Whatever the Relay refused, and whatever the connection lost, the Controller opens again with a backoff and sends the window again. A journal that lost a live row is incomplete, and the next window replaces it.
 
 A provider `timeline_replacement` whose reread only adds items continues the epoch instead of replacing it. Prompt edit and fork already create a new native session in every provider, and therefore a new journal. They are not rewrites.
 
-This is what makes T6 hold.
+A client that keeps its rows by item key survives a replacement without a reset (S4); until then a replacement resets a client as it does today. This is what makes T6 hold.
 
 ### Knowing when a journal is behind
 
@@ -276,12 +270,13 @@ Catalog confirmations reveal it. They arrive about once a minute (`packages/agen
 
 ### Older history
 
-A journal begins with the history the Controller read the first time it published that session. For Claude and Copilot that is all of the history; for Codex and OpenCode it is the latest page.
+A journal begins with the newest window of the history the Controller read the first time it published that session: the items that fit one message. Older items are not uploaded on open; they arrive on the Relay's request, anchored by the journal's oldest item that is not live-only (`beforeItemKey`).
 
-A `before` page that reaches evicted bodies is filled from the Host (see Retention). A `before` page that reaches beyond anything the journal has seen is answered with `hasOlder: true`. When the Host is online, the Host partition also asks the Controller to read further. The Controller publishes the result as prepended rows with negative sequences, as `TimelineStore.prepend` does today. The client shows the older region as loading inline, and nothing else waits.
+A `before` page that reaches evicted bodies is filled from the Host (see Retention). A `before` page that reaches beyond anything the journal has seen is answered with `hasOlder: true`. When the Host is online, the Host partition also asks the Controller to read further. The Controller publishes the result as prepended rows with negative sequences, as `TimelineStore.prepend` does today, one prepend to a message. The client shows the older region as loading inline, and nothing else waits.
 
 - One older-history read is in flight per journal at a time.
-- The Host partition stamps its rows as one atomic batch below the current oldest sequence, and the item index makes a repeated read add nothing.
+- The Host partition stamps its rows as one atomic batch below the current oldest sequence, and skips items it already holds, so a repeated read adds nothing.
+- A prepend that the quota refuses leaves no hole: the journal stays served and complete, and older history for the session has ended.
 - Sequences stay dense in both directions: forward rows grow upward, prepended rows grow downward.
 
 ### Durability and fan-out
@@ -331,7 +326,7 @@ The native session on the Host is the ground truth, so a journal is a working se
 |---|---|
 | `negotiate` and `negotiated` | The Relay answers. Clients opt in with channel query flags, and the channel's `ready` frame confirms them, as it does today (`packages/agent-remote-protocol/src/session-channel.ts:49`). |
 | Snapshot | Sent from the journal head. With the flag it carries the observation time and whether it is live. Without the flag, `runtimeInfo.connection` reads `restoring` while no runtime is resident. Such clients then keep deferring sends as they do today, and their subscription counts as demand, so the runtime is woken. |
-| Timeline pages and live rows | Served from the journal, with journal epochs and sequences.<br>Pages carry projected entries in today's format, and a correction is folded into its item's entry, so no client meets a new row type.<br>A client without the flag does not receive corrections live. The skipped sequence reads as a gap, and its `after` page brings the corrected entry, which is today's recovery path.<br>The first time a session becomes journal-served, a client still holding the Controller's epoch is reset once. |
+| Timeline pages and live rows | Served from the journal, with journal epochs and sequences.<br>Pages carry projected entries in today's format, so no client meets a new row type.<br>The first time a session becomes journal-served, a client still holding the Controller's epoch is reset once. |
 | `session_control` | The Relay issues tokens at once from the last known native owner. Native-owner changes still originate at the Controller and revoke tokens. |
 | Operations | Queued at once (see Operation queue). `command_acknowledged` is still sent when the native runtime accepts. |
 | `list_commands`, `execute_command`, and resource reads not in the blob store | Forwarded to the live runtime. A released runtime is woken, and the wait shows inside the menu or the attachment, not on the conversation. |
@@ -564,7 +559,7 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
 | A Relay partition restarts or is redeployed | Devices and Controllers reconnect and resume from their cursors and acknowledged positions. Nothing reloads from the start. |
 | The Controller goes offline | Journals stay readable and operations stay queued. The Host shows as offline. |
 | A wake fails | The wake may be tried again within the operation's deadline; after that the operation settles `rejected`, because no native call was made. The journal is unaffected. |
-| Reconcile finds a rewrite | A replacement starts a new epoch and records a diagnostic. Clients swap in one step. |
+| The window differs from the journal (a rewrite, or any other doubt) | A replacement starts a new epoch and records a diagnostic. Clients swap in one step. |
 | Publishing outpaces storage | The uplink applies backpressure per session. A row is delivered and acknowledged only once durable. |
 | A storage quota is reached | The oldest rows are evicted first, staying recoverable from the Host. A session over its own budget keeps its latest content and reports a diagnostic. |
 | The Controller restarts during a wake | The operation returns to `queued` and is offered again. No native call was made. |
@@ -580,7 +575,7 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
   - how far back people scroll;
   - row rates while streaming.
 - **Budgets, not clocks.** Deterministic tests guard budgets: request counts, journal row counts, render counts. They never use wall-clock thresholds. This follows the stage 6 convention.
-- **Provider continuity.** Fixtures prove that live rows and reread rows of the same native session produce the same item keys. A reconcile adds nothing to an unchanged session, and replaces only on a genuine rewrite.
+- **Provider continuity.** Fixtures prove that live rows and reread rows of the same native session produce the same item keys. A reopen of an unchanged session leaves the journal unchanged, and the Relay replaces it only on a doubt.
 - **Exactly once.** Tests interrupt the Controller after the claim, during a wake, after the `sending` receipt, and after the native send. The first two must return the operation to `queued` with no native call made. The last two must end `unknown`, with no resend.
 - **Both modes.** The same client suite runs against crude and smart Hosts, over real HTTP and WebSocket transports.
 - **Scheduling.** Tests with a fake clock cover demand changes, budgets, the always-hot rules, and serialized wake and release.
@@ -628,7 +623,7 @@ Smart mode is enabled per Host and provider. A provider joins only once its cont
 | One busy Host overloads its partition, or outgrows one object's storage | Batching and coalescing bound writes; per-session budgets, a per-Host quota, chunked rows and blob offload bound storage. P0 measures both, and a busy Host can later be split by session. |
 | One channel per page meets the 16-channel cap per subject (`packages/agent-remote-hosted/src/gateway.ts:1007-1011`) | P1 revisits the cap per device, since a channel no longer holds Controller streams. |
 | A backfill or a Team message wakes runtimes nobody uses | Backfill never starts a runtime; wakes from Team traffic and automation count against a per-Host wake budget. |
-| A reconcile races live output, or a partial reread looks like a rewrite | Publisher fencing, history-before-live ordering, revision-checked corrections, and comparison only inside the reread's window. |
+| A reconcile races live output, or a partial reread looks like a rewrite | Publisher fencing, history-before-live ordering, and a window that the Relay compares in one place and replaces on any doubt. |
 | Content stored on the hosted Relay raises privacy questions | Deployment documentation states what is stored and for how long; deleting a binding or an account deletes its journals and blobs; reads are authorized like streams. |
 
 ### Alternatives considered

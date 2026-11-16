@@ -385,3 +385,15 @@ Measured against the assessment: publisher mutable fields 33 -> 19 (the assessme
 4. **`rebindOps` stays beside `outcomeOps`** as an idempotent restatement after each open, because item digests do not cover resource bindings. The assessment listed "rebind re-sending" for deletion; this plan deletes the unacknowledged-rebind machinery and keeps the restatement (zero state, no write when nothing changed).
 5. **Four per-item refusal reasons collapse into `invalid`, and `journal_refused` loses `itemKey`.** They only drove the deleted skip-and-renumber path; every Relay refusal now heals by reopening, and `skipped` holds only locally unencodable items.
 6. **"Zero writes" means no item, epoch or sequence write.** Each open still writes meta (generation, watermark, head).
+
+### Notes after the review of Tasks 7 to 9 (2026-11-16)
+
+Fixed after the review: the window is admitted whole or refused, so a live-only backlog or a full Host cannot loop (live-only items are capped by bytes; a window that does not fit leaves the journal incomplete and out of serving while the Controller retries with backoff, and the `trim`, `trimmed` and `journal_window_trimmed` are gone); bodies are evicted before an extension is synced, so it appends instead of replacing; the Controller reads native history for a request outside the publishing lane; a prepend refused for quota answers `journal_older_done` and does not reopen; a prepend restates outcomes as well as bindings; a request that does not fit the 32 queued is refused at once.
+
+Recorded, not done:
+
+7. **The epoch changes when a stream is interrupted mid-item.** An open item that is not live-only is not carried by a replacement, and an open item whose resident content differs from the window's replaces. The owner's decision is that the client of S4 absorbs a replacement by item key; S3 measures replacements per open.
+8. **An interrupted open item leaves a hole in history, and history older than the window is not compared.** A rewrite of history older than the window is seen only when a reader asks for it.
+9. **An incomplete journal while the window waits for older pages.** The Controller reads older pages before it sends an empty window, so a journal can stay incomplete for as long as those reads take.
+10. **Dropping the items outside the retained window instead of evicting their bodies** (fills, `keptBody`, `appendToEvicted`, `journal_fill*`) stays the candidate named in Task 10; it is the owner's call.
+11. **Kept in Task 10:** `JournalOpenRefusal.unserved` and its fan-out in `journal-uplink.ts`. The Relay primary still uses them when a partition cannot take a Controller's journal, so that the streams of a served session close and read crude (S1 Task 1). Only the `index_too_large` and reset users of it were deleted.

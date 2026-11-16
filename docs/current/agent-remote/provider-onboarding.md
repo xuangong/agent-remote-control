@@ -62,7 +62,7 @@ Copy this record once per root integration and once for materially different chi
 
 ## Journal support
 
-A provider joins Relay journals only through its adapter: it declares `journal: { itemIdentity: 1 }` once every timeline observation carries an `itemIdentity` and continuity fixtures pass (see the Provider Contract in `docs/blueprint/agent-remote-observation.md`). The fixture records a live session and the same session opened again, and `expectContinuity` must find the same item keys and merged-content digests, add nothing to the journal, and call for a replacement only when native history really changed. Until then the provider's sessions stay on forwarding, which is always safe. The Controller asks for `journal=2` only when some provider declares the capability.
+A provider joins Relay journals only through its adapter: it declares `journal: { itemIdentity: 1 }` once every timeline observation carries an `itemIdentity` and continuity fixtures pass (see the Provider Contract in `docs/blueprint/agent-remote-observation.md`). The fixture records a live session and the same session opened again, and `expectContinuity` must find the same item keys and merged-content digests, and the Relay's journal must answer `unchanged` when the reread window is compared with the journal the live session built, and replace only when native history really changed. Until then the provider's sessions stay on forwarding, which is always safe. The Controller asks for `journal=1` only when some provider declares the capability.
 
 ## Verification and release record
 

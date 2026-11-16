@@ -121,6 +121,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   let phase: Phase = 'new';
   const isPhase = (expected: Phase): boolean => phase === expected;
   let activityOnly = false;
+  /** The client asked for item keys: its pages and live events carry them, and it is told so. */
+  let keyed = false;
   let subscribed = false;
   let hostReady = false;
   /** Something was published while the Snapshot was being read; the head and cursor are read again once it is sent. */
@@ -214,7 +216,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     protocolVersion: PROTOCOL_VERSION, type: 'agent_stream',
     payload: {
       agentId: publicAgentId, epoch: row.epoch, seq: row.seq, timestamp: row.timestamp,
-      event: { type: 'timeline', providerId: row.providerId, item: row.item, ...(row.turnId === undefined ? {} : { turnId: row.turnId }), resources: row.resources },
+      event: { type: 'timeline', providerId: row.providerId, ...(keyed ? { itemKey: row.itemKey } : {}), item: row.item, ...(row.turnId === undefined ? {} : { turnId: row.turnId }), resources: row.resources },
     },
   });
 
@@ -276,7 +278,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     const status = await reads.status();
     if (!isPhase('negotiating')) return;
     if (!status?.head) { reads.noHead?.(); shutdown(1012, 'Session journal unavailable'); return; }
-    sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true });
+    sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', sessionControl: true, ...(keyed ? { itemKeys: true as const } : {}) });
     if (activityOnly) {
       observe(status.head.snapshot, status.cursor);
     } else {
@@ -400,6 +402,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       requestId: payload.requestId, agentId: publicAgentId, direction: payload.direction,
       ...(payload.cursor === undefined ? {} : { cursor: payload.cursor }),
       limit: Math.min(payload.limit ?? PAGE_DEFAULT_LIMIT, PAGE_MAX_LIMIT),
+      ...(keyed ? { itemKeys: true } : {}),
     };
     try {
       let result = await reads.page(query);
@@ -448,6 +451,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       }
       phase = 'negotiating';
       activityOnly = message.observation === 'activity';
+      keyed = message.itemKeys === true && !activityOnly;
       negotiate().catch(readFailure);
       return;
     }

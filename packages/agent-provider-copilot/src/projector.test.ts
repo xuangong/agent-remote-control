@@ -40,7 +40,7 @@ it.each(['live', 'history'] as const)('keeps queued interactions distinct and st
 }, 10000);
 it('reports compaction failure without claiming completion or failing the turn', () => {
  const projected = new Projector().project(event('session.compaction_complete', {success: false, error: 'context unavailable'}));
- expect(projected.map(p => p.event)).toMatchObject([{type: 'timeline', item: {type: 'compaction', status: 'loading'}}, {type: 'timeline', item: {type: 'error', message: expect.stringContaining('context unavailable')}}]);
+ expect(projected.map(p => p.event)).toMatchObject([{type: 'timeline', item: {type: 'compaction', status: 'failed'}}, {type: 'timeline', item: {type: 'error', message: expect.stringContaining('context unavailable')}}]);
 }, 10000);
 
 it('assigns input after a completed ordinary turn to its new turn', () => {

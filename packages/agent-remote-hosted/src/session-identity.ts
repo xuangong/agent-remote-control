@@ -19,3 +19,17 @@ export function sessionIdentityMessage(json: string, from: string, to: string, d
   else return json;
   return JSON.stringify(message);
 }
+
+/**
+ * A Controller built before item keys decodes `negotiate` with a strict schema and answers an unknown field with a protocol
+ * error. The Relay answers the `itemKeys` flag itself (only a journal-served stream echoes it), so no Controller sees it.
+ */
+export function withoutItemKeysFlag(json: string): string {
+  if (!json.includes('"itemKeys"')) return json;
+  try {
+    const message = JSON.parse(json);
+    if (message?.type !== 'negotiate' || !('itemKeys' in message)) return json;
+    delete message.itemKeys;
+    return JSON.stringify(message);
+  } catch { return json; }
+}

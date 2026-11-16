@@ -76,6 +76,7 @@ describe('the item identity of a Copilot timeline observation', () => {
     expect(failed.map(p => [p.event.type === 'timeline' ? p.event.item.type : null, p.identity?.key, p.identity?.completes])).toEqual([
       ['compaction', `compaction:${start.id}`, undefined], ['compaction', `compaction:${start.id}`, true], ['error', expect.stringMatching(/^error:/), true],
     ]);
+    expect(failed.map(p => p.event.type === 'timeline' && p.event.item.type === 'compaction' ? p.event.item.status : null)).toEqual(['loading', 'failed', null]);
   });
 
   it('finishes streamed text and reasoning that never got a final message when the turn is aborted, as live-only items', () => {

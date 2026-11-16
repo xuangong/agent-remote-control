@@ -115,7 +115,7 @@ export async function startRelay(options: RelayOptions = {}) {
   closers.push(() => broker.close());
 
   /** The Host's Controller, connected with `journal=1` unless `journal` is false. It answers the attach of the session and the streams the Relay opens. */
-  async function connectController(behavior: { journal?: boolean; answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean } = {}) {
+  async function connectController(behavior: { journal?: boolean; answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean; strictNegotiate?: boolean } = {}) {
     const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${behavior.journal === false ? '' : '?journal=1'}`, { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
@@ -142,7 +142,10 @@ export async function startRelay(options: RelayOptions = {}) {
         if (!stream) return;
         const inner = JSON.parse(message.message);
         stream.received.push(inner);
-        if (inner.type === 'negotiate') {
+        if (inner.type === 'negotiate' && behavior.strictNegotiate && Object.keys(inner).some(field => !['protocolVersion', 'type', 'observation'].includes(field))) {
+          // A Controller built before item keys decodes `negotiate` strictly and answers an unknown field with a protocol error.
+          toStream(stream.streamId, { type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field in negotiate.', recoverable: false } });
+        } else if (inner.type === 'negotiate') {
           toStream(stream.streamId, { type: 'negotiated', sessionControl: true });
           toStream(stream.streamId, { type: 'agent_snapshot', payload: snapshot('running', PUBLIC_ID) });
           toStream(stream.streamId, { type: 'session_control', payload: { agentId: PUBLIC_ID, revision: 'rev-1', access: 'read_only', available: true } });

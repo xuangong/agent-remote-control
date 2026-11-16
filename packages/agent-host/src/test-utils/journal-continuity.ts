@@ -80,6 +80,8 @@ export async function journalOfRun(live: readonly ProviderObservation[]) {
     keys: (): string[] => journal.state().items.map(({ itemKey }) => itemKey),
     openKeys: (): string[] => journal.state().items.filter(({ state }) => state === 'open').map(({ itemKey }) => itemKey),
     liveOnlyKeys: (): string[] => journal.state().items.filter(({ liveOnly }) => liveOnly).map(({ itemKey }) => itemKey),
+    /** The status of every compaction item, in order. */
+    compactionStatuses: (): string[] => journal.state().items.flatMap(({ body }) => body?.item.type === 'compaction' ? [body.item.status] : []),
   };
 }
 

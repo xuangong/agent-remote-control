@@ -134,16 +134,27 @@ describe('a recorded Copilot session that is opened again', () => {
     expect((await journalOf(relay)).state().items.some(value => value.liveOnly)).toBe(name !== 'compaction');
   });
 
-  it('appends the snapshot of the todo list that the reopened session publishes when it opens, and replaces nothing', async () => {
+  it('keeps one todo board through five Controller starts that each publish it, a changed board updating it in place', async () => {
     const { run, relay, publisher } = await published('todos');
-    const snapshot = run.live.filter(({ itemIdentity }) => itemIdentity?.key.startsWith('todo:')).at(-1)!;
+    const snapshot = run.live.filter(({ itemIdentity }) => itemIdentity?.key === 'todo').at(-1)!;
+    const board = (done: boolean): ProviderObservation => {
+      const event = snapshot.event;
+      if (event.type !== 'timeline' || event.item.type !== 'todo') throw new Error('The recording holds no todo snapshot.');
+      return { ...snapshot, event: { ...event, item: { ...event.item, items: event.item.items.map(task => ({ ...task, completed: done })) } } };
+    };
     const keys = await keysOf(relay);
     const epoch = (await journalOf(relay)).epoch;
     const reported = windows(relay).length;
-    await reopenFrom(relay, publisher, run.reread, [{ ...snapshot, sourceKey: 'copilot:local:reopen', itemIdentity: { key: 'todo:reopened', completes: true, liveOnly: true } }]);
-    expect(windows(relay, reported)).toEqual(['appended']);
+    let current = publisher;
+    for (const [at, observation] of [snapshot, board(true), board(true), board(false), board(false)].entries()) {
+      current = (await restart(relay, current, run.reread, { live: [{ ...observation, sourceKey: `copilot:local:restart-${at}` }] })).publisher;
+    }
+    const outcomes = windows(relay, reported);
+    expect(outcomes).toHaveLength(5);
+    expect(outcomes.every(outcome => outcome === 'unchanged' || outcome === 'appended')).toBe(true);
     expect((await journalOf(relay)).epoch).toBe(epoch);
-    expect(await keysOf(relay)).toEqual([...keys, 'todo:reopened']);
+    expect(await keysOf(relay)).toEqual(keys);
+    expect((await keysOf(relay)).filter(key => key === 'todo')).toHaveLength(1);
   });
 
   describe('interrupted', () => {

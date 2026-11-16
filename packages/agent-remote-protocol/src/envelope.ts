@@ -4,7 +4,7 @@ import { SafeNonNegativeInteger } from './cursor.js';
 import { BackgroundActivity } from './background-activity.js';
 import { ResourceBinding } from './resources.js';
 import { AgentRuntimeInfo } from './snapshot.js';
-import { AgentTimelineItem, AgentUsage } from './timeline.js';
+import { AgentTimelineItem, AgentUsage, ItemKey } from './timeline.js';
 import { ProtocolVersionSchema } from './version.js';
 
 const NonEmptyString = Type.String({ minLength: 1 });
@@ -19,6 +19,7 @@ const TurnId = { turnId: Type.Optional(NonEmptyString) };
 export const PublicAgentTimelineEvent = Strict({
   type: Type.Literal('timeline'),
   ...ProviderEvent,
+  itemKey: Type.Optional(ItemKey),
   item: AgentTimelineItem,
   ...TurnId,
   resources: Type.Array(ResourceBinding),

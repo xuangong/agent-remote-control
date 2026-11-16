@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { liveOnlyKeyViolations, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 const mock = vi.hoisted(() => ({client: {} as any, native: {} as any, config: {} as any, handler: undefined as any, history: [] as any[]}));
 vi.mock('@github/copilot-sdk', () => ({RuntimeConnection: {forStdio: (x: unknown) => x}, CopilotClient: class {
   constructor() { return mock.client; }
@@ -558,7 +558,7 @@ it('publishes native planning mode and completes identity-bound plan approval', 
   expect(await reply).toEqual({approved: true, selectedAction: 'interactive'});
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
-it('publishes each todo snapshot as a live-only item of its own, including the one taken when the session opens', async () => {
+it('publishes the todo board as one live-only item named todo, updated by each snapshot including the one taken when the session opens', async () => {
  let rows: any[] = [{id: '1', title: 'Implement', status: 'in_progress'}, {id: '2', title: 'Verify', status: 'done'}];
  mock.native.rpc.plan = {readSqlTodos: vi.fn(async () => ({rows}))};
  const {provider, session} = await open(); const seen = await collect(session);
@@ -566,10 +566,11 @@ it('publishes each todo snapshot as a live-only item of its own, including the o
   await new Promise(r => setImmediate(r));
   const todos = () => seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'todo' ? [{items: v.event.item.items, identity: v.itemIdentity}] : []);
   expect(todos()).toHaveLength(1);
-  expect(todos()[0]).toMatchObject({items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}], identity: {key: expect.stringMatching(/^todo:[0-9a-f-]{36}$/), completes: true, liveOnly: true}});
+  expect(todos()[0]).toMatchObject({items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}], identity: {key: 'todo', completes: true, liveOnly: true}});
   rows = []; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
   expect(todos().map(t => t.items)).toEqual([todos()[0]!.items, []]);
-  expect(new Set(todos().map(t => t.identity?.key)).size).toBe(2);
+  expect(new Set(todos().map(t => t.identity?.key))).toEqual(new Set(['todo']));
+  expect(liveOnlyKeyViolations(seen.values.filter((v): v is ProviderObservation => v.type === 'observation'))).toEqual([]);
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
 

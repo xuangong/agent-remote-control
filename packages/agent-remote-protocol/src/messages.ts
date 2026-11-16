@@ -36,6 +36,8 @@ export const NegotiateRequest = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('negotiate'),
   observation: Type.Optional(Type.Literal('activity')),
+  /** Asks for item keys on timeline entries and live events. A Relay that serves from a journal echoes it; a Controller never sees it. */
+  itemKeys: Type.Optional(Type.Literal(true)),
 });
 export type NegotiateRequest = Static<typeof NegotiateRequest>;
 
@@ -43,6 +45,7 @@ export const NegotiateResponse = Strict({
   protocolVersion: ProtocolVersionSchema,
   type: Type.Literal('negotiated'),
   sessionControl: Type.Optional(Type.Literal(true)),
+  itemKeys: Type.Optional(Type.Literal(true)),
 });
 export type NegotiateResponse = Static<typeof NegotiateResponse>;
 

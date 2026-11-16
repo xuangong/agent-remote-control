@@ -187,7 +187,7 @@ function findProjection(entries: readonly ProjectedTimelineEntry[], row: Canonic
       && entry.item.callId === callId);
     return index === -1 ? undefined : index;
   }
-  if (row.item.type === 'compaction' && row.item.status === 'completed') {
+  if (row.item.type === 'compaction' && row.item.status !== 'loading') {
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
       if (entry?.item.type !== 'compaction' || !sameContext(entry, row)) continue;

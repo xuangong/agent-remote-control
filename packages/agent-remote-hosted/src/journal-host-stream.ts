@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { NativeSessionOwner, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
-import { sessionIdentityMessage } from './session-identity.js';
+import { sessionIdentityMessage, withoutItemKeysFlag } from './session-identity.js';
 import { RELAY_SOCKET_OPEN, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 /** The messages and bytes a stream holds for the Controller before it accepts the stream. */
@@ -157,7 +157,7 @@ export function createHostStreamOpener(context: HostStreamContext): HostStreamOp
         send(raw) {
           if (closed) throw new HostStreamRefusal('host_stream_closed', 'The Controller session closed.');
           let outgoing: string;
-          try { outgoing = sessionIdentityMessage(raw, entry.publicAgentId, entry.runtimeAgentId, 'client'); }
+          try { outgoing = withoutItemKeysFlag(sessionIdentityMessage(raw, entry.publicAgentId, entry.runtimeAgentId, 'client')); }
           catch { throw new HostStreamRefusal('invalid_session_target', 'The message addresses another session.'); }
           if (!entry.ready) {
             const held = entry.buffered.reduce((sum, value) => sum + encoder.encode(value).byteLength, 0);

@@ -1,3 +1,4 @@
+import { liveOnlyKeyViolations } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { recording } from './test-utils/copilot-recordings.js';
@@ -12,6 +13,7 @@ describe('Copilot journal continuity, from the recordings of the real CLI', () =
     expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
     expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
     expect(journal.openKeys()).toEqual([]);
+    expect(liveOnlyKeyViolations(run.live)).toEqual([]);
   });
 
   it('gives every row an identity and none a key the Controller keeps for itself', async () => {
@@ -37,8 +39,7 @@ describe('Copilot journal continuity, from the recordings of the real CLI', () =
     const run = recording('todos');
     const journal = await journalOfRun(run.live);
     const snapshots = journal.liveOnlyKeys();
-    expect(snapshots).toHaveLength(2);
-    expect(snapshots.every(key => key.startsWith('todo:'))).toBe(true);
+    expect(snapshots).toEqual(['todo']);
     expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
     expect(journal.liveOnlyKeys()).toEqual(snapshots);
     expect(run.reread.some(({ event }) => event.type === 'timeline' && event.item.type === 'todo')).toBe(false);
@@ -52,9 +53,10 @@ describe('Copilot journal continuity, from the recordings of the real CLI', () =
     expect(journal.liveOnlyKeys().filter(key => key.startsWith('reasoning:'))).toHaveLength(1);
   });
 
-  it('compaction: a failed one finishes its item, beside an error item', async () => {
+  it('compaction: a failed one ends as failed, beside an error item', async () => {
     const run = recording('compaction');
     const journal = await journalOfRun(run.live);
+    expect(journal.compactionStatuses()).toEqual(['completed', 'failed']);
     expect(journal.keys().filter(key => key.startsWith('compaction:'))).toHaveLength(2);
     expect(journal.keys().filter(key => key.startsWith('error:'))).toHaveLength(1);
     expect(journal.openKeys()).toEqual([]);

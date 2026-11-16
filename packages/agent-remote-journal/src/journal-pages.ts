@@ -9,6 +9,8 @@ export interface JournalPageRequest {
   direction: TimelineDirection;
   cursor?: TimelineHistoryCursor;
   limit: number;
+  /** The entries carry their item keys. A reader that did not ask for them gets the entries it always got, so an older reader can be served by a newer store. */
+  itemKeys?: boolean;
 }
 
 export interface JournalPageView {
@@ -67,7 +69,7 @@ function page(view: JournalPageView, request: JournalPageRequest, selected: read
           ? view.items.some(({ seqStart }) => seqStart < first.seqStart) || (servedOlder && first === view.items[0])
           : servedOlder,
         hasNewer: endSeq === undefined ? false : view.items.some(({ seqEnd }) => seqEnd > endSeq),
-        entries: selected.map(itemEntry),
+        entries: selected.map(item => itemEntry(item, request.itemKeys === true)),
       },
     },
   };

@@ -192,9 +192,9 @@ export class Projector {
         if (event.data.success) {
           return timeline({type: 'compaction', status: 'completed', trigger: event.data.trigger === 'manual' ? 'manual' : event.data.trigger ? 'auto' : undefined, preTokens: event.data.preCompactionTokens}, event.id, { key: itemKey, completes: true });
         }
-        // The item has no failed state: it ends as it began, and the failure is told by an error item beside it.
+        // The item ends as failed, and the error item beside it tells the cause.
         return [
-          ...timeline({type: 'compaction', status: 'loading'}, event.id, { key: itemKey, completes: true }),
+          ...timeline({type: 'compaction', status: 'failed'}, event.id, { key: itemKey, completes: true }),
           ...timeline({type: 'error', message: `Copilot compaction failed: ${event.data.error ?? 'Unknown native error'}`}, `${event.id}:error`, { key: `error:${event.id}`, completes: true }),
         ];
       }

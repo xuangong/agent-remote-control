@@ -34,7 +34,7 @@ export type AgentTimelineItem = (
   | { type: 'todo'; items: AgentTaskItem[] }
   | { type: 'interaction'; request: AgentInteractionRequest; response: AgentInteractionResponse }
   | { type: 'error'; message: string }
-  | { type: 'compaction'; status: 'loading' | 'completed'; trigger?: 'auto' | 'manual'; preTokens?: number }
+  | { type: 'compaction'; status: 'loading' | 'completed' | 'failed'; trigger?: 'auto' | 'manual'; preTokens?: number }
 ) & { background?: import('./background-activity.js').BackgroundActivity };
 
 export interface AgentUsage {
@@ -137,7 +137,11 @@ export interface ProviderItemIdentity {
    * empty body would wipe their content, so such an adapter repeats the full content with `completes`.
    */
   completes?: true;
-  /** A reread of native history cannot reproduce this item, so the journal keeps its only copy. */
+  /**
+   * A reread of native history cannot reproduce this item, so the journal keeps its only copy. The key of a live-only item
+   * names its kind in the session, not an occurrence: a session holds at most one live-only key per item type (`todo`, not
+   * `todo:<uuid>`), and a later observation under that key updates the item in place. `liveOnlyKeyViolations` checks it.
+   */
   liveOnly?: true;
 }
 

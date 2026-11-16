@@ -64,7 +64,7 @@ export const AgentTimelineItem = Type.Union([
   Item({ type: Type.Literal('error'), message: Type.String() }),
   Item({
     type: Type.Literal('compaction'),
-    status: Type.Union([Type.Literal('loading'), Type.Literal('completed')]),
+    status: Type.Union([Type.Literal('loading'), Type.Literal('completed'), Type.Literal('failed')]),
     trigger: Type.Optional(Type.Union([Type.Literal('auto'), Type.Literal('manual')])),
     preTokens: Type.Optional(SafeNonNegativeInteger),
   }),
@@ -98,8 +98,12 @@ export const TimelineCollapse = Type.Union([
 ]);
 export type TimelineCollapse = Static<typeof TimelineCollapse>;
 
+/** The key an item keeps for the life of its session: a client that negotiated `itemKeys` identifies a row by it across epochs. */
+export const ItemKey = Type.String({ minLength: 1, maxLength: 4096 });
+
 export const ProjectedTimelineEntry = Strict({
   providerId: NonEmptyString,
+  itemKey: Type.Optional(ItemKey),
   item: AgentTimelineItem,
   turnId: Type.Optional(NonEmptyString),
   timestamp: NonEmptyString,

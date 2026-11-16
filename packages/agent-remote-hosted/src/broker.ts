@@ -8,7 +8,7 @@ import { committed, detached } from './drafts.js';
 import { freeze } from 'immer';
 import type { TeamResourceStore } from './team-resources.js';
 import { isTeamCreate, isTeamAction, isTeamDelete } from '@orchardworks/agent-remote-protocol';
-import { sessionIdentityMessage } from './session-identity.js';
+import { sessionIdentityMessage, withoutItemKeysFlag } from './session-identity.js';
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
 import { isHostStatus, ownerOnlyHostStatus } from '@orchardworks/agent-remote-protocol';
 import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
@@ -2278,7 +2278,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       client.onMessage((raw, binary) => {
         if (!admit(raw, binary)) return;
         let outgoing: string;
-        try { outgoing = sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client'); }
+        try { outgoing = withoutItemKeysFlag(sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client')); }
         catch { return client.close(1008, 'Invalid session target'); }
         if (!stream.ready) {
           if (stream.buffered.length >= 32 || stream.buffered.reduce((sum, value) => sum + Buffer.byteLength(value), 0) + Buffer.byteLength(raw.toString()) > 1024 * 1024) return client.close(1013, 'Remote stream is not ready');

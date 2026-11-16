@@ -139,3 +139,20 @@ describe('journal pages', () => {
     expect(result.kind === 'page' && result.page.payload.endCursor).toEqual({ epoch: 'epoch-1', seq: count });
   });
 });
+
+describe('item keys on pages', () => {
+  const tail = (journal: SessionJournal, itemKeys?: boolean) => {
+    const result = journal.page({ requestId: 'r', agentId: 'a', direction: 'tail', limit: 10, ...(itemKeys === undefined ? {} : { itemKeys }) }, { olderBeyondJournal: false });
+    if (result.kind !== 'page') throw new Error('expected a page');
+    decodes(result);
+    return result.page.payload.entries;
+  };
+
+  it('puts the key of each item on its entry when the reader asked for keys, in the order of the items', () => {
+    expect(tail(fiveItems(), true).map(entry => entry.itemKey)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5']);
+  });
+
+  it('leaves the entries as they always were for a reader that did not ask, so an older reader can be served', () => {
+    for (const entries of [tail(fiveItems()), tail(fiveItems(), false)]) expect(entries.every(entry => !('itemKey' in entry))).toBe(true);
+  });
+});

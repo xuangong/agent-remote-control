@@ -358,7 +358,7 @@ export class CopilotAgentSession implements AgentSession {
     if (this.info.planning?.active !== active) throw new Error('Copilot did not confirm the requested planning mode.');
     } finally {finish();}
   }
-  /** Reads the native todo list and publishes it when it changed. Each snapshot is a live-only item of its own: history has none, and a snapshot taken at open has no place among the items a reread returns. */
+  /** Reads the native todo list and publishes it when it changed. The board is one live-only item named `todo`: history has none, and a snapshot updates the item in place instead of adding one at every Controller start. */
   private refreshTodos(): Promise<void> {
     this.todosRefresh = this.todosRefresh.then(async () => {
       if (this.closed) return;
@@ -370,7 +370,7 @@ export class CopilotAgentSession implements AgentSession {
       });
       const signature = JSON.stringify(items); if (signature === this.todosSignature) return;
       this.todosSignature = signature;
-      this.emit({type: 'timeline', provider, item: {type: 'todo', items}}, {key: `todo:${randomUUID()}`, completes: true, liveOnly: true});
+      this.emit({type: 'timeline', provider, item: {type: 'todo', items}}, {key: 'todo', completes: true, liveOnly: true});
     }).catch(error => this.options.onDiagnostic?.(`Copilot todos unavailable: ${String(error)}`));
     return this.todosRefresh;
   }

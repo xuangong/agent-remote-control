@@ -31,10 +31,10 @@ export function canonicalRow(row: JournalRow): CanonicalTimelineRow {
 }
 
 /** The projected entry of a resident item, as pages show it and live rows merge into it. */
-export function itemEntry(item: JournalItem): ProjectedTimelineEntry {
+export function itemEntry(item: JournalItem, withKey = false): ProjectedTimelineEntry {
   if (item.body === null) throw new JournalInvalidPublicationError(`Item ${item.itemKey} has no resident body.`);
   return {
-    providerId: item.providerId, item: structuredClone(item.body.item),
+    providerId: item.providerId, ...(withKey ? { itemKey: item.itemKey } : {}), item: structuredClone(item.body.item),
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
     timestamp: item.body.timestamp, seqStart: item.seqStart, seqEnd: item.seqEnd,
     sourceSeqRanges: structuredClone(item.sourceSeqRanges), collapsed: [...item.body.collapsed],

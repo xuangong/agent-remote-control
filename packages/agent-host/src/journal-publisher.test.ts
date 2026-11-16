@@ -839,6 +839,27 @@ describe('older history and fills the Relay asks for', () => {
     expect(fill.items.map((value: Wire) => [value.row.itemKey, value.row.item.text, typeof value.digest])).toEqual([['m1', 'One', 'string']]);
   });
 
+  it('publishes a live row that arrives between two chunks of older history before the next chunk', async () => {
+    const pending: Array<() => void> = [];
+    let hold = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => { if (hold && message.entries[0].op === 'prepend') pending.push(answer.ack); else answer.ack(); } });
+    const publisher = publisherFor(relay);
+    const huge = (key: string) => item('history', key, 'x'.repeat(Math.floor(MESSAGE_BUDGET_BYTES * 0.6)));
+    const { session } = await attachSession(publisher, [item('history', 'm9', 'Nine')], [{ observations: [huge('m1'), huge('m2'), huge('m3')] }]);
+    await live(relay);
+    const before = relay.written.length;
+    hold = true;
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', beforeItemKey: 'm9', limit: 5 });
+    await until(() => pending.length === 1, 'the first chunk of older history');
+    session.push(item('live', 'x', 'Between the chunks', { completes: true }));
+    await settle(30);
+    pending.shift()!();
+    await until(() => pending.length === 1, 'the second chunk of older history');
+    const ops = relay.written.slice(before).filter(message => message.type === 'journal_publish').map(message => message.entries[0].op);
+    expect(ops).toEqual(['prepend', 'append', 'prepend']);
+    pending.shift()!();
+  });
+
   it('reads native history outside the publishing lane, so a head that must go at once does not wait for the read', async () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 5000 });

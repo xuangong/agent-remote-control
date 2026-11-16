@@ -33,15 +33,17 @@
 //             loading placeholder is shown.
 // A page-side observer records every change of the visible status labels, loading placeholder, session-control notice,
 // composer state, message count and delivery state, so each blocking state has a first-seen time and a duration.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { answeredBy, composerUnchanged, controllerJournalEvents, holeCheck, journalServed, mixThresholds, parseJournalMeta, rowlessStates, stats, windowCounts } from './journal-measurement.mjs';
 import { startLatencyProxy } from './latency-proxy.mjs';
 
+const execFileAsync = promisify(execFile);
 const root = process.cwd();
 function parseOptions(argv) {
   const parsed = {};
@@ -617,9 +619,10 @@ const scenarios = {
   },
   // Window and Bot switches with the existing runner, cold and warm.
   async switch() {
-    const run = rate => JSON.parse(execFileSync(process.execPath, [join(root, 'packages/agent-remote-lab/performance/local-switch.mjs'), `baseline-${rate}x`],
-      { cwd: root, encoding: 'utf8', env: { ...process.env, ARC_ORIGIN: origin, ...(rate > 1 ? { THROTTLE: String(rate) } : {}) }, timeout: 240_000 }));
-    return { method: 'local-switch.mjs: Bot mode, click a bot row until its conversation shows entries; each bot twice (cold, then warm), with the HTTP API requests and the opening-label and row-less states of each switch.', throttle, switch: run(throttle) };
+    // Asynchronously: the latency proxy lives in this process and must keep serving the browser of the subprocess.
+    const run = async rate => JSON.parse((await execFileAsync(process.execPath, [join(root, 'packages/agent-remote-lab/performance/local-switch.mjs'), `baseline-${rate}x`],
+      { cwd: root, encoding: 'utf8', env: { ...process.env, ARC_ORIGIN: origin, ...(rate > 1 ? { THROTTLE: String(rate) } : {}) }, timeout: 240_000 })).stdout);
+    return { method: 'local-switch.mjs: Bot mode, click a bot row until its conversation shows entries; each bot twice (cold, then warm), with the HTTP API requests and the opening-label and row-less states of each switch.', throttle, switch: await run(throttle) };
   },
 };
 

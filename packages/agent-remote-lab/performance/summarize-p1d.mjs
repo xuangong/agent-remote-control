@@ -78,7 +78,8 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
 
   const forced = valid.map(entry => ({ entry, used: used(entry, 'replacement-absorbed') })).filter(item => item.used);
   table('T6: a forced replacement (the Relay recorded a `changed` or `open_item` window; other samples are not counted)', ['Arm', 'Condition', 'Samples (forced/used/all)', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Composer changed', 'Anchor lost', 'Anchor shift max (px)', 'Verdict'],
-    forced.map(({ entry, used: own }) => { const result = replacementResult(own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
+    // The crude path has no journal windows to name a replacement: every restart replaces the Controller's own epoch, so every sample counts.
+    forced.map(({ entry, used: own }) => { const result = replacementResult(entry.arm === 's4a-crude' ? own.kept.map(sample => ({ ...sample, replacementForced: true })) : own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
 
   const release = valid.map(entry => ({ entry, used: used(entry, 'runtime-release') ?? used(entry, 'release-continuity') })).filter(item => item.used);
   table('T6: a runtime release', ['Arm', 'Condition', 'Samples used', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Verdict'],

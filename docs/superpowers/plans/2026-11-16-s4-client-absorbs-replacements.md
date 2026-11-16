@@ -1,83 +1,57 @@
-# S4: the client absorbs replacements, keeps a device store, and is measured under latency
+# S4a: the client absorbs replacements, and T6 is measured under latency
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox syntax. This plan states interfaces, deletions and acceptance tests; the implementer writes the code with test-driven development.
 
-**Supersedes** `2026-11-15-p1d-client-device-store.md` and `2026-11-15-p1d2-client-measurement.md` for the work they still cover (section 1). **Follows** S1 to S3 (`2026-11-16-s1-s2-journal-simplification.md`, `2026-11-16-s3-first-journal-provider.md`), whose server side is landed.
+**Supersedes**, together with [S4b](2026-11-16-s4b-device-store.md), `2026-11-15-p1d-client-device-store.md` and `2026-11-15-p1d2-client-measurement.md` for the work they still cover. **Follows** S1 to S3 (`2026-11-16-s1-s2-journal-simplification.md`, `2026-11-16-s3-first-journal-provider.md`). S4 is split in two so that each half is short and measurable: S4a is the protocol, journal core and client changes that make a replacement invisible; S4b is the device store, labels, T1 and the return budget, and starts after S4a lands.
 
-**Goal.** A conversation shows rows from the first frame, whatever happens behind it. Rows come from the device store on open and from the held rows across a Controller restart, a runtime release or a journal replacement. A replacement keeps every unchanged row mounted, with no re-render, no scroll jump and no change to the composer. T1, T2, T3's request budget and T6 are measured at 4x CPU slowdown and a 100 ms round trip against P0, with today's path as the control group.
+**Goal.** A replacement of a journal keeps every unchanged row mounted, with no re-render, no scroll jump and no change to the composer. T6 and switch time are measured at 4x CPU slowdown and 100 ms round trip against P0, with today's path as the control group.
 
-**Tech stack and commands.** As in the old P1-D plans: TypeScript 5.7 strict, React 18, IndexedDB with `fake-indexeddb` in unit tests, `ws`, Vitest, Playwright Chromium from the lab package. Every test run has a per-test deadline (`--testTimeout`) and an outer deadline (the Bash `timeout`, at most 600000 ms). Lab tests run on Node 22 (`PATH=/opt/homebrew/opt/node@22/bin:$PATH`); lab and web tests import dependents from `dist`, so rebuild the package a task changes before running its dependents. Work in `.worktrees/im-session-service`. Local checks follow `.agents/skills/prepare-arc-local/SKILL.md` and use `ARC_LOCAL_JOURNALS=1` for every `up`, restarts included (a run without it turns the Relay's journals off).
+**Commands.** Every test run has a per-test deadline (`--testTimeout`) and an outer deadline (the Bash `timeout`, at most 600000 ms). Lab tests run on Node 22 (`PATH=/opt/homebrew/opt/node@22/bin:$PATH`); packages that dependents import from `dist` are rebuilt first. Work in `.worktrees/im-session-service`. Local checks follow `.agents/skills/prepare-arc-local/SKILL.md` and export `ARC_LOCAL_JOURNALS=1` for every `up`, restarts included.
 
-**What the owner decided (2026-11-16), and this plan keeps.**
-- T6 is met by "replace when in doubt" on the server and a client that keeps unchanged rows across a new epoch. The epoch may change. Rows are keyed by item key.
-- Item keys go on entries behind an opt-in flag. The device store, labels and T1 work stay as planned.
-- T1, T2 and T6 are measured at 4x CPU and 100 ms round trip, with a delaying proxy in front of the instance so that WebSocket frames are delayed too. Both builds run under the same conditions.
-- The counted budgets from P0: at most 2 HTTP requests on a return while sockets are alive (today 13 to 14); no "Opening session" frame on an open or a return; no re-keyed rows after a Controller restart.
-- The browser comes before the desktop app.
+**Owner decisions (2026-11-16) that bind S4a and S4b.** T6 is met by "replace when in doubt" plus a client that keeps unchanged rows across a new epoch; item keys go on entries behind an opt-in flag; T1, T2 and T6 are measured at 4x CPU and 100 ms round trip with a delaying proxy, both builds under the same conditions; the counted budgets are at most 2 HTTP requests on a return, no "Opening session" frame on an open or a return, and no re-keyed rows after a Controller restart; the browser comes before the desktop app.
 
 ---
 
-## 1. What survives from the two P1-D plans and what goes
+## 1. What survives from the two P1-D plans, and where
 
-The old plans assumed a stable epoch: corrections that reach back into the client's window, a fold rule for updates older than the window, a reducer that clears on a replacement and a lab patch (`retainedDisplay`) that hides the clearing. S1 and S2 removed corrections, `seal` and the stable epoch. What remains is the device store, the label rule and the measurement.
+The old plans assumed a stable epoch: corrections that reach into the client's window, a fold rule, a reducer that clears on a replacement and a lab patch (`retainedDisplay`) that hides the clearing. S1 and S2 removed corrections, `seal` and the stable epoch.
 
-| Old plan | Item | Fate |
-|---|---|---|
-| P1-D | Decision 1 and Task 1: one IndexedDB database, schema version 3, stores `sessions` and `session_index` | **Survives** unchanged (section 5, Task 5). |
-| P1-D | Decision 2 and Task 2: the stored record is a window (at most 200 entries, 1 MiB) with the last Snapshot minus live state | **Survives**, with item keys in the entries and last-write-wins instead of "a newer record of the same epoch" (section 5). |
-| P1-D | Decision 3: limits (40 sessions, 32 MiB disk, 16 MiB resident, 16 sessions in 4 MiB preload) | **Replaced** by one byte cap with whole-record eviction and a preload budget, both set from measurement (rule 4; section 5). |
-| P1-D | Decision 4 and Task 3: write-behind, quota handling, pinning | **Survives**; quota handling simplified to "evict least recently used until it fits, retry once, else keep in memory". |
-| P1-D | Decision 5 and 11: quota, pinning, sign-out and "Clear cache on close" | **Survives**. |
-| P1-D | Decision 6 and Task 9: preload at start, own subpath, entry chunk budget | **Survives**. |
-| P1-D | Decision 7: row key `${epoch}:${providerId}:${seqStart}:${identity}` stays | **Goes.** A keyed entry's row key is its item key; the old format remains only for entries without a key (section 3). |
-| P1-D | Decision 8: unchanged entries keep their object identity | **Survives in a stronger form**: absorption by key (section 3). |
-| P1-D | Decision 9: the replica clears on a replacement and `retainedDisplay` holds the display | **Goes.** The replica holds the rows; `retainedDisplay` is deleted (Task 10). |
-| P1-D | Task 4: "no holes in the window", the fold rule for updates older than the window | **Goes.** It existed because corrections made an `after` page return an item older than the window. `correct` is gone; a replacement carries the window and prepends land below it. The client keeps no rule beyond the existing fold in `mergeAuthoritative`. |
-| P1-D | Task 5 and 6: restore a replica from the record; catch-up from the stored cursor; the replacement and older history over a fake transport; Decision 12 (older history reads follow the transport's recovery mode) | **Survives**; the replacement case is rewritten as absorption. |
-| P1-D | Task 6a: search over the session wire has its own admission budget | **Survives**. |
-| P1-D | Tasks 7, 8, 10a, 11, 12: build and move one lab test, the display cache over the device store, no content for a reader who lost access, real transports, documents | **Survive**; Task 8 loses the retained-display seed; Task 11's replacement test becomes the acceptance tests of section 9. |
-| P1-D | Decision 10 and Task 10: label rule, T1 counts | **Survives**, extended to the rows held during a replacement (section 3.5). |
-| P1-D | Decision 13: whole-window record writes, at most once per 2 s and on page hide | **Survives**. |
-| P1-D2 | Task 1: the latency proxy (`latency-proxy.mjs`) and its test | **Survives** unchanged (Task 1 here). |
-| P1-D2 | Task 2: runner `--rtt`, `--label`, attach-relative T2, counted T1 and T6, proxy validity, `summarize-p1d.mjs` | **Survives**; the smart-arm validity signal changes (section 7.3); T6 gains a forced-replacement scenario. |
-| P1-D2 | Decision 1: control group is a build of the commit before the change in its own worktree | **Survives**; the control is the commit before S4 (`00b211d5` or later) with Copilot journal-served. |
-| P1-D2 | Task 3 and Decision 8: attach of a journal-served, bound session from its binding while the Host is offline | **Goes to S5.** Relay-owned session control makes the attach unnecessary; building a shortcut around it now is work S5 deletes. T2 here includes one Controller attach, as the old plan stated. |
-| P1-D2 | Task 4: verify the device store on the local instance's crude path | **Folded** into the local check (section 11). |
-| P1-D2 | Task 5 and "Notes for the roadmap": measure the three arms, results file | **Survives** as Task 9, with the arms of section 7.1. |
+| Old item | Fate |
+|---|---|
+| P1-D Decisions 1 to 6, 11, 13; Tasks 1 to 3, 5, 6, 6a, 7, 9: database version 3, stored window, store, restore, catch-up, search admission, preload | **Survive in S4b**, with the privacy rules and the single byte cap. |
+| P1-D Decision 3 (five limits) | **Replaced** by one byte cap and one preload budget (S4b). |
+| P1-D Decision 7 (row key `${epoch}:${providerId}:${seqStart}:${identity}` stays) | **Goes.** A keyed entry's row key is its item key (section 3). |
+| P1-D Decision 8 (unchanged entries keep their object identity) | **Survives, stronger**: absorption by key. |
+| P1-D Decision 9 (the replica clears; `retainedDisplay` hides it) | **Goes** (Task 8 deletes `retainedDisplay`). |
+| P1-D Task 4 (no holes, the fold rule for updates older than the window) | **Goes.** It existed because corrections made an `after` page return an item older than the window. The one-row-per-key rule of 3.3 gives "no holes, no duplicates" directly. |
+| P1-D Decision 10, Tasks 8, 10, 10a (labels, T1 counts, display cache, lost access) | **Survive in S4b.** |
+| P1-D2 Task 1 and 2 (latency proxy, runner options, counted T1 and T6, `summarize-p1d.mjs`) | **Survive in S4a Task 1**; T1 and T2 verdicts wait for S4b. |
+| P1-D2 Task 3 (attach of a journal-served session from its binding while the Host is offline) | **Goes to S5.** Relay-owned session control makes the attach unnecessary. |
+| P1-D2 Task 4 (device store on the crude path) and Task 5 (measure three arms) | Folded into S4b's local check and S4a/S4b measurement. |
 
 ## 2. Decisions and state accounting
 
-Each row states its change in state (rule 1): "fields" are state a reader must hold in mind; "paths" are recovery paths.
-
 | # | Decision | Fields | Paths |
 |---|---|---|---|
-| D1 | **Row identity is the item key.** `ProjectedTimelineEntry` and the `timeline` event of `agent_stream` gain an optional `itemKey`. A row's React key is `itemKey` when present, else today's `${epoch}:${providerId}:${seqStart}:${identity}`. | Wire +2 optional fields. Client 0. | 0 |
-| D2 | **Opt-in flag on negotiation.** `negotiate` gains `itemKeys: true`; `negotiated` echoes it. Only a flagged stream carries keys, so a client that does not send it, and the Strict schemas of older clients, see no new field. | Wire +2 (one flag, one echo). | 0 |
-| D3 | **A replacement is absorbed by key.** A new epoch no longer clears the replica. The replica keeps its rows, records the new epoch as pending, buffers the new epoch's live frames, fetches the tail, and merges it by key. | Replica +1 (`pendingEpoch`). `retainedDisplay` -1 (lab). | Reducer outcomes `epoch_changed` and `reset_required` -1 (merged into one `replaced`). Reset-then-refill -1. |
-| D4 | **The outgoing-message ledger follows keys, not sequences.** `afterSeq`, `consumedEchoSeqs` and `epoch` on an outgoing message become `afterKey` and `consumedEchoKeys`. A message whose anchor row vanished is `unconfirmed`, as before. | 0 (3 fields swapped for 2, one of them already absent: `epoch` is read from the state). | -1 (the `epoch !== state.timeline.epoch` branch). |
-| D5 | **Equality of a row is its content.** An absorbed row is unchanged when `item`, `resources`, `collapsed` and `turnId` are equal. Timestamps and sequences are not compared; the held timestamp is kept (section 6.3). | 0 | 0 |
-| D6 | **Device store: one cap, last write wins, validated on connect.** A stored record is never invalidated eagerly; the first page of a connection confirms it or replaces it by key. | Store: record map, index, pinned set, write queue, quota flag (5, all inside `device-store.ts`). Constants: 2 (byte cap, preload budget) instead of 5. | 1 (quota: evict and retry once). |
-| D7 | **A return with live sockets refetches nothing but access status.** The visibility listeners of list loaders are removed; lists refetch on mount, on a timer while visible, and when the shared feed socket reopens. | Listeners -N (inventoried in Task 7). | -1 (refetch on every visibility change). |
-| D8 | **`failed` compaction status.** | Wire +1 enum value. | 0 |
-| D9 | **One todo item per Copilot session.** The adapter's live-only key is `todo`, not `todo:<uuid>`; the SDK states the rule for every live-only item (section 6.2). | Journal items per session -(one per Controller start). | 0 |
+| D1 | **Row identity is the item key.** `ProjectedTimelineEntry` and the `timeline` event of `agent_stream` gain an optional `itemKey`. On a keyed stream the client holds **one row per key** (3.3). | Wire +2 optional fields. Client 0. | The type-based matching of `coalesceEntry` -1 for keyed streams (deleted in S6). |
+| D2 | **Opt-in flag.** `negotiate` gains `itemKeys: true`, `negotiated` echoes it. The Relay strips the flag before a Controller sees it (3.1). | Wire +2. | 0 |
+| D3 | **A replacement is absorbed by key.** The replica keeps its rows, records the new epoch as pending, and merges the tail by key. | Replica +1 (`pendingEpoch`); lab `retainedDisplay` -1. | Reducer outcomes `epoch_changed` and `reset_required` -1 (merged into `replaced`). Clear-and-refill -1. |
+| D4 | **The outgoing-message ledger follows keys.** `epoch`, `afterSeq`, `consumedEchoSeqs` become `afterKey`, `consumedEchoKeys`. | 0 (3 swapped for 2) | -1 |
+| D5 | **Row equality is content.** The item's canonical content (the journal's `itemDigest` exclusions) plus resource ids. Not compared: `collapsed` and other client-side marks, timestamps, sequences. | 0 | 0 |
+| D6 | **Live-only items leave the positional comparison of `sync`** (3.7). | Core: `extensionOf` loses the live-only special cases (-3 branches). | `changed` replacements caused by live-only items -1. |
+| D7 | **`failed` compaction status** (section 4.1). | Wire +1 enum value. | 0 |
+| D8 | **One todo item per session**, the single key `todo` (4.2). | Journal items -1 per Controller start. | 0 |
 
-**Budgets this plan commits to** (rule 3 and rule 4, checked in Task 9 and Task 11):
-- `SessionJournal`/`SessionPublication` are not touched: publisher mutable fields stay at 19.
-- The replica gains 2 fields (`pendingEpoch`, `restoredFromDevice`) and loses the lab's `retainedDisplay`. Reducer outcomes go from 7 to 6 (`applied`, `buffered`, `duplicate`, `gap`, `replaced`, `stale_epoch`).
-- Client memory: at most one pending replacement per conversation. While pending, rows are held at most twice (held rows and tail), bounded by the window (at most 200 entries and 1 MiB of JSON per record).
-- Device store: one disk cap and one preload budget, each stated with the measurement that sets it (Task 9). A bound without a measurement is one hard cap with a refusal.
+**Budgets.** `SessionPublication` stays at 19 mutable fields and 4 recovery outcomes: S4a does not touch the publisher. The replica gains 1 field and its reduction outcomes go from 7 to 6 (`applied`, `buffered`, `duplicate`, `gap`, `replaced`, `stale_epoch`). While a replacement is pending a conversation holds its window twice at most (at most 200 entries); there is at most one pending replacement per conversation.
 
 ## 3. The client contract for item keys
 
-### 3.1 The protocol field and the flag
+### 3.1 The protocol field, the flag, and the Relay stripping it
 
-- `ProjectedTimelineEntry.itemKey?: string` (1 to 4096 characters, the journal's own bound) in `packages/agent-remote-protocol/src/timeline.ts`.
-- `PublicAgentTimelineEvent.itemKey?: string` in `envelope.ts`, so a live row and the page entry it becomes carry the same key.
-- `NegotiateRequest.itemKeys?: true` and `NegotiateResponse.itemKeys?: true` in `messages.ts`.
-- The journal-served stream (`journal-session-stream.ts`) stamps `itemKey` on page entries (`itemEntry` already has the item) and on live frames (`streamFrame`) only when the client's negotiate carried the flag, and echoes it. A client without the flag gets today's frames.
-- A Controller-answered stream has no item keys until the Controller's projector gives them (S6). It never echoes the flag, so its entries are unkeyed and the client uses the old row key. Task 2 checks where the Relay forwards `negotiate` to a Controller. If it decodes the frame, it removes `itemKeys` before forwarding (a Controller built before S4 rejects unknown fields). If it cannot, a Controller must be updated before the browser is: this plan then tells the owner before Task 2 lands, as S5 will.
-
-**Rule 5: what this replaces, and why it cannot replace more.** On the client it replaces the composite row key as the identity of a row on a keyed stream, and the epoch-and-sequence anchors of the outgoing-message ledger (D4); it removes the clear-and-refill of a replacement and `retainedDisplay`. On the wire it replaces nothing: Controller-answered streams and older clients still need today's fields until S6 gives the Controller keys. S6 then deletes the flag (always on), the old row key, `itemIdentity()`, the range-overlap merge for pages (`mergeAuthoritative`) and `retiredEpochs`. That deletion is recorded in the roadmap (Task 11).
+- `ProjectedTimelineEntry.itemKey?: string` (1 to 4096 characters) in `packages/agent-remote-protocol/src/timeline.ts`; `PublicAgentTimelineEvent.itemKey?: string` in `envelope.ts`; `NegotiateRequest.itemKeys?: true` and `NegotiateResponse.itemKeys?: true` in `messages.ts`.
+- The journal-served stream (`journal-session-stream.ts`) stamps `itemKey` on page entries and live frames only for a flagged client, and echoes the flag. An unflagged client gets today's frames.
+- **The Relay strips the flag.** `NegotiateRequest` is Strict, so a Controller built before S4 answers an unknown field with `protocol_error`. In the crude path the Relay removes `itemKeys` from a `negotiate` before forwarding it to a Controller, in the `onMessage` that already rewrites each client frame (`sessionIdentityMessage`, `broker.ts` ~2278, the passthrough path) and in the channel path that forwards frames through `stream.receive` (`broker.ts` ~2227). No Controller has to update first. A Controller-answered stream never echoes the flag, so its entries are unkeyed and the client falls back to the old row key.
+- **Rule 5.** On the client the key replaces the composite row key as a row's identity on a keyed stream, the epoch-and-sequence anchors of the ledger, and the clear-and-refill of a replacement. On the wire it replaces nothing until S6 gives the Controller's projector item keys; S6 then deletes the flag, the old row key, `itemIdentity()`, `mergeAuthoritative`'s range-overlap rule, `coalesceEntry`'s type-based matching and `retiredEpochs`. The roadmap records this (Task 8).
 
 ### 3.2 The key and the rows
 
@@ -85,284 +59,166 @@ Each row states its change in state (rule 1): "fields" are state a reader must h
 rowKey(epoch, entry) = entry.itemKey ?? `${epoch}:${providerId}:${seqStart}:${identity(entry.item)}`
 ```
 
-`timelineEntryKey` keeps its signature and its eight call sites (`App.tsx`, `session-communication.ts`, `timeline-search.ts`, `remote-session-client.ts`, `timeline-render-model.ts`, `TimelineSearch.tsx`, `AgentTimeline.tsx`, the export in `index.ts`). Trace, search jumps and source references accept both formats: a stored reference holding an old key never matches a keyed entry, which is a failed jump, not a crash; the test pins that.
+`timelineEntryKey` keeps its signature and its eight call sites. Trace, search jumps and source references accept both formats; a stored reference holding an old key fails softly. Nothing above the row depends on the epoch for identity: the `[agent id, epoch]` keys of `HistoryControls` and the timeline container in `AgentTimeline.tsx`, and the resource scope of the timeline and of the composer (`resourceScopeKey` in `AgentComposer.tsx` ~624) drop the epoch, for every stream (a resource's id is stable). Resource tests run before the change.
 
-Nothing above the row may depend on the epoch for identity: `AgentTimeline.tsx` keys `HistoryControls` and the resource scope by `[agent id, epoch]`. Both drop the epoch for a keyed stream (a resource's id is stable in the journal), and Task 4 verifies this on the resource tests before changing the scope key.
+### 3.3 One row per key
 
-### 3.3 Absorbing a replacement
+On a keyed stream the replica never holds two entries with one key.
 
-Trigger: a `timeline_replacement` frame, a live frame whose epoch is neither the current nor the pending one, or a page with `reset`, `staleCursor` or `gap`. All three become one reduction, `replaced`, and one reaction: `pendingEpoch = epoch`, keep `entries`, drop nothing, fetch the tail.
+- **Live event with a held key:** the held entry is updated in place and keeps its position; with a new key it is appended. The content merge of an item's rows (assistant text deltas, reasoning, tool results) is the existing merge of `coalesceEntry`; what is replaced is its *matching* (previous entry, `sameContext`, `messageId`): the key decides.
+- **Page:** entries are applied by key. An `after` or `tail` page updates held keys in place. An **older** (`before`) page **drops any key the client already holds**, so an item updated above the window, which the Relay now serves in its new place, cannot appear twice or leave a hole.
+- **Replacement (3.4):** merged by key.
+- Tests: React key uniqueness, and no holes and no duplicates, with older paging after an update above the window.
 
-- Frames of the current epoch that arrive while a replacement is pending are ignored (the old epoch is retired). Frames of the pending epoch are buffered in `pendingLive`, which already filters by epoch.
-- A second replacement while one is pending retargets `pendingEpoch` and fetches the tail again. There is no queue.
-- The tail request asks for `max(historyPageSize, held entries)` entries, at most 200, so that held rows inside the Controller's window are not dropped for lack of room.
-- Cursor consumers (`nextSeq`, `useSessionTracking`, `conversation-activity`) keep reading the current epoch until the tail is applied. No consumer sees a half state.
+### 3.4 Absorbing a replacement
 
-Merging the tail `P` into the held rows `H` (new function `absorbTail(held, page)` in `replica/`):
+Trigger: a `timeline_replacement` frame, a frame whose epoch is neither the current nor the pending one, or a page with `reset`, `staleCursor` or `gap`. One reduction (`replaced`), one reaction: `pendingEpoch = epoch`, keep `entries`, fetch the tail.
 
-1. For each entry of `P`, in order: if `H` has the same row key and the content is equal (D5), keep the held `item`, `resources`, `collapsed` and `timestamp` and take the new `seqStart`, `seqEnd` and `sourceSeqRanges`. If the content differs, take the new entry whole. If `H` has no such key, insert the new entry.
-2. Held rows whose key is not in `P` are removed. A row older than the first row of `P` is also removed. The held rows are not verified by the new epoch, and older history loads again through the existing `loadOlder`, which reads from the first entry's sequence. This is the one visible change, and it happens only to a reader who scrolled above the new window: the viewport lands on the window's first row. It is bounded by the tail limit above and is counted (section 7.2).
-3. `nextSeq`, `hasOlder` and `epoch` come from the page; `pendingEpoch` clears; `restoredFromDevice` clears; buffered live frames of the epoch drain through the existing `drainPending`.
+- **Buffer every frame of `pendingEpoch`**, including a `gap` or `staleCursor` in the same epoch (it buffers in `pendingLive` and waits for the tail; it does not start another reset). Frames of the current epoch that arrive while a replacement is pending are ignored. **The old epoch is retired only when the tail is applied**, so `retiredEpochs` never holds the epoch a pending page might still name.
+- A second replacement while one is pending retargets `pendingEpoch` and fetches the tail again. No queue.
+- The tail request asks for `max(historyPageSize, held entries)`, at most 200, so held rows inside the Controller's window are not dropped for lack of room.
+- Cursor consumers (`nextSeq`, `conversation-activity`, `useSessionTracking`) read the current epoch until the tail is applied.
+- An attention cursor in an epoch the replica has retired is acknowledged once the replica holds the new epoch's content (`useSessionTracking.tsx` ~121 now keeps it unacknowledged for ever). Test it.
 
-Legacy keys: an entry without `itemKey` keys by epoch, so a new epoch matches none of them and the tail replaces them all, without a frame without rows. The unified path costs nothing for Controller-answered streams and gives them the no-blank frame for free.
+`absorbTail(held, page)`:
+1. For each entry of the page, in order: a held row with the same key and equal content (D5) keeps its held `item`, `resources`, `collapsed` and `timestamp` and takes the new sequence fields; a held key with different content takes the new entry; an unheld key is inserted.
+2. Held rows whose key is not in the page are removed, including rows older than the page's first row. The held rows are not verified by the new epoch, and older history loads again through `loadOlder`. The one visible effect is on a reader who scrolled above the new window: the viewport lands on the window's first row. It is bounded and counted.
+3. `nextSeq`, `hasOlder`, `epoch` come from the page; `pendingEpoch` clears; the old epoch retires; buffered frames drain through `drainPending`.
 
-### 3.4 What keeps a row, the scroll and the composer
+An entry without `itemKey` keys by epoch, so a new epoch matches none of them and the tail replaces them all, but never through an empty state.
 
-- **Row.** `ConversationEntry` is a memo component. It re-renders when its `entry` prop changes. After absorption the `entry` wrapper is new (its sequence fields changed) while `item`, `resources` and `collapsed` keep their identity. `ConversationEntry` therefore compares those fields and `timestamp`, `turnId`, `searchSelected`, `inspected`, `selection` and the other props, and ignores `seqStart`, `seqEnd` and `sourceSeqRanges`. The row's `sequence` prop is used only for Trace and a data attribute; Task 4 reads it from the state when needed instead of passing it as a prop. A rendered-row counter in the acceptance test pins "no re-render".
-- **Scroll.** `useTimelineScroll` already anchors on the first visible row's `data-entry-key` and restores its offset after layout. With keys that survive, the anchor survives. The `[agent id, epoch]` key on the container is what would remount the list, and it is removed. A reader whose anchor row left the window is the case in 3.3 step 2.
-- **Composer.** The composer is outside the timeline's keyed tree and reads no epoch. Draft text, focus and selection must be identical before and after; the browser test asserts this.
+### 3.5 What keeps a row, the scroll and the composer
 
-### 3.5 Labels while rows are held
+- **Row.** `ConversationEntry` is a memo component. After absorption the `entry` wrapper is new while `item`, `resources` and `collapsed` keep identity. The memo compares those and the other row props, and ignores `seqStart`, `seqEnd` and `sourceSeqRanges`; the row's `sequence` prop (Trace and a data attribute) is read from the state when needed. A render counter pins "no re-render".
+- **Scroll.** `useTimelineScroll` anchors on the first visible row's `data-entry-key` and restores its offset after layout. Surviving keys keep the anchor; removing the epoch from the container key (3.2) stops the remount.
+- **Composer.** It is outside the keyed tree; draft text, focus and selection are unchanged, and a browser test asserts it.
 
-The label rule of the old P1-D (Decision 10) gains one case. While rows are on screen and not yet confirmed current, either because they came from the device store (`restoredFromDevice`) or because a replacement is pending (`pendingEpoch !== null`), the labels `Opening session`, `Synchronizing` and `Checking access` give way to the session's last business label. A `disconnected` connection is never hidden. For a conversation with no rows at all (a first open on this device), the placeholder shows the neutral empty conversation shell without a connection word: no "Opening session", no "Loading conversation". The other T5 labels stay P2's.
+### 3.6 The ledger
 
-### 3.6 The outgoing-message ledger (D4)
+An outgoing message records `afterKey` (the row key of the newest row when it was sent) and `consumedEchoKeys`. An echo is a matching `user_message` after `afterKey` in row order. A replacement that keeps `afterKey` keeps the message awaiting its echo; if `afterKey` is gone the message is `unconfirmed`, as a reset does today. A ledger persisted before S4a is read once as `unconfirmed` and written back in the new form.
 
-An outgoing message records `afterKey`, the row key of the newest row when it was sent, and `consumedEchoKeys`. An echo is a `user_message` row after `afterKey` in row order whose text matches, as today. A replacement that keeps `afterKey` keeps the message awaiting its echo; one whose `afterKey` is gone makes it `unconfirmed`, as a reset does today. A ledger persisted before S4 has `epoch` and `afterSeq`: it is read once as `unconfirmed` (the same state a reload with a changed epoch gives today) and written back in the new form. This is a reader of old data, not a compatibility layer for old peers.
+### 3.7 The core: live-only items leave the positional comparison (C1)
 
-## 4. The return budget: at most 2 HTTP requests
+`SessionJournal.sync` compares the window with the journal in order (`extensionOf`, `session-journal.ts` ~370). A live-only item the Controller re-adds at open (the todo) moves between the window and the journal and counts as `changed`, so every Controller start of a todo session replaces the journal.
 
-P0 counted 14 requests on every return, with both sockets alive: `auth/status`, `teams`, `controller-release`, `session-migrations`, `favorites`, `successions`, `relations`, `hosts`, and per Host `previews`, `vscode-tunnel`, `session/refs`, `tpm`, plus `GET /` and `POST session-reads`. Each is a list loader that listens for `visibilitychange` or the page-resume signal. The sockets already deliver the conversation, so a return has nothing to catch up on when they are alive.
+The invariant: **live-only items take no part in the positional comparison.** `extensionOf` compares the window's and the journal's non-live-only items as today, then:
+- a live-only item of the window whose key the journal holds updates that item's body in place and keeps its position;
+- a live-only item with a new key is appended;
+- a live-only item the journal holds and the window lacks is carried, as today.
 
-**Invariant instead of a guard.** A list loader does not refetch because the page became visible. It refetches (a) when it mounts, (b) on its own timer while the page is visible (the interval each loader already uses, or 5 minutes where it has none), and (c) when the shared feed socket reopens, because a reopened socket is the one signal that something may have been missed. `watchPageResume` keeps its two jobs: confirm the access lease (`GET /auth/status`, the first of the two requests) and ping the sockets so a socket a suspended browser kept alive is found dead and reopened (which triggers (c)). The second request is the session-reads mark (`POST session-reads`), which carries a write, not a list.
+An in-place update is a row of the existing item (a stamped row; the outcome is `appended`), and a window whose live-only items are equal is `unchanged`. The S2 test of a live-only key carried to the front and re-read at the end (replace) now gives no replacement; that test changes with the rule.
 
-- Staleness this accepts: a list changed on another device while this one was hidden shows its previous value until the next timer tick, at most the loader's interval. The conversation content is not a list and is current through the sockets (T3's 1 s).
-- A return after a dead socket may exceed 2 requests; the budget is counted only while sockets are alive, as the roadmap states. Task 9 also records that case (the proxy can close every WebSocket) without a budget.
-- Task 7 starts by listing every `visibilitychange`, `pageshow`, `online` and `watchPageResume` listener in the lab (`App.tsx` 288 and 1568, `GatewayController.tsx`, `session-references.ts`, `TeamMenu.tsx`, `HostCodexDaemon.tsx`, `Toast.tsx`, `recovery-writes.ts`, `workspace-display-cache.ts` and the others the grep finds) and states for each whether it is a refetch (removed), a write-out on hide (kept), or UI-only (kept).
-- A deterministic lab test counts `fetch` calls over a simulated hide and return with live fake sockets; the runner confirms the count in the browser (section 7).
+Test (`journal-sync.test.ts`, a real `SessionJournal` and `MemoryJournalStore`): a restart with an unchanged todo gives `unchanged`; with a changed todo, `appended`; neither ever `replaced`. The tests **assert the sync outcome**, not only the item count, and a Relay-level test runs five restarts and sees zero `replaced` and one `todo` item.
 
-## 5. The device store (IndexedDB)
+## 4. The fixes S3 found
 
-Unchanged from the old plan: `browser-database.ts` (database `agent-remote-image-drafts`, version 3, an upgrade that only creates `sessions` and `session_index` and never opens a cursor on `drafts` or `images`), `session-record.ts`, `device-store.ts` with its own subpath `@orchardworks/agent-remote-web/device-store`, preload by the entry chunk with the application chunk waiting at most one second, pinning of mounted sessions, and the clearing at sign-out and on "Clear cache on close". Eleven places that open the database at an explicit version 2 open it without a version (Task 5 lists them with `grep`).
+### 4.1 `failed` compaction status
 
-**What it caches.** One record per public session, keyed by `JSON.stringify([scope, [hostId, providerId, nativeSessionId]])` where scope is the account's Relay URL. A record holds: agent id, the journal `epoch` and `nextSeq` of the last applied page (the cursor is `nextSeq - 1`), `hasOlder`, the newest entries (at most 200 and 1 MiB of JSON, each with its `itemKey` when it had one), the last Snapshot without `activeTurn`, `pendingInteractions` and `runtimeInfo.connection` (what was true before is not claimed as live), and the time of the last update. A window trimmed on its older side stores `hasOlder: true`. A window whose newest entry alone exceeds the byte limit is not stored.
+Copilot emits a `compaction` item as `loading` and, when native compaction fails, a separate `error` item. The `loading` item never ends, so the page shows "In progress" for a failed compaction.
 
-**How it is keyed by epoch and sequence.** The record's key is the session; its position is `(epoch, nextSeq)`. The journal's epoch is stable across Relay restarts (SQLite) and changes only on a replacement, so the position is meaningful:
+- `AgentTimelineItem` compaction `status` gains `'failed'`. The Copilot projector completes the item with `failed` and keeps the `error` item for the cause. `CompactionItem.tsx` renders `Failed`.
+- Rule 5: one enum value, nothing to replace, because a `loading` item needs a terminal state other than `completed`. It removes a wrong state (in progress for ever).
+- Ordering: a Relay that does not know `failed` rejects the item, so the Relay and bundle update before Controllers, as in any release. The recorded fixture for a failed compaction expects `failed`. Claude Code has no failure event and is unchanged.
 
-- On open the replica is seeded from the record with `restoredFromDevice` set. The first frame already has rows.
-- On connect the client asks for `after` `{epoch, nextSeq - 1}`. The same epoch answers with what was missed and the client continues. A different epoch is a replacement: the tail arrives, `absorbTail` merges it by key, and the rows that were restored stay mounted where unchanged. This is the path of section 3.3; the device store adds nothing to it.
-- Every applied page saves the replica's window back (write-behind of 50 ms, at most once per 2 s from the lab's observer and on page hide), now in the new epoch's coordinates.
+### 4.2 One todo item per session
 
-**How a replacement invalidates it without a visible reset.** It does not invalidate it. A stored record is a display cache validated by the connection's first page: confirmed (same epoch), or replaced by key (different epoch). Nothing is deleted before content arrives, so there is no frame without rows. The only deletions are by sign-out, by a lost access (old Task 10a: a reader who lost access sees no stored content and the record is forgotten), by "Clear cache on close", and by the byte cap.
+Each Controller start emits `todo:<uuid>` (`liveOnly`), and each list change another; S3 found 7 items after 6 restarts.
 
-**Last write wins.** Two tabs on one device may save the same session. The old plan's rule "leave a newer record of the same epoch alone" cannot hold once epochs change, and the record is only a cache that the next connection validates. The later `save` wins; a tab keeps its own memory.
+- The invariant is in the adapter and the SDK: **a live-only item's key names its kind in the session, not an occurrence.** The Copilot adapter emits `{key: 'todo', completes: true, liveOnly: true}`. With 3.7 a later snapshot updates that item in place and no start can replace the journal. The SDK documents the rule beside `liveOnly`, and its conformance test fails an adapter that emits two live-only keys of one item type in a session.
+- The board stays where it first appeared; moving it needs a removal operation, which fails rule 5.
+- A restart still appends one row (same key, same content), because the adapter does not know the journal's copy. Task 7 measures it (expected: 0 items, one 528-byte row).
 
-**Bounds (rule 4).** One cap on the disk records' total bytes, evicting whole least-recently-used records that are not pinned, and one preload budget in bytes for the start. Both start as the old plan's numbers (32 MiB disk, 4 MiB preload) and Task 9 replaces them with what it measured: the bytes of a record of the S3 session and of a 150-item session, the preload time per MiB at 4x CPU, and the storage the browser grants. A quota error evicts least-recently-used records until the write fits and retries once; a second failure keeps the content in memory and retries on the next save. Nothing reaches the interface.
+### 4.3 Time drift between paths does not matter
 
-**Older history.** `loadOlder`, the timeline search and the recovery loop read through `readTimeline`: the session wire for a transport that recovers over it, HTTP otherwise (old Decision 12). A journal-served session scrolls back without its Controller. The timeline search keeps its own admission budget at the Relay (old Task 6a).
+The journal keeps the time of the live event, the Controller reads Copilot's native time; they differ by 2 to 3 s, and no time moved inside one path. It affects neither order nor identity. It would matter only if a time difference counted as a content change and re-rendered every row on a replacement, so D5 ignores timestamps and an unchanged row keeps its held time. A changed row takes the new entry's time. No adapter or Relay change.
 
-## 6. The fixes S3 found
+## 5. Measurement
 
-### 6.1 `failed` compaction status
+### 5.1 Arms and conditions
 
-Copilot's projector emits a `compaction` item with status `loading` and, when native compaction fails, a separate `error` item (`Copilot compaction failed: ...`). The `loading` item never ends, so the page shows "In progress" for a failed compaction beside the error.
+- **Control:** the build before S4a (HEAD `00b211d5` or later, journals on, Copilot journal-served), in `.worktrees/s4-control` with its own instance. It is measured before any change.
+- **S4a:** the S4a build, journals on. **S4a crude:** the same with smart reading off for Copilot.
+- **Conditions:** no emulation, 4x CPU, 100 ms round trip, both. One instance at a time, the same five P0 sessions and the S3 Copilot sessions.
 
-- `AgentTimelineItem` compaction `status` gains `'failed'`. The Copilot projector completes the item with `failed` (`completes: true`) and keeps the existing `error` item, which carries the cause; no field is added and no information is lost. `CompactionItem.tsx` renders `Failed`.
-- Rule 5: it adds one enum value and replaces nothing, because a `loading` item needs a terminal state other than `completed`, and the status is the only place the item can say so. It deletes nothing, but it removes a state that was wrong (a row that stays in progress for ever).
-- Ordering: a Relay that does not know `failed` rejects the item, so the Relay and the web bundle update before Controllers. In `pnpm local` and in releases they ship together. The recorded Copilot fixture for a failed compaction is updated to expect `failed`.
-- Claude Code's compaction projection has no failure event; it is not changed.
+### 5.2 Proxy and scenarios
 
-### 6.2 One todo snapshot per session, by invariant
+`latency-proxy.mjs` delays every HTTP exchange and WebSocket byte by half a round trip each way, rewrites the origin and can close every WebSocket. `local-baselines.mjs` gains `--rtt`; a run fails if no WebSocket crossed the proxy. The command line talks to the instance directly.
 
-Each Controller start of a Copilot session emits `todo:<uuid>` with `liveOnly: true` (`refreshTodos`, `todosSignature` starts as `'[]'`), and each change of the list emits another. The journal holds one item per start: 7 after 6 restarts, 528 bytes each, up to the item cap.
-
-- **Where it belongs: the adapter, with a rule in the SDK.** The Relay and the client cannot know that two live-only items are two snapshots of one board; only the adapter does. The invariant that stops accumulation is: **a live-only item's key names its kind within the session, not an occurrence.** The Copilot adapter emits `{key: 'todo', completes: true, liveOnly: true}`. A later snapshot is a row of the same item, which the journal already handles as an in-place update of a complete item (it reopens and completes it). The SDK documents the rule next to `liveOnly`, and the SDK conformance test fails an adapter that emits two live-only keys with the same item type in one session.
-- **The client shows it as the latest.** One keyed row updates in place. It stays where the board first appeared, not at the bottom of the conversation. Moving it would need a removal operation, which the journal does not have, and adding one fails rule 5. If the owner wants the board at the bottom, it is a presentation decision for a later step (the row can render in the status area), not a protocol one.
-- **A restart still appends one row** (the same key with the same content), because the adapter does not know the journal's copy; the item count stays at one. Task 9 measures items and bytes added per restart (expected: 0 items, one 528-byte row) against S3's 12,422 bytes per window.
-- State: journal items -1 per Controller start; adapter fields 0; SDK +1 conformance rule.
-
-### 6.3 Time drift between paths: it does not matter, so the client does not compare it
-
-S3 found the same row showing 19:56:21 from the journal and 19:56:23 from the Controller: the journal keeps the time of the live event, the Controller reads Copilot's native time. No time moved inside one path. The two differ by 2 to 3 seconds and the display shows the time to the second.
-
-- It does not affect order, correctness or identity. It would matter only if the client treated a time difference as a content change, because then each replacement would re-render every row.
-- So row equality ignores `timestamp` (D5) and an unchanged row keeps its held time. A row's time may differ by seconds from what a later crude read shows; the user never sees the two paths at once. No adapter or Relay change.
-- If a changed row (content differs) arrives, it takes the new entry's time. That is the time the source now reports and is correct for that content.
-
-## 7. Measurement
-
-### 7.1 Arms and conditions
-
-- **Control:** the build before S4 (HEAD `00b211d5` or later, journals on, Copilot journal-served), in its own worktree `.worktrees/s4-control` and its own instance. It is today's path with the journal-served read: no device store, reset on a new epoch, per-return refetch. It is measured before any client change (Task 1) so the comparison is fixed.
-- **S4:** the S4 build, journals on, Copilot journal-served.
-- **S4 crude:** the S4 build with smart reading off for Copilot, to separate what the device store and absorption give from what the journal gives.
-- **Conditions:** no emulation, 4x CPU, 100 ms round trip, both. Every condition runs both builds in turn, one instance at a time, with the same five sessions of P0 and the Copilot sessions of S3. Round trip is half the delay each way on every HTTP exchange and every WebSocket byte; connection setup is not modelled, so a real network is slower.
-
-### 7.2 The latency proxy and the scenarios
-
-`packages/agent-remote-lab/performance/latency-proxy.mjs` (from old P1-D2 Task 1; `node --test` over real HTTP and WebSocket) delays every HTTP exchange and WebSocket byte, rewrites the origin so the instance's checks pass, and can close every WebSocket on command. `local-baselines.mjs` gains `--rtt MS`; a run through the proxy fails when no WebSocket crossed it, so a page that bypassed it cannot produce a latency result. The command line talks to the instance directly.
-
-| Scenario | Target | What is counted or timed | Pass |
+| Scenario | Target | Counted or timed | Pass |
 |---|---|---|---|
-| `open-known` (reload, then navigate by URL) | T1 | Opening-label states, row-less states and `contentSinceMountMs` after mount; the 100 ms is at 4x CPU | 0 opening-label states and 0 row-less states, maximum over all samples, every condition; content within 100 ms (p95) at 4x CPU |
-| `open-fresh` (device storage cleared, journal exists) | T2 | `contentSinceAttachMs` (first `attach` request) and since navigation; `answeredBy` | 500 ms p50 and 1,500 ms p95 at 4x CPU and at 100 ms; no slower at p50 than the control, both measures. The attach still reaches the Controller until S5; T2's "without reaching the Controller" is S5's gate |
-| `return` (hidden 30 s; hidden and frozen 300 s; sockets closed by the proxy while hidden) | T3 | HTTP requests by endpoint, opening-label states, time until current | at most 2 HTTP requests while sockets are alive, 0 opening-label states, current within 1 s (p95); the dead-socket case is recorded, with no budget |
-| `runtime-release` (Copilot `session release`, then open) | T2, T6 | as `open-known`, plus replacements by reason from the Relay diagnostic | rows kept, 0 row-less states |
-| `restart-continuity` (whole instance restart with the page open) | T6 | every timeline row node marked; survivors counted; row-less states; labels | 0 re-keyed rows (every marked node still in the document), 0 row-less states |
-| `replacement-absorbed` (new) | T6 | the runner stops the Controller, edits one item of a Copilot session it created itself in its native history file, and restarts, which forces a `changed` replacement; rows marked, composer text and focus, scroll anchor offset | every unchanged row node survives; the changed row updates in place; the composer keeps its text, focus and selection; the anchor row's offset moves at most 1 px; 0 row-less states |
-| `switch` (`local-switch.mjs`) | none in P0 | cold and warm switch times, HTTP requests per switch, opening-label states | recorded; 0 opening-label states on a warm switch; warm no slower than cold |
+| `restart-continuity` (whole instance restart, page open) | T6 | every row node marked, survivors, row-less states | 0 re-keyed rows, 0 row-less states |
+| `replacement-absorbed` (new: the runner stops the Controller, edits one item in the native history of a Copilot session it created, restarts, forcing a `changed` replacement) | T6 | rows marked, composer text and focus, scroll anchor offset | unchanged nodes survive, the changed row updates in place, composer unchanged, anchor offset moves at most 1 px, 0 row-less states |
+| `runtime-release` (Copilot `session release`, then open) | T6 | rows, replacements by reason (Relay diagnostic) | rows kept |
+| `switch` (`local-switch.mjs`) | none in P0 | cold and warm times, HTTP requests, opening-label states | recorded; warm no slower than cold |
 
-Counted measures are counts of states the observer saw (resolution 8 ms), never clock thresholds. Clock thresholds are checked only by the runner.
+S4b adds `open-known`, `open-fresh` and `return`; this plan's runner changes include their counted fields so S4b only runs them.
 
-### 7.3 Is the sample journal-served? A direct signal
+### 5.3 The journal-served signal
 
-S3's runner counted a Controller-answered open by an attach finishing before the first message and could not tell a 1 ms resident attach from a miss. The direct proof S3 found replaces it: the page's `timeline_page` frame carries the timeline epoch, and the journal's epoch is in the `meta` of the session in the instance's `journals.sqlite` (read through `node:sqlite` read-only). A sample is journal-served when the two epochs are equal and Controller-served when the page carries the Controller's own epoch. A smart-arm sample that is not journal-served is excluded from every statistic and verdict, and the summary states how many samples were used. This closes S3's open item (M6's missing signal).
+S3 counted a Controller-answered open by an attach finishing first and could not tell a fast resident attach from a miss. In the S4 arms a stream that echoed the `itemKeys` flag is journal-served (3.1: Controller-answered streams never echo it), and the runner reads the `negotiated` frame. **The runner reads `journals.sqlite` only for the control arm**, which has no flag: the page's `timeline_page` epoch equals the `meta` epoch. Because `meta` can change during a sample, the runner reads `meta` before and after each sample and classifies a sample journal-served only if both reads equal the page's epoch. A sample that is not journal-served is excluded from every statistic and the summary says how many were used.
 
-### 7.4 Recording against P0
+### 5.4 Recording
 
-`summarize-p1d.mjs` (from old P1-D2 Task 2) reads the result files of the three arms and four conditions and prints one table per target with the P0 figure, the control, S4 and S4 crude, and a verdict per pass criterion; a miss is recorded as it is and is not worked around. Results go to `docs/superpowers/plans/2026-11-16-s4-results.md` (Task 9) with the build, machine, date and sample counts, and the raw JSON under `.tmp/s4/` (not committed). The device store's caps are set from the same runs (section 5).
+`summarize-p1d.mjs` prints one table per target with the P0 figure, the control, S4a and S4a crude, and a verdict per criterion; a miss is recorded as it is. Results go to `2026-11-16-s4a-results.md`; raw JSON stays in `.tmp/s4/`. **Minimum sample count:** each scenario and condition needs at least 20 samples for a p50 or p95 to be reported (10 for the 4x conditions of the restart and replacement scenarios, which restart the instance and take about a minute each); with fewer, the table gives the maximum and says n.
 
-## 8. Tasks
+## 6. Tasks
 
-Each task leaves the repository green, changes no signature without its callers and tests, and ends with its suites run under deadlines and a commit. Rebuild a package before running its dependents' tests.
+Each task leaves the repository green and ends with its suites under deadlines and a commit.
 
-### Task 1: The latency proxy, the runner and the control measurement
+1. **Latency proxy, runner and control measurement.** Files: `packages/agent-remote-lab/performance/` (`latency-proxy.mjs` + test, `local-baselines.mjs`, `journal-measurement.mjs`, `summarize-p1d.mjs` + test, `README.md`). The proxy, `--rtt`, `--label`, attach-relative T2 and counted T1 fields (for S4b), marked row nodes, the journal-served signal of 5.3, the `replacement-absorbed` scenario. Build the control worktree and **run every scenario for the control now**. Gate: control results exist and the summary prints P0 beside it.
+2. **Keys on the wire and the Relay stripping the flag.** Files: protocol `timeline.ts`, `envelope.ts`, `messages.ts`, fixtures and schemas; `journal-session-stream.ts`; `broker.ts` (both forwarding paths); the client's `negotiate`. Tests: conformance; a real-transport test (hosted Relay over real HTTP and WebSocket) with a flagged and an unflagged client; **a real-transport test with a Controller that refuses unknown fields** (a Strict decoder) and a flagged client: the stream opens, keys are absent, the flag is not echoed. `pnpm compatibility:update` then `pnpm compatibility:check`.
+3. **The core invariant (C1).** `session-journal.ts` `extensionOf` and `sync`, 3.7, with the outcome tests.
+4. **Compaction `failed` and the single todo key.** Section 4, with the Copilot fixtures and the SDK conformance rule.
+5. **Absorption with one row per key.** Files: `replica/{types,reducer,timeline-entry-key,message-outbox,store}.ts`, `client/remote-session-client.ts`, `react/{AgentTimeline,ConversationEntry,AgentComposer,timeline-render-model}.tsx`, `hooks/useSessionTracking.tsx`. Sections 3.2 to 3.6. Reducer tests (pure): unchanged rows keep identity; changed in place; missing removed; new inserted; older rows removed; pending-epoch buffering including `gap` and `staleCursor`; the old epoch retires after the tail; a second replacement retargets; legacy entries replace without an empty state; the ledger survives or becomes `unconfirmed` by `afterKey`; **rows built live equal rows built from a page** (D5); an attention cursor of a retired epoch clears; React key uniqueness and no holes or duplicates with older paging after an update above the window. Component tests: 0 re-renders of unchanged rows, no container remount.
+6. **Acceptance tests (section 7).**
+7. **Measure and record** (section 5), including replacements per open and bytes per Controller restart for Copilot against S3 (12,422 bytes, 7 `todo` items).
+8. **The deletion task, documents and the local check.** Section 8 and section 9; `docs/current/agent-remote/protocol.md` and `web.md`, the performance README, the roadmap rows.
 
-**Files:** `packages/agent-remote-lab/performance/latency-proxy.mjs` (+ `.test.mjs`), `local-baselines.mjs`, `journal-measurement.mjs`, `summarize-p1d.mjs` (+ test), `create-p1d-sessions.mjs` if the five P0 sessions are absent, `README.md`.
+## 7. Acceptance tests
 
-- Proxy, `--rtt`, `--label`, attach-relative T2, counted T1 (opening-label and row-less states since mount), marked row nodes for T6, proxy validity, and the journal-served signal of section 7.3 (`answeredBy` from epochs).
-- New scenarios `return` (with the dead-socket variant), `replacement-absorbed`, and the counted fields of `switch`.
-- Build the control worktree `.worktrees/s4-control` at the commit before any S4 change and **run every scenario for the control arm now**, in all four conditions, before Task 2.
-- Tests: the proxy test (HTTP and WebSocket delay within a tolerance, origin rewrite, socket close); the summary test with fixture results; `node --check` on the scripts.
-- Gate: control results exist; the summary prints P0 and control side by side. State: runner options +2 (`--rtt`, a socket-close command; `--label` exists); no production code.
+Test observable behaviour. Protocol and reconnect behaviour use real transports.
 
-### Task 2: Item keys on the wire, behind the flag
-
-**Files:** `agent-remote-protocol/src/{timeline,envelope,messages}.ts`, protocol fixtures, schemas and replay entries; `agent-remote-hosted/src/journal-session-stream.ts` and the Relay's forwarding of `negotiate` to a Controller; `agent-remote-relay/src/session-wire.ts` (decode only); `agent-remote-web` negotiate call.
-
-- Interfaces in section 3.1. The client sends `itemKeys: true` on every `negotiate` of a conversation stream (not the activity observer).
-- Check first where the Relay forwards `negotiate` to a Controller and whether it decodes it. Implement the strip, or stop and tell the owner that Controllers must update before the browser.
-- Tests: protocol conformance (flagged negotiate accepted; unflagged client's Strict schema never sees the field); a real-transport test through `createHostJournals` and the in-process hosted Relay: a flagged client gets keys on a page and on a live frame, an unflagged client gets none; a Controller-answered stream with the flag gets no echo and no key.
-- Run `pnpm compatibility:update` then `pnpm compatibility:check`. State: wire +4 optional fields and flags, replacing nothing (section 3.1).
-
-### Task 3: Compaction `failed` and the single todo item
-
-**Files:** `agent-remote-protocol/src/timeline.ts`, `agent-provider-copilot/src/{projector,session}.ts`, its recorded fixture, `agent-provider-sdk` (rule and conformance test), `agent-remote-web/src/react/items/CompactionItem.tsx`.
-
-- Sections 6.1 and 6.2. Tests: the recorded failed compaction ends `failed` with its error item; the web item renders "Failed"; an adapter test with three restarts and two list changes leaves one `todo` item in a real `SessionJournal`; the SDK test rejects two live-only items of one type with different keys in one session.
-- State: section 6.
-
-### Task 4: The replica absorbs a replacement; rows keyed by item key
-
-**Files:** `agent-remote-web/src/replica/{types,reducer,timeline-entry-key,message-outbox,store}.ts` and tests, `client/remote-session-client.ts`, `react/{AgentTimeline,ConversationEntry,timeline-render-model}.tsx`, `react/useTimelineScroll.ts` only if the anchor test fails.
-
-- Interfaces: `rowKey` (3.2); `pendingEpoch` and the single `replaced` reduction (3.3); `absorbTail(held, page)` (3.3); the ledger of 3.6; `ConversationEntry`'s comparator and the container key without the epoch (3.4).
-- `remote-session-client.ts`: the `timeline_replacement` handler and `handleTimelineReduction` mark the replacement pending instead of clearing, and fetch the tail with the larger limit; `catchUpAfterSubscription` is unchanged.
-- Reducer tests (pure): unchanged rows keep `item` identity; changed row updates in place; missing row goes; new row inserts; rows older than the tail go; the new epoch's live frames buffered and drained after the tail; old-epoch frames ignored while pending; a second replacement retargets; legacy (unkeyed) entries replace wholesale without an empty state; a ledger message awaiting its echo survives a replacement that keeps `afterKey` and becomes `unconfirmed` when it does not; a pre-S4 persisted ledger reads once as `unconfirmed`.
-- Component tests (jsdom): the rendered-row counter shows 0 renders for unchanged rows after a replacement; the timeline container is not remounted; a stored reference with an old key fails softly.
-- State: section 2 (D1, D3, D4, D5).
-
-### Task 5: The device store
-
-**Files:** the old P1-D file table, rows for `browser-database.ts`, `image-drafts.ts` and its test, `session-record.ts`, `device-store.ts`, `package.json` subpath, `replica` restore (`restoredFromDevice`), `remote-session-client.ts` (`readTimeline`), `agent-remote-hosted/src/broker.ts` and its timeline admission test, the 11 places that open the database at version 2.
-
-- Section 5. Everything from old P1-D Tasks 1 to 3, 5, 6, 6a and 7 as listed in section 1, with the changes there: keys inside records, last write wins, one byte cap and one preload budget (constants set by Task 9), simplified quota handling.
-- Tests: `fake-indexeddb` unit tests for upgrade preserving drafts and images, record trimming and limits, write-behind, quota, pinning, preload; replica restore; catch-up over a fake transport for the same epoch (an `after` request only), a different epoch (tail and absorb) and older history over the socket.
-- State: store 5 fields, 2 constants, 1 recovery path.
-
-### Task 6: The lab uses the store and shows no connection word over held rows
-
-**Files:** `agent-remote-lab/src/{workspace-cache,workspace-display-cache,conversation-connections,conversation-storage,conversation-recovery,main}.ts(x)`, `components/{SessionWorkbench,SessionConversation}.tsx`, `agent-remote-web/src/client/session-state.ts`, `react/AgentActivityStatus.tsx`.
-
-- Old P1-D Tasks 8, 9, 10 and 10a, with the label rule of 3.5 and without the retained-display seed. The neutral shell for a conversation with no rows.
-- Tests: counted states for a conversation mounted from the store (no label, no row-less frame) and for a first open (no connection word); a lost access shows no stored content and forgets the record.
-
-### Task 7: The return budget
-
-**Files:** the loaders named in section 4 (to be confirmed by the inventory), `session-references.ts`, `TeamMenu.tsx`, `HostCodexDaemon.tsx`, `GatewayController.tsx`, `watchPageResume` callers.
-
-- The inventory first, committed as a table in this plan's results file. Then the invariant of section 4 (listeners that refetch removed; mount, timer and feed-reopen refetches kept).
-- Tests: a lab test counts `fetch` calls over a simulated hide and return with live fake sockets: at most 2, both named (`auth/status`, `session-reads`); with a dead socket the feed reopens and its loaders refetch once; a list still refreshes on its timer.
-
-### Task 8: Acceptance tests with real transports and a real browser
-
-Section 9. Files: `agent-remote-lab/src/test/journal-relay.ts` (a journal-served Relay: the hosted broker over real HTTP and WebSocket, with a fake Controller), `components/SessionConversation.journal.test.tsx`, `e2e/session-replacement.spec.ts` (Playwright Chromium).
-
-### Task 9: Measure and record
-
-Run the three arms in all four conditions (section 7), set the device store's caps from the measurements (section 5), write `docs/superpowers/plans/2026-11-16-s4-results.md` and the Progress row of the roadmap. The gate is that T1, T2, T6 and the counted budgets are **measured and recorded with their verdicts**, whatever they show. A miss becomes a task of S6 or a decision for the owner; it is not fixed inside this task.
-
-### Task 10: The deletion task
-
-Delete what S4 made unnecessary, and run the suites to prove nothing needed it.
-
-1. `retainedDisplay` and its three lines in `SessionConversation.tsx`, and `workspaceDisplayState` if nothing else reads it (the lab's visual patch for the clear-and-refill).
-2. In `replica/reducer.ts`: the `reset_required` and `epoch_changed` statuses and their separate branches in `applyHistoryPage` and `reduceTimelineEvent`; the clearing `applyTimelineReplacement` (it becomes the marking of `pendingEpoch`); the call sites in `remote-session-client.ts`, `store.ts` and `useSessionCatchUp.ts` that distinguish them.
-3. The `epoch` terms of the `AgentTimeline` container key, `HistoryControls` key and resource scope for a keyed stream.
-4. The ledger's `epoch`, `afterSeq` and `consumedEchoSeqs` and their reconcile branches (`message-outbox.ts`, `remote-session-client.ts:482`).
-5. Visibility listeners that refetch lists (Task 7's inventory).
-6. Tests that pin the removed behaviour (a blank frame, a label flash, a reset after a replacement).
-7. The old P1-D plans' Task 4 and the attach shortcut are not built: nothing to delete, recorded here and in the roadmap.
-8. **Recorded for S6, not done here** because Controller-answered streams still need them: the `itemKeys` flag, the old row key and `itemIdentity()`, `mergeAuthoritative`'s range-overlap rule, `retiredEpochs` and the `stale_epoch` status. S6 gives the Controller's projector item keys and deletes them.
-
-Expected line change: production about +450 (store about +350 as the old plan, keys and absorption about +150, return budget about -50 net) and about -150 deleted; tests follow. The record of actual numbers goes in the results file.
-
-### Task 11: Documents, compatibility, the local check
-
-`docs/current/agent-remote/web.md` and `protocol.md` (the flag, the field, the `failed` status, absorption, the store's schema); `packages/agent-remote-lab/performance/README.md`; the roadmap (Progress row, the S4 row's evidence, "Notes carried to later plans": remove the P1-D latency note, keep the Task 3 shortcut note under S5); `pnpm compatibility:update`, then `pnpm compatibility:check`; the local check of section 11 last.
-
-## 9. Acceptance tests
-
-Test observable behaviour, not source text. Protocol, pairing and reconnect behaviour use real transports. Clock thresholds are the runner's only.
-
-**Real transports** (hosted broker over real HTTP and WebSocket, the journal core with a real store, a fake Controller that publishes windows; the client is the real `RemoteSessionClient` over the real session-channel transport, rendered in jsdom):
-
-1. **Replacement absorbed.** The Controller reopens with one changed item and one removed item. Afterward: the unchanged rows' DOM nodes are the same objects and rendered 0 more times; the changed row updated in place; the removed row is gone; a new row is inserted in order; at no commit was the entry list empty; the composer's text, focus and selection are unchanged.
+**Real transports** (hosted broker over real HTTP and WebSocket, the journal core with a real store, a fake Controller; the real `RemoteSessionClient` over the real session-channel transport, rendered in jsdom):
+1. **Replacement absorbed.** One item changes and one disappears. Unchanged rows' DOM nodes are the same objects and rendered 0 more times; the changed row updated in place; the removed row is gone; a new row is inserted in order; the entry list was never empty; the composer's text, focus and selection are unchanged.
 2. **Same epoch continues.** A reconnect with an unchanged journal issues one `after` request and no tail.
-3. **Device store, old epoch.** A record saved in epoch E1 is restored with rows on the first frame; the Relay now holds E2; the tail absorbs by key; restored rows that are unchanged stay mounted; no frame without rows; no connection word while restored.
-4. **A message awaiting its echo across a replacement** is confirmed by its echo, not marked unconfirmed (anchor key kept); and `unconfirmed` when its anchor row was rewritten.
-5. **The flag.** A flagged stream carries keys on pages and live frames and the row keys equal the item keys; an unflagged client receives frames that pass its Strict schema; a Controller-answered stream never echoes the flag.
-6. **Two replacements in a row, and a replacement during a catch-up,** end in the second epoch's rows with no stuck pending state.
-7. **Return.** A hide and return with live sockets makes at most 2 HTTP requests and shows no opening label; with the sockets closed it reconnects and the feeds refetch.
-8. **Copilot fixtures.** Failed compaction ends `failed`; three restarts leave one `todo` item.
+3. **A message awaiting its echo across a replacement** is confirmed by its echo when its anchor row is kept, and `unconfirmed` when it was rewritten.
+4. **The flag.** Flagged: keys on pages and live frames, row keys equal item keys. Unflagged: frames that pass the old Strict schema. A refusing Controller: opens, no keys, no echo.
+5. **Replacements in a row, and during a catch-up,** end in the last epoch's rows with no stuck pending state.
+6. **Copilot.** A failed compaction ends `failed`. Five restarts with a changed todo give `unchanged` or `appended`, never `replaced`, and one `todo` item.
 
-**Real browser** (Playwright Chromium, headless, the lab served by the same journal-served fixture; the claims are visual):
+**Real browser** (Playwright Chromium, headless, the lab served by the same journal-served fixture):
+7. **No re-keyed rows and no scroll jump.** Mark every row node; read a middle row's offset; force a replacement; every unchanged node keeps its mark, the offset moves at most 1 px, and a `MutationObserver` saw no state without rows.
+8. **A reader above the new window** lands on the window's first row and can scroll up through older history again.
+9. **Composer.** Text, focus and selection survive a forced replacement; the editor never became disabled.
 
-9. **No re-keyed rows and no scroll jump.** Mark every timeline row node with an expando; read a row in the middle of the window and its offset; force a replacement; assert every unchanged node still carries the mark, the anchor offset moved at most 1 px, and a `MutationObserver` recorded no state without rows.
-10. **A reader above the new window** lands on the window's first row and can scroll up through older history again (the bounded case of 3.3 step 2).
-11. **Composer.** Type text, focus and select inside the editor, force a replacement, assert the text, focus and selection are unchanged and the editor never became disabled.
-12. **Reload and return.** A reload of a known conversation shows rows in the first frame and no opening label; a hide and return under a fetch counter stays within the budget.
+Suites before each task's commit: web, lab (Node 22), protocol, hosted, relay, journal, journal-sqlite, the SDK and Copilot, conformance, and the Playwright spec. The Gate S2 counts are the floor; deletions that lower them are listed in the results file.
 
-Suites to run before the commit of each task: web, lab (Node 22), protocol, hosted, relay, journal, the Copilot and SDK providers, conformance, and the Playwright spec. The counts at Gate S2 (web 893, lab 2801, hosted 967, protocol 418) are the floor; deletions may lower them and are listed in the results file.
+## 8. The deletion task
 
-## 10. State accounting, and the budget the client holds
+1. `retainedDisplay` in `SessionConversation.tsx`, and `workspaceDisplayState` where nothing else reads it. (`workspace-cache.ts` itself goes in S4b.)
+2. In `replica/reducer.ts`: the `reset_required` and `epoch_changed` statuses and their branches; the clearing `applyTimelineReplacement`, which becomes the marking of `pendingEpoch`; the callers that distinguish them (`remote-session-client.ts`, `store.ts`, `useSessionCatchUp.ts`).
+3. The epoch terms of the container key, `HistoryControls` key and both resource scopes.
+4. The ledger's `epoch`, `afterSeq`, `consumedEchoSeqs` and their branches (`message-outbox.ts`, `remote-session-client.ts` ~482).
+5. In the core: the live-only special cases of `extensionOf` and the S2 test that pinned the replacement.
+6. Tests that pin the removed behaviour.
+7. **Recorded for S6, not done here** (Controller-answered streams still need them): the flag, the old row key and `itemIdentity()`, `mergeAuthoritative`'s range-overlap rule, `coalesceEntry`'s type-based matching, `retiredEpochs`, the `stale_epoch` status.
 
-| Area | Fields | Paths | Reason |
-|---|---|---|---|
-| Wire | +4 (two optional fields, one flag and its echo) and +1 enum value | 0 | Replace nothing on the wire until S6 (3.1); S6 deletes the flag |
-| Replica | +2 (`pendingEpoch`, `restoredFromDevice`) | outcomes -1 (7 to 6), reset-and-refill -1 | A replacement and a restore are the two states in which rows are shown unconfirmed |
-| Ledger | 0 (swap) | -1 | |
-| Lab | -1 (`retainedDisplay`), listeners -N | -1 (refetch on visibility) | |
-| Device store | 5 inside one module, 2 constants | +1 (quota) | New, but replaces six limits of the old plan and the preview cache of six sessions |
-| Journal and adapter | journal items -1 per Controller start; publisher fields unchanged at 19 | 0 | The todo rule |
+State at the end: wire +4 optional fields and +1 enum value, replica +1 field and -1 outcome, ledger 0, lab -1, core -3 branches, journal items -1 per start; publisher fields unchanged at 19. Record the line counts in the results file.
 
-**Budgets for client state:**
-- One conversation holds at most one pending replacement and at most twice its window in rows while absorbing. A window is at most 200 entries and 1 MiB of JSON.
-- The device store has one byte cap on disk and one preload budget, each cited to a measurement in the results file. Memory copies are what the preload loaded plus mounted sessions.
-- Idle cost: no timer in the store; write-behind only after a change; the lab's observer writes at most once per 2 s per session and on page hide.
-- A change that raises a number above its measured value says why in the results file or goes to the owner.
+## 9. The local-instance check, with Copilot journal-served
 
-## 11. The local-instance check, with Copilot journal-served
+Last. Follow `.agents/skills/prepare-arc-local/SKILL.md`: this checkout's instance, free ports, the headless Playwright of this repository, one browser context per script, `ARC_LOCAL_JOURNALS=1` on every `up`.
+1. The S3 Copilot session and one of at least 150 items made with real turns.
+2. Prove journal serving: the page's `negotiated` frame echoes `itemKeys`, and its `timeline_page` epoch equals the epoch in `journals.sqlite`'s `meta`; with smart reading off it is the Controller's.
+3. Controller restart with the page open, three times: marked rows survive, no frame without rows, the `todo` item count stays one, the Relay diagnostic shows no `replaced`.
+4. Forced replacement (`replacement-absorbed`): unchanged rows survive, composer keeps text and focus, anchor offset holds; screenshots before and after.
+5. Switch between sessions; send a message across a restart; a release and an open.
+6. A failed compaction cannot be forced locally; the fixture test covers it, and the check says so.
+7. No `journal_open_refused`, `journal_session_unserved` or `journal_session_restarted` beyond the forced replacement; the owner's own processes are untouched.
 
-Last, after Task 10. Follow `.agents/skills/prepare-arc-local/SKILL.md`: this checkout's instance only, free ports, the headless Playwright of this repository, one browser context per script. `ARC_LOCAL_JOURNALS=1` for every `up`, restarts included.
+## 10. Risks and what is not in S4a
 
-1. Build and `pnpm local up`; the Copilot session of S3 and a Copilot session of at least 150 items made with real turns.
-2. **Prove journal serving directly** (S3's method): the page's `timeline_page` epoch equals the epoch in `journals.sqlite`'s `meta`; with smart reading off it equals the Controller's.
-3. Reload: rows in the first frame from the device store, no "Opening session" (counted by the runner's observer).
-4. Hide and return: at most 2 HTTP requests, no label.
-5. **Controller restart with the page open**: rows stay mounted (marked nodes survive), no frame without rows. Repeat three times and read the journal: the `todo` item count stays at one.
-6. **Forced replacement** (`replacement-absorbed`): unchanged rows survive, the composer keeps its text and focus, the anchor offset holds. Take a screenshot before and after.
-7. Switch between sessions, send a message across a restart, and release (`session release`, `released: false` is expected for a session a page watches; an open after a release is the T2 case).
-8. A failed compaction cannot be forced on the local instance; the fixture test of Task 3 covers it, and the check says so.
-9. The Controller log shows no `journal_open_refused`, `journal_session_unserved` or `journal_session_restarted` beyond the forced replacement; the instance is left as it was found, with the owner's own processes untouched.
-
-Record the evidence in the results file and the roadmap row.
-
-## 12. Risks and what is not in S4
-
-- **A replacement while a reader is far above the window** loses that position (3.3 step 2). It is rare (S3: 0 replacements in 30 opens) and bounded; the tail limit keeps held rows inside the Controller's window. Task 9 counts replacements per open for Copilot again, so a rise is seen.
-- **Opening a session still attaches the Controller** (T2's "without reaching the Controller" waits for S5). T2 here is measured from the first attach request against the control, as in P0.
-- **Lists can be stale for up to their interval after a return** (section 4). That is the trade for a return that makes two requests; the dead-socket case refetches.
-- **Compaction `failed` needs the Relay and the bundle first.** Controllers that emit it must not meet a Relay that rejects it; this is the ordering of a normal release.
-- **Controller-answered streams get no item keys** until S6. They get the no-blank frame but not row survival across an epoch change.
-- **Not in S4:** the attach shortcut for an offline Host (S5), connection labels beyond the narrow rule (P2), demand leases and use-based retention (P3), the Controller's item keys (S6), the desktop application.
+- A replacement while a reader is far above the window loses that position (3.4). It is rare (S3: 0 in 30 opens) and counted.
+- Controller-answered streams get no item keys until S6: no blank frame, but no row survival across an epoch change.
+- A restart still appends one `todo` row.
+- Not in S4a: the device store, labels, T1, T2 and the return budget (S4b); the attach shortcut (S5); the Controller's item keys (S6).

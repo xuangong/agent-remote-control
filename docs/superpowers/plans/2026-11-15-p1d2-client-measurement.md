@@ -1,6 +1,6 @@
 # P1-D Client measurement and verification Implementation Plan
 
-> **Superseded** by [S4](2026-11-16-s4-client-absorbs-replacements.md) for the work it still covers (2026-11-16): it assumed a stable epoch and incremental corrections; see S4 section 1 for what survives.
+> **Superseded** by [S4a](2026-11-16-s4-client-absorbs-replacements.md) and [S4b](2026-11-16-s4b-device-store.md) for the work it still covers (2026-11-16): it assumed a stable epoch and incremental corrections; see S4a section 1 for what survives.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

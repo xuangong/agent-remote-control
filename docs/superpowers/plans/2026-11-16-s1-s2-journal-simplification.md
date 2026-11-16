@@ -46,6 +46,17 @@ Names: `@orchardworks/agent-remote-protocol`, `-journal`, `-journal-sqlite`, `-h
 - [ ] `git grep -n "journal=" main -- 'packages/agent-remote-relay/src' 'packages/agent-remote-hosted/src/broker.ts'` prints nothing: the journal query was never on `main`.
 - [ ] Baseline counts, saved in the task notes: `wc -l` of every file in the "Where the lines go" table (Section 7) and the publisher field count: `grep -cP '^  private (?!readonly)(?!async)(?!get )\w+\s*[:=;]' packages/agent-host/src/journal-publication.ts` (33 at HEAD; the assessment's 36 counted differently, this command is the budget's definition).
 
+## 1a. Open points decided by the coordinator (2026-11-16)
+
+These follow from the owner's approved direction. They are recorded here so that the executor does not reopen them.
+
+1. **No proactive upload of older history on open.** Older history reaches the Relay only when a reader asks for it (`journal_older_request`). This is the design's retention rule: the native session is the ground truth, and the Relay keeps a working set filled on demand. While the Host is offline, history older than the window shows as available later.
+2. **The journal version stays 1.** No journal-capable Controller has shipped, and compatibility matters only through an upgrade.
+3. **An open item in the window replaces on every reopen.** This is accepted until S3 measures it. Comparing open items by content is a follow-up only if the measurement shows frequent replacements (rule 4: measure before adding).
+4. **`rebindOps` stays** as an idempotent restatement, because digests do not cover resource bindings. Only the unacknowledged-rebind queue goes.
+5. **One refusal for a bad item.** The per-item refusal reasons merge into `invalid` with an `itemKey`.
+6. **"Zero writes" for an unchanged reopen** means no item, epoch or sequence write. The meta row may still be written.
+
 ## 2. The result of the interaction-frame check (assessment 3.3)
 
 Verified by reading the client and Relay, before any change. **No client behaviour needs the dedicated `interaction_requested`, `interaction_resolved` and `interaction_invalidated` frames when the head carries the pending interactions.** So Task 6 stops forwarding them on journal-served streams and deletes the hold. Evidence the executor must re-check in Task 6 step 1:

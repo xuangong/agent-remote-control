@@ -256,8 +256,9 @@ it('native path and read-tool session grants prevent repeated approvals for the 
   await session.respondToInteraction(read.request.requestId, {kind: 'tool_approval', decision: 'allow', scope: 'session'});
   await waitFor(() => seen.events().some(e => e.type === 'turn_completed'));
   expect(seen.events().filter(e => e.type === 'interaction_requested')).toHaveLength(2);
+  // The native record says what the native runtime says, live and reread: a path-access grant is a plain approval, a read grant is for the session.
   expect(seen.events().filter(e => e.type === 'interaction_resolved').map(e => e.response)).toEqual([
-   {kind: 'tool_approval', decision: 'allow', scope: 'session'}, {kind: 'tool_approval', decision: 'allow', scope: 'session'},
+   {kind: 'tool_approval', decision: 'allow', scope: 'once'}, {kind: 'tool_approval', decision: 'allow', scope: 'session'},
   ]);
   expect(seen.timeline().filter(e => e.item.type === 'tool_call' && e.item.status === 'completed')).toHaveLength(2);
   expect(f.errors).toEqual([]);

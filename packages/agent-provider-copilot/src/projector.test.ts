@@ -4,19 +4,19 @@ import {Projector} from './projector.js';
 function event(type: string, data: unknown): SessionEvent {return {type, data, id: Math.random().toString(), timestamp: new Date().toISOString(), parentId: null} as SessionEvent;}
 it('appends native deltas without duplicating durable text and preserves tool identity', () => {
  const projector = new Projector();
- const first = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hel'}))!;
- const second = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'lo'}))!;
- const final = projector.project(event('assistant.message', {messageId: 'm', content: 'Hello'}));
- expect(first.key).toBe(second.key); expect(first.event).toMatchObject({item: {text: 'Hel'}}); expect(second.event).toMatchObject({item: {text: 'lo'}}); expect(final).toBeUndefined();
- projector.project(event('tool.execution_start', {toolCallId: 't', toolName: 'bash', arguments: {command: 'pwd'}}));
- expect(projector.project(event('tool.execution_complete', {toolCallId: 't', success: false, error: {message: 'No'}, result: {content: 'stderr'}}))?.event).toMatchObject({item: {name: 'bash', detail: {type: 'shell', command: 'pwd'}, status: 'failed', error: 'No'}});
+ const first = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hel'}))[0]!;
+ const second = projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'lo'}))[0]!;
+ const final = projector.project(event('assistant.message', {messageId: 'm', content: 'Hello'}))[0];
+ expect(first.key).toBe(second.key); expect(first.event).toMatchObject({item: {text: 'Hel'}}); expect(second.event).toMatchObject({item: {text: 'lo'}}); expect(final?.event).toMatchObject({item: {text: ''}}); expect(final?.identity).toEqual({key: 'assistant:m', completes: true});
+ projector.project(event('tool.execution_start', {toolCallId: 't', toolName: 'bash', arguments: {command: 'pwd'}}))[0];
+ expect(projector.project(event('tool.execution_complete', {toolCallId: 't', success: false, error: {message: 'No'}, result: {content: 'stderr'}}))[0]?.event).toMatchObject({item: {name: 'bash', detail: {type: 'shell', command: 'pwd'}, status: 'failed', error: 'No'}});
 }, 10000);
 it('gives repeated native child turn zero distinct public turn identities', () => {
  const projector = new Projector();
- const first = projector.project(event('assistant.turn_start', {turnId: '0'}))!;
- expect(projector.project(event('assistant.turn_end', {turnId: '0'}))).toBeUndefined();
- const firstEnd = projector.project(event('assistant.idle', {}))!;
- const second = projector.project(event('assistant.turn_start', {turnId: '0'}))!;
+ const first = projector.project(event('assistant.turn_start', {turnId: '0'}))[0]!;
+ expect(projector.project(event('assistant.turn_end', {turnId: '0'}))[0]).toBeUndefined();
+ const firstEnd = projector.project(event('assistant.idle', {}))[0]!;
+ const second = projector.project(event('assistant.turn_start', {turnId: '0'}))[0]!;
  expect(first.event).toHaveProperty('turnId', (firstEnd.event as {turnId: string}).turnId);
  expect((first.event as {turnId: string}).turnId).not.toBe((second.event as {turnId: string}).turnId);
 }, 10000);
@@ -24,7 +24,7 @@ it('reconstructs historical foreground turns across multiple model steps without
  const projector = new Projector();
  const history = [event('user.message', {content: 'First'}), event('assistant.turn_start', {turnId: '0'}), event('assistant.turn_end', {turnId: '0'}), event('assistant.turn_start', {turnId: '1'}), event('assistant.turn_end', {turnId: '1'}), event('user.message', {content: 'Second'}), event('assistant.turn_start', {turnId: '0'}), event('assistant.turn_end', {turnId: '0'})];
  projector.prepareHistory(history);
- const projected = history.map(e => projector.project(e, 'history')?.event).filter(e => e?.type === 'turn_started' || e?.type === 'turn_completed');
+ const projected = history.map(e => projector.project(e, 'history')[0]?.event).filter(e => e?.type === 'turn_started' || e?.type === 'turn_completed');
  expect(projected.map(e => e!.type)).toEqual(['turn_started', 'turn_completed', 'turn_started', 'turn_completed']);
 }, 10000);
 it.each(['live', 'history'] as const)('keeps queued interactions distinct and steering together in %s', delivery => {
@@ -39,7 +39,8 @@ it.each(['live', 'history'] as const)('keeps queued interactions distinct and st
  expect(users.map(e => e.turnId)).toEqual([starts[0]!.turnId, starts[0]!.turnId, starts[1]!.turnId]);
 }, 10000);
 it('reports compaction failure without claiming completion or failing the turn', () => {
- expect(new Projector().project(event('session.compaction_complete', {success: false, error: 'context unavailable'}))?.event).toMatchObject({type: 'timeline', item: {type: 'error', message: expect.stringContaining('context unavailable')}});
+ const projected = new Projector().project(event('session.compaction_complete', {success: false, error: 'context unavailable'}));
+ expect(projected.map(p => p.event)).toMatchObject([{type: 'timeline', item: {type: 'compaction', status: 'loading'}}, {type: 'timeline', item: {type: 'error', message: expect.stringContaining('context unavailable')}}]);
 }, 10000);
 
 it('assigns input after a completed ordinary turn to its new turn', () => {
@@ -53,15 +54,15 @@ it('assigns input after a completed ordinary turn to its new turn', () => {
 
 it('emits only an unsent final suffix and suppresses late deltas and duplicate finals', () => {
  const projector = new Projector();
- projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hello'}));
- expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))?.event).toMatchObject({item: {messageId: 'm', text: ' world'}});
- expect(projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: ' world'}))).toBeUndefined();
- expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))).toBeUndefined();
+ projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Hello'}))[0];
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))[0]?.event).toMatchObject({item: {messageId: 'm', text: ' world'}});
+ expect(projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: ' world'}))[0]).toBeUndefined();
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Hello world'}))[0]).toBeUndefined();
 }, 10000);
 it('preserves a non-prefix final correction under a separate message identity', () => {
  const projector = new Projector();
- projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Draft'}));
- expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Corrected'}))?.event).toMatchObject({item: {messageId: 'm:correction', text: 'Corrected'}});
+ projector.project(event('assistant.message_delta', {messageId: 'm', deltaContent: 'Draft'}))[0];
+ expect(projector.project(event('assistant.message', {messageId: 'm', content: 'Corrected'})).map(p => p.event)).toMatchObject([{item: {messageId: 'm', text: ''}}, {item: {messageId: 'm:correction', text: 'Corrected'}}]);
 }, 10000);
 
 it('preserves background follow-up turn identity without ephemeral idle history', () => {
@@ -74,9 +75,9 @@ it('preserves background follow-up turn identity without ephemeral idle history'
 }, 10000);
 it('does not emit empty reasoning and maps context usage without inventing monetary cost', () => {
  const p = new Projector();
- expect(p.project(event('assistant.reasoning', {reasoningId: 'r', content: ''}))).toBeUndefined();
- expect(p.project(event('session.usage_info', {currentTokens: 120, tokenLimit: 1000, messagesLength: 3}))?.event).toMatchObject({type: 'usage_updated', usage: {contextScope: 'current', contextWindowUsedTokens: 120, contextWindowMaxTokens: 1000}});
- expect(p.project(event('assistant.usage', {model: 'm', cost: 2, inputTokens: 5, outputTokens: 1}))).toBeUndefined();
+ expect(p.project(event('assistant.reasoning', {reasoningId: 'r', content: ''}))[0]).toBeUndefined();
+ expect(p.project(event('session.usage_info', {currentTokens: 120, tokenLimit: 1000, messagesLength: 3}))[0]?.event).toMatchObject({type: 'usage_updated', usage: {contextScope: 'current', contextWindowUsedTokens: 120, contextWindowMaxTokens: 1000}});
+ expect(p.project(event('assistant.usage', {model: 'm', cost: 2, inputTokens: 5, outputTokens: 1}))[0]).toBeUndefined();
 }, 10000);
 it('reconstructs completed historical interactions without reopening pending prompts', () => {
  const p = new Projector();
@@ -90,47 +91,47 @@ it('streams reasoning once and keeps bounded tool output snapshots through compl
  const p = new Projector();
  const reasoning = [event('assistant.reasoning_delta', {reasoningId: 'r', deltaContent: 'Think'}), event('assistant.reasoning_delta', {reasoningId: 'r', deltaContent: 'ing'}), event('assistant.reasoning', {reasoningId: 'r', content: 'Thinking carefully'})].flatMap(e => p.projectAll(e)).map(p => p.event);
  expect(reasoning.map(e => e.type === 'timeline' && e.item.type === 'reasoning' ? e.item.text : '')).toEqual(['Think', 'ing', ' carefully']);
- expect(p.project(event('assistant.reasoning_delta', {reasoningId: 'r', deltaContent: ' carefully'}))).toBeUndefined();
- p.project(event('tool.execution_start', {toolCallId: 't', toolName: 'bash', arguments: {command: 'echo hello'}}));
- p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'hel'}));
- expect(p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'lo'}))?.event).toMatchObject({item: {status: 'running', result: {content: [{type: 'text', text: 'hello'}]}}});
- const final = p.project(event('tool.execution_complete', {toolCallId: 't', success: true, result: {content: 'hello!', structuredContent: {ok: true}}}));
+ expect(p.project(event('assistant.reasoning_delta', {reasoningId: 'r', deltaContent: ' carefully'}))[0]).toBeUndefined();
+ p.project(event('tool.execution_start', {toolCallId: 't', toolName: 'bash', arguments: {command: 'echo hello'}}))[0];
+ p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'hel'}))[0];
+ expect(p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'lo'}))[0]?.event).toMatchObject({item: {status: 'running', result: {content: [{type: 'text', text: 'hello'}]}}});
+ const final = p.project(event('tool.execution_complete', {toolCallId: 't', success: true, result: {content: 'hello!', structuredContent: {ok: true}}}))[0];
  expect(final?.event).toMatchObject({item: {status: 'completed', result: {content: [{type: 'text', text: 'hello!'}, {type: 'json', value: {ok: true}}]}}});
- expect(p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'late'}))).toBeUndefined();
+ expect(p.project(event('tool.execution_partial_result', {toolCallId: 't', partialOutput: 'late'}))[0]).toBeUndefined();
 }, 10000);
 
 it('projects native failure and cancellation as distinct public terminal events', () => {
  const failed = new Projector();
- const start = failed.project(event('assistant.turn_start', {turnId: '0'}))!.event;
- expect(failed.project(event('session.error', {errorType: 'model', message: 'Model unavailable'}))?.event).toMatchObject({type: 'turn_failed', error: 'Model unavailable', turnId: 'turnId' in start ? start.turnId : undefined});
- expect(failed.project(event('assistant.idle', {}))).toBeUndefined();
- const canceled = new Projector(); canceled.project(event('assistant.turn_start', {turnId: '0'}));
- expect(canceled.project(event('abort', {}))?.event).toMatchObject({type: 'turn_canceled', reason: 'Native turn aborted'});
- expect(canceled.project(event('assistant.idle', {}))).toBeUndefined();
+ const start = failed.project(event('assistant.turn_start', {turnId: '0'}))[0]!.event;
+ expect(failed.project(event('session.error', {errorType: 'model', message: 'Model unavailable'}))[0]?.event).toMatchObject({type: 'turn_failed', error: 'Model unavailable', turnId: 'turnId' in start ? start.turnId : undefined});
+ expect(failed.project(event('assistant.idle', {}))[0]).toBeUndefined();
+ const canceled = new Projector(); canceled.project(event('assistant.turn_start', {turnId: '0'}))[0];
+ expect(canceled.project(event('abort', {}))[0]?.event).toMatchObject({type: 'turn_canceled', reason: 'Native turn aborted'});
+ expect(canceled.project(event('assistant.idle', {}))[0]).toBeUndefined();
 }, 10000);
 
 it('retains successful compaction metadata and native token counts', () => {
  const p = new Projector();
- expect(p.project(event('session.compaction_start', {}))?.event).toMatchObject({item: {type: 'compaction', status: 'loading'}});
- expect(p.project(event('session.compaction_complete', {success: true, trigger: 'manual', preCompactionTokens: 900}))?.event).toMatchObject({item: {type: 'compaction', status: 'completed', trigger: 'manual', preTokens: 900}});
+ expect(p.project(event('session.compaction_start', {}))[0]?.event).toMatchObject({item: {type: 'compaction', status: 'loading'}});
+ expect(p.project(event('session.compaction_complete', {success: true, trigger: 'manual', preCompactionTokens: 900}))[0]?.event).toMatchObject({item: {type: 'compaction', status: 'completed', trigger: 'manual', preTokens: 900}});
 }, 10000);
 
 it('does not publish ephemeral per-call counts as session usage from either root or child projectors', () => {
  const p = new Projector();
- expect(p.project(event('assistant.usage', {inputTokens: 12, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 2}))).toBeUndefined();
- expect(p.project(event('assistant.usage', {inputTokens: 4, outputTokens: 2}))).toBeUndefined();
- expect(p.project(event('assistant.usage', {inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0}))).toBeUndefined();
+ expect(p.project(event('assistant.usage', {inputTokens: 12, outputTokens: 5, cacheReadTokens: 8, cacheWriteTokens: 2}))[0]).toBeUndefined();
+ expect(p.project(event('assistant.usage', {inputTokens: 4, outputTokens: 2}))[0]).toBeUndefined();
+ expect(p.project(event('assistant.usage', {inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0}))[0]).toBeUndefined();
 }, 10000);
 
 it('rejects invalid token components and leaves unavailable context fields unknown', () => {
  const p = new Projector();
- expect(p.project(event('session.usage_info', {currentTokens: 0}))?.event).toEqual({
+ expect(p.project(event('session.usage_info', {currentTokens: 0}))[0]?.event).toEqual({
   type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {contextScope: 'current', contextWindowUsedTokens: 0},
  });
- expect(p.project(event('session.usage_info', {tokenLimit: 1000}))?.event).toEqual({
+ expect(p.project(event('session.usage_info', {tokenLimit: 1000}))[0]?.event).toEqual({
   type: 'usage_updated', provider: 'copilot', turnId: undefined, usage: {contextScope: 'current', contextWindowMaxTokens: 1000},
  });
- expect(p.project(event('session.usage_info', {currentTokens: -1, tokenLimit: 0}))).toBeUndefined();
- expect(p.project(event('session.usage_info', {}))).toBeUndefined();
- expect(p.project(event('session.usage_info', {currentTokens: Number.MAX_SAFE_INTEGER + 1, tokenLimit: 1.5}))).toBeUndefined();
+ expect(p.project(event('session.usage_info', {currentTokens: -1, tokenLimit: 0}))[0]).toBeUndefined();
+ expect(p.project(event('session.usage_info', {}))[0]).toBeUndefined();
+ expect(p.project(event('session.usage_info', {currentTokens: Number.MAX_SAFE_INTEGER + 1, tokenLimit: 1.5}))[0]).toBeUndefined();
 }, 10000);

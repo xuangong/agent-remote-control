@@ -353,7 +353,7 @@ it('preserves native deny and location approval receipts when completion wins th
   mock.handler(event('permission.completed', {requestId: 'location', result: {kind: 'approved-for-location'}}));
   await provider.dispose(); await seen.done;
   const receipts = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [v.event.response] : []);
-  expect(receipts).toEqual([{kind: 'tool_approval', decision: 'deny'}, {kind: 'tool_approval', decision: 'allow', scope: 'once'}]);
+  expect(receipts).toEqual([{kind: 'tool_approval', decision: 'deny'}, {kind: 'tool_approval', decision: 'allow', scope: 'session'}]);
 }, 10000);
 it('reads only current regular bounded skill documents without following final symlinks', async () => {
  const {mkdtemp, writeFile, symlink, rm} = await import('node:fs/promises');
@@ -556,15 +556,36 @@ it('publishes native planning mode and completes identity-bound plan approval', 
   expect(await reply).toEqual({approved: true, selectedAction: 'interactive'});
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
-it('loads native todos and publishes serialized refreshes including a cleared list', async () => {
+it('publishes a todo snapshot only for a live change, as a live-only item, and not when the session opens', async () => {
  let rows: any[] = [{id: '1', title: 'Implement', status: 'in_progress'}, {id: '2', title: 'Verify', status: 'done'}];
  mock.native.rpc.plan = {readSqlTodos: vi.fn(async () => ({rows}))};
  const {provider, session} = await open(); const seen = await collect(session);
  try {
   await new Promise(r => setImmediate(r));
-  expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}]}})}));
+  expect(seen.values.filter(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'todo')).toEqual([]);
+  rows = [...rows, {id: '3', title: 'Ship', status: 'pending'}]; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
+  expect(seen.values).toContainEqual(expect.objectContaining({itemIdentity: {key: 'todo:plan', completes: true, liveOnly: true}, event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: [{id: '1', text: 'Implement', completed: false, status: 'in_progress'}, {id: '2', text: 'Verify', completed: true, status: 'completed'}, {id: '3', text: 'Ship', completed: false, status: 'pending'}]}})}));
   rows = []; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
   expect(seen.values).toContainEqual(expect.objectContaining({event: expect.objectContaining({type: 'timeline', item: {type: 'todo', items: []}})}));
+ } finally {await provider.dispose(); await seen.done;}
+}, 10000);
+
+it('tells which resolved interactions and adapter errors a reread cannot reproduce: all but a tool approval', async () => {
+ const {provider, session} = await open(); const seen = await collect(session);
+ try {
+  mock.handler(event('permission.requested', {requestId: 'tool', permissionRequest: {kind: 'shell'}}));
+  mock.handler(event('permission.completed', {requestId: 'tool', result: {kind: 'approved'}}));
+  mock.handler(event('user_input.requested', {requestId: 'ask', question: 'Which?'}));
+  const answer = mock.config.onUserInputRequest({question: 'Which?'}); await new Promise(r => setImmediate(r));
+  await session.respondToInteraction('ask', {kind: 'question', answers: [{questionId: 'answer', selectedValues: [], customText: 'This'}]}); await answer;
+  mock.handler(event('exit_plan_mode.requested', {requestId: 'plan', summary: 'Plan', planContent: 'Do it', actions: ['exit_only'], recommendedAction: 'exit_only'}));
+  mock.handler(event('exit_plan_mode.completed', {requestId: 'plan', approved: true, selectedAction: 'exit_only'}));
+  await expect(mock.config.onUserInputRequest({question: 'Unknown?'})).rejects.toThrow('no unique native request identity');
+  await new Promise(r => setImmediate(r));
+  const errors = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'timeline' && v.event.item.type === 'error' ? [v.itemIdentity] : []);
+  expect(errors).toEqual([{key: expect.stringMatching(/^error:[0-9a-f-]{36}$/), completes: true, liveOnly: true}]);
+  const resolved = seen.values.flatMap(v => v.type === 'observation' && v.event.type === 'interaction_resolved' ? [[v.event.requestId, v.itemIdentity]] : []);
+  expect(resolved).toEqual([['tool', {key: 'interaction:tool', completes: true}], ['ask', {key: 'interaction:ask', completes: true, liveOnly: true}], ['plan', {key: 'interaction:plan', completes: true, liveOnly: true}]]);
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
 
@@ -648,7 +669,7 @@ it('keeps an interactive session-scope decision when native completion arrives b
  mock.handler(event('permission.requested', {requestId: 'read-session', permissionRequest: {kind: 'read', path: '/workspace/file'}, promptRequest: {kind: 'read', path: '/workspace/file'}}));
  mock.native.rpc.permissions.handlePendingPermissionRequest.mockImplementation(async (params: unknown) => {
   expect(params).toEqual({requestId: 'read-session', result: {kind: 'approve-for-session', approval: {kind: 'read'}}});
-  mock.handler(event('permission.completed', {requestId: 'read-session', result: {kind: 'approved'}}));
+  mock.handler(event('permission.completed', {requestId: 'read-session', result: {kind: 'approved-for-session'}}));
   return {success: true};
  });
  try { await session.respondToInteraction('read-session', {kind: 'tool_approval', decision: 'allow', scope: 'session'}); }

@@ -25,7 +25,7 @@ export function interactionRequest(event: SessionEvent): AgentInteractionRequest
 export function interactionResponse(event: SessionEvent, request: AgentInteractionRequest): AgentInteractionResponse | undefined {
  if (event.type === 'permission.completed' && request.kind === 'tool_approval') {
   const kind = event.data.result.kind;
-  return kind.startsWith('approved') ? {kind: 'tool_approval', decision: 'allow', scope: 'once'} : {kind: 'tool_approval', decision: kind.startsWith('denied') ? 'deny' : 'cancel'};
+  return kind.startsWith('approved') ? {kind: 'tool_approval', decision: 'allow', scope: kind === 'approved-for-session' || kind === 'approved-for-location' ? 'session' : 'once'} : {kind: 'tool_approval', decision: kind.startsWith('denied') ? 'deny' : 'cancel'};
  }
  if (event.type === 'user_input.completed' && request.kind === 'question') {
   const {answer, wasFreeform} = event.data;

@@ -1,4 +1,5 @@
-import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
+import { randomUUID } from 'node:crypto';
+import { AgentOperationRejectedError, type ProviderItemIdentity } from '@orchardworks/agent-provider-sdk';
 import type { CopilotSession, SessionEvent } from '@github/copilot-sdk';
 import { validateInteractionResponse, redactInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { provider, record } from './native.js';
@@ -10,12 +11,14 @@ type PlanPayload = Parameters<NonNullable<import('@github/copilot-sdk').SessionC
 type PlanReply = {approved: boolean; selectedAction?: string; feedback?: string};
 type QuestionPayload = Parameters<NonNullable<import('@github/copilot-sdk').SessionConfig['onUserInputRequest']>>[0];
 type QuestionReply = {answer: string; wasFreeform: boolean};
-interface Pending { sessionDecision?: ReturnType<typeof sessionApproval>; submittedResponse?: AgentInteractionResponse; request: AgentInteractionRequest; owner?: string | null; toolCallId?: string; submitting: boolean; elicitation?: ElicitationPayload; elicitationCallback?: {resolve: (reply: ElicitationReply) => void; reject: (error: Error) => void}; question?: QuestionPayload; plan?: PlanPayload; planCallback?: {resolve: (reply: PlanReply) => void; reject: (error: Error) => void}; callback?: {resolve: (reply: QuestionReply) => void; reject: (error: Error) => void}; }
+interface Pending { sessionDecision?: ReturnType<typeof sessionApproval>; request: AgentInteractionRequest; owner?: string | null; toolCallId?: string; submitting: boolean; elicitation?: ElicitationPayload; elicitationCallback?: {resolve: (reply: ElicitationReply) => void; reject: (error: Error) => void}; question?: QuestionPayload; plan?: PlanPayload; planCallback?: {resolve: (reply: PlanReply) => void; reject: (error: Error) => void}; callback?: {resolve: (reply: QuestionReply) => void; reject: (error: Error) => void}; }
+/** An error the adapter itself raises has no native record. */
+const adapterError = (): ProviderItemIdentity => ({key: `error:${randomUUID()}`, completes: true, liveOnly: true});
 /** Native request IDs correlate presentation, responses, completion and cancellation. */
 export class NativeInteractions {
   private readonly toolOwners = new Map<string, string | undefined>();
   private readonly pending = new Map<string, Pending>();
-  constructor(private readonly emit: (event: AgentStreamEvent) => void, private readonly rpc: () => CopilotSession['rpc'], private readonly call: <T>(operation: Promise<T>, label: string) => Promise<T>) {}
+  constructor(private readonly emit: (event: AgentStreamEvent, identity?: ProviderItemIdentity) => void, private readonly rpc: () => CopilotSession['rpc'], private readonly call: <T>(operation: Promise<T>, label: string) => Promise<T>) {}
   get waiting(): boolean { return this.pending.size > 0; }
   get pendingIds(): readonly string[] { return [...this.pending.keys()]; }
   trackTool(event: SessionEvent): void {
@@ -32,7 +35,7 @@ export class NativeInteractions {
     this.trackTool(event);
     let request: AgentInteractionRequest | undefined;
     try {request = interactionRequest(event);} catch {
-      this.emit({type: 'timeline', provider, item: {type: 'error', message: 'Copilot interaction uses an unsupported schema.'}}); return;
+      this.emit({type: 'timeline', provider, item: {type: 'error', message: 'Copilot interaction uses an unsupported schema.'}}, adapterError()); return;
     }
     if (request) {
       const d = record(event.data);
@@ -45,10 +48,9 @@ export class NativeInteractions {
       if (event.type === 'exit_plan_mode.requested') pending.plan = event.data;
       if (event.type === 'elicitation.requested') pending.elicitation = {...event.data, sessionId: ''} as ElicitationPayload;
     } else if (event.type === 'permission.completed') {
-      const kind = event.data.result.kind;
-      const submitted = this.pending.get(event.data.requestId)?.submittedResponse;
-      this.retire(event.data.requestId, kind.startsWith('approved') ? submitted?.kind === 'tool_approval' && submitted.decision === 'allow' ? submitted : {kind: 'tool_approval', decision: 'allow', scope: 'once'}
-        : {kind: 'tool_approval', decision: kind.startsWith('denied') ? 'deny' : 'cancel'});
+      // The native event alone decides the response, so a reread of history says the same: a path-access grant for the session is recorded as a plain approval.
+      const request = this.pending.get(event.data.requestId)?.request;
+      if (request) this.retire(event.data.requestId, interactionResponse(event, request));
     } else if (event.type === 'user_input.completed') {
       const request = this.pending.get(event.data.requestId)?.request;
       if (!request || request.kind !== 'question') return;
@@ -75,7 +77,7 @@ export class NativeInteractions {
     const matches = [...this.pending.values()].filter(pending => !pending.callback && pending.question && signature(pending.question) === signature(payload));
     if (matches.length !== 1) {
       const message = 'Copilot question callback has no unique native request identity; concurrent identical questions are unsupported.';
-      this.emit({type: 'timeline', provider, item: {type: 'error', message}});
+      this.emit({type: 'timeline', provider, item: {type: 'error', message}}, adapterError());
       for (const pending of matches) this.retire(pending.request.requestId);
       return Promise.reject(new Error(message));
     }
@@ -97,7 +99,7 @@ export class NativeInteractions {
     const matches = [...this.pending.values()].filter(p => p.plan && !p.planCallback && signature(p.plan) === signature(payload));
     if (matches.length !== 1) {
       const error = new Error('Copilot plan callback has no unique native request identity.');
-      this.emit({type: 'timeline', provider, item: {type: 'error', message: error.message}});
+      this.emit({type: 'timeline', provider, item: {type: 'error', message: error.message}}, adapterError());
       for (const pending of matches) this.retire(pending.request.requestId);
       return Promise.reject(error);
     }
@@ -120,14 +122,15 @@ export class NativeInteractions {
       }
     }
     const terminal = response ?? (pending.request.kind === 'question' ? {kind: 'question' as const, answers: [], dismissed: true} : {kind: 'tool_approval' as const, decision: 'cancel' as const});
-    this.emit({type: 'interaction_resolved', provider, requestId, response: redactInteractionResponse(pending.request, terminal)});
+    // Only a tool approval is on disk; a question, form or plan approval is never written to the history a reread returns.
+    this.emit({type: 'interaction_resolved', provider, requestId, response: redactInteractionResponse(pending.request, terminal)}, {key: `interaction:${requestId}`, completes: true, ...(pending.request.kind === 'tool_approval' ? {} : {liveOnly: true})});
   }
   cancelOwner(owner?: string | null, toolCallId?: string): void { for (const [id, pending] of this.pending) if (pending.owner === owner) this.retire(id); }
   dispose(): void { for (const id of this.pending.keys()) this.retire(id); }
   async respond(requestId: string, response: AgentInteractionResponse): Promise<void> {
     const pending = this.pending.get(requestId); if (!pending) throw new AgentOperationRejectedError('operation_rejected', 'Unknown Copilot interaction.');
     if (pending.submitting) throw new AgentOperationRejectedError('operation_rejected', 'Copilot interaction response is already pending.');
-    validateInteractionResponse(pending.request, response); pending.submitting = true; pending.submittedResponse = response;
+    validateInteractionResponse(pending.request, response); pending.submitting = true;
     try {
       if (response.kind === 'form' || response.kind === 'external_action') {
         if (!pending.elicitationCallback) throw new AgentOperationRejectedError('operation_rejected', 'Copilot native elicitation callback is not available.');
@@ -150,6 +153,6 @@ export class NativeInteractions {
         : undefined;
       if (!result?.success) throw new Error('Copilot did not confirm the interaction response.');
       this.retire(requestId, response);
-    } finally { pending.submitting = false; pending.submittedResponse = undefined; }
+    } finally { pending.submitting = false; }
   }
 }

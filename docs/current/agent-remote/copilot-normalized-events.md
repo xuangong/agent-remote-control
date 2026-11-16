@@ -33,11 +33,11 @@ Evidence labels below:
 | --- | --- | --- |
 | `user_message` | Native text/message ID; root blob image attachments reference session-owned resources. Binary assets restore saved images. Child views do not run the root image resource mapper. | Native image resume/resource test; unit image bounds |
 | `assistant_message` | Incremental deltas, final unsent suffix, duplicate/late delta suppression. A non-prefix correction becomes a separate message instead of corrupting an append-only stream. | Native exact-once live/resume; projector tests |
-| `reasoning` | Incremental reasoning and final suffix, without opaque reasoning data. Empty rows are suppressed. Cannot reconstruct reasoning omitted by the durable native journal. | Unit projector tests |
+| `reasoning` | Incremental reasoning and final suffix, without opaque reasoning data. Empty rows are suppressed. Cannot reconstruct reasoning omitted by the durable native journal; the native history omits the stream. | Unit projector tests; native recording |
 | `tool_call` | Start, bounded partial snapshots, completion/failure, original call identity. Diff mapping described below. Native `success:false` maps to failed; the adapter does not independently emit tool status `canceled`. | Native shell/child/diff tests; projector tests |
-| `todo` | Serialized `plan.readSqlTodos` on open and `session.todos_changed`; changed snapshots and clear are emitted. Native historical todo snapshots are not invented from current SQL. `activeForm` is not mapped. | Native SQL todo test; unit serialized refresh/clear |
+| `todo` | Serialized `plan.readSqlTodos` after each live `session.todos_changed`; changed snapshots and clear are emitted. Opening a session reads the list only to know what changed and emits nothing, because a snapshot taken at open has no position in the history a reread returns. Native historical todo snapshots are not invented from current SQL. `activeForm` is not mapped. | Native SQL todo test; unit serialized refresh/clear |
 | `interaction` | Completed historical request/response pairs, with child approvals on the owning parent. Old pending callbacks are never reopened. Native permission journal records only approved/denied, so historical approval scope currently falls back to once; live JSONL retains observed scope. | Native resume; projector/provider tests |
-| `error` | Failed compaction and unsupported/ambiguous interaction schemas become visible errors. Native `session.warning`, `session.info`, system notices and model retry diagnostics are not mapped. | Unit failure/ambiguity tests; ignored events by inspection |
+| `error` | A failed compaction (beside its compaction item) and unsupported/ambiguous interaction schemas become visible errors. Native `session.warning`, `session.info`, system notices and model retry diagnostics are not mapped. | Unit failure/ambiguity tests; ignored events by inspection |
 | `compaction` | Start and successful completion; manual/auto trigger and pre-token count. Failure emits an error, never a false success. | Unit projector tests |
 
 ## All seven tool detail variants and result fields
@@ -108,3 +108,21 @@ The `apply_patch` change is implemented here. The remaining gaps are audited fin
 - Read-only reprojection of the reported native plan journal confirmed that the denied patch has no file changes and the subsequent successful patch contains the actual 23 added lines in `plan.md`. No agent command was replayed or file rewritten by this verification.
 
 These checks do not replace native iOS, Windows or production validation. Existing user debug sessions were not restarted; running processes keep their already-loaded adapter code until restarted or replaced explicitly.
+
+## Item identity
+
+Every timeline observation carries the identity of its item (`itemIdentity`), equal in the live stream and in a reread of `events.jsonl`, so a journal recognizes the item. The adapter owns keys, completion and live-only marks.
+
+| Item | Key | Notes |
+| --- | --- | --- |
+| user message | `user:<event id>` | completes when emitted |
+| assistant text | `assistant:<messageId>` | deltas and the final message share it; the final message completes it with the unsent suffix, or an empty body when the stream was whole; a final that does not extend the stream completes the item empty and adds a complete `assistant:<messageId>:correction` item |
+| reasoning | `reasoning:<reasoningId>`, live-only | the native history does not keep the reasoning stream (recorded against the real CLI), so a reread cannot reproduce it and the journal keeps the streamed copy; the final completes it |
+| tool call | `tool:<toolCallId>` | start and partial rows are open; `tool.execution_complete` completes with the whole row; a tool without a completion stays open in history |
+| tool approval | `interaction:<requestId>` | `permission.*` is persisted; `approved-for-session` and `approved-for-location` are scope `session` |
+| question, form, plan approval | `interaction:<requestId>`, live-only | `user_input.*`, `elicitation.*` and `exit_plan_mode.*` are never written to disk |
+| compaction | `compaction:<start event id>` | the completion, or the failure, takes the pending start and completes it; a failure also adds an `error` item |
+| todo | `todo:plan`, live-only | only a live `session.todos_changed` |
+| error | `error:<event id>`; adapter-made `error:<uuid>`, live-only | |
+
+On `abort`, text and reasoning that streamed and never got a final message are finished with an empty live-only body, so no item stays open. A tool that streamed partial output differs from its reread, because `tool.execution_partial_result` is not stored; the journal replaces once for it.

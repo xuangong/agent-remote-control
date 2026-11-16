@@ -10,8 +10,8 @@ function event(type: string, data: unknown): SessionEvent {
 }
 function project(argumentsValue: unknown, result: unknown, success = true, delivery: 'live' | 'history' = 'live') {
   const p = new Projector();
-  const start = p.project(event('tool.execution_start', {toolCallId: 'patch', toolName: 'apply_patch', arguments: argumentsValue}), delivery)!.event;
-  const end = p.project(event('tool.execution_complete', {toolCallId: 'patch', success, result, ...(!success ? {error: {message: 'Plan boundary denied'}} : {})}), delivery)!.event;
+  const start = p.project(event('tool.execution_start', {toolCallId: 'patch', toolName: 'apply_patch', arguments: argumentsValue}), delivery)[0]!.event;
+  const end = p.project(event('tool.execution_complete', {toolCallId: 'patch', success, result, ...(!success ? {error: {message: 'Plan boundary denied'}} : {})}), delivery)[0]!.event;
   if (end.type !== 'timeline' || end.item.type !== 'tool_call') throw new Error('Missing tool result');
   return {start, item: end.item};
 }

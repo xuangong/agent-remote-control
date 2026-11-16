@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import type { CopilotClient, CopilotSession, SessionConfig, SessionEvent } from '@github/copilot-sdk';
-import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type AgentTaskItem, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, validateCommandDirectory, validateSessionSetting, type AgentCapabilities, type AgentChildSession, type AgentCommand, type AgentInteractionResponse, type AgentMessageOptions, type AgentRuntimeInfo, type AgentSession, type AgentSessionConfig, type AgentStreamEvent, type AgentTaskItem, type ProviderItemIdentity, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { CopilotAgentProviderOptions } from './provider.js';
 import { Channel, deadline } from './channel.js';
 import { Projector, provider, record } from './projector.js';
@@ -24,12 +24,12 @@ export class CopilotAgentSession implements AgentSession {
   private readonly projector: Projector;
   private readonly images: CopilotImages;
   private readonly seen = new Set<string>();
-  private readonly interactions = new NativeInteractions(event => this.emit(event), () => this.rpc, (operation, label) => this.mutateNative(() => operation, label));
+  private readonly interactions = new NativeInteractions((event, identity) => this.emit(event, identity), () => this.rpc, (operation, label) => this.mutateNative(() => operation, label));
   private readonly children = new Map<string, CopilotChildSession>();
   private readonly resources = new Map<string, string>();
   private unsubscribe?: () => void;
   private buffered: SessionEvent[] | undefined = [];
-  private readonly deferredEvents: AgentStreamEvent[] = [];
+  private readonly deferredEvents: Array<{event: AgentStreamEvent; identity?: ProviderItemIdentity}> = [];
   private closed = false;
   private observed = false;
   private revision = 0;
@@ -107,9 +107,9 @@ export class CopilotAgentSession implements AgentSession {
       for (const event of history) self.accept(event, 'history');
       self.stream.push({type: 'history_boundary'});
       const buffered = self.buffered!; self.buffered = undefined;
-      for (const event of self.deferredEvents.splice(0)) {
+      for (const {event, identity} of self.deferredEvents.splice(0)) {
         const id = event.type === 'interaction_requested' ? event.request.requestId : event.type === 'interaction_resolved' || event.type === 'interaction_invalidated' ? event.requestId : undefined;
-        if (!id || !completedInteractions.has(id)) self.emit(event);
+        if (!id || !completedInteractions.has(id)) self.emit(event, identity);
       }
       for (const event of buffered) self.accept(event, 'live');
       if (!processing && self.foregroundRevision === activityRevision) self.accept({type: 'assistant.idle', id: `activity-idle:${randomUUID()}`, parentId: null, timestamp: new Date().toISOString(), ephemeral: true, data: {}} as SessionEvent, 'live');
@@ -121,7 +121,7 @@ export class CopilotAgentSession implements AgentSession {
         if(selected.toolApproval&&self.info.settings?.find(setting=>setting.id==='tool_approval_mode')?.value!==selected.toolApproval) await self.setSessionSetting('tool_approval_mode',selected.toolApproval);
       }
       if (config.planning !== undefined) await self.setPlanning(config.planning);
-      await self.refreshTodos(); await self.refreshChildren(); self.emitRuntime();
+      await self.refreshTodos(false); await self.refreshChildren(); self.emitRuntime();
       self.scheduleUsageRefresh(true); void self.refreshInitialContext();
       return self;
     } catch (error) { await self.dispose(); throw error; }
@@ -143,7 +143,7 @@ export class CopilotAgentSession implements AgentSession {
     return this.call(pending, label);
   }
   observe(): AsyncIterable<ProviderStreamItem> { if (this.observed) throw new Error('Copilot observation already attached.'); this.observed = true; return this.stream; }
-  emit(event: AgentStreamEvent): void { if (this.buffered) { this.deferredEvents.push(event); return; } if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event}); }
+  emit(event: AgentStreamEvent, identity?: ProviderItemIdentity): void { if (this.buffered) { this.deferredEvents.push({event, identity}); return; } if (!this.closed) this.stream.push({type: 'observation', sourceKey: `copilot:local:${randomUUID()}`, occurredAt: Date.now(), delivery: 'live', event, ...(identity ? {itemIdentity: identity} : {})}); }
   private emitRuntime() { this.emit({type: 'runtime_updated', provider, runtimeInfo: structuredClone({...this.info, status: this.info.status})}); }
   private accept(event: SessionEvent, delivery: 'history' | 'live'): void {
     if (this.closed || this.seen.has(event.id)) return; this.seen.add(event.id);
@@ -164,7 +164,7 @@ export class CopilotAgentSession implements AgentSession {
           const parts = (images?.content ?? [{type:'text' as const,text:event.data.content}]).flatMap(part => part.type === 'text' ? projectResourceInputText(part.text) : [part]);
           if(parts.some(part=>part.type==='resource')) { projected.event.item.content=parts; projected.event.item.text=parts.map(part=>part.type==='text'?part.text:`[${part.label}]`).join(''); }
         }
-        this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event, ...(images ? {resourceReferences: images.resourceReferences} : {})});
+        this.stream.push({type: 'observation', sourceKey: `copilot:${this.config.sessionId}:${projected.key}`, nativeRevision: ++this.revision, occurredAt: Date.parse(event.timestamp), delivery, event: projected.event, ...(projected.identity ? {itemIdentity: projected.identity} : {}), ...(images ? {resourceReferences: images.resourceReferences} : {})});
       }
       if (delivery === 'live') {
         if (event.type === 'assistant.turn_start') this.info.status = 'running';
@@ -181,7 +181,7 @@ export class CopilotAgentSession implements AgentSession {
       this.info.mode = event.data.newMode; this.info.planning = {active: event.data.newMode === 'plan'};
       this.updatePreparedControl({mode:event.data.newMode}); this.emitRuntime();
     }
-    if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos();
+    if (delivery === 'live' && event.type === 'session.todos_changed') void this.refreshTodos(true);
     if (delivery === 'live' && !owner && event.type === 'session.model_change') {
       // Preserve every native transition even if the model queue drains before readback.
       this.controlsRevision++;
@@ -358,7 +358,8 @@ export class CopilotAgentSession implements AgentSession {
     if (this.info.planning?.active !== active) throw new Error('Copilot did not confirm the requested planning mode.');
     } finally {finish();}
   }
-  private refreshTodos(): Promise<void> {
+  /** Reads the native todo list. Only a live change is announced: a snapshot taken when the session opens has no place in the history a reread returns. */
+  private refreshTodos(announce: boolean): Promise<void> {
     this.todosRefresh = this.todosRefresh.then(async () => {
       if (this.closed) return;
       const {rows} = await this.call(this.rpc.plan.readSqlTodos(), 'Copilot todos');
@@ -369,7 +370,7 @@ export class CopilotAgentSession implements AgentSession {
       });
       const signature = JSON.stringify(items); if (signature === this.todosSignature) return;
       this.todosSignature = signature;
-      this.emit({type: 'timeline', provider, item: {type: 'todo', items}});
+      if (announce) this.emit({type: 'timeline', provider, item: {type: 'todo', items}}, {key: 'todo:plan', completes: true, liveOnly: true});
     }).catch(error => this.options.onDiagnostic?.(`Copilot todos unavailable: ${String(error)}`));
     return this.todosRefresh;
   }

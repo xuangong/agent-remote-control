@@ -48,15 +48,13 @@ export interface PublisherLimits {
   gapReadsMax: number;
   /** The newest items kept by each narrower replacement after a quota refusal, widest first. */
   quotaWindows: readonly number[];
-  /** Messages and bytes in flight across every session of the connection. */
-  inFlightMessages: number;
+  /** Bytes in flight across every session of the connection: the uplink buffers a bounded number and refuses a send past it. */
   inFlightBytes: number;
-  concurrentOpens: number;
 }
 
 export const DEFAULT_PUBLISHER_LIMITS: PublisherLimits = {
   batchWindowMs: 50, responseTimeoutMs: 30_000, backoffBaseMs: 250, backoffMaxMs: 30_000, sustainedMs: 60_000, heldEventsMax: 10_000, gapReadsMax: 8,
-  quotaWindows: [2000, 200, 20], inFlightMessages: 64, inFlightBytes: 16 * 1024 * 1024, concurrentOpens: 4,
+  quotaWindows: [2000, 200, 20], inFlightBytes: 16 * 1024 * 1024,
 };
 
 export interface PublicationContext {
@@ -65,9 +63,8 @@ export interface PublicationContext {
   now(): number;
   /** Writes one message to the Relay: `offline` when no connection holds the grant, `unencodable` when the wire refuses it. */
   send(message: RemoteHostUplinkMessage, providerId: string): 'sent' | 'offline' | 'unencodable';
-  /** Waits for room to have one more message in flight; the returned function gives the room back. A head has room of its own, so it never waits behind a message that does not fit. */
-  reserve(bytes: number, head?: boolean): Promise<() => void>;
-  openSlot(): Promise<() => void>;
+  /** Waits for room to have one more message of `bytes` in flight; the returned function gives the room back. */
+  reserve(bytes: number): Promise<() => void>;
   diagnostic(entry: JournalPublisherDiagnostic): void;
   schedule(callback: () => void, delayMs: number): unknown;
   cancel(timer: unknown): void;
@@ -343,18 +340,13 @@ export class SessionPublication {
 
   private async run(token: number): Promise<void> {
     if (token !== this.cycle) return;
-    const release = await this.context.openSlot();
-    let freed = false;
-    const free = (): void => { if (!freed) { freed = true; release(); } };
     this.reconciling = true;
     try {
-      if (token !== this.cycle) return;
-      await this.reconcile(token, free);
+      await this.reconcile(token);
     } catch (error) {
       this.recover(token, error);
     } finally {
       this.reconciling = false;
-      free();
       this.serveRequests();
     }
   }
@@ -363,15 +355,13 @@ export class SessionPublication {
     if (token !== this.cycle) throw new Cancelled();
   }
 
-  /** `freeSlot` gives back the place among the sessions that open at once, as soon as the item index has been read. */
-  private async reconcile(token: number, freeSlot: () => void): Promise<void> {
+  private async reconcile(token: number): Promise<void> {
     const subscription = this.source.subscribeJournal({ event: event => this.onEvent(token, event), closed: () => this.onClosed(token), identityMissing: () => this.onIdentityMissing(token) });
     this.subscription = subscription;
     // A manager that already broke the identity contract says so in the next tick; the journal is not opened for a session that is given up.
     await Promise.resolve();
     this.check(token);
     const opened = await this.open(token);
-    freeSlot();
     this.check(token);
     // Rows above this one reach the session as events; a reread that reaches them would publish them twice.
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
@@ -583,7 +573,7 @@ export class SessionPublication {
   private async publish(token: number, chunk: { ops: PublishOp[]; bytes: number }): Promise<void> {
     let ops = chunk.ops;
     while (ops.length > 0) {
-      const release = await this.context.reserve(chunk.bytes, ops.every(op => op.op === 'head'));
+      const release = await this.context.reserve(chunk.bytes);
       try {
         this.check(token);
         const first = this.sequence + 1;
@@ -729,16 +719,12 @@ export class SessionPublication {
     const token = this.cycle;
     this.enqueue(async () => {
       if (token !== this.cycle) return;
-      const release = await this.context.openSlot();
       try {
-        if (token !== this.cycle) return;
         const requestId = randomUUID();
         const reply = await this.ask(token, { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open', requestId, sessionKey: this.options.sessionKey, publisherId: this.context.publisherId },
           message => (message.type === 'journal_opened' || message.type === 'journal_open_refused') && message.requestId === requestId);
         if (reply.type === 'journal_opened') this.sendUnserve('identity_missing', reply.generation);
-      } catch { /* The connection ended or the Relay did not answer; the next connection says it again. */ } finally {
-        release();
-      }
+      } catch { /* The connection ended or the Relay did not answer; the next connection says it again. */ }
     });
   }
 

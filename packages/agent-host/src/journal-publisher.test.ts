@@ -737,38 +737,18 @@ describe('recovering', () => {
     expect(entries.findIndex(value => value.op === 'head')).toBeLessThan(entries.findIndex(value => value.op === 'append' && value.row.itemKey === 'late'));
   });
 
-  it('opens at most the allowed number of sessions at a time, and frees the place once a session has read its index', async () => {
+  it('keeps no more bytes in flight than the shared budget allows, across sessions, and admits one message when none is in flight', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
-    const publisher = publisherFor(relay, { concurrentOpens: 1, responseTimeoutMs: 600_000 });
-    await attachSession(publisher, [item('history', 'a1', 'First')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' });
-    await until(() => pending.length === 1, 'the first session to wait for its acknowledgement');
-    await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
-    await until(() => relay.opens() === 2, 'the second session to open while the first waits');
-    await until(() => pending.length === 2, 'the second session to publish while the first waits');
-  });
-
-  it('keeps a session from opening while the allowed number of sessions are still reading their index', async () => {
-    const relay = scriptedRelay({ holdOpened: true });
-    const publisher = publisherFor(relay, { concurrentOpens: 1, responseTimeoutMs: 600_000 });
-    await attachSession(publisher, [item('history', 'a1', 'First')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' });
-    await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
-    await settle(60);
-    expect(relay.opens()).toBe(1);
-    relay.releaseOpens();
-    await until(() => relay.opens() === 2, 'the second open once the first index is read');
-  });
-
-  it('keeps no more messages in flight than the shared budget allows, across sessions', async () => {
-    const pending: Array<() => void> = [];
-    const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
-    const publisher = publisherFor(relay, { inFlightMessages: 2 });
+    const publisher = publisherFor(relay, { inFlightBytes: 1 });
     for (const at of [1, 2, 3]) await attachSession(publisher, [item('history', `a${at}`, 'Text')], undefined, { agentId: `agent-${at}`, nativeSessionId: `thread-${at}` });
-    await until(() => pending.length === 2, 'two messages in flight');
+    await until(() => pending.length === 1, 'one message in flight, though it is larger than the budget');
     await settle(60);
-    expect(pending).toHaveLength(2);
+    expect(pending).toHaveLength(1);
     pending.shift()!();
-    await until(() => relay.publishes().some(message => message.sessionKey === 'fake:thread-3'), 'the third session once room is given back');
+    await until(() => pending.length === 1 && relay.publishes().length === 2, 'the next session once room is given back');
+    pending.shift()!();
+    await until(() => relay.publishes().some(message => message.sessionKey === 'fake:thread-3'), 'the third session once room is given back again');
   });
 
   it('closes a gap without publishing twice the rows that arrive while it reads older history', async () => {
@@ -1030,21 +1010,6 @@ describe('requests of the Relay', () => {
     expect(kinds.slice(0, kinds.indexOf('journal_fill')).filter(kind => kind === 'prepend').length).toBeLessThan(4);
     await until(() => relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'prepend').length === 4, 'all four blocks');
   });
-
-  it('lets a head go out at once while a message that does not fit the shared budget waits', async () => {
-    const pending: Array<() => void> = [];
-    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'replace')) pending.push(answer.ack); else answer.ack(); } });
-    const publisher = publisherFor(relay, { inFlightBytes: 6000 });
-    await attachSession(publisher, [item('history', 'a1', 'Small')], undefined, { agentId: 'agent-a', nativeSessionId: 'thread-a' });
-    await until(() => pending.length === 1, 'the first message in flight');
-    await attachSession(publisher, [item('history', 'c1', 'y'.repeat(9000))], undefined, { agentId: 'agent-c', nativeSessionId: 'thread-c' });
-    await until(() => relay.opens() === 2, 'the open of the large session');
-    await settle(100);
-    expect(pending).toHaveLength(1);
-    await attachSession(publisher, [item('history', 'b1', 'Other')], undefined, { agentId: 'agent-b', nativeSessionId: 'thread-b' }, { relay, keys: ['b1'] });
-    await until(() => relay.publishes().some(message => message.sessionKey === 'fake:thread-b' && message.entries.every((value: Wire) => value.op === 'head')), 'the head of the third session');
-    expect(pending).toHaveLength(1);
-  });
 });
 
 describe('what a flush sends, and what a refused item does', () => {
@@ -1272,7 +1237,7 @@ describe('older history and fills the Relay asks for', () => {
   it('takes room from the shared budget for a fill, like a publication', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
-    const publisher = publisherFor(relay, { inFlightMessages: 1 });
+    const publisher = publisherFor(relay, { inFlightBytes: 1 });
     await attachSession(publisher, [item('history', 'm1', 'One')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m1'] });
     await until(() => pending.length === 1, 'the head waiting for its acknowledgement');
     relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });

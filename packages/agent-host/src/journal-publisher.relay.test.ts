@@ -29,8 +29,8 @@ async function follow(publisher: JournalPublisher, history: Observation[], older
   return { session, manager };
 }
 
-const texts = async (relay: ReturnType<typeof relayLoopback>) => {
-  const journal = await relay.journal(SESSION);
+const texts = async (relay: ReturnType<typeof relayLoopback>, sessionKey = SESSION) => {
+  const journal = await relay.journal(sessionKey);
   const page = journal?.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 500 }, { olderBeyondJournal: false });
   return page?.kind === 'page' ? page.page.payload.entries.map(entry => 'text' in entry.item ? entry.item.text : '') : undefined;
 };
@@ -462,5 +462,66 @@ describe('the publisher against the Relay\'s journal service', () => {
     const shown = (await texts(relay))!.filter(text => text.includes('first'));
     expect(shown).toEqual(['first ']);
     expect(appends).toBe(2);
+  });
+
+  describe('many sessions over one connection', () => {
+    const SESSIONS = 12;
+    const BUDGET_BYTES = 6000;
+    /** A publisher whose writer is watched: the bytes of the entries of the publications the Relay has not yet acknowledged are what the uplink holds. */
+    function watched(relay: ReturnType<typeof relayLoopback>) {
+      const sent: Array<{ sessionKey: string; last: number; bytes: number }> = [];
+      const unacknowledged = () => sent.filter(message => !relay.fromRelay.some(reply => reply.type === 'journal_ack' && reply.sessionKey === message.sessionKey && reply.watermark >= message.last));
+      const peak = { bytes: 0 };
+      const publisher = createJournalPublisher({ providers: () => ['fake'], scheduler: clock, now: clock.now, limits: { ...limits, inFlightBytes: BUDGET_BYTES } });
+      closers.push(() => publisher.close());
+      relay.connect(publisher);
+      publisher.available({ send: json => {
+        const message = JSON.parse(json);
+        if (message.type === 'journal_publish') {
+          sent.push({ sessionKey: message.sessionKey, last: message.entries.at(-1).sequence, bytes: Buffer.byteLength(JSON.stringify(message.entries)) });
+          peak.bytes = Math.max(peak.bytes, unacknowledged().reduce((total, entry) => total + entry.bytes, 0));
+        }
+        relay.writer.send(json);
+      } });
+      return { publisher, sent, peak };
+    }
+    async function attachAll(publisher: JournalPublisher, text: string) {
+      const sessions: ScriptedSession[] = [];
+      for (let at = 1; at <= SESSIONS; at += 1) {
+        const session = new ScriptedSession('fake', `thread-${at}`, [item('history', `m${at}`, text), boundary()]);
+        const manager = await attachScripted(session, `agent-${at}`);
+        closers.push(() => { void manager.close(); });
+        publisher.attach({ agentId: `agent-${at}`, providerId: 'fake', nativeSessionId: `thread-${at}`, source: manager });
+        sessions.push(session);
+      }
+      return sessions;
+    }
+    const keys = Array.from({ length: SESSIONS }, (_, at) => `fake:thread-${at + 1}`);
+    const allServed = (relay: ReturnType<typeof relayLoopback>) => async () => (await Promise.all(keys.map(key => relay.journal(key)))).every(journal => journal?.head !== undefined);
+
+    it('takes every session of a burst live, and never has more bytes in flight than the shared budget allows', async () => {
+      const relay = relayLoopback(clock);
+      const { publisher, peak } = watched(relay);
+      await attachAll(publisher, 'y'.repeat(1500));
+      await until(allServed(relay), 'every session to publish its head');
+      expect(peak.bytes).toBeGreaterThan(0);
+      expect(peak.bytes).toBeLessThanOrEqual(BUDGET_BYTES);
+    });
+
+    it('acknowledges the head of one session after at most one message of each other session, not after every message they have to send', async () => {
+      const relay = relayLoopback(clock);
+      const { publisher, sent } = watched(relay);
+      const sessions = await attachAll(publisher, 'y'.repeat(800));
+      await until(allServed(relay), 'every session to be live');
+      await settle(30);
+      const before = sent.length;
+      for (const [at, session] of sessions.entries()) for (let row = 0; row < 3; row += 1) session.push(item('live', `live-${at}-${row}`, 'z'.repeat(1200), { completes: true }));
+      sessions[SESSIONS - 1]!.push(item('live', 'last', 'Last', { completes: true }));
+      await until(async () => (await texts(relay, keys[SESSIONS - 1]!))?.includes('Last') === true, 'the last session to publish its row');
+      const own = sent.findIndex((message, at) => at >= before && message.sessionKey === keys[SESSIONS - 1]);
+      expect(own).toBeGreaterThanOrEqual(0);
+      const ahead = sent.slice(before, own).filter(message => message.sessionKey !== keys[SESSIONS - 1]);
+      expect(ahead.length).toBeLessThanOrEqual(SESSIONS - 1);
+    });
   });
 });

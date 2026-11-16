@@ -82,10 +82,10 @@ describe('the Controller publishing its sessions over the real uplink', () => {
     expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('1');
     await until(async () => (await run.journal())?.head !== undefined, 'the head');
     let journal = (await run.journal())!;
-    expect(journal.index().map(entry => [entry.itemKey, entry.state])).toEqual([['m1', 'complete'], ['m2', 'complete']]);
+    expect(journal.state().items.map(entry => [entry.itemKey, entry.state])).toEqual([['m1', 'complete'], ['m2', 'complete']]);
     run.sessions[0]!.push(item('live', 'a', 'Wor', { completes: false }));
     run.sessions[0]!.push(item('live', 'a', 'ld', { completes: true }));
-    await until(async () => (await run.journal())?.index().find(entry => entry.itemKey === 'a')?.state === 'complete', 'the live item');
+    await until(async () => (await run.journal())?.state().items.find(entry => entry.itemKey === 'a')?.state === 'complete', 'the live item');
     journal = (await run.journal())!;
     const page = journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false });
     expect(page.kind === 'page' && page.page.payload.entries.map(entry => 'text' in entry.item ? entry.item.text : '')).toEqual(['Hello', 'World', 'World']);
@@ -103,7 +103,7 @@ describe('the Controller publishing its sessions over the real uplink', () => {
     await new Promise<void>(resolve => setTimeout(resolve, 100));
     const after = (await run.journal())!;
     expect(after.epoch).toBe(before.epoch);
-    expect(after.index().map(entry => [entry.itemKey, entry.seqStart, entry.revision])).toEqual(before.index().map(entry => [entry.itemKey, entry.seqStart, entry.revision]));
+    expect(after.state().items.map(entry => [entry.itemKey, entry.seqStart])).toEqual(before.state().items.map(entry => [entry.itemKey, entry.seqStart]));
     expect(after.cursor).toEqual(before.cursor);
   });
 

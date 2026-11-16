@@ -1,7 +1,7 @@
 import { expect } from 'vitest';
 
 import { SessionJournal } from './session-journal.js';
-import type { JournalPublication, JournalRowInput } from './types.js';
+import type { JournalItemInput, JournalPublication, JournalRowInput } from './types.js';
 
 export const PUBLISHER = 'controller-1';
 
@@ -39,4 +39,18 @@ export function scribble(value: unknown): void {
       else scribble(record[key]);
     }
   }
+}
+
+/** What a test reads of each item: its place, state and whether its body is resident. */
+export function indexOf(journal: SessionJournal) {
+  return journal.state().items.map(item => ({
+    itemKey: item.itemKey, seqStart: item.seqStart, seqEnd: item.seqEnd, state: item.state,
+    ...(item.digest === undefined ? {} : { digest: item.digest }), liveOnly: item.liveOnly,
+    ...(item.clientMessageId === undefined ? {} : { clientMessageId: item.clientMessageId }), resident: item.body !== null,
+  }));
+}
+
+/** Gives an empty journal the items of a window, as a Controller's first publication does. */
+export function seedJournal(journal: SessionJournal, publication: JournalPublication, items: readonly JournalItemInput[]): void {
+  journal.sync(publication, items, { roomBytes: Number.MAX_SAFE_INTEGER });
 }

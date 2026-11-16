@@ -16,7 +16,6 @@ const DEADLINE_MS = Number(process.env.JOURNAL_BENCHMARK_DEADLINE_MS ?? 270_000)
 const HOST = 'host-1';
 const PUBLISHER = 'controller-1';
 const OPEN = { maxIndexItems: 1_000_000, pageItems: 2000 };
-const INDEX_PAGE_ITEMS = 2000;
 const BATCH_ITEMS = 128;
 const SMALL_BATCH_ITEMS = 4;
 const RETAIN = { turns: 50, minItems: 200 };
@@ -67,7 +66,7 @@ function entriesFor(shape, first, count, nextSequence, options = {}) {
     const row = SHAPES[shape](n);
     if (options.liveOnly && isLiveOnly(n)) {
       entries.push({ sequence: nextSequence(), op: 'append', row: { ...row, liveOnly: true } });
-      entries.push({ sequence: nextSequence(), op: 'seal', itemKey: row.itemKey });
+      entries.push({ sequence: nextSequence(), op: 'complete', itemKey: row.itemKey, digest: digestOf(n) });
     } else {
       entries.push({ sequence: nextSequence(), op: 'append', row });
       entries.push({ sequence: nextSequence(), op: 'complete', itemKey: row.itemKey, digest: digestOf(n) });
@@ -87,7 +86,7 @@ const summary = values => ({ n: values.length, p50: percentile(values, 0.5), p95
 const directory = await mkdtemp(join(tmpdir(), 'arc-journal-benchmark-'));
 const database = await openNodeJournalDatabase(join(directory, 'journals.sqlite'));
 const store = new SqlJournalStore(database);
-const service = extra => createHostJournals({ store, now: Date.now, ...extra });
+const service = extra => createHostJournals({ store, ...extra });
 
 /** Opens the session as the Controller does and returns a publisher that keeps the sequence going. */
 async function publisherFor(journals, session, shape, options = {}) {
@@ -208,16 +207,12 @@ try {
 
   progress('100,000 items: internals of the journal core');
   {
-    const loadTimes = [], measure = [], windowStart = [], indexBuild = [], carried = [], evictOnce = [], evictRange = [], dropLiveOnly = [];
+    const loadTimes = [], measure = [], windowStart = [], evictOnce = [], evictRange = [], dropLiveOnly = [];
     for (let round = 0; round < 5; round++) {
       loadTimes.push((await timed(() => store.load(`${HOST}:${big}`))).ms);
       const journal = new SessionJournal(await store.load(`${HOST}:${big}`));
       measure.push((await timed(async () => journal.residentBytes())).ms);
-      indexBuild.push((await timed(async () => journal.index())).ms);
       for (let again = 0; again < 20; again++) windowStart.push((await timed(async () => journal.windowStart(RETAIN.turns, RETAIN.minItems))).ms);
-      const reread = Array.from({ length: 400 }, (_, at) => { let n = baseItems + at * 7; if (isLiveOnly(n)) n += 1; return { row: realisticRow(n), digest: digestOf(n) }; });
-      carried.push((await timed(async () => journal.carriedOnReplace(reread))).ms);
-      if (round === 0) report.carriedOnReplace100k = journal.carriedOnReplace(reread);
       const start = journal.windowStart(RETAIN.turns, RETAIN.minItems);
       for (let again = 0; again < 20; again++) evictRange.push((await timed(async () => journal.evictRange(start, start))).ms);
       for (let again = 0; again < 20; again++) dropLiveOnly.push((await timed(async () => journal.dropOldestLiveOnly(2000))).ms);
@@ -225,35 +220,18 @@ try {
     }
     record('core.storeLoad.100k', loadTimes);
     record('core.residentBytes.coldMeasure.100k', measure);
-    record('core.index.build.100k', indexBuild);
     record('core.windowStart.per-publication.100k', windowStart);
-    record('core.carriedOnReplace.100k', carried);
     record('core.evict.fullPass.100k', evictOnce);
     record('core.evictRange.emptyRange.per-publication.100k', evictRange);
     record('core.dropOldestLiveOnly.withinCap.per-publication.100k', dropLiveOnly);
   }
 
-  progress('100,000 items: index pages, fills');
+  progress('100,000 items: fills');
   let replaceState;
   {
     const journals = service();
     const publisher = await publisherFor(journals, big, 'realistic', { liveOnly: true });
     record('open.cold.100k', [publisher.openMs]);
-    const pages = [];
-    let after = publisher.opened.index.at(-1)?.seqStart;
-    let listed = publisher.opened.index.length;
-    while (publisher.opened.more && after !== undefined) {
-      const page = await timed(() => journals.indexPage(HOST, big, publisher.opened.epoch, after, INDEX_PAGE_ITEMS));
-      if (!page.value) throw new Error('An index page was refused.');
-      pages.push(page.ms);
-      listed += page.value.length;
-      if (page.value.length < INDEX_PAGE_ITEMS) break;
-      after = page.value.at(-1).seqStart;
-    }
-    report.indexListed = listed;
-    record('indexPage.100k', pages);
-    record('indexPage.100k.allPagesTotal', [pages.reduce((sum, ms) => sum + ms, 0)]);
-
     // Fills of 64 evicted items each (the protocol's bound), each with the page read in the same step; later fills pass the session cap.
     const fills = [];
     let n = 0, filled = 0, skipped = 0;
@@ -276,8 +254,8 @@ try {
   {
     const { publisher } = replaceState;
     const reread = Array.from({ length: 400 }, (_, at) => { let n = baseItems + at * 7; if (isLiveOnly(n)) n += 1; return { row: realisticRow(n), digest: digestOf(n) }; });
-    const inside = instrument(['carriedOnReplace', 'replace', 'windowStart']);
-    const replaced = await timed(() => publisher.publish([{ sequence: publisher.nextSequence(), op: 'replace', items: reread }]));
+    const inside = instrument(['sync', 'windowStart']);
+    const replaced = await timed(() => publisher.publish([{ sequence: publisher.nextSequence(), op: 'window', items: reread }]));
     inside.restore();
     if (replaced.value.refusal) throw new Error(`The replacement was refused: ${replaced.value.refusal.reason}`);
     record('replace400.on100k.realistic', [replaced.ms]);
@@ -291,7 +269,7 @@ try {
       const publisher = await publisherFor(journals, session, 'light', { liveOnly: true });
       await publisher.publishItems(0, SESSION_ITEM_MAX - 1000, 256);
       const reread = Array.from({ length: 400 }, (_, at) => { let n = at * 7; if (isLiveOnly(n)) n += 1; return { row: SHAPES.light(n), digest: digestOf(n) }; });
-      const replaced = await timed(() => publisher.publish([{ sequence: publisher.nextSequence(), op: 'replace', items: reread }]));
+      const replaced = await timed(() => publisher.publish([{ sequence: publisher.nextSequence(), op: 'window', items: reread }]));
       if (replaced.value.refusal) throw new Error(`The replacement was refused: ${replaced.value.refusal.reason}`);
       replaces.push(replaced.ms);
     }

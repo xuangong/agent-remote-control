@@ -1,4 +1,4 @@
-import type { JournalIndexEntry, JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
+import type { JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
 import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 
 import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
@@ -34,8 +34,7 @@ export interface JournalPartitionRead {
  * journal version the Relay speaks, so a partition never receives an operation it does not know. `journal-partition.contract.json` records the calls and replies of every method.
  */
 export interface JournalPartitionApi {
-  open(hostId: string, sessionKey: string, publisherId: string, options: { maxIndexItems: number; pageItems: number; reset?: true }): Promise<JournalOpened | JournalOpenRefusal>;
-  indexPage(hostId: string, sessionKey: string, epoch: string, after: number, maxItems: number): Promise<JournalIndexEntry[] | undefined>;
+  open(hostId: string, sessionKey: string, publisherId: string): Promise<JournalOpened | JournalOpenRefusal>;
   publish(hostId: string, sessionKey: string, generation: number, entries: JournalPublishEntry[]): Promise<JournalPublished>;
   /** Fills bodies. With `read`, the page comes back in the same reply and was read in the same step as the fill. */
   fill(hostId: string, sessionKey: string, items: CompleteItemInput[], read?: JournalPartitionRead): Promise<JournalFilled>;
@@ -74,8 +73,7 @@ export function estimateCloneBytes(value: unknown): number {
 export function serveJournalPartition(journals: HostJournals, options: { replyMaxBytes?: number } = {}): JournalPartitionApi {
   const replyMaxBytes = options.replyMaxBytes ?? REPLY_MAX_BYTES;
   return {
-    open: (hostId, sessionKey, publisherId, bounds) => journals.open(hostId, sessionKey, publisherId, bounds),
-    indexPage: (hostId, sessionKey, epoch, after, maxItems) => journals.indexPage(hostId, sessionKey, epoch, after, maxItems),
+    open: (hostId, sessionKey, publisherId) => journals.open(hostId, sessionKey, publisherId, {}),
     publish: (hostId, sessionKey, generation, entries) => journals.publish(hostId, sessionKey, generation, entries),
     async fill(hostId, sessionKey, items, read) {
       if (!read) return journals.fill(hostId, sessionKey, items);
@@ -158,7 +156,7 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   }
 
   return {
-    open: (hostId, sessionKey, publisherId, { allowed, maxIndexItems, pageItems, reset }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
+    open: (hostId, sessionKey, publisherId, { allowed }) => serialized<JournalOpened | JournalOpenRefusal>(hostId, async () => {
       if (allowed && !allowed()) return { refused: 'unavailable' };
       if (!await ensureVersion(hostId)) {
         // The partition cannot take this Controller's journal, so the old head must not go on serving the session: streams close and read crude.
@@ -166,12 +164,8 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
         heads.remove(hostId, sessionKey);
         return wasServed ? { refused: 'unavailable', unserved: true } : { refused: 'unavailable' };
       }
-      const opened = await partition(hostId).open(hostId, sessionKey, publisherId, { maxIndexItems, pageItems, ...(reset ? { reset: true as const } : {}) });
-      if (opened.unserved) heads.remove(hostId, sessionKey);
-      return opened;
+      return partition(hostId).open(hostId, sessionKey, publisherId);
     }),
-
-    indexPage: (hostId, sessionKey, epoch, after, maxItems) => serialized(hostId, () => partition(hostId).indexPage(hostId, sessionKey, epoch, after, maxItems)),
 
     publish: (hostId, sessionKey, generation, entries) => serialized<JournalPublished>(hostId, async () => {
       const result = await partition(hostId).publish(hostId, sessionKey, generation, [...entries]);

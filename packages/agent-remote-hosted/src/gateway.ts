@@ -113,7 +113,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
   const scheduler = options.scheduler ?? createTimerRelayScheduler();
   const durable = options.storage !== undefined;
   if ((options.journals || options.journalService) && !durable) throw new Error('Session journals need durable Relay state: without it a deletion could be lost.');
-  const journalService = options.journalService ?? (options.journals ? createHostJournals({ store: options.journals, now: Date.now }) : undefined);
+  const journalService = options.journalService ?? (options.journals ? createHostJournals({ store: options.journals }) : undefined);
   const accountBacked = durable || auth.provider === 'google';
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${auth.origin.startsWith('https:') ? '; Secure' : ''}`;
   const hash = (value: string) => createHash('sha256').update(value).digest('hex');

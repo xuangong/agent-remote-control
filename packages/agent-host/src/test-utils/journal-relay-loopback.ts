@@ -19,7 +19,7 @@ export interface RelayLoopbackOptions {
    * Refuses one entry of a publication before the journal sees it, as a Relay that rejects an item for its own reasons
    * does: the entries before it are stored by the real journal, the refused one and those after it are not.
    */
-  refuseEntry?(entry: { sequence: number; op: string; itemKey?: string }): { reason: 'body_missing' | 'invalid' | 'type_changed' | 'quota_exceeded'; itemKey: string } | undefined;
+  refuseEntry?(entry: { sequence: number; op: string }): { reason: 'invalid' | 'quota_exceeded' } | undefined;
 }
 
 /** The Relay's journal service and its per-connection adapter, wired to a publisher through asynchronous hand-offs. */
@@ -32,7 +32,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
     apply: changes => { writes.push({ upsert: changes.upsert.map(item => item.itemKey), removed: changes.removed, replaced: changes.replaced }); return store.apply(changes); },
     delete: key => store.delete(key), catalog: store.catalog,
   };
-  const real = createHostJournals({ store: counted, now: () => 1_000, ...(options.limits === undefined ? {} : { limits: options.limits }) });
+  const real = createHostJournals({ store: counted, ...(options.limits === undefined ? {} : { limits: options.limits }) });
   let opens = 0;
   const journals: HostJournals = {
     ...real,
@@ -41,7 +41,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
       let at = -1;
       let refusal: ReturnType<NonNullable<RelayLoopbackOptions['refuseEntry']>>;
       for (const [position, entry] of entries.entries()) {
-        refusal = options.refuseEntry?.({ sequence: entry.sequence, op: entry.op, ...('itemKey' in entry ? { itemKey: entry.itemKey } : 'row' in entry ? { itemKey: entry.row.itemKey } : {}) });
+        refusal = options.refuseEntry?.({ sequence: entry.sequence, op: entry.op });
         if (refusal) { at = position; break; }
       }
       if (at < 0 || !refusal) return real.publish(hostId, sessionKey, generation, entries);

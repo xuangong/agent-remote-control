@@ -2,7 +2,7 @@ import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardw
 import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { createHostJournals, type HostJournals, type JournalOpenOptions, type JournalOpened } from './host-journals.js';
+import { createHostJournals, type HostJournals, type JournalOpened } from './host-journals.js';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -20,44 +20,35 @@ const snapshot = {
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const },
 };
 
-const LIMITS: JournalOpenOptions = { maxIndexItems: 1_000_000, pageItems: 1_000_000 };
-const openSession = (journals: HostJournals, hostId: string, sessionKey: string, publisherId: string, options: JournalOpenOptions = LIMITS) =>
-  journals.open(hostId, sessionKey, publisherId, options) as Promise<JournalOpened>;
+const window = (sequence: number, ...items: Array<[string, string]>): JournalPublishEntry => ({ sequence, op: 'window', items: items.map(([itemKey, text]) => ({ row: row(itemKey, text), digest: `digest-${itemKey}` })) });
+const openSession = (journals: HostJournals, hostId: string, sessionKey: string, publisherId: string) =>
+  journals.open(hostId, sessionKey, publisherId, {}) as Promise<JournalOpened>;
+const epochOf = async (journals: HostJournals) => (await journals.status(HOST, SESSION))!.cursor.epoch;
 
 function fixture(store: JournalStore = new MemoryJournalStore()) {
-  return { journals: createHostJournals({ store, now: () => 1_000 }), store };
+  return { journals: createHostJournals({ store }), store };
 }
 
 describe('createHostJournals', () => {
   it('opens a journal and fences the previous generation on every open', async () => {
     const { journals, store } = fixture();
     const first = await openSession(journals, HOST, SESSION, 'controller-1');
-    expect(first).toMatchObject({ generation: 1, watermark: 0, index: [] });
-    expect(typeof first.epoch).toBe('string');
+    expect(first).toEqual({ generation: 1, watermark: 0 });
     expect((await store.load(KEY))?.meta.publisher).toEqual({ publisherId: 'controller-1', generation: 1, watermark: 0 });
-    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, epoch: first.epoch });
-  });
-
-  it('claims nothing when the index is larger than the Relay may send', async () => {
-    const { journals, store } = fixture();
-    await openSession(journals, HOST, SESSION, 'controller-1');
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
-    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 0, pageItems: 10 })).toEqual({ refused: 'index_too_large' });
-    expect((await store.load(KEY))?.meta.publisher?.generation).toBe(1);
-    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1 });
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toEqual({ generation: 2, watermark: 0 });
   });
 
   it('applies a publication in order, stores it before returning and reports the stamped rows', async () => {
     const { journals, store } = fixture();
-    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    const epoch = await epochOf(journals);
     const result = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hel'), append(2, 'm1', 'lo'), complete(3, 'm1'), append(4, 'm2', 'Next')]);
     expect(result.refusal).toBeUndefined();
     expect(result.events.map(event => event.kind === 'row' ? [event.row.itemKey, event.row.seq] : event.kind)).toEqual([['m1', 1], ['m1', 2], ['m2', 3]]);
-    expect(result).toMatchObject({ watermark: 4, cursor: { epoch: opened.epoch, seq: 3 } });
+    expect(result).toMatchObject({ watermark: 4, cursor: { epoch, seq: 3 } });
     const saved = await store.load(KEY);
     expect(saved?.meta.publisher?.watermark).toBe(4);
     expect(saved?.items.map(({ itemKey, state }) => [itemKey, state])).toEqual([['m1', 'complete'], ['m2', 'open']]);
-    expect((await openSession(journals, HOST, SESSION, 'controller-1')).index.map(({ itemKey }) => itemKey)).toEqual(['m1', 'm2']);
   });
 
   it('acknowledges a publication it already applied without changing the journal', async () => {
@@ -74,7 +65,7 @@ describe('createHostJournals', () => {
     await openSession(journals, HOST, SESSION, 'controller-1');
     const result = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'One'), complete(2, 'ghost'), append(3, 'm3', 'Three')]);
     expect(result.events.map(event => event.kind === 'row' ? event.row.itemKey : event.kind)).toEqual(['m1']);
-    expect(result).toMatchObject({ watermark: 1, refusal: { sequence: 2, reason: 'unknown_item', itemKey: 'ghost' } });
+    expect(result).toMatchObject({ watermark: 1, refusal: { sequence: 2, reason: 'invalid' } });
     expect((await store.load(KEY))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
   });
 
@@ -83,11 +74,10 @@ describe('createHostJournals', () => {
     await openSession(journals, HOST, SESSION, 'controller-1');
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), complete(2, 'm1')]);
     const refusal = async (entry: JournalPublishEntry) => (await journals.publish(HOST, SESSION, 1, [entry])).refusal;
-    expect(await refusal({ sequence: 3, op: 'correct', row: row('m1', 'Hello!'), digest: 'd', expectedRevision: 99 })).toEqual({ sequence: 3, reason: 'stale_revision', itemKey: 'm1' });
-    expect(await refusal(complete(3, 'ghost'))).toEqual({ sequence: 3, reason: 'unknown_item', itemKey: 'ghost' });
-    expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m1', 'x'), item: { type: 'reasoning', text: 'x' } } })).toEqual({ sequence: 3, reason: 'type_changed', itemKey: 'm1' });
-    expect(await refusal({ sequence: 3, op: 'replace', items: [{ row: row('a', 'x'), digest: 'd1' }, { row: row('a', 'y'), digest: 'd2' }] })).toEqual({ sequence: 3, reason: 'duplicate_item', itemKey: 'a' });
-    expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m2', 'x'), occurredAt: Number.NaN } })).toEqual({ sequence: 3, reason: 'invalid', itemKey: 'm2' });
+    expect(await refusal(complete(3, 'ghost'))).toEqual({ sequence: 3, reason: 'invalid' });
+    expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m1', 'x'), item: { type: 'reasoning', text: 'x' } } })).toEqual({ sequence: 3, reason: 'invalid' });
+    expect(await refusal(window(3, ['a', 'x'], ['a', 'y']))).toEqual({ sequence: 3, reason: 'invalid' });
+    expect(await refusal({ sequence: 3, op: 'append', row: { ...row('m2', 'x'), occurredAt: Number.NaN } })).toEqual({ sequence: 3, reason: 'invalid' });
     expect(await refusal(complete(9, 'm1'))).toEqual({ sequence: 9, reason: 'sequence_gap' });
   });
 
@@ -110,9 +100,9 @@ describe('createHostJournals', () => {
     await store.apply(seeded.takeChanges()!);
     const { journals } = fixture(store);
     const opened = await openSession(journals, HOST, SESSION, 'controller-1');
-    expect(opened).toMatchObject({ generation: 2, watermark: 2, index: [expect.objectContaining({ itemKey: 'm1', resident: false })] });
+    expect(opened).toEqual({ generation: 2, watermark: 2 });
     const result = await journals.publish(HOST, SESSION, 2, [append(3, 'm1', 'more')]);
-    expect(result.refusal).toEqual({ sequence: 3, reason: 'body_missing', itemKey: 'm1' });
+    expect(result.refusal).toEqual({ sequence: 3, reason: 'invalid' });
   });
 
   it('refuses a fenced generation and a session that was never opened, without changing anything', async () => {
@@ -127,25 +117,26 @@ describe('createHostJournals', () => {
     expect(await store.load(`${HOST}:codex:unknown`)).toBeUndefined();
   });
 
-  it('stores the head and reports the new epoch of a replacement', async () => {
+  it('stores the head and reports the new epoch of a replacing window', async () => {
     const { journals, store } = fixture();
-    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    const before = await epochOf(journals);
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Old'), complete(2, 'm1')]);
     const result = await journals.publish(HOST, SESSION, 1, [
       { sequence: 3, op: 'head', head: { snapshot, observedAt: 7 } },
-      { sequence: 4, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] },
+      window(4, ['x1', 'Fresh']),
     ]);
     const replaced = result.events.find(event => event.kind === 'replaced');
     expect(replaced).toBeDefined();
-    expect(replaced?.kind === 'replaced' && replaced.epoch).not.toBe(opened.epoch);
+    expect(replaced?.kind === 'replaced' && replaced.epoch).not.toBe(before);
     expect(result.cursor).toEqual({ epoch: replaced?.kind === 'replaced' ? replaced.epoch : undefined, seq: 1 });
     const saved = await store.load(KEY);
     expect(saved?.meta.head).toEqual({ snapshot, observedAt: 7 });
     expect(saved?.items.map(({ itemKey }) => itemKey)).toEqual(['x1']);
   });
 
-  it('lists what subscribers see, in order: appended rows, replacements and new heads, but no corrections or prepends', async () => {
-    const { journals, store } = fixture();
+  it('lists what subscribers see, in order: appended rows, replacements and new heads, but no prepends', async () => {
+    const { journals } = fixture();
     await openSession(journals, HOST, SESSION, 'controller-1');
     const first = await journals.publish(HOST, SESSION, 1, [
       append(1, 'm1', 'Hello'), complete(2, 'm1'),
@@ -156,27 +147,24 @@ describe('createHostJournals', () => {
       { kind: 'head', head: { snapshot, observedAt: 5 } },
       { kind: 'row', row: expect.objectContaining({ itemKey: 'm2', seq: 2 }) },
     ]);
-    const revision = (await store.load(KEY))!.items.find(item => item.itemKey === 'm1')!.revision;
     const second = await journals.publish(HOST, SESSION, 1, [
-      { sequence: 5, op: 'correct', row: row('m1', 'Hello!'), digest: 'digest-new', expectedRevision: revision },
-      { sequence: 6, op: 'prepend', items: [{ row: row('m0', 'Earlier'), digest: 'digest-m0' }] },
+      { sequence: 5, op: 'prepend', items: [{ row: row('m0', 'Earlier'), digest: 'digest-m0' }] },
     ]);
     expect(second.events).toEqual([]);
-    const third = await journals.publish(HOST, SESSION, 1, [{ sequence: 7, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] }]);
+    const third = await journals.publish(HOST, SESSION, 1, [window(6, ['x1', 'Fresh'])]);
     expect(third.events).toEqual([{ kind: 'replaced', epoch: third.cursor!.epoch }]);
   });
 
-  it('delivers rows of both epochs around a replacement in order, and nothing for a replacement it already applied', async () => {
+  it('delivers rows of both epochs around a replacement in order, and nothing for a window it already applied', async () => {
     const { journals } = fixture();
-    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
-    const entries: JournalPublishEntry[] = [
-      append(1, 'm1', 'Old'), { sequence: 2, op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: 'digest-x1' }] }, append(3, 'x2', 'New'),
-    ];
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    const first = await epochOf(journals);
+    const entries: JournalPublishEntry[] = [append(1, 'm1', 'Old'), window(2, ['x1', 'Fresh']), append(3, 'x2', 'New')];
     const result = await journals.publish(HOST, SESSION, 1, entries);
     const epoch = result.cursor!.epoch;
-    expect(epoch).not.toBe(opened.epoch);
+    expect(epoch).not.toBe(first);
     expect(result.events).toEqual([
-      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', epoch: opened.epoch }) },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', epoch: first }) },
       { kind: 'replaced', epoch },
       { kind: 'row', row: expect.objectContaining({ itemKey: 'x2', epoch }) },
     ]);
@@ -214,10 +202,11 @@ describe('createHostJournals', () => {
   it('reports the cursor and head of a session, and nothing for a session without a journal', async () => {
     const { journals } = fixture();
     expect(await journals.status(HOST, SESSION)).toBeUndefined();
-    const opened = await openSession(journals, HOST, SESSION, 'controller-1');
-    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch: opened.epoch, seq: 0 } });
+    await openSession(journals, HOST, SESSION, 'controller-1');
+    const epoch = await epochOf(journals);
+    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch, seq: 0 } });
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), { sequence: 2, op: 'head', head: { snapshot, observedAt: 5 } }]);
-    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch: opened.epoch, seq: 1 }, head: { snapshot, observedAt: 5 }, oldestItemKey: 'm1' });
+    expect(await journals.status(HOST, SESSION)).toEqual({ cursor: { epoch, seq: 1 }, head: { snapshot, observedAt: 5 }, oldestItemKey: 'm1' });
   });
 
   it('does not return before the store holds the changes', async () => {
@@ -249,7 +238,7 @@ describe('createHostJournals', () => {
     failing = true;
     await expect(journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')])).rejects.toThrow('disk full');
     failing = false;
-    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 0, index: [] });
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toEqual({ generation: 2, watermark: 0 });
   });
 
   it('serializes the work of one Host in call order', async () => {
@@ -269,9 +258,9 @@ describe('createHostJournals', () => {
     await openSession(journals, HOST, SESSION, 'controller-1');
     await openSession(journals, 'host-2', SESSION, 'controller-2');
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello')]);
-    expect((await openSession(journals, 'host-2', SESSION, 'controller-2')).index).toEqual([]);
+    expect(await openSession(journals, 'host-2', SESSION, 'controller-2')).toEqual({ generation: 2, watermark: 0 });
     await journals.forget(HOST);
-    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 1, index: [expect.objectContaining({ itemKey: 'm1' })] });
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toEqual({ generation: 2, watermark: 1 });
   });
 
   it('puts bodies back only when their digest matches the recorded one', async () => {
@@ -317,7 +306,7 @@ describe('createHostJournals', () => {
     const saved = await store.load(KEY);
     expect(saved?.items).toEqual([]);
     expect(saved?.meta.publisher?.watermark).toBe(0);
-    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 3, watermark: 0, index: [] });
+    expect(await openSession(journals, HOST, SESSION, 'controller-1')).toMatchObject({ generation: 3, watermark: 0 });
   });
 
   it('runs the calls queued behind one that failed', async () => {
@@ -326,8 +315,8 @@ describe('createHostJournals', () => {
     const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
       apply: async changes => { if (failures-- > 0) throw new Error('disk full'); await memory.apply(changes); } };
     const { journals } = fixture(store);
-    const first = journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    const second = journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const first = journals.open(HOST, SESSION, 'controller-1', {});
+    const second = journals.open(HOST, SESSION, 'controller-1', {});
     await expect(first).rejects.toThrow('disk full');
     expect(await second).toMatchObject({ generation: 1 });
   });
@@ -339,7 +328,7 @@ describe('createHostJournals', () => {
     const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
       apply: async changes => { if (changes.meta.sessionKey.startsWith(`${HOST}:`)) await gate; await memory.apply(changes); } };
     const { journals } = fixture(store);
-    const blocked = journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const blocked = journals.open(HOST, SESSION, 'controller-1', {});
     expect(await openSession(journals, 'host-2', SESSION, 'controller-2')).toMatchObject({ generation: 1 });
     release();
     expect(await blocked).toMatchObject({ generation: 1 });

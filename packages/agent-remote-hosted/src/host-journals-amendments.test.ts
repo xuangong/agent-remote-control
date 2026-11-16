@@ -25,7 +25,7 @@ async function seeded(limits?: { liveOnlyItems?: number; sessionBytes?: number }
   const journal = SessionJournal.create(KEY);
   journal.claim(PUBLISHER);
   await store.apply(journal.takeChanges()!);
-  return { store, journals: createHostJournals({ store, now: () => 1_000, ...(limits ? { limits } : {}) }) };
+  return { store, journals: createHostJournals({ store, ...(limits ? { limits } : {}) }) };
 }
 
 describe('amendments published to a journal', () => {
@@ -57,26 +57,14 @@ describe('amendments published to a journal', () => {
     expect((await journals.publish(HOST, SESSION, 1, entries)).events).toEqual([]);
   });
 
-  it('refuses an open correction that names a stale revision, and keeps the entries before it', async () => {
-    const { journals } = await seeded();
-    const result = await journals.publish(HOST, SESSION, 1, [
-      { sequence: 1, op: 'append', row: row('a', 'Alpha') },
-      { sequence: 2, op: 'correct', row: row('a', 'Alpha, in full'), expectedRevision: 99 },
-      { sequence: 3, op: 'rebind', itemKey: 'a', previous: pending, replacement: settled },
-    ]);
-    expect(result.refusal).toEqual({ sequence: 2, reason: 'stale_revision', itemKey: 'a' });
-    expect(result.watermark).toBe(1);
-    expect(result.events.map(event => event.kind)).toEqual(['row']);
-  });
-
   it('accepts the entries after a refused one when they are sent again under the refused entry\'s number, and does not take them for a duplicate', async () => {
     const { store, journals } = await seeded();
     const result = await journals.publish(HOST, SESSION, 1, [
       { sequence: 1, op: 'append', row: row('a', 'Alpha') },
-      { sequence: 2, op: 'correct', row: row('b', 'Ghost'), expectedRevision: 1 },
+      { sequence: 2, op: 'complete', itemKey: 'ghost', digest: 'd'.repeat(64) },
       { sequence: 3, op: 'append', row: row('c', 'Gamma') },
     ]);
-    expect(result.refusal).toEqual({ sequence: 2, reason: 'unknown_item', itemKey: 'b' });
+    expect(result.refusal).toEqual({ sequence: 2, reason: 'invalid' });
     expect(result.watermark).toBe(1);
     // The entry that followed was not applied, and the refused sequence is still free.
     expect((await journals.publish(HOST, SESSION, 1, [{ sequence: 3, op: 'append', row: row('c', 'Gamma') }])).refusal).toEqual({ sequence: 3, reason: 'sequence_gap' });
@@ -87,9 +75,9 @@ describe('amendments published to a journal', () => {
     expect((await store.load(KEY))?.items.map(item => item.itemKey)).toEqual(['a', 'c']);
   });
 
-  it('takes a replacement whose last item is still open, without a digest', async () => {
+  it('takes a window whose last item is still open, without a digest', async () => {
     const { store, journals } = await seeded();
-    const result = await journals.publish(HOST, SESSION, 1, [{ sequence: 1, op: 'replace', items: [{ row: row('a', 'Alpha'), digest: 'd'.repeat(64) }, { row: row('b', 'Still streaming') }] }]);
+    const result = await journals.publish(HOST, SESSION, 1, [{ sequence: 1, op: 'window', items: [{ row: row('a', 'Alpha'), digest: 'd'.repeat(64) }, { row: row('b', 'Still streaming') }] }]);
     expect(result.refusal).toBeUndefined();
     const saved = await store.load(KEY);
     expect(saved?.items.map(item => [item.itemKey, item.state, item.digest])).toEqual([['a', 'complete', 'd'.repeat(64)], ['b', 'open', undefined]]);

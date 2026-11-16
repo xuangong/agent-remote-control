@@ -13,18 +13,11 @@
     "args": [
       "host-1",
       "codex:thread-1",
-      "controller-1",
-      {
-        "maxIndexItems": 100,
-        "pageItems": 2
-      }
+      "controller-1"
     ],
     "reply": {
       "generation": 1,
-      "watermark": 0,
-      "epoch": "<epoch>",
-      "index": [],
-      "more": false
+      "watermark": 0
     }
   },
   {
@@ -225,28 +218,6 @@
         "trimmed": 0
       }
     }
-  },
-  {
-    "method": "indexPage",
-    "args": [
-      "host-1",
-      "codex:thread-1",
-      "<epoch>",
-      0,
-      10
-    ],
-    "reply": [
-      {
-        "itemKey": "m1",
-        "seqStart": 1,
-        "seqEnd": 1,
-        "state": "complete",
-        "digest": "digest-m1",
-        "liveOnly": false,
-        "revision": 2,
-        "resident": true
-      }
-    ]
   },
   {
     "method": "page",
@@ -510,18 +481,11 @@
     "args": [
       "host-1",
       "codex:thread-1",
-      "controller-1",
-      {
-        "maxIndexItems": 100,
-        "pageItems": 2
-      }
+      "controller-1"
     ],
     "reply": {
       "generation": 1,
-      "watermark": 0,
-      "epoch": "<epoch>",
-      "index": [],
-      "more": false
+      "watermark": 0
     }
   },
   {
@@ -588,35 +552,6 @@
         },
         {
           "sequence": 4,
-          "op": "correct",
-          "row": {
-            "itemKey": "m2",
-            "providerId": "codex",
-            "sourceKey": "m2:1",
-            "occurredAt": 1725000000000,
-            "turnId": "turn-1",
-            "resources": [
-              {
-                "locator": "docs/plan.md",
-                "resourceId": "resource-1",
-                "status": "pending"
-              }
-            ],
-            "item": {
-              "type": "assistant_message",
-              "text": "Plan, in full",
-              "messageId": "m2",
-              "background": {
-                "id": "review-1",
-                "kind": "review",
-                "status": "pending"
-              }
-            }
-          },
-          "expectedRevision": 1
-        },
-        {
-          "sequence": 5,
           "op": "head",
           "head": {
             "snapshot": {
@@ -742,10 +677,10 @@
           }
         }
       ],
-      "watermark": 5,
+      "watermark": 4,
       "cursor": {
         "epoch": "<epoch>",
-        "seq": 2
+        "seq": 1
       },
       "hasHead": true
     }
@@ -759,10 +694,10 @@
     ],
     "reply": {
       "events": [],
-      "watermark": 5,
+      "watermark": 4,
       "cursor": {
         "epoch": "<epoch>",
-        "seq": 2
+        "seq": 1
       },
       "hasHead": false,
       "unserved": true
@@ -773,19 +708,11 @@
     "args": [
       "host-1",
       "codex:thread-2",
-      "controller-1",
-      {
-        "maxIndexItems": 100,
-        "pageItems": 2,
-        "reset": true
-      }
+      "controller-1"
     ],
     "reply": {
       "generation": 1,
-      "watermark": 0,
-      "epoch": "<epoch>",
-      "index": [],
-      "more": false
+      "watermark": 0
     }
   }
 ]

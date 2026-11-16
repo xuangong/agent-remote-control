@@ -14,7 +14,7 @@ import type { SessionWireOperationExecutor } from '../session-wire.js';
 import { createUplinkWriter } from './uplink-writer.js';
 
 const JOURNAL_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set<JournalRelayMessage['type']>([
-  'journal_opened', 'journal_index_page', 'journal_open_refused', 'journal_ack', 'journal_refused', 'journal_fill_request', 'journal_older_request',
+  'journal_opened', 'journal_open_refused', 'journal_ack', 'journal_refused', 'journal_fill_request', 'journal_older_request',
 ]);
 const isJournalRelayMessage = (message: { type: string }): message is JournalRelayMessage => JOURNAL_RELAY_MESSAGE_TYPES.has(message.type);
 

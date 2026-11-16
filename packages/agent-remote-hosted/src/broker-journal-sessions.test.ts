@@ -21,13 +21,13 @@ const tail = (requestId: string) => ({ type: 'timeline_request', payload: { requ
 /** A Controller that opened the session's journal and published two complete rows and a head. */
 async function publishedController(r: Relay, behavior: Parameters<Relay['connectController']>[0] = {}) {
   const controller = await r.connectController(behavior);
-  const opened = await controller.open();
+  await controller.open();
   await controller.publish([
     { op: 'append', row: row('m1', 'Hello') }, { op: 'complete', itemKey: 'm1', digest: DIGEST },
     { op: 'append', row: row('m2', 'World') }, { op: 'complete', itemKey: 'm2', digest: DIGEST },
     { op: 'head', head: { snapshot: snapshot('idle', 'native-session'), observedAt: 5 } },
   ]);
-  return { controller, epoch: opened.epoch as string };
+  return { controller, epoch: (await r.store.load(STORE_KEY))!.meta.epoch };
 }
 
 /** Negotiates and subscribes, and waits for the acknowledgement. */
@@ -76,28 +76,27 @@ it('delivers live rows to subscribers in order, after the subscription is acknow
   expect(browser.frames.findIndex(frame => frame.type === 'timeline_subscribed')).toBeLessThan(browser.frames.findIndex(frame => frame.type === 'agent_stream'));
 });
 
-it('does not send a correction live; the next page after the client\'s cursor carries it', async () => {
+it('does not send a prepend live; the next page after the client\'s cursor leaves it out', async () => {
   const r = await relay();
   const { controller, epoch } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  const revision = (await r.store.load(STORE_KEY))!.items.find(item => item.itemKey === 'm1')!.revision;
   await controller.publish([
-    { op: 'correct', row: row('m1', 'Hello corrected'), digest: DIGEST, expectedRevision: revision },
+    { op: 'prepend', items: [{ row: row('m0', 'Older'), digest: DIGEST }] },
     { op: 'append', row: row('m3', 'Next') },
   ]);
   await until(() => browser.frames.some(frame => frame.type === 'agent_stream') ? true : undefined, 'the live row');
-  expect(browser.frames.filter(frame => frame.type === 'agent_stream').map(frame => frame.payload.seq)).toEqual([4]);
+  expect(browser.frames.filter(frame => frame.type === 'agent_stream').map(frame => frame.payload.seq)).toEqual([3]);
   browser.send({ type: 'timeline_request', payload: { requestId: 'page-2', agentId: PUBLIC_ID, direction: 'after', cursor: { epoch, seq: 2 }, limit: 100 } });
-  expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello corrected', 'Next']);
+  expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Next']);
 });
 
-it('announces a replacement to subscribers and serves the new epoch', async () => {
+it('announces a replacing window to subscribers and serves the new epoch', async () => {
   const r = await relay();
   const { controller, epoch } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  await controller.publish([{ op: 'replace', items: [{ row: row('x1', 'Fresh'), digest: DIGEST }] }]);
+  await controller.publish([{ op: 'window', items: [{ row: row('x1', 'Fresh'), digest: DIGEST }] }]);
   const replaced = await browser.take(message => message.type === 'timeline_replacement', 'replacement');
   const stored = (await r.store.load(STORE_KEY))!;
   expect(stored.meta.epoch).not.toBe(epoch);

@@ -1,6 +1,6 @@
-import type { AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry, ResourceBinding, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
+import type { AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
 import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
-import { includeResources, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import { JournalBodyMissingError, JournalInvalidRowError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
 
@@ -94,10 +94,4 @@ export function bodyFromRow(input: JournalRowInput): JournalBody {
     item: structuredClone(input.item), timestamp: rowTimestamp(input.itemKey, input.occurredAt),
     collapsed: [], resources: structuredClone(input.resources ?? []),
   };
-}
-
-export function mergeResources(current: readonly ResourceBinding[], additions: readonly ResourceBinding[]): ResourceBinding[] {
-  const merged = structuredClone([...current]);
-  includeResources(merged, [...additions]);
-  return merged;
 }

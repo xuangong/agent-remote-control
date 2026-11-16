@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 
 /** `count` complete items, each its own turn unless `turn` says otherwise. */
@@ -13,7 +13,7 @@ function completeItems(count: number, turn: (at: number) => string | undefined =
   }
   return { journal, publish };
 }
-const resident = (journal: SessionJournal) => journal.index().filter(entry => entry.resident).map(entry => entry.itemKey);
+const resident = (journal: SessionJournal) => indexOf(journal).filter(entry => entry.resident).map(entry => entry.itemKey);
 
 describe('the retained window', () => {
   it('is the latest turns or the latest items, whichever reaches further back', () => {
@@ -61,37 +61,8 @@ describe('an incomplete journal', () => {
     journal.markIncomplete();
     expect(journal.takeChanges()?.meta.incomplete).toBe(true);
     expect(new SessionJournal(journal.state()).incomplete).toBe(true);
-    journal.replace(publish(), [], 1);
+    journal.sync(publish(), [], { roomBytes: Number.MAX_SAFE_INTEGER });
     expect(journal.incomplete).toBe(false);
-  });
-});
-
-describe('what a replacement carries', () => {
-  it('counts the live-only items and the open items it seals, and not the items it rereads', () => {
-    const { journal, publish } = openJournal();
-    journal.append(publish(), { ...text('l1', 'l1', 'live', 'turn-0'), liveOnly: true });
-    journal.append(publish(), text('m1', 'd1', 'first', 'turn-1'));
-    journal.complete(publish(), 'm1', 'digest-1');
-    journal.append(publish(), text('o1', 'o1', 'still open', 'turn-2'));
-    const reread = [{ row: text('m1', 'd1', 'first', 'turn-1'), digest: 'digest-1' }];
-    const carried = journal.carriedOnReplace(reread);
-    expect(carried.count).toBe(2);
-    expect(carried.bytes).toBeGreaterThan(0);
-    expect(journal.carriedOnReplace([...reread, { row: text('o1', 'o1', 'still open', 'turn-2'), digest: 'digest-o1' }]).count).toBe(1);
-  });
-});
-
-describe('the index snapshot', () => {
-  it('is reused until an item changes, and rebuilt after any change', () => {
-    const { journal, publish } = completeItems(3);
-    const first = journal.index();
-    expect(journal.index()).toBe(first);
-    journal.evict(1);
-    const evicted = journal.index();
-    expect(evicted).not.toBe(first);
-    expect(evicted.map(entry => entry.resident)).toEqual([false, false, true]);
-    journal.append(publish(), text('m4', 'd4', 'four', 'turn-4'));
-    expect(journal.index()).toHaveLength(4);
   });
 });
 
@@ -101,7 +72,8 @@ describe('the live-only totals', () => {
     journal.append(publish(), text('m1', 'd1', 'first', 'turn-1'));
     expect(journal.liveOnlyCount).toBe(0);
     expect(journal.liveOnlyBytes()).toBe(0);
-    journal.seal(publish(), 'm1');
+    journal.append(publish(), { ...text('m1', 'd1b', ' more', 'turn-1'), liveOnly: true });
+    journal.complete(publish(), 'm1', 'digest-m1');
     expect(journal.liveOnlyCount).toBe(1);
     const sealedBytes = journal.liveOnlyBytes();
     expect(sealedBytes).toBeGreaterThan(0);

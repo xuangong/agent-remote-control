@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, text } from './journal.test-fixture.js';
 
 const big = (character: string) => character.repeat(10_000);
 const snapshot = {
@@ -93,12 +93,12 @@ describe('live-only items', () => {
     const { journal, publish } = openJournal();
     for (const key of ['l1', 'l2', 'l3']) {
       journal.append(publish(), live(key));
-      journal.seal(publish(), key);
+      journal.complete(publish(), key, `digest-${key}`);
     }
     journal.append(publish(), text('m1', 'd1', 'kept'));
     journal.takeChanges();
     expect(journal.dropOldestLiveOnly(1)).toEqual(['l1', 'l2']);
-    expect(journal.index().map(entry => entry.itemKey)).toEqual(['l3', 'm1']);
+    expect(indexOf(journal).map(entry => entry.itemKey)).toEqual(['l3', 'm1']);
     expect(journal.liveOnlyCount).toBe(1);
     const changes = journal.takeChanges()!;
     expect(changes.removed).toEqual(['l1', 'l2']);

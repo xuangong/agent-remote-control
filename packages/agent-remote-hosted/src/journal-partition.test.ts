@@ -11,7 +11,6 @@ import { createPartitionJournals, estimateCloneBytes, serveJournalPartition, typ
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
 const DEADLINE_MS = 5000;
-const LIMITS = { maxIndexItems: 1_000_000, pageItems: 2000 };
 const rowOf = (itemKey: string, text: string, turn = 1) => ({
   itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
   item: { type: 'assistant_message' as const, text, messageId: itemKey },
@@ -29,7 +28,7 @@ const head = (sequence: number): JournalPublishEntry => ({ sequence, op: 'head',
 function overRpc(api: JournalPartitionApi): JournalPartitionApi {
   const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
   return {
-    open: wrap(api.open), indexPage: wrap(api.indexPage), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status), unserveHead: wrap(api.unserveHead),
+    open: wrap(api.open), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status), unserveHead: wrap(api.unserveHead),
     servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost), capabilities: wrap(api.capabilities),
   };
 }
@@ -43,7 +42,7 @@ function cluster(options: Partial<Omit<HostJournalsOptions, 'store' | 'now'>> = 
   const build = (hostId: string, memory: MemoryJournalStore): JournalPartitionApi => {
     const store: JournalStore = { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
       catalog: { list: async prefix => { calls.push(`list:${hostId}`); return memory.catalog.list(prefix); }, deletePrefix: prefix => memory.catalog.deletePrefix(prefix) } };
-    const inner = serveJournalPartition(createHostJournals({ store, now: () => 1_000, ...options }));
+    const inner = serveJournalPartition(createHostJournals({ store, ...options }));
     return overRpc({
       ...inner,
       open: (...args) => { calls.push(`open:${hostId}`); return inner.open(...args); },
@@ -73,8 +72,8 @@ function cluster(options: Partial<Omit<HostJournalsOptions, 'store' | 'now'>> = 
 describe('the journals of primary over journal partitions', () => {
   it('opens, publishes and pages through the partition of each Host, keeping Hosts apart', async () => {
     const { journals, stores } = cluster();
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    await journals.open('host-2', SESSION, 'controller-2', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
+    await journals.open('host-2', SESSION, 'controller-2', {});
     const published = await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), complete(2, 'm1')]);
     expect(published).toMatchObject({ watermark: 2, cursor: { seq: 1 }, hasHead: false, events: [{ kind: 'row' }] });
     const page = await journals.page(HOST, SESSION, { requestId: 'p', agentId: 'a', direction: 'tail', limit: 10 }, false);
@@ -85,22 +84,11 @@ describe('the journals of primary over journal partitions', () => {
     expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 1 } });
   });
 
-  it('opens with the first page of the index and reads the rest a page at a time', async () => {
-    const { journals } = cluster();
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b'), append(3, 'm3', 'c')]);
-    const opened = await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 10, pageItems: 2 }) as JournalOpened;
-    expect(opened).toMatchObject({ generation: 2, more: true, index: [{ itemKey: 'm1' }, { itemKey: 'm2' }] });
-    expect((await journals.indexPage(HOST, SESSION, opened.epoch, 2, 10))!.map(entry => entry.itemKey)).toEqual(['m3']);
-    expect(await journals.indexPage(HOST, SESSION, 'another-epoch', 2, 10)).toBeUndefined();
-    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2 })).toEqual({ refused: 'index_too_large' });
-  });
-
   it('learns which sessions have a head from publication results and loads a Host once', async () => {
     const { journals, calls } = cluster();
     expect(journals.served(HOST, SESSION)).toBeUndefined();
     expect(await journals.servedSessions(HOST)).toEqual([]);
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     expect((await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)])).hasHead).toBe(true);
     expect(journals.served(HOST, SESSION)).toBe(true);
     expect(journals.served(HOST, 'codex:other')).toBe(false);
@@ -109,7 +97,7 @@ describe('the journals of primary over journal partitions', () => {
 
   it('keeps a head published before the Host loaded, and answers undefined until it loads', async () => {
     const { journals } = cluster();
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     expect(journals.served(HOST, SESSION)).toBeUndefined();
     expect(await journals.servedSessions(HOST)).toEqual([SESSION]);
@@ -118,7 +106,7 @@ describe('the journals of primary over journal partitions', () => {
 
   it('shares one load among concurrent callers, and loads the heads from the partition after primary starts again', async () => {
     const first = cluster();
-    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.open(HOST, SESSION, 'controller-1', {});
     await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     first.calls.length = 0;
     const restarted = createPartitionJournals({ partition: first.restart() });
@@ -133,7 +121,7 @@ describe('the journals of primary over journal partitions', () => {
 
   it('does not adopt an answer that a deletion overtook', async () => {
     const first = cluster();
-    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.open(HOST, SESSION, 'controller-1', {});
     await first.journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     const reader = createPartitionJournals({ partition: first.partition });
     const release = first.holdServed();
@@ -148,7 +136,7 @@ describe('the journals of primary over journal partitions', () => {
   it('forgets a session a stream found without a head, until a publication gives it one', async () => {
     const { journals } = cluster();
     await journals.servedSessions(HOST);
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
     journals.unserve(HOST, SESSION);
@@ -159,14 +147,14 @@ describe('the journals of primary over journal partitions', () => {
 
   it('does not call the partition for an open whose connection ended', async () => {
     const { journals, calls, stores } = cluster();
-    expect(await journals.open(HOST, SESSION, 'controller-1', { ...LIMITS, allowed: () => false })).toEqual({ refused: 'unavailable' });
+    expect(await journals.open(HOST, SESSION, 'controller-1', { allowed: () => false })).toEqual({ refused: 'unavailable' });
     expect(calls).toEqual([]);
     expect(stores.size).toBe(0);
   });
 
   it('orders a deletion against publications: earlier ones apply, later ones are refused and the head index forgets', async () => {
     const { journals, stores } = cluster();
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     const before = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     const deleted = journals.deleteHost(HOST);
     const after = journals.publish(HOST, SESSION, 1, [append(3, 'm2', 'World')]);
@@ -178,34 +166,24 @@ describe('the journals of primary over journal partitions', () => {
   });
 
   it('stops serving a session whose head a quota cleared, and serves it again when a rebuild publishes a head', async () => {
-    const { journals } = cluster({ limits: { sessionItems: 2 } });
+    const { journals } = cluster({ limits: { sessionBytes: 3500 } });
     await journals.servedSessions(HOST);
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), complete(2, 'm1'), append(3, 'm2', 'b'), complete(4, 'm2'), head(5)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
-    const refused = await journals.publish(HOST, SESSION, 1, [append(6, 'm3', 'c')]);
+    const refused = await journals.publish(HOST, SESSION, 1, [append(6, 'm3', 'x'.repeat(4000))]);
     expect(refused).toMatchObject({ unserved: true, hasHead: false });
     expect(journals.served(HOST, SESSION)).toBe(false);
-    // The journal is missing a row until a replacement under a new generation rebuilds it.
-    const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
-    await journals.publish(HOST, SESSION, reopened.generation, [{ sequence: 6, op: 'replace', items: [{ row: rowOf('r1', 'Fresh'), digest: 'digest-r1' }] }, head(7)]);
+    // The journal is missing a row until a window under a new generation rebuilds it.
+    const reopened = await journals.open(HOST, SESSION, 'controller-1', {}) as JournalOpened;
+    await journals.publish(HOST, SESSION, reopened.generation, [{ sequence: 6, op: 'window', items: [{ row: rowOf('r1', 'Fresh'), digest: 'digest-r1' }] }, head(7)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
   });
 
-  it('takes the session out of serving when an open is refused over the index bound after clearing its head', async () => {
+  it('takes the session out of serving at the Controller\'s word', async () => {
     const { journals } = cluster();
     await journals.servedSessions(HOST);
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
-    await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), append(2, 'm2', 'b'), head(3)]);
-    expect(journals.served(HOST, SESSION)).toBe(true);
-    expect(await journals.open(HOST, SESSION, 'controller-1', { maxIndexItems: 1, pageItems: 1 })).toEqual({ refused: 'index_too_large', unserved: true });
-    expect(journals.served(HOST, SESSION)).toBe(false);
-  });
-
-  it('takes the session out of serving at the Controller\'s word and when a reset open clears its head', async () => {
-    const { journals } = cluster();
-    await journals.servedSessions(HOST);
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'a'), head(2)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
     expect(await journals.unserveHead(HOST, SESSION, 7)).toBeUndefined();
@@ -214,14 +192,11 @@ describe('the journals of primary over journal partitions', () => {
     expect(journals.served(HOST, SESSION)).toBe(false);
     await journals.publish(HOST, SESSION, 1, [head(3)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
-    const reset = await journals.open(HOST, SESSION, 'controller-1', { ...LIMITS, reset: true }) as JournalOpened;
-    expect(reset).toMatchObject({ generation: 2, index: [], more: false, unserved: true });
-    expect(journals.served(HOST, SESSION)).toBe(false);
   });
 
   it('fills bodies and reads the page in one step, asking olderBeyondJournal in the Host queue and sending only plain data', async () => {
     const { journals } = cluster({ retention: { turns: 1, minItems: 1 } });
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'first', 1), complete(2, 'm1'), append(3, 'm2', 'second', 2), complete(4, 'm2')]);
     const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
     expect(await journals.page(HOST, SESSION, request, false)).toEqual({ kind: 'missing', itemKeys: ['m1'] });
@@ -236,7 +211,7 @@ describe('the journals of primary over journal partitions', () => {
 
   it('runs a fill after the publications made before it', async () => {
     const { journals } = cluster({ retention: { turns: 1, minItems: 1 } });
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
     void journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'first', 1), complete(2, 'm1')]);
     const filled = await journals.fill(HOST, SESSION, [{ row: rowOf('m1', 'first', 1), digest: 'digest-m1' }], { request, olderBeyondJournal: () => false });
@@ -245,45 +220,43 @@ describe('the journals of primary over journal partitions', () => {
 
   it('refuses a publication queued behind one that failed with a partition reset, instead of applying it with a gap', async () => {
     const memory = new MemoryJournalStore();
-    const fresh = () => serveJournalPartition(createHostJournals({ store: memory, now: () => 1_000 }));
+    const fresh = () => serveJournalPartition(createHostJournals({ store: memory }));
     let current = fresh();
     let failNext = true;
     const journals = createPartitionJournals({ partition: () => overRpc({ ...current, publish: async (...args) => {
       if (failNext) { failNext = false; current = fresh(); throw new Error('The Durable Object was reset.'); }
       return current.publish(...args);
     } }) });
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     const first = journals.publish(HOST, SESSION, 1, [append(1, 'm1', 'one'), append(2, 'm2', 'two')]);
     const second = journals.publish(HOST, SESSION, 1, [append(3, 'm3', 'three')]);
     await expect(first).rejects.toThrow('reset');
     expect((await second).refusal).toEqual({ sequence: 3, reason: 'sequence_gap' });
     expect((await memory.catalog.list('')).length).toBe(1);
     expect(await journals.status(HOST, SESSION)).toMatchObject({ cursor: { seq: 0 } });
-    const reopened = await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened;
+    const reopened = await journals.open(HOST, SESSION, 'controller-1', {}) as JournalOpened;
     expect(reopened.watermark).toBe(0);
     expect((await journals.publish(HOST, SESSION, reopened.generation, [append(1, 'm1', 'one'), append(2, 'm2', 'two'), append(3, 'm3', 'three')])).refusal).toBeUndefined();
   });
 
   it('answers a read after the publications made before it', async () => {
     const { journals } = cluster();
-    await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await journals.open(HOST, SESSION, 'controller-1', {});
     await journals.publish(HOST, SESSION, 1, [append(1, 'm2', 'now', 2), complete(2, 'm2')]);
     const request = { requestId: 'p', agentId: 'a', direction: 'tail' as const, limit: 10 };
     const older = journals.publish(HOST, SESSION, 1, [{ sequence: 3, op: 'prepend', items: [{ row: rowOf('m1', 'before', 1), digest: 'digest-m1' }] }]);
     const page = await journals.page(HOST, SESSION, request, false);
     const status = journals.status(HOST, SESSION);
-    const index = journals.indexPage(HOST, SESSION, (await journals.open(HOST, SESSION, 'controller-1', LIMITS) as JournalOpened).epoch, -100, 10);
     await older;
     expect(page).toMatchObject({ kind: 'page', page: { payload: { entries: [{ item: { text: 'before' } }, { item: { text: 'now' } }], hasOlder: false } } });
     expect(await status).toMatchObject({ cursor: { seq: 1 } });
-    expect((await index)!.map(entry => entry.itemKey)).toEqual(['m1', 'm2']);
   });
 
   it('lets a head load complete between back-to-back publications', async () => {
     const first = cluster();
-    await first.journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    await first.journals.open(HOST, SESSION, 'controller-1', {});
     const writer = createPartitionJournals({ partition: first.partition });
-    await writer.open(HOST, SESSION, 'controller-1', LIMITS);
+    await writer.open(HOST, SESSION, 'controller-1', {});
     const release = first.holdServed();
     const loading = writer.servedSessions(HOST);
     await new Promise(resolve => setTimeout(resolve, 5));
@@ -302,37 +275,37 @@ describe('the partition contract across a rollout', () => {
   const masked = (value: unknown, epoch: string) => JSON.parse(JSON.stringify(value ?? null).replaceAll(epoch || '\u0000', '<epoch>').replace(/"protocolVersion":"[^"]*"/g, '"protocolVersion":"<version>"'));
 
   it('answers every recorded call with the recorded reply shape, so a change to an argument or a result fails here', async () => {
-    const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 })));
+    const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() })));
     const methods = new Set(steps.map(step => step.method));
-    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'indexPage', 'open', 'page', 'publish', 'servedSessions', 'status', 'unserveHead']);
+    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'open', 'page', 'publish', 'servedSessions', 'status', 'unserveHead']);
     let epoch = '';
     for (const step of steps) {
       const args = step.args.map(arg => (arg === '<epoch>' ? epoch : arg === null ? undefined : arg));
       const reply = await (api[step.method] as (...call: unknown[]) => Promise<unknown>)(...args);
-      if (step.method === 'open') epoch = (reply as { epoch: string }).epoch;
+      epoch = (reply as { cursor?: { epoch: string } } | undefined)?.cursor?.epoch ?? epoch;
       expect(masked(reply, epoch), `${step.method} ${JSON.stringify(step.args).slice(0, 80)}`).toEqual(masked(step.reply, '<epoch>'));
     }
   });
 
   it('covers every method of the contract', () => {
-    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }));
     expect(Object.keys(api).sort()).toEqual([...new Set(steps.map(step => step.method))].sort());
   });
 
   it('asks the partition for its version once per Host, however many opens follow', async () => {
     let asked = 0;
-    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }));
     const journals = createPartitionJournals({ partition: () => ({ ...inner, capabilities: async host => { asked++; return inner.capabilities(host); } }) });
-    for (const session of ['codex:a', 'codex:b', 'codex:c']) expect(await journals.open(HOST, session, 'controller-1', LIMITS)).toMatchObject({ generation: 1 });
+    for (const session of ['codex:a', 'codex:b', 'codex:c']) expect(await journals.open(HOST, session, 'controller-1', {})).toMatchObject({ generation: 1 });
     expect(asked).toBe(1);
-    await journals.open('host-2', SESSION, 'controller-1', LIMITS);
+    await journals.open('host-2', SESSION, 'controller-1', {});
     expect(asked).toBe(2);
   });
 
   it('refuses an open of a partition that cannot answer its version, calls it for nothing else, and asks again at the next open', async () => {
-    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }));
     const store = new MemoryJournalStore();
-    const behind = serveJournalPartition(createHostJournals({ store, now: () => 1 }));
+    const behind = serveJournalPartition(createHostJournals({ store }));
     const calls: string[] = [];
     let answer: 'throws' | 'missing' | 'older' | 'current' = 'throws';
     const partition: JournalPartitionApi = {
@@ -347,29 +320,29 @@ describe('the partition contract across a rollout', () => {
     const journals = createPartitionJournals({ partition: () => partition });
     for (const failing of ['throws', 'missing', 'older'] as const) {
       answer = failing;
-      expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable' });
+      expect(await journals.open(HOST, SESSION, 'controller-1', {})).toEqual({ refused: 'unavailable' });
     }
     expect(new Set(calls)).toEqual(new Set(['capabilities']));
     expect(await store.catalog.list('')).toEqual([]);
     answer = 'current';
-    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 1 });
+    expect(await journals.open(HOST, SESSION, 'controller-1', {})).toMatchObject({ generation: 1 });
     expect(calls.filter(call => call === 'capabilities')).toHaveLength(4);
   });
 });
 
 describe('a refused open of a served session', () => {
   it('takes the session out of serving, so its streams close and read crude, and serves it again after a good open and a head', async () => {
-    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }));
-    await inner.open(HOST, SESSION, 'controller-1', LIMITS);
+    const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }));
+    await inner.open(HOST, SESSION, 'controller-1');
     await inner.publish(HOST, SESSION, 1, [append(1, 'm1', 'Hello'), head(2)]);
     let broken = true;
     const journals = createPartitionJournals({ partition: () => ({ ...inner, capabilities: async host => { if (broken) throw new Error('The Durable Object is overloaded.'); return inner.capabilities(host); } }) });
     expect(await journals.servedSessions(HOST)).toEqual([SESSION]);
-    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable', unserved: true });
+    expect(await journals.open(HOST, SESSION, 'controller-1', {})).toEqual({ refused: 'unavailable', unserved: true });
     expect(journals.served(HOST, SESSION)).toBe(false);
-    expect(await journals.open(HOST, SESSION, 'controller-1', LIMITS)).toEqual({ refused: 'unavailable' });
+    expect(await journals.open(HOST, SESSION, 'controller-1', {})).toEqual({ refused: 'unavailable' });
     broken = false;
-    const opened = await journals.open(HOST, SESSION, 'controller-1', LIMITS);
+    const opened = await journals.open(HOST, SESSION, 'controller-1', {});
     expect(opened).toMatchObject({ generation: 2 });
     await journals.publish(HOST, SESSION, 2, [head(3)]);
     expect(journals.served(HOST, SESSION)).toBe(true);
@@ -394,9 +367,9 @@ describe('serveJournalPartition', () => {
   const entriesOf = (result: Awaited<ReturnType<JournalPartitionApi['page']>>) => (result as { kind: 'page'; page: { payload: { entries: unknown[] } } }).page.payload.entries;
 
   it('answers a page whose estimated clone size would pass the bound with fewer entries', async () => {
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const journals = createHostJournals({ store: new MemoryJournalStore() });
     const bounded = serveJournalPartition(journals, { replyMaxBytes: 5000 });
-    await bounded.open(HOST, SESSION, 'controller-1', LIMITS);
+    await bounded.open(HOST, SESSION, 'controller-1', {});
     await publishSix(bounded);
     const small = entriesOf(await bounded.page(HOST, SESSION, tail, false));
     expect(small.length).toBeGreaterThan(0);
@@ -405,9 +378,9 @@ describe('serveJournalPartition', () => {
   });
 
   it('answers a page with every entry when its estimate fits the bound exactly, and with fewer when it is one byte over', async () => {
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+    const journals = createHostJournals({ store: new MemoryJournalStore() });
     const open = serveJournalPartition(journals);
-    await open.open(HOST, SESSION, 'controller-1', LIMITS);
+    await open.open(HOST, SESSION, 'controller-1', {});
     await publishSix(open);
     const full = await open.page(HOST, SESSION, tail, false);
     const size = estimateCloneBytes(full);
@@ -416,9 +389,9 @@ describe('serveJournalPartition', () => {
   });
 
   it('answers a fill whose page would pass the bound with a page of fewer entries, keeping what was filled', async () => {
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000, retention: { turns: 1, minItems: 1 } });
+    const journals = createHostJournals({ store: new MemoryJournalStore(), retention: { turns: 1, minItems: 1 } });
     const bounded = serveJournalPartition(journals, { replyMaxBytes: 5000 });
-    await bounded.open(HOST, SESSION, 'controller-1', LIMITS);
+    await bounded.open(HOST, SESSION, 'controller-1', {});
     await publishSix(bounded);
     const missing = await bounded.page(HOST, SESSION, tail, false);
     const itemKeys = (missing as { itemKeys: string[] }).itemKeys;
@@ -431,7 +404,7 @@ describe('serveJournalPartition', () => {
   });
 
   it('returns no page for a session without a journal', async () => {
-    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }), { replyMaxBytes: 1 });
+    const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }), { replyMaxBytes: 1 });
     expect(await api.page(HOST, SESSION, tail, false)).toBeUndefined();
   });
 });

@@ -111,7 +111,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         if (options.stateFile) storage = openGatewayState(options.stateFile, auth.secret, hostedAuthStorageIdentity(auth));
         if (!options.journalFile) return;
         journalDatabase = await openNodeJournalDatabase(options.journalFile);
-        journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase), now: Date.now });
+        journalService = createHostJournals({ store: new SqlJournalStore(journalDatabase) });
         await journalService.loadAllServed();
       };
       try {

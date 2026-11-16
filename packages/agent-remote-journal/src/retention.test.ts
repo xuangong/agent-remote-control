@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { bodyFromRow } from './journal-items.js';
 import { evictableItems } from './retention.js';
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, text } from './journal.test-fixture.js';
 
 function threeTurns() {
   const { journal, publish } = openJournal();
@@ -26,7 +26,7 @@ describe('retention', () => {
   it('asks for a fill when a page reaches an evicted body and accepts only the recorded digest', () => {
     const { journal } = threeTurns();
     expect(journal.evict(2)).toEqual(['m1']);
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'm1', resident: false });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'm1', resident: false });
     const request = { requestId: 'r', agentId: 'a', direction: 'tail' as const, limit: 10 };
     expect(journal.page(request, { olderBeyondJournal: false })).toEqual({ kind: 'missing', itemKeys: ['m1'] });
     const body = bodyFromRow(text('m1', 'h1', 'first', 'turn-1'));
@@ -34,18 +34,6 @@ describe('retention', () => {
     expect(journal.fill('m1', body, 'digest-1')).toBe('filled');
     expect(journal.page(request, { olderBeyondJournal: false }).kind).toBe('page');
     expect(journal.fill('unknown', body, 'digest-1')).toBe('unknown');
-  });
-
-  it('never evicts a sealed item, which has no digest to fill it back', () => {
-    const { journal, publish } = openJournal();
-    journal.append(publish(), text('s1', 'ds1', 'sealed', 'turn-1'));
-    journal.seal(publish(), 's1');
-    journal.append(publish(), text('m2', 'd2', 'second', 'turn-2'));
-    journal.complete(publish(), 'm2', 'digest-2');
-    journal.append(publish(), text('m3', 'd3', 'third', 'turn-3'));
-    expect(evictableItems(journal.state().items, 1)).toEqual(['m2']);
-    expect(journal.evict(1)).toEqual(['m2']);
-    expect(journal.index()[0]).toMatchObject({ itemKey: 's1', resident: true });
   });
 
   it('rejects a turn count that is not a non-negative integer', () => {
@@ -63,7 +51,7 @@ describe('retention', () => {
     expect(journal.takeChanges()).toBeUndefined();
     const body = bodyFromRow(text('m1', 'h1', 'first', 'turn-1'));
     expect(journal.fill('m1', body, 'digest-other')).toBe('mismatch');
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'm1', resident: false });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'm1', resident: false });
     expect(journal.takeChanges()).toBeUndefined();
     expect(journal.fill('m1', body, 'digest-1')).toBe('filled');
     expect(journal.takeChanges()?.upsert.map(({ itemKey }) => itemKey)).toEqual(['m1']);
@@ -134,7 +122,6 @@ describe('retention', () => {
     journal.fill('c1', bodyFromRow(call({})), 'digest-c1');
     journal.append(publish(), call({}));
     journal.complete(publish(), 'c1', 'digest-c1b');
-    journal.correct(publish(), call({}), 'digest-c1c', journal.index()[0]!.revision);
     expect(journal.state().items[0]?.body?.item).not.toHaveProperty('background');
   });
 });

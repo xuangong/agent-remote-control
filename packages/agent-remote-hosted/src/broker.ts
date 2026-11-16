@@ -162,7 +162,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
-  const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals, now }));
+  const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals }));
   const heartbeat = { intervalMs: options.heartbeatIntervalMs ?? 30_000, timeoutMs: options.heartbeatTimeoutMs ?? 10_000 };
   if (!Number.isSafeInteger(heartbeat.intervalMs) || !Number.isSafeInteger(heartbeat.timeoutMs) || heartbeat.timeoutMs < 1 || heartbeat.timeoutMs >= heartbeat.intervalMs || heartbeat.intervalMs > 600_000) {
     throw new RangeError('Host heartbeat deadlines require 0 < timeout < interval <= 600000 milliseconds.');

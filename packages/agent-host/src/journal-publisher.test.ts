@@ -49,7 +49,7 @@ function scriptedRelay(options: { watermark?: number; holdOpened?: boolean; refu
         return;
       }
       held.generation += 1;
-      const reply = () => send({ uplinkVersion: 2, type: 'journal_opened', requestId: message.requestId, sessionKey: message.sessionKey, generation: held.generation, watermark: held.applied, epoch: 'epoch-1', index: [] });
+      const reply = () => send({ uplinkVersion: 2, type: 'journal_opened', requestId: message.requestId, sessionKey: message.sessionKey, generation: held.generation, watermark: held.applied });
       if (options.holdOpened) heldOpens.push(reply); else reply();
     } else if (message.type === 'journal_publish') {
       const generationOf: number = message.generation;
@@ -391,7 +391,7 @@ describe('recovering', () => {
     expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'sequence_gap' });
   });
 
-  it.each(['quota_exceeded', 'incomplete', 'invalid', 'unknown_item', 'body_missing', 'type_changed', 'fenced'])('opens again with backoff and sends the window again after the Relay refuses a live row as %s', async reason => {
+  it.each(['quota_exceeded', 'incomplete', 'invalid', 'sequence_gap', 'fenced'])('opens again with backoff and sends the window again after the Relay refuses a live row as %s', async reason => {
     const diagnostics: Wire[] = [];
     let refused = false;
     const relay = scriptedRelay({ onPublish: (message, answer) => {

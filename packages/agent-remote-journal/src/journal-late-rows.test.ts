@@ -1,7 +1,7 @@
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
-import { expectNoChange, openJournal, text } from './journal.test-fixture.js';
+import { expectNoChange, indexOf, openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import { JournalBodyMissingError, JournalItemTypeChangedError, type JournalRowInput } from './types.js';
 
@@ -29,7 +29,7 @@ function withEvictedTool() {
   journal.append(publish(), text('later', 'later:1', 'Next turn', 'turn-2'));
   journal.complete(publish(), 'later', DIGEST);
   journal.evict(1);
-  expect(journal.index().map(entry => [entry.itemKey, entry.resident])).toEqual([['tool:w1', false], ['later', true]]);
+  expect(indexOf(journal).map(entry => [entry.itemKey, entry.resident])).toEqual([['tool:w1', false], ['later', true]]);
   return { journal, publish };
 }
 
@@ -44,13 +44,11 @@ const tail = (journal: ReturnType<typeof openJournal>['journal']) => {
 describe('a late row of a content-replacing type reaching an evicted item', () => {
   it('brings the item back with the row\'s content, open, keeping its time, its resources and its background merged with the row\'s', () => {
     const { journal, publish } = withEvictedTool();
-    const before = journal.index()[0]!;
     const row = journal.append(publish(), { ...tool('completed', { background: { ...pending, status: 'visible' } }), resources: [two] });
     expect(row).toBeDefined();
-    const entry = journal.index()[0]!;
+    const entry = indexOf(journal)[0]!;
     expect(entry).toMatchObject({ itemKey: 'tool:w1', state: 'open', resident: true, seqEnd: row!.seq });
     expect(entry.digest).toBeUndefined();
-    expect(entry.revision).toBeGreaterThan(before.revision);
     const [shown] = tail(journal);
     expect(shown).toMatchObject({
       item: { type: 'tool_call', status: 'completed', detail: { description: 'Wrote' }, background: { id: 'review-1', status: 'visible' } },
@@ -90,13 +88,13 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
     const restored = new SessionJournal(state);
     const { generation } = restored.claim('controller-2');
     restored.append({ publisherId: 'controller-2', generation, sequence: 1 }, tool('completed'));
-    expect(restored.index()[0]).toMatchObject({ itemKey: 'tool:w1', resident: true, state: 'open' });
+    expect(indexOf(restored)[0]).toMatchObject({ itemKey: 'tool:w1', resident: true, state: 'open' });
   });
 
   it('marks an evicted item live-only when the late row says so', () => {
     const { journal, publish } = withEvictedTool();
     journal.append(publish(), { ...tool('completed'), liveOnly: true });
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'tool:w1', liveOnly: true, state: 'open' });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'tool:w1', liveOnly: true, state: 'open' });
     expect(journal.liveOnlyCount).toBe(1);
   });
 

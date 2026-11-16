@@ -49,7 +49,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     const journal = (await relay.journal(SESSION))!;
     expect(await texts(relay)).toEqual(['Hello', 'World']);
-    expect(journal.index().map(value => [value.itemKey, value.state, typeof value.digest])).toEqual([['m1', 'complete', 'string'], ['m2', 'complete', 'string']]);
+    expect(journal.state().items.map(value => [value.itemKey, value.state, typeof value.digest])).toEqual([['m1', 'complete', 'string'], ['m2', 'complete', 'string']]);
     expect(journal.head?.snapshot.id).toBe('agent-1');
   });
 
@@ -75,7 +75,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     await settle(50);
     const after = (await restarted.journal(SESSION))!;
     expect(after.epoch).toBe(before.epoch);
-    expect(after.index().map(value => [value.itemKey, value.seqStart])).toEqual(before.index().map(value => [value.itemKey, value.seqStart]));
+    expect(after.state().items.map(value => [value.itemKey, value.seqStart])).toEqual(before.state().items.map(value => [value.itemKey, value.seqStart]));
     expect(restarted.published.flatMap(({ result }) => result.events.filter(event => event.kind === 'row' || event.kind === 'replaced'))).toEqual([]);
     expect(await texts(restarted)).toEqual(['Hello', 'World', 'World']);
     await reopened.manager.close();
@@ -110,8 +110,8 @@ describe('the publisher against the Relay\'s journal service', () => {
     expect(await relay.connection.requestOlder(SESSION, 10, 'm3')).toEqual({ olderAvailable: false });
     expect(await texts(relay)).toEqual(['One', 'Two', 'Three', 'Four']);
     const journal = (await relay.journal(SESSION))!;
-    expect(journal.index().map(value => value.seqStart)).toEqual([-1, 0, 1, 2]);
-    const digest = journal.index()[0]!.digest;
+    expect(journal.state().items.map(value => value.seqStart)).toEqual([-1, 0, 1, 2]);
+    const digest = journal.state().items[0]!.digest;
     expect(digest).toBe(await itemDigest(mergedRow(groupItems([{ epoch: 'e', seq: 1, providerId: 'fake', sourceKey: 's', occurredAt: 1, timestamp: new Date(1).toISOString(), turnId: 'turn-1', item: { type: 'assistant_message', text: 'One', messageId: 'm1' }, resources: [], identity: { key: 'm1', completes: true } }])[0]!).item));
     expect(await relay.connection.requestFill(SESSION, ['m3', 'm4'])).toMatchObject({ filled: ['m3', 'm4'] });
   });
@@ -172,7 +172,7 @@ describe('the publisher against the Relay\'s journal service', () => {
   const opensOf = (relay: ReturnType<typeof relayLoopback>) => relay.fromPublisher.filter(message => message.type === 'journal_open');
   const sequencesContiguous = async (relay: ReturnType<typeof relayLoopback>) => {
     const journal = (await relay.journal(SESSION))!;
-    const seqs = journal.index().map(value => value.seqStart);
+    const seqs = journal.state().items.map(value => value.seqStart);
     return seqs.every((value, at) => at === 0 || value === seqs[at - 1]! + 1);
   };
 
@@ -196,7 +196,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     const after = (await again.journal(SESSION))!;
     expect(after.epoch).toBe(before.epoch);
     expect(await texts(again)).toEqual(['Hello', 'World', 'Live', 'While away']);
-    expect(new Set(after.index().map(value => value.itemKey)).size).toBe(after.index().length);
+    expect(new Set(after.state().items.map(value => value.itemKey)).size).toBe(after.state().items.length);
     expect(again.published.flatMap(({ result }) => result.events.filter(event => event.kind === 'replaced'))).toEqual([]);
     expect(await sequencesContiguous(again)).toBe(true);
   });

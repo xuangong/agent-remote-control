@@ -305,9 +305,9 @@ describe('a Relay refusal or a lost message heals by opening again', () => {
   it.each(['quota_exceeded', 'invalid'] as const)('after the Relay refuses a live row as %s', async reason => {
     let refused = false;
     const relay = relayLoopback(clock, { refuseEntry: entry => {
-      if (refused || entry.op !== 'append' || entry.itemKey !== 'x') return undefined;
+      if (refused || entry.op !== 'append') return undefined;
       refused = true;
-      return { reason, itemKey: 'x' };
+      return { reason };
     } });
     const publisher = start(relay);
     const run = await follow(publisher, native());

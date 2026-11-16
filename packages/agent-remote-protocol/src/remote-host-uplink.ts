@@ -8,7 +8,7 @@ import { PairingPurpose } from './pairing.js';
 import { ControllerIdentity } from './controller-release.js';
 import { HostEnvironment } from './host-environment.js';
 import { HostSessionStates } from './session-states.js';
-import { JournalAck, JournalFill, JournalFillRequest, JournalIndexPage, JournalIndexRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, JournalRequestRefused, JournalUnserve, validJournalMessage } from './remote-host-journal.js';
+import { JournalAck, JournalFill, JournalFillRequest, JournalOlderDone, JournalOlderRequest, JournalOpen, JournalOpened, JournalOpenRefused, JournalPublish, JournalRefused, JournalRequestRefused, JournalUnserve, validJournalMessage } from './remote-host-journal.js';
 
 import type { WireDecodeResult, WireEncodeResult } from './codec.js';
 
@@ -77,9 +77,7 @@ export const RemoteHostUplinkMessage = Type.Union([
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_older_done'), ...JournalOlderDone.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_unserve'), ...JournalUnserve.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_request_refused'), ...JournalRequestRefused.properties }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_index_request'), ...JournalIndexRequest.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_opened'), ...JournalOpened.properties }, object),
-  Type.Object({ uplinkVersion: version, type: Type.Literal('journal_index_page'), ...JournalIndexPage.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_open_refused'), ...JournalOpenRefused.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_ack'), ...JournalAck.properties }, object),
   Type.Object({ uplinkVersion: version, type: Type.Literal('journal_refused'), ...JournalRefused.properties }, object),
@@ -100,11 +98,11 @@ export const RemoteHostUplinkMessage = Type.Union([
 
 export type RemoteHostUplinkMessage = Static<typeof RemoteHostUplinkMessage>;
 export type RemoteHostUplinkBrokerMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_index_page' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
+  { type: 'team_response' | 'outbox_response' | 'journal_opened' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' | 'outbox_ready' | 'credential_issued' | 'registered' | 'heartbeat' | 'rpc_request' | 'rpc_cancel' | 'stream_open' | 'stream_message' | 'stream_close' }>;
 
 /** The journal messages the Relay sends to a Controller that holds the journal grant. */
 export type JournalRelayMessage = Extract<RemoteHostUplinkMessage,
-  { type: 'journal_opened' | 'journal_index_page' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' }>;
+  { type: 'journal_opened' | 'journal_open_refused' | 'journal_ack' | 'journal_refused' | 'journal_fill_request' | 'journal_older_request' }>;
 
 export function decodeRemoteHostUplinkMessage(json: string): WireDecodeResult<RemoteHostUplinkMessage> {
   let value: unknown;

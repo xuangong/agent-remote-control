@@ -89,7 +89,7 @@ describe('the attention cursor of a served head', () => {
   it('is served as a live cursor when the attention item sits below the first sequence', async () => {
     const f = fixture();
     const text = (itemKey: string) => ({ row: { itemKey, providerId: 'codex', sourceKey: `${itemKey}:1`, occurredAt: 1_725_000_000_000, turnId: 'turn-1', item: { type: 'assistant_message' as const, text: itemKey, messageId: itemKey } }, digest: 'a'.repeat(64) });
-    f.journal.replace(f.at(), [text('a')], 1_000);
+    f.journal.sync(f.at(), [text('a')], { roomBytes: Number.MAX_SAFE_INTEGER });
     f.journal.prepend(f.at(), [text('p1'), text('p2'), text('p3')]);
     f.journal.setHead(f.at(), { snapshot: { ...snapshot(), attention: { cursor: { epoch: 'controller-epoch', seq: 7 } } }, observedAt: 7, attentionItemKey: 'p1' });
     await f.ready(false);

@@ -1,8 +1,8 @@
 import { mergeBackgroundActivity, type AgentTimelineItem, type BackgroundActivity, type ProjectedTimelineEntry, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { entryFromRow, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { entryFromRow, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
 
 import {
-  canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, mergeResources, residentEntry, stampRow,
+  canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, residentEntry, stampRow,
 } from './journal-items.js';
 import { canonicalContent, canonicalJson } from './item-digest.js';
 import { pageJournal, type JournalPageRequest, type JournalPageResult } from './journal-pages.js';
@@ -11,16 +11,13 @@ import { replacementOrder } from './replacement.js';
 import { utf8ByteLength } from './utf8-size.js';
 import {
   JournalBodyMissingError, JournalDuplicateItemError, JournalFencedError, JournalInvalidPublicationError, JournalItemTypeChangedError, JournalSequenceGapError,
-  JournalStaleRevisionError, JournalUnknownItemError,
-  type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalIndexEntry, type JournalItem, type JournalMeta, type JournalPublication,
+  JournalUnknownItemError,
+  type JournalItemInput, type JournalChanges, type JournalHead, type JournalPublisher, type JournalItem, type JournalMeta, type JournalPublication,
   type JournalBody, type JournalRow, type JournalRowInput, type JournalState, type SyncResult,
 } from './types.js';
 
 /** The item types whose rows replace the item's content instead of adding to it. */
 const CONTENT_REPLACING_TYPES: ReadonlySet<string> = new Set(['tool_call', 'todo']);
-
-/** How long a retired epoch is remembered, for diagnostics only. */
-export const RETIRED_EPOCH_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * The journal of one session: epochs and dense sequences assigned here, one record per item, and the one publisher
@@ -43,11 +40,9 @@ export class SessionJournal {
   protected readonly liveOnlyKeys = new Set<string>();
   protected readonly liveOnlySizes = new Map<string, number>();
   protected liveOnlyTotal = 0;
-  /** The index as last built; dropped whenever an item changes. */
-  protected indexSnapshot: readonly JournalIndexEntry[] | undefined;
 
   static create(sessionKey: string, epoch: string = crypto.randomUUID()): SessionJournal {
-    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null, lastRevision: 0, retiredEpochs: [] }, items: [] });
+    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null }, items: [] });
     journal.metaDirty = true;
     return journal;
   }
@@ -55,9 +50,6 @@ export class SessionJournal {
   constructor(state: JournalState) {
     this.meta = structuredClone(state.meta);
     this.items = structuredClone(state.items).sort((left, right) => left.seqStart - right.seqStart);
-    let newest = this.meta.lastRevision ?? 0;
-    for (const { revision } of this.items) if (revision > newest) newest = revision;
-    this.meta.lastRevision = newest;
     for (const item of this.items) this.byKey.set(item.itemKey, item);
     for (const item of this.items) {
       this.unmeasured.add(item.itemKey);
@@ -145,20 +137,6 @@ export class SessionJournal {
   }
 
   /**
-   * What a replacement by `reread` would carry over: the live-only items and the open items it seals, with their count and
-   * estimated size. A replacement is admitted by its own size plus this.
-   */
-  carriedOnReplace(reread: readonly JournalItemInput[]): { count: number; bytes: number } {
-    let count = 0, bytes = 0;
-    for (const entry of replacementOrder(this.items, reread)) {
-      if (entry.kind !== 'carried') continue;
-      count += 1;
-      bytes += utf8ByteLength(JSON.stringify(entry.item));
-    }
-    return { count, bytes };
-  }
-
-  /**
    * Removes the oldest complete live-only items until at most `keep` live-only items remain, skeleton and body: nothing can
    * rebuild them, so their place in the sequence goes with them. An open item is never removed: the next append would
    * recreate it with only the new text. Returns the keys removed.
@@ -177,7 +155,6 @@ export class SessionJournal {
       this.unmeasured.add(key);
       this.liveOnlyKeys.delete(key);
     }
-    this.indexSnapshot = undefined;
     return [...doomed];
   }
 
@@ -213,7 +190,6 @@ export class SessionJournal {
       const opened = this.openItem(structuredClone(row), input.liveOnly === true);
       this.advance(publication);
       this.meta.nextSeq += 1;
-      opened.revision = this.nextRevision();
       this.insertLast(opened);
       return row;
     }
@@ -228,7 +204,6 @@ export class SessionJournal {
     if (input.liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
-    existing.revision = this.nextRevision();
     this.touch(existing.itemKey);
     return row;
   }
@@ -262,7 +237,6 @@ export class SessionJournal {
     if (liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
-    existing.revision = this.nextRevision();
     this.touch(existing.itemKey);
     return row;
   }
@@ -274,20 +248,6 @@ export class SessionJournal {
     this.advance(publication);
     item.state = 'complete';
     item.digest = digest;
-    item.revision = this.nextRevision();
-    this.touch(itemKey);
-  }
-
-  /** Closes an item that native history no longer contains, keeping what was received. It has no native copy, so it is relay-only. */
-  seal(publication: JournalPublication, itemKey: string): void {
-    if (this.duplicate(publication)) return;
-    const item = this.require(itemKey);
-    if (item.body === null) throw new JournalBodyMissingError(itemKey);
-    this.advance(publication);
-    item.state = 'complete';
-    item.liveOnly = true;
-    delete item.digest;
-    item.revision = this.nextRevision();
     this.touch(itemKey);
   }
 
@@ -298,7 +258,6 @@ export class SessionJournal {
     this.advance(publication);
     item.clientMessageId = clientMessageId;
     if (item.body?.item.type === 'user_message') item.body.item.clientMessageId = clientMessageId;
-    item.revision = this.nextRevision();
     this.touch(itemKey);
   }
 
@@ -315,7 +274,7 @@ export class SessionJournal {
    * in what the item keeps of it. It matches by locator, not by the previous id, so a binding whose id changed since (a
    * restart, a new key) still takes the replacement. Returns the epoch and sequence clients know the item by, or undefined
    * for a duplicate publication, an item the journal does not know and a binding that already is the replacement: none of
-   * them changes anything, so nothing is stored or told. An amendment does not move the item's revision.
+   * them changes anything, so nothing is stored or told.
    */
   rebind(publication: JournalPublication, itemKey: string, previous: ResourceBinding, replacement: ResourceBinding): { epoch: string; seq: number } | undefined {
     if (this.duplicate(publication)) return undefined;
@@ -356,58 +315,6 @@ export class SessionJournal {
   }
 
   /**
-   * Replaces an item's content after a reread found it different, unless the item moved since the index was read. With a
-   * digest the item is complete; without one it stays open, as an item the Controller still receives deltas of does.
-   */
-  correct(publication: JournalPublication, input: JournalRowInput, digest: string | undefined, expectedRevision: number): JournalRow | undefined {
-    if (this.duplicate(publication)) return undefined;
-    const item = this.require(input.itemKey);
-    if (item.revision !== expectedRevision) throw new JournalStaleRevisionError(item.itemKey, item.revision);
-    const row = stampRow(this.meta.epoch, this.meta.nextSeq, input);
-    this.advance(publication);
-    this.meta.nextSeq += 1;
-    const stored = structuredClone(row.item);
-    carryKnownFields(stored, knownFields(item));
-    row.item = structuredClone(stored);
-    const known = item.body ?? item.keptBody;
-    item.body = {
-      item: stored, timestamp: row.timestamp,
-      collapsed: [...(known?.collapsed ?? [])], resources: mergeResources(known?.resources ?? [], row.resources),
-    };
-    delete item.background;
-    delete item.keptBody;
-    item.liveOnly = input.liveOnly === true;
-    item.seqEnd = row.seq;
-    item.sourceSeqRanges = includeSequence(item.sourceSeqRanges, row.seq);
-    if (digest === undefined) {
-      item.state = 'open';
-      delete item.digest;
-    } else {
-      item.state = 'complete';
-      item.digest = digest;
-    }
-    item.revision = this.nextRevision();
-    this.touch(item.itemKey);
-    return row;
-  }
-
-  /**
-   * Starts a new epoch from a reread of native history: one sequence per item, oldest first. Live-only items, which a
-   * reread cannot reproduce, are carried over in place, and open items the reread lacks are carried sealed.
-   */
-  replace(publication: JournalPublication, items: readonly JournalItemInput[], now: number): string {
-    if (this.duplicate(publication)) return this.meta.epoch;
-    this.requireDistinct(items);
-    const retired = this.meta.epoch;
-    const epoch = this.rebuild(publication, items, true);
-    this.meta.retiredEpochs = [
-      ...this.meta.retiredEpochs.filter(({ retiredAt }) => now - retiredAt < RETIRED_EPOCH_MS),
-      { epoch: retired, retiredAt: now },
-    ];
-    return epoch;
-  }
-
-  /**
    * Compares the Controller's newest window of native history with the journal and brings the journal to it with the least
    * change: `unchanged` when it already holds the window, `appended` when the window only adds items at the end, otherwise
    * one `replaced` epoch that carries the live-only items. The window is trimmed first to the newest items that fit
@@ -436,13 +343,12 @@ export class SessionJournal {
       this.advance(publication);
       const rows = extension.map(item => {
         const created = this.completeItem(this.meta.epoch, item, this.meta.nextSeq);
-        created.revision = this.nextRevision();
         this.insertLast(created);
         return stampRow(this.meta.epoch, this.meta.nextSeq++, item.row);
       });
       return { outcome: 'appended', rows };
     }
-    return { outcome: 'replaced', epoch: this.rebuild(publication, kept, false), trimmed: start };
+    return { outcome: 'replaced', epoch: this.rebuild(publication, kept), trimmed: start };
   }
 
   /**
@@ -473,19 +379,14 @@ export class SessionJournal {
   }
 
   /** Starts the new epoch of a replacement: the items in order with the carried ones, and resets what depended on the old epoch. */
-  protected rebuild(publication: JournalPublication, items: readonly JournalItemInput[], sealOpen: boolean): string {
+  protected rebuild(publication: JournalPublication, items: readonly JournalItemInput[]): string {
     const epoch = crypto.randomUUID();
-    const resealed = new Set<JournalItem>();
-    const next = replacementOrder(this.items, items, sealOpen).map((entry, offset): JournalItem => {
+    const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
       const seq = offset + 1;
       if (entry.kind === 'carried') {
-        const carried = { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
-        if (entry.item !== this.byKey.get(entry.item.itemKey)) resealed.add(carried);
-        return carried;
+        return { ...entry.item, seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }] };
       }
-      const item = this.completeItem(epoch, entry.complete, seq, this.byKey.get(entry.complete.row.itemKey));
-      resealed.add(item);
-      return item;
+      return this.completeItem(epoch, entry.complete, seq, this.byKey.get(entry.complete.row.itemKey));
     });
     this.advance(publication);
     this.meta.epoch = epoch;
@@ -497,17 +398,13 @@ export class SessionJournal {
     this.sizes.clear();
     this.sizedTotal = 0;
     this.unmeasured.clear();
-    this.indexSnapshot = undefined;
     this.liveOnlyKeys.clear();
     this.liveOnlySizes.clear();
     this.liveOnlyTotal = 0;
     this.removedKeys.clear();
     this.replaced = true;
     delete this.meta.incomplete;
-    for (const item of next) {
-      if (resealed.has(item)) item.revision = this.nextRevision();
-      this.insertLast(item);
-    }
+    for (const item of next) this.insertLast(item);
     return epoch;
   }
 
@@ -530,12 +427,10 @@ export class SessionJournal {
     this.items.length = 0;
     for (const item of merged) this.items.push(item);
     for (const item of created) {
-      item.revision = this.nextRevision();
-      this.byKey.set(item.itemKey, item);
+        this.byKey.set(item.itemKey, item);
       this.touch(item.itemKey);
     }
     this.meta.minSeq = first;
-    this.indexSnapshot = undefined;
     return rows;
   }
 
@@ -555,17 +450,6 @@ export class SessionJournal {
       if (previous.clientMessageId !== undefined) item.clientMessageId = previous.clientMessageId;
     }
     return item;
-  }
-
-  /** The entries of every item in order. The array is a snapshot that stays valid until an item changes: do not modify it. */
-  index(): readonly JournalIndexEntry[] {
-    this.indexSnapshot ??= this.items.map(item => ({
-      itemKey: item.itemKey, seqStart: item.seqStart, seqEnd: item.seqEnd, state: item.state,
-      ...(item.digest === undefined ? {} : { digest: item.digest }), liveOnly: item.liveOnly,
-      ...(item.clientMessageId === undefined ? {} : { clientMessageId: item.clientMessageId }),
-      revision: item.revision, resident: item.body !== null,
-    }));
-    return this.indexSnapshot;
   }
 
   /** A page of the journal; `olderBeyondJournal` says whether the Host still holds history older than the journal. */
@@ -652,7 +536,6 @@ export class SessionJournal {
   protected touch(itemKey: string): void {
     this.dirty.add(itemKey);
     this.unmeasured.add(itemKey);
-    this.indexSnapshot = undefined;
     if (this.byKey.get(itemKey)?.liveOnly) this.liveOnlyKeys.add(itemKey); else this.liveOnlyKeys.delete(itemKey);
   }
 
@@ -664,11 +547,6 @@ export class SessionJournal {
     if (!Number.isSafeInteger(publication.sequence) || publication.sequence < 1) throw new JournalInvalidPublicationError(publication.sequence);
     if (publication.sequence > publisher.watermark + 1) throw new JournalSequenceGapError(publication.sequence, publisher.watermark);
     return publication.sequence <= publisher.watermark;
-  }
-
-  protected nextRevision(): number {
-    this.meta.lastRevision += 1;
-    return this.meta.lastRevision;
   }
 
   protected advance(publication: JournalPublication): void {
@@ -687,7 +565,7 @@ export class SessionJournal {
     return {
       itemKey: row.itemKey, providerId: row.providerId, ...(row.turnId === undefined ? {} : { turnId: row.turnId }),
       seqStart: row.seq, seqEnd: row.seq, sourceSeqRanges: entry.sourceSeqRanges,
-      state: 'open', liveOnly, revision: 0, body: entryBody(entry),
+      state: 'open', liveOnly, body: entryBody(entry),
     };
   }
 

@@ -110,7 +110,7 @@ export async function startRelay(options: RelayOptions = {}) {
   const store = new MemoryJournalStore();
   await options.seed?.(store);
   const broker = createHostBroker({ origin: 'https://relay.example', initialState: options.state ? options.state(savedState()) : savedState(), now: () => 10_000, rpcTimeoutMs: 1000,
-    ...(options.journalLimits ? { journalService: createHostJournals({ store, now: () => 10_000, limits: options.journalLimits }) } : {}),
+    ...(options.journalLimits ? { journalService: createHostJournals({ store, limits: options.journalLimits }) } : {}),
     journals: options.journalStore ? options.journalStore(store) : store, journalRequestTimeoutMs: options.requestTimeoutMs ?? 1000, ...options.broker });
   closers.push(() => broker.close());
 

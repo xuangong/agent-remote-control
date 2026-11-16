@@ -38,7 +38,7 @@ function countingStore() {
 
 function fixture(options: Partial<Omit<HostJournalsOptions, 'store'>> = {}) {
   const counted = countingStore();
-  return { ...counted, journals: createHostJournals({ now: () => 1_000, ...options, store: counted.store }) };
+  return { ...counted, journals: createHostJournals({ ...options, store: counted.store }) };
 }
 const open = (journals: HostJournals, publisherId = 'controller-1') => journals.open(HOST, SESSION, publisherId, LIMITS) as Promise<JournalOpened>;
 const keys = async (memory: MemoryJournalStore) => (await memory.load(KEY))!.items.map(item => item.itemKey);

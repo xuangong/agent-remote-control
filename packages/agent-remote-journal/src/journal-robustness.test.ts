@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { bodyFromRow } from './journal-items.js';
 import { MemoryJournalStore } from './journal-store.js';
 import { expectNoChange, openJournal, PUBLISHER, scribble, text } from './journal.test-fixture.js';
-import { planReconcile } from './reconcile.js';
 import { SessionJournal } from './session-journal.js';
 import {
   JournalFencedError, JournalInvalidPublicationError, JournalInvalidRowError, type JournalHead, type JournalPublication, type JournalRowInput,
@@ -15,7 +14,7 @@ describe('appending at scale', () => {
     for (let at = 0; at < 20_000; at += 1) journal.append(publish(), text('m1', `d${at}`, 'a'));
     const [item] = journal.state().items;
     expect(item?.body?.item).toMatchObject({ type: 'assistant_message', text: 'a'.repeat(20_000) });
-    expect(item).toMatchObject({ seqStart: 1, seqEnd: 20_000, revision: 20_000, sourceSeqRanges: [{ startSeq: 1, endSeq: 20_000 }] });
+    expect(item).toMatchObject({ seqStart: 1, seqEnd: 20_000, sourceSeqRanges: [{ startSeq: 1, endSeq: 20_000 }] });
     expect(item?.body?.collapsed).toEqual(['assistant_merge']);
   });
 
@@ -77,7 +76,7 @@ describe('rows and publications that cannot be applied', () => {
       const publication = { publisherId: PUBLISHER, generation: 1, sequence };
       expectNoChange(journal, () => journal.append(publication, text('m1', 'd1', 'x')), JournalInvalidPublicationError);
       expectNoChange(journal, () => journal.complete(publication, 'm1', 'd'), JournalInvalidPublicationError);
-      expectNoChange(journal, () => journal.replace(publication, [], 0), JournalInvalidPublicationError);
+      expectNoChange(journal, () => journal.sync(publication, [], { roomBytes: Number.MAX_SAFE_INTEGER }), JournalInvalidPublicationError);
     }
   });
 
@@ -98,10 +97,8 @@ function base() {
 
 const operations: Record<string, (journal: SessionJournal, publication: JournalPublication) => unknown> = {
   complete: (journal, publication) => journal.complete(publication, 'm1', 'digest-1'),
-  seal: (journal, publication) => journal.seal(publication, 'm1'),
   alias: (journal, publication) => journal.alias(publication, 'u1', 'client-1'),
-  correct: (journal, publication) => journal.correct(publication, text('m1', 'h1', 'Hello!'), 'digest-2', journal.index()[0]!.revision),
-  replace: (journal, publication) => journal.replace(publication, [{ row: text('m9', 'h9', 'fresh'), digest: 'digest-9' }], 1),
+  window: (journal, publication) => journal.sync(publication, [{ row: text('m9', 'h9', 'fresh'), digest: 'digest-9' }], { roomBytes: Number.MAX_SAFE_INTEGER }),
   prepend: (journal, publication) => journal.prepend(publication, [{ row: text('m0', 'h0', 'old'), digest: 'digest-0' }]),
 };
 
@@ -132,23 +129,19 @@ describe.each(Object.keys(operations))('%s', name => {
     const applied = journal.state();
     scribble(result);
     scribble(journal.state());
-    scribble(journal.index());
     scribble(journal.takeChanges());
     expect(journal.state()).toEqual(applied);
   });
 });
 
 describe('inputs of a publication', () => {
-  it('stay the caller\'s after correct, replace and prepend', () => {
+  it('stay the caller\'s after a window and a prepend', () => {
     const { journal, publish } = base();
-    const correction = text('m1', 'h1', 'Hello!');
-    journal.correct(publish(), correction, 'digest-2', journal.index()[0]!.revision);
     const prepended = [{ row: { ...text('m0', 'h0', 'old'), resources: [{ locator: 'l', resourceId: 'r', status: 'available' as const }] }, digest: 'digest-0' }];
     journal.prepend(publish(), prepended);
     const replaced = [{ row: { ...text('m9', 'h9', 'fresh'), resources: [{ locator: 'l', resourceId: 'r', status: 'available' as const }] }, digest: 'digest-9' }];
-    journal.replace(publish(), replaced, 1);
+    journal.sync(publish(), replaced, { roomBytes: Number.MAX_SAFE_INTEGER });
     const applied = journal.state();
-    scribble(correction);
     scribble(prepended);
     scribble(replaced);
     expect(journal.state()).toEqual(applied);
@@ -193,20 +186,14 @@ describe('a store that replays the changes', () => {
       const publication = (): JournalPublication => ({ publisherId, generation, sequence: random() < 0.05 ? Math.max(1, sequence - 1) : ++sequence });
       const key = pick(keys);
       const turn = pick(['turn-1', 'turn-2', 'turn-3']);
-      const operation = pick(['append', 'append', 'append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']);
+      const operation = pick(['append', 'append', 'append', 'complete', 'alias', 'window', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']);
       counts.set(operation, (counts.get(operation) ?? 0) + 1);
       try {
         switch (operation) {
           case 'append': journal.append(publication(), row(key, `c${stamp++}`, turn)); break;
           case 'complete': journal.complete(publication(), key, `digest-${key}-${Math.floor(random() * 3)}`); break;
-          case 'seal': journal.seal(publication(), key); break;
           case 'alias': journal.alias(publication(), key, `client-${Math.floor(random() * 3)}`); break;
-          case 'correct': {
-            const revision = journal.index().find(entry => entry.itemKey === key)?.revision ?? 1;
-            journal.correct(publication(), row(key, `h${stamp++}`, turn), `digest-${key}-${Math.floor(random() * 3)}`, random() < 0.8 ? revision : revision - 1);
-            break;
-          }
-          case 'replace': journal.replace(publication(), keys.filter(() => random() < 0.5).map(completeOf), stamp++); break;
+          case 'window': journal.sync(publication(), keys.filter(() => random() < 0.5).map(completeOf), { roomBytes: Number.MAX_SAFE_INTEGER }); break;
           case 'prepend': journal.prepend(publication(), keys.filter(() => random() < 0.3).map(completeOf)); break;
           case 'evict': journal.evict(Math.floor(random() * 3)); break;
           case 'fill': {
@@ -228,42 +215,7 @@ describe('a store that replays the changes', () => {
     }
     const changes = journal.takeChanges();
     if (changes) await store.apply(changes);
-    for (const operation of ['append', 'complete', 'seal', 'alias', 'correct', 'replace', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']) expect(counts.get(operation)).toBeGreaterThan(20);
+    for (const operation of ['append', 'complete', 'alias', 'window', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']) expect(counts.get(operation)).toBeGreaterThan(20);
     expect(new SessionJournal((await store.load(journal.sessionKey))!).state()).toEqual(journal.state());
-  });
-});
-
-describe('applying a reconcile plan', () => {
-  it('leaves an index that matches the reread', () => {
-    const { journal, publish } = openJournal();
-    const complete = (key: string, digest: string) => ({ row: text(key, `h-${key}`, `body of ${key}`), digest });
-    journal.append(publish(), text('a', 'da', 'body of a'));
-    journal.complete(publish(), 'a', 'digest-a');
-    journal.append(publish(), text('b', 'db', 'half'));
-    journal.append(publish(), text('c', 'dc', 'body of c'));
-    journal.complete(publish(), 'c', 'digest-c');
-    const reread = [complete('x', 'digest-x'), complete('a', 'digest-a'), complete('c', 'digest-c2'), complete('d', 'digest-d')];
-    const plan = planReconcile(journal.index(), reread.map(({ row, digest }) => ({ itemKey: row.itemKey, digest })));
-    expect(plan).toEqual({ kind: 'continue', prepend: ['x'], append: ['d'], correct: ['c'], abandon: ['b'] });
-    if (plan.kind !== 'continue') return;
-    const byKey = new Map(reread.map(entry => [entry.row.itemKey, entry]));
-    const entryOf = (key: string) => byKey.get(key)!;
-    journal.prepend(publish(), plan.prepend.map(entryOf));
-    for (const key of plan.correct) {
-      const revision = journal.index().find(entry => entry.itemKey === key)!.revision;
-      journal.correct(publish(), entryOf(key).row, entryOf(key).digest, revision);
-    }
-    for (const key of plan.append) {
-      journal.append(publish(), entryOf(key).row);
-      journal.complete(publish(), key, entryOf(key).digest);
-    }
-    for (const key of plan.abandon) journal.seal(publish(), key);
-    const nativeItems = journal.index().filter(({ liveOnly }) => !liveOnly);
-    expect(nativeItems.map(({ itemKey, digest, state }) => [itemKey, digest, state])).toEqual(
-      reread.map(({ row, digest }) => [row.itemKey, digest, 'complete']),
-    );
-    expect(journal.index().find(({ itemKey }) => itemKey === 'b')).toMatchObject({ state: 'complete', liveOnly: true });
-    expect(planReconcile(journal.index(), reread.map(({ row, digest }) => ({ itemKey: row.itemKey, digest }))))
-      .toEqual({ kind: 'continue', prepend: [], append: [], correct: [], abandon: [] });
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, text } from './journal.test-fixture.js';
 import type { JournalRowInput } from './types.js';
 import { SessionJournal } from './session-journal.js';
 
@@ -78,7 +78,7 @@ describe('journal pages', () => {
     for (const key of ['B', 'C', 'D']) journal.append(publish(), text(key, key, key));
     journal.append(publish(), toolCall('A', 'a2'));
     journal.append(publish(), text('E', 'E', 'E'));
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'A', seqStart: 1, seqEnd: 5 });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'A', seqStart: 1, seqEnd: 5 });
     const delivered = pagesAfter(journal, 1).flat();
     expect([...delivered].sort()).toEqual(['A', 'B', 'C', 'D', 'E']);
   });
@@ -130,7 +130,7 @@ describe('journal pages', () => {
       const seq = offset + 1;
       return {
         itemKey: `k${seq}`, providerId: 'codex', seqStart: seq, seqEnd: seq, sourceSeqRanges: [{ startSeq: seq, endSeq: seq }],
-        state: 'complete' as const, liveOnly: false, revision: 1, digest: `d${seq}`,
+        state: 'complete' as const, liveOnly: false, digest: `d${seq}`,
         body: { item: { type: 'assistant_message' as const, text: 'x', messageId: `k${seq}` }, timestamp: '2025-01-01T00:00:00.000Z', collapsed: [], resources: [] },
       };
     });

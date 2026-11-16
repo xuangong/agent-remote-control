@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { bodyFromRow } from './journal-items.js';
 import { MemoryJournalStore } from './journal-store.js';
 import { SessionJournal } from './session-journal.js';
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, text } from './journal.test-fixture.js';
 
 const snapshot = () => ({
   id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle' as const, activeTurn: null,
@@ -21,7 +21,7 @@ describe('MemoryJournalStore', () => {
     journal.append(publish(), text('m2', 'd3', 'Next'));
     await store.apply(journal.takeChanges()!);
     const restored = new SessionJournal((await store.load(journal.sessionKey))!);
-    expect(restored.index()).toEqual(journal.index());
+    expect(indexOf(restored)).toEqual(indexOf(journal));
     expect(restored.cursor).toEqual(journal.cursor);
     const request = { requestId: 'r', agentId: 'a', direction: 'tail' as const, limit: 10 };
     expect(restored.page(request, { olderBeyondJournal: false })).toEqual(journal.page(request, { olderBeyondJournal: false }));
@@ -33,7 +33,7 @@ describe('MemoryJournalStore', () => {
     journal.append(publish(), text('m1', 'd1', 'Old'));
     journal.complete(publish(), 'm1', 'digest-1');
     await store.apply(journal.takeChanges()!);
-    journal.replace(publish(), [{ row: text('m2', 'h2', 'Fresh'), digest: 'digest-2' }], 0);
+    journal.sync(publish(), [{ row: text('m2', 'h2', 'Fresh'), digest: 'digest-2' }], { roomBytes: Number.MAX_SAFE_INTEGER });
     await store.apply(journal.takeChanges()!);
     expect((await store.load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m2']);
     await store.delete(journal.sessionKey);
@@ -60,7 +60,7 @@ describe('MemoryJournalStore', () => {
     const store = new MemoryJournalStore();
     const { journal, publish } = openJournal();
     journal.append(publish(), { ...text('l1', 's1', 'live'), liveOnly: true });
-    journal.seal(publish(), 'l1');
+    journal.complete(publish(), 'l1', 'digest-l1');
     journal.append(publish(), text('m1', 'd1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);

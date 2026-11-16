@@ -1,5 +1,5 @@
-import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
-import { decodeRemoteHostUplinkMessage, JOURNAL_INDEX_MAX_ITEMS, JOURNAL_INDEX_PAGE_MAX_ITEMS } from '@orchardworks/agent-remote-protocol';
+import { MemoryJournalStore, type JournalStore } from '@orchardworks/agent-remote-journal';
+import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { createHostJournals, type HostJournals, type JournalPublished } from './host-journals.js';
@@ -23,7 +23,7 @@ type Sent = { type: string; [field: string]: unknown };
 
 function fixture(options: { journals?: HostJournals; diagnostic?(event: 'journal_message_unencodable' | 'journal_store_failed' | 'journal_fanout_failed' | 'journal_quota_exceeded' | 'journal_live_only_dropped'): void; published?(sessionKey: string, result: JournalPublished): void } = {}) {
   const store = new MemoryJournalStore();
-  const journals = options.journals ?? createHostJournals({ store, now: () => 1_000 });
+  const journals = options.journals ?? createHostJournals({ store });
   const sent: Sent[] = [];
   const timers = new Map<number, { callback(): void; delayMs: number }>();
   let nextTimer = 0, live = true, sendFailure: Error | undefined;
@@ -62,7 +62,7 @@ describe('a journal connection', () => {
 
   it('does not hand on a publication the journal fenced because a newer connection opened the session', async () => {
     const store = new MemoryJournalStore();
-    const journals = createHostJournals({ store, now: () => 1_000 });
+    const journals = createHostJournals({ store });
     const reported: string[] = [];
     const older = fixture({ journals, published: sessionKey => reported.push(sessionKey) });
     const newer = fixture({ journals });
@@ -80,7 +80,7 @@ describe('a journal connection', () => {
     const store: JournalStore = { load: key => memory.load(key), delete: key => memory.delete(key),
       apply: async changes => { if (failNext) { failNext = false; throw new Error('disk full'); } await memory.apply(changes); } };
     const reported: string[] = [];
-    const f = fixture({ journals: createHostJournals({ store, now: () => 1_000 }), published: sessionKey => reported.push(sessionKey) });
+    const f = fixture({ journals: createHostJournals({ store }), published: sessionKey => reported.push(sessionKey) });
     await f.open();
     failNext = true;
     await expect(f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Lost') }])).rejects.toThrow('disk full');
@@ -104,16 +104,18 @@ describe('a journal connection', () => {
     expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', watermark: 1 });
   });
 
-  it('answers an open with the generation, watermark, epoch and index', async () => {
+  it('answers an open with the generation and watermark', async () => {
     const f = fixture();
-    expect(await f.open()).toMatchObject({ type: 'journal_opened', uplinkVersion: 2, requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0, index: [] });
+    expect(await f.open()).toMatchObject({ type: 'journal_opened', uplinkVersion: 2, requestId: 'open-1', sessionKey: SESSION, generation: 1, watermark: 0 });
+    expect(await f.open()).not.toHaveProperty('index');
   });
 
   it('acknowledges a publication only after the store holds it', async () => {
     const f = fixture();
-    const opened = await f.open();
+    await f.open();
     await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'm1', digest: DIGEST }]);
-    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 2, cursor: { epoch: opened.epoch, seq: 1 } });
+    const epoch = (await f.store.load(`host-1:${SESSION}`))!.meta.epoch;
+    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', sessionKey: SESSION, generation: 1, watermark: 2, cursor: { epoch, seq: 1 } });
     expect((await f.store.load(`host-1:${SESSION}`))?.items).toEqual([expect.objectContaining({ itemKey: 'm1', digest: DIGEST })]);
   });
 
@@ -123,13 +125,13 @@ describe('a journal connection', () => {
     await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'ghost', digest: DIGEST }]);
     expect(f.sent.slice(-2)).toMatchObject([
       { type: 'journal_ack', watermark: 1 },
-      { type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 2, reason: 'unknown_item', itemKey: 'ghost' },
+      { type: 'journal_refused', sessionKey: SESSION, generation: 1, sequence: 2, reason: 'invalid' },
     ]);
   });
 
   it('refuses a publication for a session this connection did not open', async () => {
     const f = fixture();
-    await f.publish([{ sequence: 4, op: 'seal', itemKey: 'm1' }]);
+    await f.publish([{ sequence: 4, op: 'complete', itemKey: 'm1', digest: DIGEST }]);
     expect(f.sent).toEqual([expect.objectContaining({ type: 'journal_refused', generation: 1, sequence: 4, reason: 'fenced' })]);
     expect(await f.store.load(`host-1:${SESSION}`)).toBeUndefined();
   });
@@ -145,93 +147,30 @@ describe('a journal connection', () => {
     expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', generation: 2, watermark: 1 });
   });
 
-  it('asks for an index no longer than a journal may list, and leaves the session unopened when the service refuses it', async () => {
-    const asked: Array<{ maxIndexItems: number; pageItems: number }> = [];
-    const refusing: HostJournals = { ...createHostJournals({ store: new MemoryJournalStore(), now: () => 1 }),
-      open: async (_hostId, _sessionKey, _publisherId, options) => { asked.push({ maxIndexItems: options.maxIndexItems, pageItems: options.pageItems }); return { refused: 'index_too_large' }; } };
+  it('leaves the session unopened when the service refuses the open', async () => {
+    const refusing: HostJournals = { ...createHostJournals({ store: new MemoryJournalStore() }), open: async () => ({ refused: 'unavailable' }) };
     const f = fixture({ journals: refusing });
-    expect(await f.open()).toEqual({ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'index_too_large' });
-    expect(asked).toEqual([{ maxIndexItems: JOURNAL_INDEX_MAX_ITEMS, pageItems: JOURNAL_INDEX_PAGE_MAX_ITEMS }]);
+    expect(await f.open()).toEqual({ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'open-1', sessionKey: SESSION, reason: 'unavailable' });
     expect(f.sent).toHaveLength(1);
-    await f.publish([{ sequence: 1, op: 'seal', itemKey: 'm1' }]);
+    await f.publish([{ sequence: 1, op: 'complete', itemKey: 'm1', digest: DIGEST }]);
     expect(f.sent.at(-1)).toMatchObject({ type: 'journal_refused', reason: 'fenced' });
   });
 
   it('does not send a message that fails to encode and reports it', async () => {
     const diagnostics: string[] = [];
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const base = createHostJournals({ store: new MemoryJournalStore() });
     const broken: HostJournals = { ...base, publish: async () => ({ events: [], watermark: -1, cursor: { epoch: 'e', seq: 0 } }) };
     const f = fixture({ journals: broken, diagnostic: message => diagnostics.push(message) });
     await f.open();
     f.sent.length = 0;
-    await f.publish([{ sequence: 1, op: 'seal', itemKey: 'm1' }]);
+    await f.publish([{ sequence: 1, op: 'complete', itemKey: 'm1', digest: DIGEST }]);
     expect(f.sent).toEqual([]);
     expect(diagnostics).toEqual(['journal_message_unencodable']);
   });
 
-  it('sends the first page of an index no single message can carry and the rest one page at a time, as the Controller asks', async () => {
-    const f = fixture();
-    const seeded = SessionJournal.create(`host-1:${SESSION}`);
-    const { generation } = seeded.claim('controller-1');
-    for (let at = 0; at < 2100; at++) {
-      const itemKey = `${at}-`.padEnd(4000, 'k');
-      seeded.append({ publisherId: 'controller-1', generation, sequence: at + 1 }, { ...row(itemKey, 'x'), sourceKey: itemKey });
-    }
-    await f.store.apply(seeded.takeChanges()!);
-    const opened = await f.open() as unknown as { generation: number; watermark: number; epoch: string; index: Array<{ seqStart: number }>; indexAfter?: number };
-    expect(opened).toMatchObject({ type: 'journal_opened', generation: 2, watermark: 2100 });
-    expect(f.sent).toHaveLength(1);
-    const index = [...opened.index];
-    let after = opened.indexAfter;
-    let requests = 0;
-    while (after !== undefined) {
-      f.sent.length = 0;
-      await f.connection.receive(wire({ type: 'journal_index_request', requestId: `index-${requests}`, sessionKey: SESSION, generation: 2, epoch: opened.epoch, after }));
-      expect(f.sent).toHaveLength(1);
-      const page = f.sent[0] as unknown as { type: string; requestId: string; index: Array<{ seqStart: number }>; indexAfter?: number };
-      expect(page).toMatchObject({ type: 'journal_index_page', requestId: `index-${requests}`, sessionKey: SESSION });
-      index.push(...page.index);
-      after = page.indexAfter;
-      requests += 1;
-    }
-    expect(requests).toBeGreaterThanOrEqual(1);
-    expect(index.map(entry => entry.seqStart)).toEqual(Array.from({ length: 2100 }, (_, at) => at + 1));
-    await f.publish([{ sequence: 2101, op: 'append', row: row('after', 'Hello') }], 2);
-    expect(f.sent.at(-1)).toMatchObject({ type: 'journal_ack', generation: 2, watermark: 2101 });
-  });
-
-  it('refuses an index request for a generation that is not the one opened', async () => {
-    const f = fixture();
-    await f.open();
-    f.sent.length = 0;
-    await f.connection.receive(wire({ type: 'journal_index_request', requestId: 'index-1', sessionKey: SESSION, generation: 9, epoch: 'e', after: 0 }));
-    expect(f.sent).toEqual([{ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'index-1', sessionKey: SESSION, reason: 'invalid' }]);
-  });
-
-  it('refuses an index request for an epoch a replacement ended, so the Controller opens again', async () => {
-    const f = fixture();
-    const opened = await f.open() as unknown as { epoch: string };
-    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
-    await f.publish([{ sequence: 2, op: 'replace', items: [{ row: row('m9', 'Fresh'), digest: DIGEST }] }]);
-    f.sent.length = 0;
-    await f.connection.receive(wire({ type: 'journal_index_request', requestId: 'index-1', sessionKey: SESSION, generation: 1, epoch: opened.epoch, after: 0 }));
-    expect(f.sent).toEqual([{ uplinkVersion: 2, type: 'journal_open_refused', requestId: 'index-1', sessionKey: SESSION, reason: 'stale_epoch' }]);
-  });
-
-  it('sends the index of a small journal in the opening message alone', async () => {
-    const f = fixture();
-    await f.open();
-    await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
-    f.sent.length = 0;
-    await f.connection.receive(wire({ type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' }));
-    expect(f.sent).toHaveLength(1);
-    expect(f.sent[0]).toMatchObject({ type: 'journal_opened', index: [expect.objectContaining({ itemKey: 'm1' })] });
-    expect(f.sent[0]).not.toHaveProperty('indexAfter');
-  });
-
   it('lets the journal service ask whether the connection is still current before it claims anything', async () => {
     const store = new MemoryJournalStore();
-    const base = createHostJournals({ store, now: () => 1 });
+    const base = createHostJournals({ store });
     const asked: boolean[] = [];
     const journals: HostJournals = { ...base, open: async (hostId, sessionKey, publisherId, options) => { asked.push(options.allowed?.() ?? false); return base.open(hostId, sessionKey, publisherId, options); } };
     const f = fixture({ journals });
@@ -246,7 +185,7 @@ describe('a journal connection', () => {
 
   it('reports a publication the journal refused for its limits, and refuses it to the Host', async () => {
     const events: string[] = [];
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { sessionItems: 0 } });
+    const journals = createHostJournals({ store: new MemoryJournalStore(), limits: { sessionBytes: 1 } });
     const f = fixture({ journals, diagnostic: event => events.push(event) });
     await f.open();
     await f.publish([{ sequence: 1, op: 'append', row: row('m1', 'Hello') }]);
@@ -256,7 +195,7 @@ describe('a journal connection', () => {
 
   it('reports live-only items the journal removed beyond its cap once they are complete', async () => {
     const events: string[] = [];
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { liveOnlyItems: 1 } });
+    const journals = createHostJournals({ store: new MemoryJournalStore(), limits: { liveOnlyItems: 1 } });
     const f = fixture({ journals, diagnostic: event => events.push(event) });
     await f.open();
     await f.publish([{ sequence: 1, op: 'append', row: { ...row('l1', 'a'), liveOnly: true } }, { sequence: 2, op: 'append', row: { ...row('l2', 'b'), liveOnly: true } }]);
@@ -268,9 +207,9 @@ describe('a journal connection', () => {
 
   it('clears an opened session when a later open is refused', async () => {
     const store = new MemoryJournalStore();
-    const base = createHostJournals({ store, now: () => 1 });
+    const base = createHostJournals({ store });
     let calls = 0;
-    const journals: HostJournals = { ...base, open: (hostId, sessionKey, publisherId, options) => base.open(hostId, sessionKey, publisherId, ++calls === 1 ? options : { ...options, maxIndexItems: -1 }) };
+    const journals: HostJournals = { ...base, open: (hostId, sessionKey, publisherId, options) => base.open(hostId, sessionKey, publisherId, ++calls === 1 ? options : { ...options, allowed: () => false }) };
     const f = fixture({ journals });
     await f.open();
     expect(await f.open()).toMatchObject({ type: 'journal_open_refused' });
@@ -280,7 +219,7 @@ describe('a journal connection', () => {
   });
 
   it('refuses the publication of a connection that a newer open fenced, without acknowledging it', async () => {
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const journals = createHostJournals({ store: new MemoryJournalStore() });
     const older = fixture({ journals });
     const newer = fixture({ journals });
     await older.open();
@@ -294,7 +233,7 @@ describe('a journal connection', () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     let fills = 0;
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const base = createHostJournals({ store: new MemoryJournalStore() });
     const journals: HostJournals = { ...base, fill: async () => { fills += 1; await gate; return { filled: ['m1'], mismatched: [], unknown: [] }; } };
     const f = fixture({ journals });
     const first = f.connection.requestFill(SESSION, ['m1']);
@@ -315,7 +254,7 @@ describe('a journal connection', () => {
 
   it('hands the page read of a fill request to the journal, and resolves with the page it read in the same step', async () => {
     const seen: unknown[] = [];
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const base = createHostJournals({ store: new MemoryJournalStore() });
     const journals: HostJournals = { ...base, fill: async (_host, _key, _items, read) => { seen.push(read?.request.requestId, read?.olderBeyondJournal()); return { filled: ['m1'], mismatched: [], unknown: [] }; } };
     const f = fixture({ journals });
     const request = { requestId: 'page-1', agentId: 'agent', direction: 'tail' as const, limit: 10 };
@@ -328,10 +267,10 @@ describe('a journal connection', () => {
 
   it('passes on to the broker an open refusal that took the session out of serving, as it does for a publication, even after the connection ended', async () => {
     const reported: Array<{ sessionKey: string; unserved?: true; events: number }> = [];
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
-    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large', unserved: true }) };
+    const base = createHostJournals({ store: new MemoryJournalStore() });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'unavailable', unserved: true }) };
     const f = fixture({ journals: refusing, published: (sessionKey, result) => reported.push({ sessionKey, unserved: result.unserved, events: result.events.length }) });
-    expect(await f.open()).toMatchObject({ type: 'journal_open_refused', reason: 'index_too_large' });
+    expect(await f.open()).toMatchObject({ type: 'journal_open_refused', reason: 'unavailable' });
     expect(reported).toEqual([{ sessionKey: SESSION, unserved: true, events: 0 }]);
     f.endConnection();
     f.sent.length = 0;
@@ -342,8 +281,8 @@ describe('a journal connection', () => {
 
   it('does not report an open refusal that left a session serving as unserved', async () => {
     const reported: unknown[] = [];
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
-    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'index_too_large' }) };
+    const base = createHostJournals({ store: new MemoryJournalStore() });
+    const refusing: HostJournals = { ...base, open: async () => ({ refused: 'unavailable' }) };
     const f = fixture({ journals: refusing, published: (_sessionKey, result) => reported.push(result) });
     await f.open();
     expect(reported).toEqual([]);
@@ -351,7 +290,7 @@ describe('a journal connection', () => {
 
   it('reports a quota refusal even when the connection is no longer current, because the journal already left serving', async () => {
     const events: string[] = [];
-    const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1, limits: { sessionItems: 0 } });
+    const journals = createHostJournals({ store: new MemoryJournalStore(), limits: { sessionBytes: 1 } });
     const f = fixture({ journals, diagnostic: event => events.push(event) });
     await f.open();
     f.endConnection();
@@ -362,7 +301,7 @@ describe('a journal connection', () => {
   it('fails a fill that is being applied when the connection closes', async () => {
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const base = createHostJournals({ store: new MemoryJournalStore() });
     const journals: HostJournals = { ...base, fill: async () => { await gate; return { filled: ['m1'], mismatched: [], unknown: [] }; } };
     const f = fixture({ journals });
     const first = f.connection.requestFill(SESSION, ['m1']);
@@ -375,7 +314,7 @@ describe('a journal connection', () => {
 
   it('reports a store failure while taking the bodies of a fill and fails the request', async () => {
     const events: string[] = [];
-    const base = createHostJournals({ store: new MemoryJournalStore(), now: () => 1 });
+    const base = createHostJournals({ store: new MemoryJournalStore() });
     const journals: HostJournals = { ...base, fill: async () => { throw new Error('disk full'); } };
     const f = fixture({ journals, diagnostic: event => events.push(event) });
     const pending = f.connection.requestFill(SESSION, ['m1']);

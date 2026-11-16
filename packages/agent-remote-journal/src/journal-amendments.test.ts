@@ -1,8 +1,7 @@
 import type { AgentSnapshotPayload, ResourceBinding } from '@orchardworks/agent-remote-protocol';
-import type { JournalRowInput } from './types.js';
 import { describe, expect, it } from 'vitest';
 
-import { openJournal, text } from './journal.test-fixture.js';
+import { indexOf, openJournal, seedJournal, text } from './journal.test-fixture.js';
 
 const DIGEST = 'a'.repeat(64);
 const pending: ResourceBinding = { locator: 'docs/plan.md', resourceId: 'resource-1', status: 'pending' };
@@ -26,34 +25,18 @@ function withTwoItems() {
   return fixture;
 }
 
-describe('a correction without a digest', () => {
-  it('replaces the content and leaves the item open', () => {
-    const { journal, publish } = withTwoItems();
-    const revision = journal.index().find(entry => entry.itemKey === 'b')!.revision;
-    journal.correct(publish(), text('b', 'b:full', 'Beta, in full'), undefined, revision);
-    const entry = journal.index().find(item => item.itemKey === 'b')!;
-    expect(entry).toMatchObject({ state: 'open', revision: revision + 1 });
-    expect(entry.digest).toBeUndefined();
-    expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false })).toMatchObject({
-      kind: 'page', page: { payload: { entries: [{ item: { text: 'Alpha' } }, { item: { text: 'Beta, in full' } }] } },
-    });
-  });
-});
-
 describe('a resource binding replaced in place', () => {
   it('changes the binding of a resident item and reports the position clients know the item by', () => {
     const { journal, publish } = withTwoItems();
-    const revision = journal.index()[0]!.revision;
     expect(journal.rebind(publish(), 'a', pending, settled)).toEqual({ epoch: 'epoch-1', seq: 1 });
     const page = journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false });
     expect(page).toMatchObject({ kind: 'page', page: { payload: { entries: [{ resources: [settled] }, { resources: [] }] } } });
-    expect(journal.index()[0]!.revision).toBe(revision);
   });
 
   it('changes the binding an evicted item keeps, so it shows after the body is filled again', () => {
     const { journal, publish } = withTwoItems();
     journal.evict(0);
-    expect(journal.index().map(entry => entry.resident)).toEqual([false, false]);
+    expect(indexOf(journal).map(entry => entry.resident)).toEqual([false, false]);
     journal.rebind(publish(), 'a', pending, settled);
     journal.fill('a', { item: { type: 'assistant_message', text: 'Alpha', messageId: 'a' }, timestamp: '2024-08-30T00:00:00.000Z', collapsed: [], resources: [pending] }, DIGEST);
     expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 1 }, { olderBeyondJournal: false })).toMatchObject({ kind: 'missing' });
@@ -79,7 +62,7 @@ describe('a background outcome applied in place', () => {
     const { journal, publish } = withTwoItems();
     journal.append(publish(), { ...text('c', 'c:1', 'Gamma', 'turn-2'), item: { type: 'assistant_message', text: 'Gamma', messageId: 'c', background: { ...review, id: 'other' } } });
     journal.evict(1);
-    expect(journal.index().map(entry => entry.resident)).toEqual([false, false, true]);
+    expect(indexOf(journal).map(entry => entry.resident)).toEqual([false, false, true]);
     expect(journal.outcome(publish(), { ...review, status: 'visible', summary: 'Found two issues.' })).toBe(true);
     expect(journal.outcome(publish(), { ...review, status: 'silent' })).toBe(false);
     journal.fill('a', { item: { type: 'assistant_message', text: 'Alpha', messageId: 'a' }, timestamp: '2024-08-30T00:00:00.000Z', collapsed: [], resources: [pending] }, DIGEST);
@@ -100,28 +83,28 @@ describe('a background outcome applied in place', () => {
 describe('rows of a replacement or a prepend that only the Controller holds', () => {
   it('stay live-only, so a later reread does not count them as missing', () => {
     const { journal, publish } = openJournal();
-    journal.replace(publish(), [
+    seedJournal(journal, publish(), [
       { row: text('a', 'a:1', 'Alpha'), digest: DIGEST },
       { row: { ...text('q', 'q:1', 'Question'), liveOnly: true }, digest: DIGEST },
-    ], 1_000);
-    expect(journal.index().map(entry => [entry.itemKey, entry.liveOnly])).toEqual([['a', false], ['q', true]]);
+    ]);
+    expect(indexOf(journal).map(entry => [entry.itemKey, entry.liveOnly])).toEqual([['a', false], ['q', true]]);
     journal.prepend(publish(), [{ row: { ...text('p', 'p:1', 'Older'), liveOnly: true }, digest: DIGEST }]);
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'p', liveOnly: true });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'p', liveOnly: true });
   });
 });
 
 describe('items of a replacement or a prepend that are still open', () => {
   it('carry no digest, stay open and are never evicted', () => {
     const { journal, publish } = openJournal();
-    journal.replace(publish(), [
+    seedJournal(journal, publish(), [
       { row: text('a', 'a:1', 'Alpha', 'turn-1'), digest: DIGEST },
       { row: text('b', 'b:1', 'Streaming', 'turn-2') },
-    ], 1_000);
-    expect(journal.index().map(entry => [entry.itemKey, entry.state, entry.digest])).toEqual([['a', 'complete', DIGEST], ['b', 'open', undefined]]);
+    ]);
+    expect(indexOf(journal).map(entry => [entry.itemKey, entry.state, entry.digest])).toEqual([['a', 'complete', DIGEST], ['b', 'open', undefined]]);
     journal.prepend(publish(), [{ row: text('p', 'p:1', 'Older', 'turn-0') }]);
-    expect(journal.index()[0]).toMatchObject({ itemKey: 'p', state: 'open' });
+    expect(indexOf(journal)[0]).toMatchObject({ itemKey: 'p', state: 'open' });
     journal.evict(0);
-    expect(journal.index().map(entry => [entry.itemKey, entry.resident])).toEqual([['p', true], ['a', false], ['b', true]]);
+    expect(indexOf(journal).map(entry => [entry.itemKey, entry.resident])).toEqual([['p', true], ['a', false], ['b', true]]);
   });
 });
 
@@ -146,10 +129,12 @@ describe('the attention cursor of the head', () => {
   it('follows the item into the new epoch of a replacement', () => {
     const { journal, publish } = withTwoItems();
     journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'b' });
-    const epoch = journal.replace(publish(), [
+    const result = journal.sync(publish(), [
       { row: text('b', 'b:r', 'Beta'), digest: DIGEST },
       { row: text('a', 'a:r', 'Alpha'), digest: DIGEST },
-    ], 1_000);
+    ], { roomBytes: Number.MAX_SAFE_INTEGER });
+    if (result.outcome !== 'replaced') throw new Error('Expected a replacement.');
+    const { epoch } = result;
     expect(journal.head?.snapshot.attention?.cursor).toEqual({ epoch, seq: 1 });
   });
 
@@ -161,11 +146,11 @@ describe('the attention cursor of the head', () => {
 
   it('never goes below zero when the named item was prepended below the first sequence', () => {
     const { journal, publish } = openJournal();
-    journal.replace(publish(), [{ row: text('a', 'a:1', 'Alpha'), digest: DIGEST }], 1_000);
+    seedJournal(journal, publish(), [{ row: text('a', 'a:1', 'Alpha'), digest: DIGEST }]);
     journal.prepend(publish(), [
       { row: text('p1', 'p1:1', 'One'), digest: DIGEST }, { row: text('p2', 'p2:1', 'Two'), digest: DIGEST }, { row: text('p3', 'p3:1', 'Three'), digest: DIGEST },
     ]);
-    expect(journal.index()[0]!.seqStart).toBeLessThan(0);
+    expect(indexOf(journal)[0]!.seqStart).toBeLessThan(0);
     journal.setHead(publish(), { snapshot: snapshot(true), observedAt: 5, attentionItemKey: 'p1' });
     expect(journal.head?.snapshot.attention?.cursor?.seq).toBe(0);
   });
@@ -186,12 +171,10 @@ describe('the attention cursor of the head', () => {
     const { journal, publish } = withTwoItems();
     journal.rebind(publish(), 'a', pending, settled);
     journal.takeChanges();
-    const revision = journal.index()[0]!.revision;
     const repeated = publish();
     expect(journal.rebind(repeated, 'a', pending, settled)).toBeUndefined();
     expect(journal.rebind(publish(), 'a', settled, settled)).toBeUndefined();
     expect(journal.publisher?.watermark).toBe(repeated.sequence + 1);
-    expect(journal.index()[0]!.revision).toBe(revision);
     const changes = journal.takeChanges();
     expect(changes?.upsert ?? []).toEqual([]);
   });
@@ -200,21 +183,5 @@ describe('the attention cursor of the head', () => {
     const { journal, publish } = withTwoItems();
     expect(journal.rebind(publish(), 'a', { ...pending, locator: 'other.md' }, { ...settled, locator: 'other.md' })).toBeUndefined();
     expect(journal.page({ requestId: 'r', agentId: 'agent', direction: 'tail', limit: 10 }, { olderBeyondJournal: false })).toMatchObject({ page: { payload: { entries: [{ resources: [pending] }, {}] } } });
-  });
-});
-
-describe('a correction and the live-only mark', () => {
-  const liveOnlyItem = (): JournalRowInput => ({ ...text('q', 'q:1', 'Question'), liveOnly: true });
-
-  it('keeps the mark of an item the Controller still holds alone, and removes it when the correction adopts a native copy', () => {
-    const { journal, publish } = openJournal();
-    journal.append(publish(), liveOnlyItem());
-    const revision = () => journal.index().find(entry => entry.itemKey === 'q')!.revision;
-    journal.correct(publish(), liveOnlyItem(), 'digest-1', revision());
-    expect(journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ liveOnly: true, state: 'complete' });
-    expect(journal.liveOnlyCount).toBe(1);
-    journal.correct(publish(), text('q', 'q:native', 'Question'), 'digest-1', revision());
-    expect(journal.index().find(entry => entry.itemKey === 'q')).toMatchObject({ liveOnly: false });
-    expect(journal.liveOnlyCount).toBe(0);
   });
 });

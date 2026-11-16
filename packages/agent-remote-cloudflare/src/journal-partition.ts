@@ -23,7 +23,7 @@ export class JournalPartition extends DurableObject<unknown> implements JournalP
     super(context, env);
     const tuning = this.tuning();
     const journals = createHostJournals({
-      store: new SqlJournalStore(this.database(context.storage)), now: Date.now,
+      store: new SqlJournalStore(this.database(context.storage)),
       cache: tuning.cache, limits: tuning.limits, retention: tuning.retention,
     });
     this.api = serveJournalPartition(journals, tuning.replyMaxBytes === undefined ? {} : { replyMaxBytes: tuning.replyMaxBytes });
@@ -40,7 +40,6 @@ export class JournalPartition extends DurableObject<unknown> implements JournalP
   }
 
   open(...args: Parameters<JournalPartitionApi['open']>) { return this.api.open(...args); }
-  indexPage(...args: Parameters<JournalPartitionApi['indexPage']>) { return this.api.indexPage(...args); }
   publish(...args: Parameters<JournalPartitionApi['publish']>) { return this.api.publish(...args); }
   fill(...args: Parameters<JournalPartitionApi['fill']>) { return this.api.fill(...args); }
   page(...args: Parameters<JournalPartitionApi['page']>) { return this.api.page(...args); }

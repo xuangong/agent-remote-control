@@ -66,12 +66,12 @@ describe('the journal grant on the Host uplink', () => {
     send({ type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 3, cursor: { epoch: 'epoch-1', seq: 2 } });
     send({ type: 'journal_older_request', requestId: 'older-1', sessionKey: 'codex:thread-1', beforeItemKey: 'item-1', limit: 50 });
     send({ type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'codex:thread-1', itemKeys: ['a'] });
-    send({ type: 'journal_refused', sessionKey: 'codex:thread-1', generation: 1, sequence: 4, reason: 'body_missing', itemKey: 'a' });
-    send({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: 'codex:thread-1', reason: 'index_too_large' });
+    send({ type: 'journal_refused', sessionKey: 'codex:thread-1', generation: 1, sequence: 4, reason: 'invalid' });
+    send({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: 'codex:thread-1', reason: 'unavailable' });
     await until(() => messages.length === 5);
     expect(messages.map(message => message.type)).toEqual(['journal_ack', 'journal_older_request', 'journal_fill_request', 'journal_refused', 'journal_open_refused']);
     expect(messages[0]).toMatchObject({ watermark: 3, cursor: { seq: 2 } });
-    expect(messages[3]).toMatchObject({ reason: 'body_missing', itemKey: 'a' });
+    expect(messages[3]).toMatchObject({ reason: 'invalid' });
   });
 
   it('is told that no connection may write when the Relay does not acknowledge journals', async () => {

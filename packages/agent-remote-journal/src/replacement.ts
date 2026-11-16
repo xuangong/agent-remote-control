@@ -4,29 +4,22 @@ export type ReplacementEntry =
   | { kind: 'reread'; complete: JournalItemInput }
   | { kind: 'carried'; item: JournalItem };
 
-/** An open item that native history lacks, closed: it is relay-only and keeps what was received. Other items stay as they are. */
-function sealedCopy(item: JournalItem): JournalItem {
-  if (item.state !== 'open' || item.liveOnly) return item;
-  const { digest: _digest, ...rest } = item;
-  return { ...rest, state: 'complete', liveOnly: true };
-}
-
 /**
  * The order of a new epoch: the reread items, with every old item the reread cannot reproduce, which is a live-only
- * item (or, with `sealOpen`, an open one, carried sealed), kept right after the nearest preceding old item that
+ * item, kept right after the nearest preceding old item that
  * survives, or before the first reread item when none does. Carried items keep their relative order.
  */
-export function replacementOrder(previous: readonly JournalItem[], reread: readonly JournalItemInput[], sealOpen = true): ReplacementEntry[] {
+export function replacementOrder(previous: readonly JournalItem[], reread: readonly JournalItemInput[]): ReplacementEntry[] {
   const rereadKeys = new Set(reread.map(({ row }) => row.itemKey));
   const carriedAfter = new Map<string | null, JournalItem[]>();
   let anchor: string | null = null;
   for (const item of previous) {
     if (rereadKeys.has(item.itemKey)) {
       anchor = item.itemKey;
-    } else if (item.liveOnly || (sealOpen && item.state === 'open')) {
+    } else if (item.liveOnly) {
       const carried = carriedAfter.get(anchor);
-      if (carried) carried.push(sealedCopy(item));
-      else carriedAfter.set(anchor, [sealedCopy(item)]);
+      if (carried) carried.push(item);
+      else carriedAfter.set(anchor, [item]);
     }
   }
   const carried = (key: string | null): ReplacementEntry[] =>

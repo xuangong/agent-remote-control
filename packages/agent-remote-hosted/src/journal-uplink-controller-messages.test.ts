@@ -15,7 +15,7 @@ const snapshot: AgentSnapshotPayload = {
 const wire = (message: Record<string, unknown>) => ({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, ...message }) as unknown as JournalHostMessage;
 
 function fixture() {
-  const journals = createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 });
+  const journals = createHostJournals({ store: new MemoryJournalStore() });
   const sent: RemoteHostUplinkMessage[] = [];
   const published: Array<{ sessionKey: string; result: JournalPublished }> = [];
   const timers: Array<() => void> = [];
@@ -81,32 +81,15 @@ describe('the Controller\'s unserve and request refusals', () => {
     await expect(older).rejects.toBeInstanceOf(JournalRequestError);
   });
 
-  it('opens without an index when the Controller asks for a reset, and tells the broker the session stopped being served', async () => {
-    const { journals, connection, sent, published, open } = fixture();
-    const generation = await open();
-    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [{ sequence: 1, op: 'head', head: { snapshot, observedAt: 5 } }] }));
-    published.length = 0;
-    sent.length = 0;
-    await connection.receive(wire({ type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1', reset: true }));
-    const opened = sent.find(message => message.type === 'journal_opened') as { generation: number; watermark: number; index: unknown[]; indexAfter?: number };
-    expect(opened).toMatchObject({ generation: generation + 1, index: [] });
-    expect(opened.indexAfter).toBeUndefined();
-    expect(journals.served(HOST, SESSION)).toBe(false);
-    expect(published).toEqual([{ sessionKey: SESSION, result: { events: [], watermark: 0, unserved: true } }]);
-    sent.length = 0;
-    await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: opened.watermark + 1, op: 'head', head: { snapshot, observedAt: 6 } }] }));
-    expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_refused', reason: 'incomplete' }));
-  });
-
   it('accepts the entry that follows a refused one under the refused number, and does not take it for a duplicate', async () => {
     const { connection, sent, open } = fixture();
     const generation = await open();
     const row = (itemKey: string) => ({ itemKey, providerId: 'codex', sourceKey: `${itemKey}:1`, occurredAt: 1, item: { type: 'assistant_message', text: itemKey, messageId: itemKey } });
     await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [
-      { sequence: 1, op: 'append', row: row('a') }, { sequence: 2, op: 'correct', row: row('ghost'), expectedRevision: 1 }, { sequence: 3, op: 'append', row: row('b') },
+      { sequence: 1, op: 'append', row: row('a') }, { sequence: 2, op: 'complete', itemKey: 'ghost', digest: 'd'.repeat(64) }, { sequence: 3, op: 'append', row: row('b') },
     ] }));
     expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_ack', watermark: 1 }));
-    expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_refused', sequence: 2, reason: 'unknown_item', itemKey: 'ghost' }));
+    expect(sent).toContainEqual(expect.objectContaining({ type: 'journal_refused', sequence: 2, reason: 'invalid' }));
     sent.length = 0;
     await connection.receive(wire({ type: 'journal_publish', sessionKey: SESSION, generation, entries: [{ sequence: 2, op: 'append', row: row('b') }] }));
     expect(sent).toEqual([expect.objectContaining({ type: 'journal_ack', watermark: 2, cursor: expect.objectContaining({ seq: 2 }) })]);

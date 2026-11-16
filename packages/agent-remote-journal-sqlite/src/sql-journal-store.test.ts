@@ -53,7 +53,7 @@ describe.each(stores)('%s', (_name, create) => {
     journal.append(at(), row('m2', 'Next'));
     await store.apply(journal.takeChanges()!);
     const restored = new SessionJournal((await store.load(journal.sessionKey))!);
-    expect(restored.index()).toEqual(journal.index());
+    expect(restored.state()).toEqual(journal.state());
     expect(restored.cursor).toEqual(journal.cursor);
     const request = { requestId: 'r', agentId: 'a', direction: 'tail' as const, limit: 10 };
     expect(restored.page(request, { olderBeyondJournal: false })).toEqual(journal.page(request, { olderBeyondJournal: false }));
@@ -69,7 +69,7 @@ describe.each(stores)('%s', (_name, create) => {
     journal.append(at(), row('m1', 'Old'));
     journal.complete(at(), 'm1', 'digest-1');
     await store.apply(journal.takeChanges()!);
-    journal.replace(at(), [{ row: row('m2', 'Fresh'), digest: 'digest-2' }], 0);
+    journal.sync(at(), [{ row: row('m2', 'Fresh'), digest: 'digest-2' }], { roomBytes: Number.MAX_SAFE_INTEGER });
     await store.apply(journal.takeChanges()!);
     expect((await store.load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m2']);
     await store.delete(journal.sessionKey);
@@ -96,7 +96,7 @@ describe.each(stores)('%s', (_name, create) => {
     const store = await create();
     const { journal, at } = openJournal();
     journal.append(at(), { ...row('l1', 'live'), liveOnly: true });
-    journal.seal(at(), 'l1');
+    journal.complete(at(), 'l1', 'digest-l1');
     journal.append(at(), row('m1', 'kept'));
     await store.apply(journal.takeChanges()!);
     journal.dropOldestLiveOnly(0);

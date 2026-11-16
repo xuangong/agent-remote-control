@@ -103,23 +103,22 @@ it('closes a Host that sends a message only the Relay may send', async () => {
 it('opens the journal of a session and stores the claim', async () => {
   const { host, open, store, storeKey } = await connectedHost();
   const opened = await open();
-  expect(opened).toMatchObject({ uplinkVersion: 2, sessionKey: SESSION, generation: 1, watermark: 0, index: [] });
-  expect(typeof opened.epoch).toBe('string');
+  expect(opened).toMatchObject({ uplinkVersion: 2, sessionKey: SESSION, generation: 1, watermark: 0 });
+  expect(opened).not.toHaveProperty('index');
   expect((await store.load(storeKey))?.meta.publisher).toEqual({ publisherId: 'controller-1', generation: 1, watermark: 0 });
   expect(storeKey.startsWith(`${host.hostId}:`)).toBe(true);
 });
 
-it('acknowledges a publication only after the store holds it, and returns the index when the journal is opened again', async () => {
+it('acknowledges a publication only after the store holds it, and resumes after its watermark when the journal is opened again', async () => {
   const { open, send, take, store, storeKey } = await connectedHost();
   const opened = await open();
   send({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [
     { sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'm1', digest: DIGEST }] });
   const ack = await take('journal_ack');
-  expect(ack).toMatchObject({ sessionKey: SESSION, generation: 1, watermark: 2, cursor: { epoch: opened.epoch, seq: 1 } });
+  expect(ack).toMatchObject({ sessionKey: SESSION, generation: 1, watermark: 2, cursor: { epoch: (await store.load(storeKey))!.meta.epoch, seq: 1 } });
   expect((await store.load(storeKey))?.items).toEqual([expect.objectContaining({ itemKey: 'm1', state: 'complete', digest: DIGEST })]);
   const reopened = await open();
-  expect(reopened).toMatchObject({ generation: 2, watermark: 2, epoch: opened.epoch,
-    index: [expect.objectContaining({ itemKey: 'm1', seqStart: 1, seqEnd: 1, state: 'complete', digest: DIGEST, resident: true })] });
+  expect(reopened).toMatchObject({ generation: 2, watermark: 2 });
 });
 
 it('fences the first generation when the session is opened again', async () => {
@@ -139,7 +138,7 @@ it('acknowledges the entries before a refused one and names the refusal', async 
     { sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'ghost', digest: DIGEST },
     { sequence: 3, op: 'append', row: row('m3', 'Never applied') }] });
   expect(await take('journal_ack')).toMatchObject({ watermark: 1 });
-  expect(await take('journal_refused')).toMatchObject({ generation: 1, sequence: 2, reason: 'unknown_item', itemKey: 'ghost' });
+  expect(await take('journal_refused')).toMatchObject({ generation: 1, sequence: 2, reason: 'invalid' });
   expect((await store.load(storeKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
 });
 
@@ -164,7 +163,7 @@ it('keeps the journals of two Hosts apart even for the same session', async () =
   const opened = await first.open();
   first.send({ type: 'journal_publish', sessionKey: SESSION, generation: opened.generation, entries: [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }] });
   await first.take('journal_ack');
-  expect((await second.open()).index).toEqual([]);
+  expect(await second.open()).toMatchObject({ generation: 1, watermark: 0 });
 });
 it('asks the Controller for bodies and resolves with what the journal took', async () => {
   const { broker, host, open, send, take, store, storeKey } = await connectedHost();
@@ -236,34 +235,6 @@ it('refuses requests for a Host that cannot publish journals or does not exist',
   await expect(plain.broker.requestOlder(plain.host.hostId, SESSION, 5, 'm1')).rejects.toMatchObject({ status: 501, code: 'journal_unavailable' });
   await expect(plain.broker.requestOlder('no-such-host', SESSION, 5)).rejects.toMatchObject({ status: 404, code: 'host_not_found' });
 });
-
-it('opens a journal whose index no single message can carry, and sends the rest a page at a time as the Controller asks', async () => {
-  const memory = new MemoryJournalStore();
-  const probe = await connectedHost({ journals: memory });
-  const seeded = SessionJournal.create(probe.storeKey);
-  const { generation } = seeded.claim('controller-1');
-  for (let at = 0; at < 2100; at++) {
-    const itemKey = `${at}-`.padEnd(4000, 'k');
-    seeded.append({ publisherId: 'controller-1', generation, sequence: at + 1 }, { ...row(itemKey, 'x'), sourceKey: itemKey });
-  }
-  await memory.apply(seeded.takeChanges()!);
-  probe.send({ type: 'journal_open', requestId: 'open-big', sessionKey: SESSION, publisherId: 'controller-1' });
-  const opened = await probe.take('journal_opened');
-  expect(opened).toMatchObject({ requestId: 'open-big', generation: 2, watermark: 2100 });
-  expect(opened.indexAfter).toBeDefined();
-  const index: Wire[] = [...opened.index];
-  let after: number | undefined = opened.indexAfter;
-  for (let request = 0; after !== undefined; request++) {
-    probe.send({ type: 'journal_index_request', requestId: `index-${request}`, sessionKey: SESSION, generation: 2, epoch: opened.epoch, after });
-    const page = await probe.take('journal_index_page');
-    expect(page).toMatchObject({ requestId: `index-${request}`, sessionKey: SESSION });
-    index.push(...page.index);
-    after = page.indexAfter;
-  }
-  expect(index.map(entry => entry.seqStart)).toEqual(Array.from({ length: 2100 }, (_, at) => at + 1));
-  probe.send({ type: 'journal_publish', sessionKey: SESSION, generation: 2, entries: [{ sequence: 2101, op: 'seal', itemKey: index[0]!.itemKey }] });
-  expect(await probe.take('journal_ack')).toMatchObject({ generation: 2, watermark: 2101 });
-}, 30_000);
 
 it('records a diagnostic and closes the connection when the journal store fails', async () => {
   const memory = new MemoryJournalStore();

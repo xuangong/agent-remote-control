@@ -4,7 +4,6 @@ import { fixture, send } from './fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const SESSION = 'codex:thread-1';
-const LIMITS = { maxIndexItems: 1_000_000, pageItems: 2000 };
 const row = (itemKey: string, text: string, turn = 1) => ({
   itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId: `turn-${turn}`,
   item: { type: 'assistant_message', text, messageId: itemKey },
@@ -28,7 +27,7 @@ async function call(f: Fixture, hostId: string, method: string, ...args: unknown
 test('keeps a published journal in the object of its Host, splits a large item into chunks and serves it after a restart', async () => {
   const f = await fixture({ journals: {} });
   const text = '😀é'.repeat(100_000);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1')).toEqual({ generation: 1, watermark: 0 });
   const published = await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
     { sequence: 1, op: 'append', row: row('big', text) }, { sequence: 2, op: 'complete', itemKey: 'big', digest: 'digest-big' }, head(3)]);
   expect(published).toMatchObject({ watermark: 3, hasHead: true });
@@ -40,13 +39,13 @@ test('keeps a published journal in the object of its Host, splits a large item i
   await f.restart();
   expect(await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false)).toEqual(before);
   expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS)).toMatchObject({ generation: 2, watermark: 3 });
+  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 3 });
 }, 60_000);
 
 test('keeps each Host in its own object and deletes the journals of one Host without touching another', async () => {
   const f = await fixture({ journals: {} });
   for (const host of ['host-1', 'host-2']) {
-    await call(f, host, 'open', host, SESSION, 'controller-1', LIMITS);
+    await call(f, host, 'open', host, SESSION, 'controller-1');
     await call(f, host, 'publish', host, SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
   }
   expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
@@ -61,14 +60,14 @@ test('keeps each Host in its own object and deletes the journals of one Host wit
 test('refuses growth over the session limit of the object', async () => {
   const f = await fixture({ journals: { tuning: { limits: { sessionBytes: 3500 } } } });
   const big = 'x'.repeat(2000);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
   expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', big, 1) }])).refusal).toBeUndefined();
   expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', big, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
 }, 60_000);
 
 test('answers a page that would pass the reply bound with fewer entries', async () => {
   const f = await fixture({ journals: { tuning: { replyMaxBytes: 5000 } } });
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
   const entries = Array.from({ length: 6 }, (_, n) => [{ sequence: n * 2 + 1, op: 'append', row: row(`m${n}`, 'x'.repeat(2000), n) }, { sequence: n * 2 + 2, op: 'complete', itemKey: `m${n}`, digest: `digest-${n}` }]).flat();
   await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, entries);
   const page = await call(f, 'host-1', 'page', 'host-1', SESSION, { ...tail, limit: 6 }, false);
@@ -76,24 +75,10 @@ test('answers a page that would pass the reply bound with fewer entries', async 
   expect(page.page.payload.entries.length).toBeLessThan(6);
 }, 60_000);
 
-test('refuses to open a journal whose index is over the item bound, claims nothing, and pages the index through RPC', async () => {
-  const f = await fixture({ journals: {} });
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
-  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
-    { sequence: 1, op: 'append', row: row('m1', 'a') }, { sequence: 2, op: 'append', row: row('m2', 'b') }, { sequence: 3, op: 'append', row: row('m3', 'c') }]);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { maxIndexItems: 2, pageItems: 2 })).toEqual({ refused: 'index_too_large' });
-  const opened = await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { maxIndexItems: 10, pageItems: 2 });
-  expect(opened).toMatchObject({ generation: 2, watermark: 3, more: true });
-  expect(opened.index.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m1', 'm2']);
-  const rest = await call(f, 'host-1', 'indexPage', 'host-1', SESSION, opened.epoch, opened.index.at(-1).seqStart, 10);
-  expect(rest.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m3']);
-  expect(await call(f, 'host-1', 'indexPage', 'host-1', SESSION, 'another-epoch', 0, 10)).toBeNull();
-}, 60_000);
-
 test('fills bodies and reads the page in one call, and serves a page of several MiB in one reply', async () => {
   const f = await fixture({ journals: { tuning: { retention: { turns: 1, minItems: 1 } } } });
   const text = 'é'.repeat(1_000_000);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
   for (const n of [1, 2, 3]) {
     await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
       { sequence: n * 2 - 1, op: 'append', row: row(`m${n}`, text, n) }, { sequence: n * 2, op: 'complete', itemKey: `m${n}`, digest: `digest-m${n}` }]);
@@ -111,7 +96,7 @@ test('holds the Durable Object bounds by default: two journals, 20 MiB of cache 
   expect(await call(f, 'host-1', 'effectiveTuning')).toEqual({
     cache: { maxJournals: 2, maxBytes: 20 * 1024 * 1024 }, limits: { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } });
   const text = 'x'.repeat(7 * 1024 * 1024);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
   expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', text, 1) }])).refusal).toBeUndefined();
   expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', text, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
 }, 120_000);
@@ -123,7 +108,7 @@ test('rolls back every statement of a transaction that fails', async () => {
 
 test('keeps two journals in memory by default and reads a third one that was dropped from the store again', async () => {
   const f = await fixture({ journals: {} });
-  for (const key of ['codex:a', 'codex:b', 'codex:c']) await call(f, 'host-1', 'open', 'host-1', key, 'controller-1', LIMITS);
+  for (const key of ['codex:a', 'codex:b', 'codex:c']) await call(f, 'host-1', 'open', 'host-1', key, 'controller-1');
   const before = await call(f, 'host-1', 'journalLoads');
   await call(f, 'host-1', 'status', 'host-1', 'codex:c');
   expect(await call(f, 'host-1', 'journalLoads')).toBe(before);
@@ -163,7 +148,7 @@ test('grants journals through the partitions, keeps journal rows out of primary 
   expect(host.registered).toMatchObject({ type: 'registered', journal: 1 });
   const hostId = host.registered.hostId as string;
   send(host.socket, { type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' });
-  expect(await host.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0, index: [] });
+  expect(await host.take('journal_opened')).toMatchObject({ generation: 1, watermark: 0 });
   send(host.socket, { type: 'journal_publish', sessionKey: SESSION, generation: 1, entries: [
     { sequence: 1, op: 'append', row: row('m1', 'Hello') }, { sequence: 2, op: 'complete', itemKey: 'm1', digest: 'digest-m1' }, head(3)] });
   expect(await host.take('journal_ack')).toMatchObject({ generation: 1, watermark: 3 });
@@ -177,7 +162,7 @@ test('grants journals through the partitions, keeps journal rows out of primary 
   send(again.socket, { type: 'journal_open', requestId: 'open-2', sessionKey: SESSION, publisherId: 'controller-1' });
   const reopened = await again.take('journal_opened');
   expect(reopened).toMatchObject({ generation: 2, watermark: 3 });
-  expect(reopened.index.map((entry: { itemKey: string }) => entry.itemKey)).toEqual(['m1']);
+  expect(reopened).not.toHaveProperty('index');
 }, 90_000);
 
 test('grants no journals when the Worker has the binding but the variable is not set', async () => {
@@ -206,13 +191,12 @@ test('reports its capabilities through Durable Object RPC', async () => {
 
 test('takes a session out of serving at the Controller\'s word, in the object that holds its journal', async () => {
   const f = await fixture({ journals: {} });
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', LIMITS);
+  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
   await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
   expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
   expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 7)).toBeNull();
   expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 1)).toMatchObject({ unserved: true, hasHead: false, watermark: 2 });
   expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1', { ...LIMITS, reset: true })).toMatchObject({ generation: 2, index: [], more: false });
 }, 60_000);
 
 test('refuses the open of a Host whose partition is older than the Relay, and answers once the partition is current', async () => {
@@ -224,5 +208,5 @@ test('refuses the open of a Host whose partition is older than the Relay, and an
   const host = await journalHost(f, pairing.key);
   expect(host.registered).toMatchObject({ type: 'registered', journal: 1 });
   send(host.socket, { type: 'journal_open', requestId: 'open-1', sessionKey: SESSION, publisherId: 'controller-1' });
-  expect(await host.take('journal_open_refused')).toMatchObject({ requestId: 'open-1', sessionKey: SESSION, reason: 'invalid' });
+  expect(await host.take('journal_open_refused')).toMatchObject({ requestId: 'open-1', sessionKey: SESSION, reason: 'unavailable' });
 }, 60_000);

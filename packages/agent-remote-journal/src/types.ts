@@ -1,9 +1,9 @@
 import type {
-  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalHead, JournalIndexEntry, JournalItemInput, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
+  AgentTimelineItem, BackgroundActivity, CompleteItemInput, JournalHead, JournalItemInput, JournalRowInput, ResourceBinding, TimelineCollapse, TimelineSeqRange,
 } from '@orchardworks/agent-remote-protocol';
 
 /** The wire shapes the journal consumes and produces; the Host uplink carries them unchanged. */
-export type { CompleteItemInput, JournalHead, JournalIndexEntry, JournalItemInput, JournalRowInput };
+export type { CompleteItemInput, JournalHead, JournalItemInput, JournalRowInput };
 
 /** A row stamped with the journal's epoch and sequence; what subscribers receive live. */
 export interface JournalRow {
@@ -44,7 +44,6 @@ export interface JournalItem {
   background?: BackgroundActivity;
   /** The rest of the body that is not reread from the Host, kept while the body is evicted, and the item's type (absent in data stored before it was recorded). */
   keptBody?: Omit<JournalBody, 'item'> & { itemType?: AgentTimelineItem['type'] };
-  revision: number;
   body: JournalBody | null;
 }
 
@@ -71,13 +70,10 @@ export interface JournalMeta {
   /** The lowest sequence in use; older rows are prepended below it. */
   minSeq: number;
   publisher: JournalPublisher | null;
-  /** The last revision given to any item; revisions never repeat within the journal. */
-  lastRevision: number;
   /** Absent until the Controller publishes its first Snapshot. */
   head?: JournalHead;
   /** Set when a publication of the session was refused and its rows are missing; cleared by a replacement, which rebuilds the journal. */
   incomplete?: true;
-  retiredEpochs: { epoch: string; retiredAt: number }[];
 }
 
 export interface JournalState {
@@ -129,13 +125,6 @@ export class JournalSequenceGapError extends Error {
   constructor(readonly sequence: number, readonly watermark: number) {
     super(`Publication ${sequence} skips ahead of the watermark ${watermark}.`);
     this.name = 'JournalSequenceGapError';
-  }
-}
-
-export class JournalStaleRevisionError extends Error {
-  constructor(readonly itemKey: string, readonly revision: number) {
-    super(`Journal item ${itemKey} moved to revision ${revision}.`);
-    this.name = 'JournalStaleRevisionError';
   }
 }
 

@@ -213,7 +213,7 @@ it('keeps the journals a Controller opened when the same connection is registere
   expect(rotate?.status).toBe(200);
   await socket.receive({ uplinkVersion: 2, type: 'credential_saved' });
   expect(socket.sent.at(-1)).toEqual(registered);
-  await socket.receive({ uplinkVersion: 2, type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [{ sequence: 1, op: 'seal', itemKey: 'ghost' }] });
+  await socket.receive({ uplinkVersion: 2, type: 'journal_publish', sessionKey: 'codex:thread-1', generation: 1, entries: [{ sequence: 1, op: 'complete', itemKey: 'ghost', digest: 'd'.repeat(64) }] });
   expect(socket.sent.filter(message => message.type === 'journal_ack')).toHaveLength(1);
   expect(socket.closes).toHaveLength(0);
 }, 10_000);

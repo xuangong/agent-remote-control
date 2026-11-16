@@ -77,7 +77,7 @@ it('saves the switch with the Host, keeps it when the Controller registers again
 });
 
 it('takes a session out of serving when a quota refuses a publication: its streams close, a new one is read from the Controller, and the head is cleared', async () => {
-  const r = await relay({ journalLimits: { sessionItems: 1 } });
+  const r = await relay({ journalLimits: { sessionBytes: 3500 } });
   const controller = await r.connectController();
   const opened = await controller.open();
   await controller.publish([
@@ -87,7 +87,7 @@ it('takes a session out of serving when a quota refuses a publication: its strea
   const browser = await r.openBrowser();
   browser.send({ type: 'negotiate' });
   await browser.take(message => message.type === 'agent_snapshot', 'Snapshot');
-  controller.send({ type: 'journal_publish', sessionKey: SESSION_KEY, generation: opened.generation, entries: [{ sequence: 4, op: 'append', row: row('m2', 'World') }] });
+  controller.send({ type: 'journal_publish', sessionKey: SESSION_KEY, generation: opened.generation, entries: [{ sequence: 4, op: 'append', row: row('m2', 'x'.repeat(4000)) }] });
   expect(await controller.inbox.take(message => message.type === 'journal_refused', 'refusal')).toMatchObject({ sequence: 4, reason: 'quota_exceeded' });
   await sleep(20);
   expect(browser.pair.native.closeCode).toBe(1012);
@@ -203,7 +203,7 @@ it('deletes the pending journals of a Host before it is told it is registered, s
   release();
   const controller = await connecting;
   const opened = await controller.open();
-  expect(opened).toMatchObject({ watermark: 0, index: [] });
+  expect(opened).toMatchObject({ watermark: 0 });
   await sleep(30);
   expect((await r.store.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual([STORE_KEY]);
 });

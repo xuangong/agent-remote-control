@@ -41,15 +41,17 @@ beforeAll(async () => {
     window.loadTail = (epoch, rows, hasOlder) => { replica.applyHistory(page('tail', epoch, rows, hasOlder)); };
     window.replaceWith = (epoch, rows, hasOlder) => { replica.replaceTimeline(epoch); replica.applyHistory(page('tail', epoch, rows, hasOlder)); };
     window.loadOlder = (epoch, rows, hasOlder) => { replica.applyHistory(page('before', epoch, rows, hasOlder)); };
+    window.setNotice = height => { document.querySelector('#notice').style.height = height + 'px'; };
     window.replacementPending = (epoch) => { replica.replaceTimeline(epoch); };
 
     function Screen() {
       const state = useSyncExternalStore(listener => replica.subscribe(listener), () => replica.getState());
-      const scroll = useTimelineScroll('one', true, positions, undefined, undefined, state.timeline.entries);
+      const scroll = useTimelineScroll('one', true, positions, undefined, undefined, state.timeline.entries, 'bottom');
       return <div style={{ display: 'flex', flexDirection: 'column', height: '640px', width: '720px' }}>
-        <div id="viewport" ref={scroll.viewportRef} onScroll={scroll.onScroll} onWheel={scroll.onWheel} style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0 }}>
-          <div ref={scroll.contentRef}><AgentTimeline state={state} /></div>
+        <div id="viewport" ref={scroll.viewportRef} onScroll={scroll.onScroll} onWheel={scroll.onWheel} style={{ flex: '1 1 auto', overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column-reverse' }}>
+          <div ref={scroll.contentRef} style={{ flex: 'none' }}><AgentTimeline state={state} /></div>
         </div>
+        <div id="notice" style={{ flex: 'none', height: '0px' }} />
         <AgentComposer state={state} sessionState={remoteSessionState(undefined, 'ready')} onSendMessage={async () => {}} />
       </div>;
     }
@@ -172,7 +174,7 @@ it('lands a reader above the new window on its first row and lets them read olde
     const keys = await keysOf(page);
     expect(keys.slice(0, 3)).toEqual(['k50', 'k51', 'k52']);
     expect(new Set(keys).size).toBe(keys.length);
-    await page.evaluate(() => { (document.querySelector('#viewport') as HTMLElement).scrollTop = 0; });
+    await page.evaluate(() => { const viewport = document.querySelector('#viewport') as HTMLElement; viewport.scrollTop = -(viewport.scrollHeight - viewport.clientHeight); });
     expect(await firstVisible(page)).toBe('k50');
     expect(errors.filter(message => /same key|unique "key"/.test(message))).toEqual([]);
   } finally { await page.close(); }
@@ -203,5 +205,17 @@ it('keeps the composer\'s text, focus and selection, and never disables it, thro
     expect(await read()).toEqual(before);
     expect(await page.evaluate(() => (window as any).composerNode === document.querySelector('[data-testid="prompt-input"]'))).toBe(true);
     expect(await page.evaluate(() => (window as any).composerDisabled)).toBe(false);
+  } finally { await page.close(); }
+});
+
+it('keeps the reader\'s line when the viewport changes height without any change to the rows (a notice appears and goes)', async () => {
+  const { page } = await openPage(rows(60));
+  try {
+    await readAt(page, 'k30', 40);
+    const key = (await firstVisible(page))!;
+    const before = await topOf(page, key);
+    for (const height of [32, 62, 21, 0]) { await page.evaluate(px => (window as any).setNotice(px), height); await page.waitForTimeout(120); }
+    await page.waitForTimeout(300);
+    expect(Math.abs(((await topOf(page, key)) as number) - (before as number))).toBeLessThanOrEqual(4);
   } finally { await page.close(); }
 });

@@ -620,16 +620,26 @@ export class SessionPublication {
       ops.push({ op, bytes: entryBytes(op) ?? MESSAGE_BUDGET_BYTES });
     }
     await this.inLane(token, async () => {
-      for (const chunk of chunkOps(ops)) {
+      // One prepend to a message: a Relay that refuses one for its quota applies nothing of it, so the numbering stays where it was.
+      let ended = false;
+      for (const prepend of ops) {
         await this.flushLive(token);
-        await this.publish(token, chunk);
+        try { await this.publish(token, { ops: [prepend.op], bytes: prepend.bytes }); }
+        catch (error) {
+          // A quota refusal of older history leaves the journal whole: it only has no room for more history, and the session stays served.
+          if (!(error instanceof Refused) || error.reason !== 'quota_exceeded') throw error;
+          ended = true;
+          break;
+        }
       }
-      // A binding that settled after the items were read arrived as a rebind before the journal held them, which passes it over.
-      const settled = rebindOps(groupItems(accepted.flatMap(({ item }) => this.source.itemRows(item.row.itemKey))));
-      for (const chunk of chunkOps(settled)) await this.publish(token, chunk);
+      if (!ended) {
+        // A binding that settled after the items were read arrived as a rebind before the journal held them, which passes it over.
+        const restated = groupItems(accepted.flatMap(({ item }) => this.source.itemRows(item.row.itemKey)));
+        for (const chunk of chunkOps(rebindOps(restated))) await this.publish(token, chunk);
+      }
       this.check(token);
       this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey,
-        olderAvailable: candidates.length > take.length || this.source.hasOlderHistory() }, this.options.providerId);
+        olderAvailable: !ended && (candidates.length > take.length || this.source.hasOlderHistory()) }, this.options.providerId);
     });
   }
 

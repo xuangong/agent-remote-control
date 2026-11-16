@@ -247,9 +247,12 @@ describe('the quota and a journal that is missing rows', () => {
     const anchor = (await journalOf(relay)).oldestItemKey!;
     expect(anchor).toBe('b1');
     const before = await keysOf(relay);
-    // The Controller cannot publish the page, and says so; the stream serves the page it has.
-    await expect(relay.connection.requestOlder(SESSION, 5, anchor)).rejects.toThrow(/not_ready/);
+    // The Relay refuses the page for its quota; the Controller says no older history is left, and does not open again.
+    const openCount = () => relay.fromPublisher.filter(message => message.type === 'journal_open').length;
+    const opensBefore = openCount();
+    await expect(relay.connection.requestOlder(SESSION, 5, anchor)).resolves.toEqual({ olderAvailable: false });
     await settle(60);
+    expect(openCount()).toBe(opensBefore);
     expect(relay.diagnostics).toContain('journal_quota_exceeded');
     expect(relay.published.some(({ result }) => result.prependRefused === true)).toBe(true);
     const journal = await journalOf(relay);

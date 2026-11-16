@@ -839,6 +839,22 @@ describe('older history and fills the Relay asks for', () => {
     expect(fill.items.map((value: Wire) => [value.row.itemKey, value.row.item.text, typeof value.digest])).toEqual([['m1', 'One', 'string']]);
   });
 
+  it('answers an older-history request the Relay refused for its quota as exhausted, without opening again, and keeps numbering from the refused entry', async () => {
+    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries[0].op === 'prepend') answer.refuse('quota_exceeded'); else answer.ack(); } });
+    const publisher = publisherFor(relay);
+    const { session } = await attachSession(publisher, [item('history', 'm3', 'Three')], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }]);
+    await live(relay);
+    const opens = relay.opens();
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', beforeItemKey: 'm3', limit: 5 });
+    await until(() => relay.written.some(message => message.type === 'journal_older_done'), 'the answer');
+    expect(relay.written.find(message => message.type === 'journal_older_done')).toMatchObject({ requestId: 'older-1', olderAvailable: false });
+    session.push(item('live', 'a', 'Hi', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'a' && value.state === 'complete'), 'the live row after the refusal');
+    await settle(60);
+    expect(relay.opens()).toBe(opens);
+    expect(relay.refusedAt()).toHaveLength(1);
+  });
+
   it('publishes a live row that arrives between two chunks of older history before the next chunk', async () => {
     const pending: Array<() => void> = [];
     let hold = false;

@@ -212,11 +212,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
       event: { type: 'background_activity_updated', providerId: outcome.providerId, ...(outcome.turnId === undefined ? {} : { turnId: outcome.turnId }), background: outcome.background } },
   });
 
-  const streamFrame = (row: JournalRow): ServerMessage => ({
+  const streamFrame = (row: JournalRow, itemSeqStart?: number): ServerMessage => ({
     protocolVersion: PROTOCOL_VERSION, type: 'agent_stream',
     payload: {
       agentId: publicAgentId, epoch: row.epoch, seq: row.seq, timestamp: row.timestamp,
-      event: { type: 'timeline', providerId: row.providerId, ...(keyed ? { itemKey: row.itemKey } : {}), item: row.item, ...(row.turnId === undefined ? {} : { turnId: row.turnId }), resources: row.resources },
+      event: { type: 'timeline', providerId: row.providerId, ...(keyed ? { itemKey: row.itemKey, ...(itemSeqStart === undefined ? {} : { itemSeqStart }) } : {}), item: row.item, ...(row.turnId === undefined ? {} : { turnId: row.turnId }), resources: row.resources },
     },
   });
 
@@ -504,7 +504,7 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
           sendServer(snapshotMessage('agent_update', event.head));
           break;
         case 'row':
-          if (subscribed) sendServer(streamFrame(event.row));
+          if (subscribed) sendServer(streamFrame(event.row, event.itemSeqStart));
           break;
         case 'replaced':
           if (subscribed) sendServer({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: publicAgentId, epoch: event.epoch } });

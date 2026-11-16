@@ -105,6 +105,9 @@ export class SessionJournal {
   get liveOnlyCount(): number { return this.liveOnlyKeys.size; }
 
   /** The key of the first item that is not live-only: where a request for older history starts. */
+  /** The first sequence of an item, which an update in place keeps. */
+  seqStartOf(itemKey: string): number | undefined { return this.byKey.get(itemKey)?.seqStart; }
+
   get oldestItemKey(): string | undefined { return this.items.find(item => !item.liveOnly)?.itemKey; }
 
   /** Whether the item's body is in memory; false for an evicted or unknown item. */

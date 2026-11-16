@@ -80,3 +80,20 @@ it('opens a flagged client on a session a Controller answers, without the flag r
   await browser.take(message => message.type === 'agent_snapshot', 'Snapshot');
   expect(browser.frames.some(frame => frame.type === 'protocol_error')).toBe(false);
 });
+
+it('tells a flagged client the first sequence of an item a live row updates, and an unflagged client nothing of it', async () => {
+  const r = await relay();
+  const controller = await publishedController(r);
+  for (const [flag, expected] of [[true, 1], [false, undefined]] as const) {
+    const browser = await r.openBrowser();
+    browser.send({ type: 'negotiate', ...(flag ? { itemKeys: true } : {}) });
+    await browser.take(message => message.type === 'agent_snapshot', 'Snapshot');
+    browser.send({ type: 'timeline_subscription', payload: { requestId: 'sub', agentIds: [PUBLIC_ID] } });
+    await browser.take(message => message.type === 'timeline_subscribed', 'subscription');
+    // The first item is updated in place: its row has a later sequence than its first one.
+    await controller.publish([{ op: 'append', row: row('m1', ' updated') }]);
+    const live = await until(() => browser.frames.find(frame => frame.type === 'agent_stream'), 'the live row');
+    expect(live.payload.event.itemSeqStart).toBe(expected);
+    expect(live.payload.seq).toBeGreaterThan(1);
+  }
+});

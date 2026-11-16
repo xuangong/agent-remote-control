@@ -30,6 +30,13 @@ it('keeps older history reachable when a reconnect brings an item updated above 
 
   const requests: string[] = [];
   const open = new Set<WebSocket>();
+  const live = new Map<WebSocket, (message: ServerMessage) => void>();
+  /** The Relay's live frame for a row the journal just applied: the item's key and its first sequence, as the journal session stream sends them. */
+  const pushRow = (appended: ReturnType<SessionJournal['append']>) => {
+    if (!appended) throw new Error('The journal refused the row.');
+    for (const send of live.values()) send({ protocolVersion: PROTOCOL_VERSION, type: 'agent_stream', payload: { agentId: 'one', epoch: appended.epoch, seq: appended.seq, timestamp: appended.timestamp,
+      event: { type: 'timeline', providerId: 'copilot', itemKey: appended.itemKey, itemSeqStart: journal.seqStartOf(appended.itemKey), item: appended.item, resources: [] } } } as ServerMessage);
+  };
   const pageOf = (requestId: string, direction: 'tail' | 'before' | 'after', cursor: { epoch: string; seq: number } | undefined, limit: number) => {
     requests.push(`${direction}:${cursor?.seq ?? ''}`);
     const result = journal.page({ requestId, agentId: 'one', direction, ...(cursor ? { cursor } : {}), limit, itemKeys: true }, { olderBeyondJournal: false });
@@ -57,6 +64,7 @@ it('keeps older history reachable when a reconnect brings an item updated above 
           runtimeInfo: { providerId: 'copilot', sessionId: 'one', status: 'idle' } } });
       }
       const message = frame.message;
+      if (message?.type === 'timeline_subscription') live.set(socket, emit);
       if (message?.type === 'timeline_subscription') emit({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_subscribed', payload: { requestId: message.payload.requestId, agentIds: ['one'] } });
       if (message?.type === 'timeline_request') {
         const { requestId, direction, cursor, limit } = message.payload;
@@ -82,8 +90,13 @@ it('keeps older history reachable when a reconnect brings an item updated above 
   expect(keys()).toEqual(Array.from({ length: 20 }, (_, index) => `n${index + 22}`));
   expect(replica.getState().timeline.hasOlder).toBe(true);
 
-  // The board changes (the journal keeps its first sequence) and a new row follows; the client reconnects.
-  journal.append(publication(), row('todo', 'board', board(true)));
+  // The board changes while the client is connected: a live frame for an item above the window. It must not land at the bottom.
+  pushRow(journal.append(publication(), row('todo', 'board', board(true))));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(keys()).toEqual(Array.from({ length: 20 }, (_, index) => `n${index + 22}`));
+
+  // The board changes again (the journal keeps its first sequence) and a new row follows; the client reconnects.
+  journal.append(publication(), row('todo', 'board', board(false)));
   journal.append(publication(), row('n42', 'Row 42'));
   journal.complete(publication(), 'n42', 'digest-42');
   statuses.length = 0;
@@ -98,7 +111,7 @@ it('keeps older history reachable when a reconnect brings an item updated above 
   for (let pages = 0; pages < 5 && replica.getState().timeline.hasOlder; pages += 1) await client.loadOlder();
   const all = replica.getState().timeline.entries;
   expect(all.map(entry => entry.itemKey)).toEqual(['todo', ...Array.from({ length: 41 }, (_, index) => `n${index + 2}`)]);
-  expect(all[0]).toMatchObject({ seqStart: 1, item: { items: [{ completed: true }] } });
+  expect(all[0]).toMatchObject({ seqStart: 1, item: { items: [{ completed: false }] } });
   expect(replica.getState().timeline.hasOlder).toBe(false);
   expect(all.map(entry => entry.seqStart)).toEqual([...all.map(entry => entry.seqStart)].sort((a, b) => a - b));
 }, 20_000);

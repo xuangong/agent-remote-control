@@ -70,7 +70,7 @@ export interface JournalRefusal {
 /** What a subscriber of the session sees of a publication, in the order its entries were applied. */
 export type JournalLiveEvent =
   /** An appended row; it is delivered live with its epoch and sequence. Corrections and prepended rows are never events. */
-  | { kind: 'row'; row: JournalRow }
+  | { kind: 'row'; row: JournalRow; itemSeqStart?: number }
   /** A replacement started a new epoch. */
   | { kind: 'replaced'; epoch: string }
   /** A head that was not already applied. */
@@ -396,14 +396,14 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
 
   function apply(journal: SessionJournal, publication: JournalPublication, entry: JournalPublishEntry, published: JournalPublished, roomBytes: number): void {
     switch (entry.op) {
-      case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row }); break; }
+      case 'append': { const row = journal.append(publication, entry.row); if (row) published.events.push({ kind: 'row', row, itemSeqStart: journal.seqStartOf(row.itemKey) ?? row.seq }); break; }
       case 'complete': journal.complete(publication, entry.itemKey, entry.digest); break;
       case 'alias': journal.alias(publication, entry.itemKey, entry.clientMessageId); break;
       case 'window': {
         const result = journal.sync(publication, entry.items, { roomBytes });
         const bytes = utf8ByteLength(JSON.stringify(entry));
         published.window = result.outcome === 'replaced' ? { outcome: 'replaced', reason: result.reason, bytes } : { outcome: result.outcome, bytes };
-        if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row });
+        if (result.outcome === 'appended') for (const row of result.rows) published.events.push({ kind: 'row', row, itemSeqStart: journal.seqStartOf(row.itemKey) ?? row.seq });
         else if (result.outcome === 'replaced') published.events.push({ kind: 'replaced', epoch: result.epoch });
         break;
       }

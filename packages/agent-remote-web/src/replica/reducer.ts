@@ -197,6 +197,12 @@ export function applyTimelineReplacement(state: AgentReplicaState, epoch: string
   };
 }
 
+/** The timeline starts over in `epoch`, with no row held and the old epoch retired: a recording's reset, as an observer saw it. */
+export function resetTimeline(state: AgentReplicaState, epoch: string): AgentReplicaState {
+  const retired = state.timeline.epoch && state.timeline.epoch !== epoch ? unique([...state.retiredEpochs, state.timeline.epoch]) : state.retiredEpochs;
+  return { ...state, retiredEpochs: retired, timeline: { ...createReplicaState().timeline, epoch } };
+}
+
 export function applyInteractionRequestedMessage(
   state: AgentReplicaState,
   message: InteractionRequestedMessage,
@@ -471,7 +477,7 @@ function appendLive(state: AgentReplicaState, message: TimelineStreamMessage): A
     ...state,
     timeline: {
       ...state.timeline,
-      entries: coalesceEntry(state.timeline.entries, projected),
+      entries: coalesceEntry(state.timeline.entries, projected, state.timeline.hasOlder),
       nextSeq: payload.seq + 1,
       pendingLive: state.timeline.pendingLive.filter((current) => current.payload.seq !== payload.seq),
     },
@@ -486,7 +492,7 @@ function liveEntry(message: TimelineStreamMessage): ProjectedTimelineEntry {
     item: clone(payload.event.item),
     ...(payload.event.turnId === undefined ? {} : { turnId: payload.event.turnId }),
     timestamp: payload.timestamp,
-    seqStart: payload.seq,
+    seqStart: payload.event.itemSeqStart ?? payload.seq,
     seqEnd: payload.seq,
     sourceSeqRanges: [{ startSeq: payload.seq, endSeq: payload.seq }],
     collapsed: [],
@@ -497,12 +503,21 @@ function liveEntry(message: TimelineStreamMessage): ProjectedTimelineEntry {
 function coalesceEntry(
   entries: readonly ProjectedTimelineEntry[],
   incoming: ProjectedTimelineEntry,
+  hasOlder = false,
 ): ProjectedTimelineEntry[] {
   if (incoming.itemKey !== undefined) {
     // A keyed row continues the one row that holds its key, in place, through the fold the journal and the pages use.
     const index = entries.map((entry) => entry.itemKey).lastIndexOf(incoming.itemKey);
-    if (index < 0) return sortEntries([...entries, incoming]);
-    const merged = clone(entries[index]!);
+    if (index < 0) {
+      // An item updated above the window keeps its first sequence: it is older history, which the next older page brings in its place.
+      const first = entries[0];
+      if (hasOlder && first && incoming.seqStart < first.seqStart) return entries.slice();
+      return sortEntries([...entries, incoming]);
+    }
+    const held = entries[index]!;
+    // The fold changes the item, its collapse marks, its sequence ranges and its resources, and nothing else.
+    const merged: ProjectedTimelineEntry = { ...held, item: { ...held.item }, collapsed: [...held.collapsed],
+      sourceSeqRanges: held.sourceSeqRanges.map((range) => ({ ...range })), resources: [...held.resources] };
     mergeRowIntoEntry(merged, { seq: incoming.seqEnd, item: incoming.item, resources: incoming.resources });
     return entries.map((entry, at) => at === index ? merged : entry);
   }

@@ -706,4 +706,22 @@ describe('absorbing a replacement by item key', () => {
     expect(keysOf(after.state)).toEqual(['todo', 'a']);
     expect(after.state.timeline.entries[0]).toMatchObject({ seqStart: 1, seqEnd: 3, item: { items: [{ text: 'x' }] } });
   });
+
+  it('leaves a live frame for an item above the window to the older page, so live and paged order agree', () => {
+    const state = applyHistoryPage(createReplicaState(), tail([assistant('n22', 'Row 22', 22), assistant('n23', 'Row 23', 23)], 'epoch-one', { hasOlder: true })).state;
+    const frame = (seq: number, itemKey: string, itemSeqStart: number): AgentStreamMessage => {
+      const message = stream(seq, { type: 'todo', items: [{ text: 'a', completed: true }] }, 'epoch-one');
+      Object.assign((message.payload as { event: object }).event, { itemKey, itemSeqStart });
+      return message;
+    };
+    const next = reduceTimelineEvent(state, frame(24, 'todo', 1));
+    expect(next.status).toBe('applied');
+    expect(keysOf(next.state)).toEqual(['n22', 'n23']);
+    expect(next.state.timeline.nextSeq).toBe(25);
+    // A new item inside the window still lands at the end, and the older page then brings the todo in its place.
+    const inside = reduceTimelineEvent(next.state, { ...frame(25, 'n24', 24) });
+    expect(keysOf(inside.state)).toEqual(['n22', 'n23', 'n24']);
+    const older = applyHistoryPage(inside.state, page('before', [keyed('todo', 1, { type: 'todo', items: [] })], { epoch: 'epoch-one', hasOlder: false }));
+    expect(keysOf(older.state)).toEqual(['todo', 'n22', 'n23', 'n24']);
+  });
 });

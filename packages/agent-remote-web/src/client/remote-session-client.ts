@@ -366,6 +366,12 @@ export class RemoteSessionClient {
 
   loadOlder(): Promise<void> {
     const state = this.replica.getState().timeline;
+    // The rows above are those of the epoch being replaced: wait for the tail instead of asking for them.
+    if (state.pendingEpoch !== undefined) {
+      return new Promise<void>(resolve => {
+        const stop = this.replica.subscribe(() => { if (this.replica.getState().timeline.pendingEpoch === undefined) { stop(); resolve(); } });
+      }).then(() => this.loadOlder());
+    }
     const first = state.entries[0];
     if (!state.initialized || !state.epoch || !state.hasOlder) return Promise.resolve();
     if (this.olderHistory) return this.olderHistory.promise;

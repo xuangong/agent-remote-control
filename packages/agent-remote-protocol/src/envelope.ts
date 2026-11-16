@@ -20,6 +20,8 @@ export const PublicAgentTimelineEvent = Strict({
   type: Type.Literal('timeline'),
   ...ProviderEvent,
   itemKey: Type.Optional(ItemKey),
+  /** With `itemKey`: the first sequence of the item, which is below the row's own when the item was updated in place. */
+  itemSeqStart: Type.Optional(SafeNonNegativeInteger),
   item: AgentTimelineItem,
   ...TurnId,
   resources: Type.Array(ResourceBinding),

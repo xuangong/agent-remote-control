@@ -33,6 +33,8 @@ describe('item keys', () => {
     expect(status(decodeServerMessage, streamOf({ itemKey: 'assistant:m1' }))).toBe('ok');
     expect(status(decodeServerMessage, streamOf({}))).toBe('ok');
     expect(status(decodeServerMessage, streamOf({ itemKey: '' }))).toBe('rejected');
+    expect(status(decodeServerMessage, streamOf({ itemKey: 'k', itemSeqStart: 1 }))).toBe('ok');
+    expect(status(decodeServerMessage, streamOf({ itemKey: 'k', itemSeqStart: -1 }))).toBe('rejected');
   });
 
   it('has a failed compaction', () => {

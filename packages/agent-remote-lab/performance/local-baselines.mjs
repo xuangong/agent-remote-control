@@ -155,7 +155,14 @@ const observerSource = `(() => {
       for (let at = document.querySelector('.agent-timeline-entry')?.parentElement; at; at = at.parentElement) if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at;
       return document.scrollingElement;
     },
-    scrollToMiddle: () => { const scroller = window.__baseline.scroller(); scroller.scrollTop = Math.max(0, (scroller.scrollHeight - scroller.clientHeight) / 2); return scroller.scrollTop; },
+    // A reader scrolling up: the wheel says so, which is what stops the timeline from following the latest content.
+    scrollToMiddle: () => {
+      const scroller = window.__baseline.scroller();
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
+      scroller.scrollTop = Math.max(0, (scroller.scrollHeight - scroller.clientHeight) / 2);
+      scroller.dispatchEvent(new Event('scroll'));
+      return scroller.scrollTop;
+    },
     // The first row in view and its offset from the top of the scroller.
     anchor: () => {
       const scroller = window.__baseline.scroller(), top = scroller === document.scrollingElement ? 0 : scroller.getBoundingClientRect().top;
@@ -532,7 +539,7 @@ const scenarios = {
         const sample = await settledRows(item, begin);
         const composerAfter = await item.handle.page.evaluate(() => window.__baseline.composer()).catch(() => null);
         const anchorOffset = item.anchor ? await item.handle.page.evaluate(key => window.__baseline.offsetOf(key), item.anchor.key).catch(() => null) : null;
-        samples.push({ rep, ...sample,
+        samples.push({ rep, ...sample, wheelIntent: true,
           composerUnchanged: !!composerAfter && !!item.composerBefore && composerUnchanged(item.composerBefore, composerAfter),
           composerBefore: item.composerBefore, composerAfter,
           anchorKey: item.anchor?.key ?? null, anchorSurvived: anchorOffset !== null, anchorShiftPx: anchorOffset !== null && item.anchor ? Math.abs(anchorOffset - item.anchor.offset) : null });

@@ -222,3 +222,122 @@ Last. Follow `.agents/skills/prepare-arc-local/SKILL.md`: this checkout's instan
 - Controller-answered streams get no item keys until S6: no blank frame, but no row survival across an epoch change.
 - A restart still appends one `todo` row.
 - Not in S4a: the device store, labels, T1, T2 and the return budget (S4b); the attach shortcut (S5); the Controller's item keys (S6).
+
+## 11. S4a measurements and record
+
+Recorded 2026-11-16 and 2026-11-17 on this checkout's instance (Apple M4, 16 GiB, Chromium 151, Node 22), Copilot only: four sessions (24, 35, 5 and 158 items), made with real turns in the instance workspace. `ARC_LOCAL_JOURNALS=1` was exported for every `up`, restarts made by the runner included. Raw JSON: `.tmp/s4/` (not committed). The tables are the output of `summarize-p1d.mjs`.
+
+| Arm | Build | Smart reading for Copilot |
+|---|---|---|
+| Control | the `dist` of `59b05441` (production code identical to `634e72da`; docs only since), measured before any client change, on this checkout's instance (see "Departures") | on |
+| S4a | `7127aea7`, clean | on |
+| S4a crude | `7127aea7` | off (1x and 4x CPU with 100 ms only) |
+
+**Method.**
+- `latency-proxy.mjs` delays HTTP and WebSocket traffic by half a round trip each way; a run is invalid when no WebSocket crossed it. 4x CPU is the Chromium throttle. One headless page per sample: pages of one user share their Window, so a second page switches the first.
+- `restart-continuity`: one page on a session, every row node marked, `pnpm local up --no-build`, the nodes still in the document counted; six restarts per condition, the four sessions in turn.
+- `replacement-absorbed`: a turn whose shell command takes a minute runs in the session, one page holds it with every row marked, a draft in the composer and the timeline scrolled to its middle; the instance restarts during the tool. The Controller's window then differs from the journal's open tool and the Relay replaces the journal (reason `open_item`). Only samples for which the Relay recorded a `changed` or `open_item` window count as forced; the others are listed as used. The S4a numbers pool two runs of six (the second scrolled with a wheel event, like a reader, the first by setting `scrollTop`).
+- `runtime-release`: Copilot has no runtime to release (`released: false`), so it shows rows kept while nothing happens.
+- A sample counts only when journal-served: the control by the page's epochs equalling the epoch in `journals.sqlite` before and after the sample, S4a by the stream echoing `itemKeys`. A percentile needs 20 samples; no cell has them, so cells state maxima and counts (n = 6 per condition, 12 pooled for the replacement scenario, below the plan's minimum of 10 for single runs).
+
+### T6: the open conversation across a Controller and Relay restart
+
+| Arm | Condition | Samples used | Rows marked | Rows re-keyed | Row-less states (max) | Verdict (0 and 0) |
+| --- | --- | --- | --- | --- | --- | --- |
+| P0 (marks the first row only) | no emulation | n/a | n/a | 2 of 2 sessions lost the marked row; 0 row-less states | n/a | n/a |
+| control | no emulation | 6/6 | 226 | 0 | 0 | pass |
+| control | 4x CPU | 6/6 | 269 | 0 | 0 | pass |
+| control | 100 ms round trip | 6/6 | 316 | 0 | 0 | pass |
+| control | 4x CPU and 100 ms round trip | 6/6 | 361 | 0 | 0 | pass |
+| s4a | no emulation | 6/6 | 396 | 0 | 0 | pass |
+| s4a | 4x CPU | 6/6 | 415 | 0 | 0 | pass |
+| s4a | 100 ms round trip | 6/6 | 432 | 0 | 0 | pass |
+| s4a | 4x CPU and 100 ms round trip | 6/6 | 448 | 0 | 0 | pass |
+| s4a-crude | no emulation | 6/6 | 519 | 519 | 0 | miss |
+| s4a-crude | 4x CPU and 100 ms round trip | 6/6 | 536 | 536 | 0 | miss |
+
+### T6: a forced replacement (the Relay recorded a `changed` or `open_item` window; other samples are not counted)
+
+| Arm | Condition | Samples (forced/used/all) | Rows marked | Rows re-keyed | Row-less states (max) | Draft changed | Focus lost (editor disabled while reconnecting) | Anchor lost | Anchor shift max (px) | Verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| control | no emulation | 5/6/6 | 239 | 239 | 0 | 0 | 5 | 5 | 0 | miss |
+| control | 4x CPU | 4/6/6 | 257 | 257 | 0 | 0 | 4 | 4 | 0 | miss |
+| control | 100 ms round trip | 4/6/6 | 288 | 288 | 0 | 0 | 4 | 4 | 0 | miss |
+| control | 4x CPU and 100 ms round trip | 4/6/6 | 317 | 317 | 0 | 0 | 4 | 4 | 0 | miss |
+| s4a | no emulation | 5/12/12 | 441 | 0 | 0 | 0 | 5 | 0 | 0 | pass |
+| s4a | 4x CPU | 5/12/12 | 500 | 0 | 0 | 0 | 5 | 0 | 0 | pass |
+| s4a | 100 ms round trip | 5/12/12 | 459 | 0 | 0 | 0 | 5 | 0 | 91.4 | miss |
+| s4a | 4x CPU and 100 ms round trip | 4/12/12 | 400 | 0 | 0 | 0 | 4 | 0 | 91.4 | miss |
+| s4a-crude | no emulation | 6/6/6 | 533 | 533 | 0 | 0 | 0 | 6 | 0 | miss |
+| s4a-crude | 4x CPU and 100 ms round trip | 6/6/6 | 548 | 548 | 0 | 0 | 0 | 6 | 0 | miss |
+
+### T6: a runtime release
+
+| Arm | Condition | Samples used | Rows marked | Rows re-keyed | Row-less states (max) | Verdict |
+| --- | --- | --- | --- | --- | --- | --- |
+| control | no emulation | 4/4 | 166 | 0 | 0 | pass |
+| control | 4x CPU | 4/4 | 189 | 0 | 0 | pass |
+| control | 100 ms round trip | 4/4 | 214 | 0 | 0 | pass |
+| control | 4x CPU and 100 ms round trip | 4/4 | 238 | 0 | 0 | pass |
+| s4a | no emulation | 4/4 | 258 | 0 | 0 | pass |
+| s4a | 4x CPU | 4/4 | 269 | 0 | 0 | pass |
+| s4a | 100 ms round trip | 4/4 | 279 | 0 | 0 | pass |
+| s4a | 4x CPU and 100 ms round trip | 4/4 | 289 | 0 | 0 | pass |
+| s4a-crude | no emulation | 4/4 | 331 | 0 | 0 | pass |
+| s4a-crude | 4x CPU and 100 ms round trip | 4/4 | 341 | 0 | 0 | pass |
+
+### Switch time (median of the switches of one run; below the 20-sample minimum for a percentile)
+
+| Arm | Condition | Cold ms | Warm ms | HTTP API requests (cold / warm) | Opening-label states (cold / warm) | Row-less states (cold / warm) | Verdict (warm no slower than cold) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| P0 | no emulation | 67 | 100 | n/a | n/a | n/a | n/a |
+| P0 | 4x CPU | 88 | 110 | n/a | n/a | n/a | n/a |
+| control | no emulation | 43 | 43 | 1 / 1 | 0 / 1 | 0 / 1 | pass |
+| control | 4x CPU | 77 | 66 | 1 / 1 | 1 / 1 | 1 / 1 | pass |
+| control | 100 ms round trip | 48 | 45 | 1 / 1 | 0 / 1 | 0 / 1 | pass |
+| control | 4x CPU and 100 ms round trip | 74 | 62 | 1 / 1 | 1 / 1 | 1 / 1 | pass |
+| s4a | no emulation | 45 | 46 | 1 / 1 | 0 / 1 | 0 / 1 | miss |
+| s4a | 4x CPU | 71 | 70 | 1 / 1 | 1 / 1 | 1 / 1 | pass |
+| s4a | 100 ms round trip | 40 | 44 | 1 / 1 | 1 / 1 | 0 / 0 | miss |
+| s4a | 4x CPU and 100 ms round trip | 68 | 75 | 1 / 1 | 1 / 1 | 1 / 1 | miss |
+| s4a-crude | no emulation | 46 | 45 | 1 / 1 | 0 / 1 | 0 / 1 | pass |
+| s4a-crude | 4x CPU and 100 ms round trip | 74 | 62 | 1 / 1 | 1 / 1 | 1 / 1 | pass |
+
+
+**Verdicts.**
+
+- **T6, a Controller restart with the page open: met by the control and by S4a.** 0 of 1,172 marked rows re-keyed in the control (24 samples) and 0 of 1,691 in S4a (24 samples), 0 row-less states in both; the budget "no re-keyed rows after a Controller restart" held already, because the journal keeps its epoch across a restart. What S4a changes is what the Relay sees: the 24 restarts gave 39 windows, all `unchanged` (the control: 28 `unchanged` and 11 `appended`, one per Controller start of a session with a todo board). One restart of a fresh session with a todo board, five times: 5 `unchanged` windows, 2,300 bytes each, one `todo` item and nothing written (S3: 12,422 bytes and one more `todo:<uuid>` item per start, 7 after 6).
+- **T6, a forced replacement: missed by the control, met by S4a for rows and draft.** The control re-keyed every row of every forced sample (1,101 of 1,101 rows over 17 samples: 239, 257, 288 and 317 per condition) and lost its anchor row. S4a re-keyed 0 of 1,800 rows over 19 forced samples (the unchanged rows kept their DOM nodes; `open_item` replaced the journal), had 0 row-less states, kept the draft text and selection in all of them and kept the anchor row in all of them. The editor loses focus in the forced samples of both builds because it is disabled while the session reconnects (the Controller restarted), which has nothing to do with the replacement; the real-browser test shows focus kept when nothing reconnects. The reading position of the anchor row moved by 34 to 91 px in the runner's samples of S4a, in unforced samples (an unchanged window, 10 to 61 px) as well as forced ones (about 90 px). The unforced shift is the session-control notice that appears while the session reconnects; the forced one, in the 158-item session, is the running tool row that lost its output and became 90 px shorter while the timeline followed its bottom (screenshots in `.tmp/s4/shots/`). The 1 px criterion is therefore proven in the real browser test (a reader holding a row stays within 4 px of half-pixel layout through a replacement that removes and adds rows above it), not on the live instance.
+- **T6, a runtime release:** rows kept in every arm (Copilot has nothing to release).
+- **The crude path (smart reading off):** every row is re-keyed at every restart and replacement (519 of 519, 533 of 533) and there is never a row-less state (0). Controller-answered streams have no item keys until S6; what S4a gives them is no blank frame, because the replacement keeps the held rows until its tail is read.
+- **Switch time** (recorded, no P0 criterion): S4a cold 40 to 71 ms and warm 44 to 75 ms at the median (the control cold 43 to 77 ms, warm 43 to 66 ms), 1 HTTP request per switch, 0 to 1 opening-label states and 0 to 1 row-less states per switch, equal to the control within noise; "warm no slower than cold" misses by 1 to 7 ms in three S4a conditions, which is noise on medians of 12 switches. The switch is not the bottleneck on a journal-served session.
+- **Replacements per open:** 0 replaced windows in 24 restart samples and 16 release samples of S4a (the control: 0 as well); the only replacements are the forced ones.
+
+**Counted state (rule 1).**
+
+| Item | Before | After |
+|---|---|---|
+| Replica fields | | +1 (`pendingEpoch`) |
+| Reduction outcomes | 7 | 6 (`applied`, `buffered`, `duplicate`, `gap`, `replaced`, `stale_epoch`) |
+| Outgoing ledger fields | `epoch`, `afterSeq`, `consumedEchoSeqs` | `afterKey`, `consumedEchoKeys` |
+| Journal core | 3 live-only special cases in `extensionOf` | `planOf` loop and `nativeExtension` (one rule) |
+| Wire | | 4 optional fields (`itemKey` twice, `itemKeys` twice), 1 enum value, 1 optional field on the page request between the Relay and its store |
+| `SessionPublication` | 19 fields, 4 recovery outcomes | unchanged |
+| Journal items | 1 more per Controller start of a todo session | 0 |
+| Lab | `retainedDisplay` | kept (see "Departures") |
+
+Production code `634e72da..HEAD`: +467/-157 lines in 34 files (tests +1,158/-51, measurement tooling +558/-64, documents +5/-3).
+
+**Departures from the plan.**
+
+- **The control ran on this checkout's instance, not in `.worktrees/s4-control`** (the owner's instruction for this run). Its production code is the build that was already running (`59b05441`), and no product code was rebuilt until the control finished; the runner's `up --no-build` restarts reported the checkout's newer revision (docs and runner changes only). The control cannot be re-measured now: the `dist` was rebuilt for S4a.
+- **The forced replacement is a restart during a long tool, not an edit of native history.** The instruction for this run is never to touch `~/.copilot`. The restart makes the Controller's window differ from the journal's open tool item (`open_item`), a real replacement with real changed rows, but whether the window differs depends on the native history, so only some samples force one; the summary counts those.
+- **`retainedDisplay` stays.** It also keeps a pane that the live budget released showing its last rows (`SessionConversation.connections.test.tsx` pins it), not only the clear-and-refill that no longer happens. S4b's device store replaces it.
+- **The browser acceptance is a bundled fixture in Chromium, not a spec against a journal-served Relay.** It renders the product's timeline, composer and scroll hook over the replica and replaces the epoch as the client does; the live instance, with real browser, real Relay and real Controller, covers the rest through the runner and the local check. The real-transport tests of acceptance 1 to 5 run the real client over a real WebSocket against a scripted journal Relay in jsdom; the flag and the refusing Controller run against the hosted broker (in-memory sockets, as its other tests), not over HTTP.
+- **The page request carries the flag** (`itemKeys` on the request between the Relay and its store) instead of the stream removing the key from entries: the Cloudflare partition contract answers a request without it exactly as before, so an older primary Worker can read a newer partition.
+- **The reading position** is within 4 px in the real-browser test, not 1 px, and not measured against a replacement alone on the live instance (see verdicts).
+- **Sequence labels.** A row ignores a change of its sequence alone, so its `Inspect event #N` label keeps the number it had when it last rendered; the inspector reads the row by key.
+- **Samples:** 6 per condition (12 pooled for the replacement scenario), not 10 or 20, because every sample restarts the instance.
+- **Task 3's Relay-level test** runs in `journal-window.copilot.journal.test.ts` (Relay loopback over the recorded Copilot runs) and in `journal-sync.test.ts`, not in a separate hosted test.
+
+**What the owner must know.** No Controller has to update: the Relay removes the flag before a Controller sees it, the failed-compaction status needs the Relay and the bundle to update before Controllers (a Relay that does not know it rejects the item), and the Cloudflare partitions Worker still deploys first. The web bundle now sends `itemKeys: true`, so it needs a Relay of this build (the bundle and the Relay ship together).

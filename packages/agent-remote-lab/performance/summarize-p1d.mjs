@@ -33,14 +33,25 @@ export function rowSurvival(samples) {
   return { n: samples.length, rows: total, rekeyed: total - alive, rowlessMax: Math.max(0, ...samples.map(sample => sample.rowlessStates ?? 0)) };
 }
 
+/**
+ * The draft survived: the same text and selection. Focus is reported apart: the editor is disabled while the session reconnects (it is
+ * read-only until the session is taken again), and a disabled editor loses focus whatever a replacement does.
+ */
+export function composerKept(sample) {
+  const { composerBefore: before, composerAfter: after } = sample;
+  if (!before || !after) return sample.composerUnchanged === true;
+  return before.text === after.text && before.selectionStart === after.selectionStart && before.selectionEnd === after.selectionEnd;
+}
+
 /** T6, forced replacement: rekeyed rows, row-less states, composer and anchor, over the samples in which a replacement happened. */
 export function replacementResult(samples) {
   const forced = samples.filter(sample => sample.replacementForced === true);
   const survival = rowSurvival(forced);
-  const anchored = forced.filter(sample => sample.anchorKey !== null);
-  return { ...survival, forced: forced.length, composerChanged: forced.filter(sample => !sample.composerUnchanged).length,
+  const anchored = forced.filter(sample => sample.anchorKey !== null && (sample.wheelIntent === true || sample.anchorSurvived === false));
+  return { ...survival, forced: forced.length, composerChanged: forced.filter(sample => !composerKept(sample)).length,
+    focusLost: forced.filter(sample => sample.composerBefore?.focused === true && sample.composerAfter?.focused === false).length,
     anchorLost: anchored.filter(sample => !sample.anchorSurvived).length, anchorShiftMaxPx: Math.max(0, ...anchored.map(sample => sample.anchorShiftPx ?? 0)),
-    pass: forced.length > 0 && survival.rekeyed === 0 && survival.rowlessMax === 0 && forced.every(sample => sample.composerUnchanged)
+    pass: forced.length > 0 && survival.rekeyed === 0 && survival.rowlessMax === 0 && forced.every(composerKept)
       && anchored.every(sample => sample.anchorSurvived && (sample.anchorShiftPx ?? Infinity) <= 1) };
 }
 
@@ -76,10 +87,16 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
     [['P0 (marks the first row only)', 'no emulation', 'n/a', 'n/a', p0Text, 'n/a', 'n/a'],
       ...restart.map(({ entry, used: own }) => { const result = rowSurvival(own.kept); return [entry.arm, entry.name, sampleCount(own), result.rows, result.rekeyed, result.rowlessMax, own.kept.length ? verdictOf(result.rekeyed === 0 && result.rowlessMax === 0) : 'no samples']; })]);
 
-  const forced = valid.map(entry => ({ entry, used: used(entry, 'replacement-absorbed') })).filter(item => item.used);
-  table('T6: a forced replacement (the Relay recorded a `changed` or `open_item` window; other samples are not counted)', ['Arm', 'Condition', 'Samples (forced/used/all)', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Composer changed', 'Anchor lost', 'Anchor shift max (px)', 'Verdict'],
+  // Every run of the scenario counts for rows and draft; the reading position only from samples that scrolled with a wheel event,
+  // the way a reader does (an earlier run scrolled by setting scrollTop, which leaves the timeline following the latest content).
+  const forced = valid.map(entry => {
+    const names = Object.keys(entry.run.scenarios ?? {}).filter(name => name.startsWith('replacement-absorbed'));
+    const all = names.flatMap(name => scenario(entry, name)?.samples ?? []);
+    return { entry, used: names.length ? { all, kept: usable(entry.arm, all) } : undefined };
+  }).filter(item => item.used);
+  table('T6: a forced replacement (the Relay recorded a `changed` or `open_item` window; other samples are not counted)', ['Arm', 'Condition', 'Samples (forced/used/all)', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Draft changed', 'Focus lost (editor disabled while reconnecting)', 'Anchor lost', 'Anchor shift max (px)', 'Verdict'],
     // The crude path has no journal windows to name a replacement: every restart replaces the Controller's own epoch, so every sample counts.
-    forced.map(({ entry, used: own }) => { const result = replacementResult(entry.arm === 's4a-crude' ? own.kept.map(sample => ({ ...sample, replacementForced: true })) : own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
+    forced.map(({ entry, used: own }) => { const result = replacementResult(entry.arm === 's4a-crude' ? own.kept.map(sample => ({ ...sample, replacementForced: true })) : own.kept); return [entry.arm, entry.name, `${result.forced}/${own.kept.length}/${own.all.length}`, result.rows, result.rekeyed, result.rowlessMax, result.composerChanged, result.focusLost, result.anchorLost, result.anchorShiftMaxPx, result.forced ? verdictOf(result.pass) : 'no replacement forced']; }));
 
   const release = valid.map(entry => ({ entry, used: used(entry, 'runtime-release') ?? used(entry, 'release-continuity') })).filter(item => item.used);
   table('T6: a runtime release', ['Arm', 'Condition', 'Samples used', 'Rows marked', 'Rows re-keyed', 'Row-less states (max)', 'Verdict'],

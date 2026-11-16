@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { composerUnchanged, journalServed, parseJournalMeta, rowlessStates, reportable } from '../performance/journal-measurement.mjs';
-import { figure, replacementResult, rowSurvival, summarize, usable } from '../performance/summarize-p1d.mjs';
+import { composerKept, figure, replacementResult, rowSurvival, summarize, usable } from '../performance/summarize-p1d.mjs';
 
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
@@ -60,16 +60,26 @@ describe('the summary', () => {
     expect(usable('s4a-crude', samples)).toHaveLength(2);
   });
 
+  it('keeps a draft by its text and selection, not by its focus, which a disabled editor loses', () => {
+    const before = { text: 'draft', focused: true, selectionStart: 5, selectionEnd: 5 };
+    expect(composerKept({ composerBefore: before, composerAfter: { ...before, focused: false } })).toBe(true);
+    expect(composerKept({ composerBefore: before, composerAfter: { ...before, text: 'draf' } })).toBe(false);
+    expect(composerKept({ composerBefore: before, composerAfter: { ...before, selectionStart: 2 } })).toBe(false);
+    expect(composerKept({ composerUnchanged: true })).toBe(true);
+  });
+
   it('counts re-keyed rows and row-less states', () => {
     expect(rowSurvival([{ rows: { total: 10, alive: 10 }, rowlessStates: 0 }, { rows: { total: 20, alive: 15 }, rowlessStates: 2 }])).toEqual({ n: 2, rows: 30, rekeyed: 5, rowlessMax: 2 });
   });
 
   it('passes a forced replacement only when rows, composer and anchor held, and counts only forced samples', () => {
-    const good = { replacementForced: true, rows: { total: 10, alive: 10 }, rowlessStates: 0, composerUnchanged: true, anchorKey: 'k', anchorSurvived: true, anchorShiftPx: 0.5 };
+    const good = { wheelIntent: true, replacementForced: true, rows: { total: 10, alive: 10 }, rowlessStates: 0, composerUnchanged: true, anchorKey: 'k', anchorSurvived: true, anchorShiftPx: 0.5 };
     expect(replacementResult([good, { ...good, replacementForced: false, rows: { total: 10, alive: 0 } }]).pass).toBe(true);
     expect(replacementResult([{ ...good, anchorShiftPx: 3 }]).pass).toBe(false);
     expect(replacementResult([{ ...good, rows: { total: 10, alive: 9 } }]).pass).toBe(false);
     expect(replacementResult([{ ...good, replacementForced: false }]).pass).toBe(false);
+    // A sample that scrolled without a wheel event says nothing about the reading position, but its rows and draft count.
+    expect(replacementResult([{ ...good, wheelIntent: undefined, anchorShiftPx: 90 }]).pass).toBe(true);
   });
 
   it('prints a table per target with the verdicts, excludes an invalid run and states what it did not use', () => {
@@ -89,7 +99,7 @@ describe('the summary', () => {
     expect(text).toContain('s4a/rtt100: No WebSocket crossed');
     expect(text).toMatch(/\| control \| no emulation \| 2\/3 \| 20 \| 6 \| 0 \| miss \|/);
     expect(text).toMatch(/\| s4a \| no emulation \| 2\/2 \| 20 \| 0 \| 0 \| pass \|/);
-    expect(text).toMatch(/\| s4a \| no emulation \| 1\/1\/1 \| 10 \| 0 \| 0 \| 0 \| 0 \| 0 \| pass \|/);
+    expect(text).toMatch(/\| s4a \| no emulation \| 1\/1\/1 \| 10 \| 0 \| 0 \| 0 \| 0 \| 0 \| 0 \| pass \|/);
     expect(text).toMatch(/\| control \| no emulation \| 300 \| 120 \| 4 \/ 1 \| 2 \/ 0 \| 1 \/ 0 \| pass \|/);
     expect(text).not.toMatch(/100 ms round trip \| 1\/1/);
   });

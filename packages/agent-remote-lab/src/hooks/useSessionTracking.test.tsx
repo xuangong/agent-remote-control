@@ -759,6 +759,52 @@ it.each([
   } finally { await act(async () => { acquired.release(); connections.clear(); }); }
 });
 
+it('acknowledges activity whose cursor is in an epoch the replica retired, once the replica holds the new epoch', async () => {
+  const primary = { ...star, agentId: 'native' };
+  saveTrackedSessions('alice', [star]);
+  const activity = new Map<string, Parameters<RemoteAgentTransport['connect']>[1]>();
+  const transport: RemoteAgentTransport = {
+    fetchSnapshot: async () => { throw new Error('Activity tracking must not load snapshots'); },
+    fetchTimeline: async () => { throw new Error('Activity tracking must not load history'); },
+    onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
+    connect(id, listener) {
+      queueMicrotask(() => listener.onOpen());
+      return { close: () => {}, send: message => {
+        if (message.type !== 'negotiate' || message.observation !== 'activity') return;
+        activity.set(id, listener);
+        listener.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: id, status: 'idle', cursor: { epoch: 'content', seq: 1 } } });
+      } };
+    },
+  };
+  const page = (seq: number, epoch: string): import('@orchardworks/agent-remote-protocol').HistoryPage => ({
+    protocolVersion: '1.8.0', type: 'timeline_page', payload: {
+      requestId: `history-${epoch}-${seq}`, agentId: 'native', direction: 'tail', epoch, reset: false, staleCursor: false, gap: false, error: null,
+      window: { minSeq: 1, maxSeq: seq, nextSeq: seq + 1 }, startCursor: { epoch, seq: 1 }, endCursor: { epoch, seq },
+      hasOlder: false, hasNewer: false, entries: [{ providerId: 'codex', itemKey: 'row', seqStart: 1, seqEnd: seq,
+        sourceSeqRanges: [{ startSeq: 1, endSeq: seq }], collapsed: [], resources: [], timestamp: '2026-10-03T00:00:00Z',
+        item: { type: 'assistant_message', text: `Output ${seq}` } }],
+    },
+  });
+  const replica = new AgentReplica(); replica.applyHistory(page(1, 'content'));
+  const connections = new ConversationConnections(transport);
+  const acquired = keepOpen(connections, primary.agentId, replica, primary);
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+  let tracking!: SessionTracking;
+  function Fixture() {
+    tracking = useSessionTracking('alice', transport, sessionKey(primary), [primary], undefined, connections, true, [primary]);
+    return <>{tracking.observers}</>;
+  }
+  try {
+    await render(<Fixture />);
+    // A replacement: the replica reads the tail of the new epoch, which retires `content`.
+    await act(async () => { replica.replaceTimeline('replacement'); replica.applyHistory(page(2, 'replacement')); });
+    expect(replica.getState().retiredEpochs).toContain('content');
+    // Activity still names a cursor in the retired epoch; it counts as read, because the replica holds the content that replaced it.
+    await act(async () => activity.get('native')!.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: 'native', status: 'idle', cursor: { epoch: 'content', seq: 5 } } }));
+    expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
+  } finally { await act(async () => { acquired.release(); connections.clear(); }); }
+});
+
 it.each(['scope', 'transport'] as const)('does not reuse read content after the tracking %s changes', async boundary => {
   const primary = { ...star, agentId: 'native' };
   saveTrackedSessions('alice', [star]);

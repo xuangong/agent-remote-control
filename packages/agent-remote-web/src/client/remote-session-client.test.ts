@@ -853,6 +853,29 @@ describe('RemoteSessionClient', () => {
     await expect(pending).resolves.toEqual(acknowledgement);
   });
 
+  it('takes a question from the update alone, accepts the answer, and drops the question with the next update', async () => {
+    const transport = new FakeTransport();
+    const replica = new AgentReplica();
+    const client = new RemoteSessionClient('agent-one', transport, replica);
+    client.start();
+    transport.open();
+    const base = snapshot().payload;
+    const request = { kind: 'plan_approval' as const, requestId: 'interaction-one', plan: 'Check the evidence.', allowedActions: ['approve' as const] };
+    transport.emit({ protocolVersion: '1.8.0', type: 'agent_update', payload: { ...base, pendingInteractions: [request] } });
+    expect(replica.getState().pendingInteractions.map(value => value.requestId)).toEqual(['interaction-one']);
+
+    const pending = client.respondToInteraction('interaction-one', { kind: 'plan_approval', action: 'approve' });
+    const submission = transport.sent.at(-1);
+    if (submission?.type !== 'interaction_response') throw new Error('Expected interaction response');
+    const acknowledgement = { protocolVersion: '1.8.0' as const, type: 'command_acknowledged' as const,
+      payload: { agentId: 'agent-one', requestId: submission.payload.submissionId, command: 'interaction_response' as const } };
+    transport.emit(acknowledgement);
+    await expect(pending).resolves.toEqual(acknowledgement);
+
+    transport.emit({ protocolVersion: '1.8.0', type: 'agent_update', payload: { ...base, updatedAt: '2026-09-02T00:00:02.000Z', pendingInteractions: [] } });
+    expect(replica.getState().pendingInteractions).toEqual([]);
+  });
+
   it('invalidates an interaction locally while keeping submission correlation independent', async () => {
     const transport = new FakeTransport();
     const replica = new AgentReplica();

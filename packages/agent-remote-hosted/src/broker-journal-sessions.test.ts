@@ -263,6 +263,27 @@ it('reads a session whose listing said it had a head through the Controller, and
   expect(texts(await third.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello']);
 });
 
+it('delivers a question to the browser only inside the head, never as the Controller\'s interaction frame, and removes it with the next head', async () => {
+  const question = { kind: 'question', requestId: 'question-1', questions: [{ questionId: 'q', header: 'Pick', prompt: 'Which?', required: true, selection: 'single', options: [{ value: 'a', label: 'A', description: 'a' }], allowCustomText: false, allowDismiss: false }] };
+  const r = await relay();
+  const { controller } = await publishedController(r);
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  const stream = await negotiatedControllerStream(controller);
+  const before = browser.frames.length;
+  await controller.publish([{ op: 'head', head: { snapshot: { ...snapshot('running', 'native-session'), pendingInteractions: [question] }, observedAt: 6 } }]);
+  controller.toStream(stream.streamId, { type: 'interaction_requested', payload: { agentId: PUBLIC_ID, request: question } });
+  await until(() => browser.frames.slice(before).some(frame => frame.type === 'agent_update') ? true : undefined, 'the head that carries the question');
+  expect(browser.frames.slice(before).find(frame => frame.type === 'agent_update')!.payload.pendingInteractions[0].requestId).toBe('question-1');
+  const answered = browser.frames.length;
+  controller.toStream(stream.streamId, { type: 'interaction_resolved', payload: { agentId: PUBLIC_ID, requestId: 'question-1', response: { kind: 'question', answers: [] } } });
+  await controller.publish([{ op: 'head', head: { snapshot: snapshot('running', 'native-session'), observedAt: 7 } }]);
+  await until(() => browser.frames.slice(answered).some(frame => frame.type === 'agent_update') ? true : undefined, 'the head that no longer carries the question');
+  expect(browser.frames.slice(answered).find(frame => frame.type === 'agent_update')!.payload.pendingInteractions).toEqual([]);
+  await sleep(30);
+  expect(browser.frames.some(frame => String(frame.type).startsWith('interaction_'))).toBe(false);
+});
+
 it('answers a session channel subscription from the journal', async () => {
   const r = await relay({ seed: store => seedJournal(store) });
   const channel = socketPair(r.closers);

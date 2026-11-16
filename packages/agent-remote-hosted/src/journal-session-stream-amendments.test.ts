@@ -98,82 +98,29 @@ describe('the attention cursor of a served head', () => {
   });
 });
 
-describe('interaction frames from the Controller', () => {
-  it('reach the browser at once when the head it was sent already agrees', async () => {
+describe('pending interactions on a journal-served stream', () => {
+  const answer = { kind: 'question', answers: [] };
+  it('never forward the interaction frames of the Controller, and keep no timer for them', async () => {
     const f = fixture();
     await f.ready();
+    const before = f.sent.length;
     f.stream.deliver(f.setHead([request]));
     f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
-    expect(f.sent.at(-1)).toMatchObject({ type: 'interaction_requested', payload: { request: { requestId: 'question-1' } } });
+    f.fromController({ type: 'interaction_invalidated', payload: { agentId: 'agent', requestId: 'question-1', reason: 'Canceled.' } });
     f.stream.deliver(f.setHead([]));
-    f.fromController({ type: 'interaction_resolved', payload: { agentId: 'agent', requestId: 'question-1', response: { kind: 'question', answers: [] } } });
-    expect(f.sent.at(-1)).toMatchObject({ type: 'interaction_resolved' });
-  });
-
-  it('wait for the head that carries the question, so an older head never overtakes the question', async () => {
-    const f = fixture();
-    await f.ready();
-    const before = f.sent.length;
-    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
-    expect(f.sent).toHaveLength(before);
-    f.stream.deliver(f.setHead([request]));
-    expect(f.types().slice(before)).toEqual(['agent_update', 'interaction_requested']);
-    expect(f.sent[before]!.payload.pendingInteractions).toHaveLength(1);
-  });
-
-  it('wait for the head that no longer lists a resolved question, and keep their order', async () => {
-    const f = fixture();
-    await f.ready();
-    f.stream.deliver(f.setHead([request]));
-    const before = f.sent.length;
-    f.fromController({ type: 'interaction_resolved', payload: { agentId: 'agent', requestId: 'question-1', response: { kind: 'question', answers: [] } } });
-    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: { ...request, requestId: 'question-2' } } });
-    expect(f.sent).toHaveLength(before);
-    f.stream.deliver(f.setHead([{ ...request, requestId: 'question-2' }]));
-    expect(f.types().slice(before)).toEqual(['agent_update', 'interaction_resolved', 'interaction_requested']);
-  });
-
-  it('are sent after two seconds even when no head agrees, and the timer is cleared when the stream ends', async () => {
-    const f = fixture();
-    await f.ready();
-    const before = f.sent.length;
-    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
-    expect(f.timers.size).toBe(1);
-    for (const [id, callback] of [...f.timers]) { f.timers.delete(id); callback(); }
-    expect(f.sent.slice(before).map(message => message.type)).toEqual(['interaction_requested']);
-    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: { ...request, requestId: 'question-3' } } });
-    expect(f.timers.size).toBe(1);
-    f.stream.close();
+    f.fromController({ type: 'interaction_resolved', payload: { agentId: 'agent', requestId: 'question-1', response: answer } });
+    expect(f.types().slice(before)).toEqual(['agent_update', 'agent_update']);
     expect(f.timers.size).toBe(0);
   });
 
-  it('are bounded in bytes too: past one mebibyte of waiting frames the oldest is sent at once', async () => {
+  it('reach the browser only inside the head: an update that lacks a question removes it', async () => {
     const f = fixture();
     await f.ready();
     const before = f.sent.length;
-    const large = (at: number) => ({ ...request, requestId: `large-${at}`, questions: [{ ...request.questions[0]!, prompt: 'x'.repeat(400_000) }] });
-    for (let at = 0; at < 3; at += 1) f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: large(at) } });
-    expect(f.sent.slice(before).map(message => message.payload.request.requestId)).toEqual(['large-0']);
-    expect(f.timers.size).toBe(2);
-  });
-
-  it('are dropped, without a timer, when they arrive after the stream closed', async () => {
-    const f = fixture();
-    await f.ready();
-    const before = f.sent.length;
-    f.stream.close();
-    f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });
-    expect(f.timers.size).toBe(0);
-    expect(f.sent).toHaveLength(before);
-  });
-
-  it('are bounded: past 64 waiting frames the oldest is sent at once', async () => {
-    const f = fixture();
-    await f.ready();
-    const before = f.sent.length;
-    for (let at = 0; at < 70; at += 1) f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request: { ...request, requestId: `question-${at}` } } });
-    expect(f.sent.length - before).toBe(6);
-    expect(f.sent[before]!.payload.request.requestId).toBe('question-0');
-    expect(f.timers.size).toBe(64);
+    f.stream.deliver(f.setHead([request]));
+    f.stream.deliver(f.setHead([]));
+    const updates = f.sent.slice(before);
+    expect(updates.map(message => message.type)).toEqual(['agent_update', 'agent_update']);
+    expect(updates.map(message => message.payload.pendingInteractions.map((value: Wire) => value.requestId))).toEqual([['question-1'], []]);
   });
 });

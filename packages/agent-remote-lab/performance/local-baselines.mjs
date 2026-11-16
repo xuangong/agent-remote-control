@@ -482,72 +482,65 @@ const scenarios = {
   async 'release-continuity'() { return releaseContinuity(sessions, false); },
   // T6 for the sessions that read from the Relay's journal: the same release, with the windows the Relay recorded.
   async 'runtime-release'() { return releaseContinuity(copilotSessions(), true); },
-  // T6: the open conversations across a Controller (and Relay) restart, `pnpm local up --no-build`. Every session is open in its own page
-  // of one context, so one restart gives one sample per session; `--reps` restarts.
+  // T6: the open conversation across a Controller (and Relay) restart, `pnpm local up --no-build`. One page per restart: pages of one
+  // user share their Window, so a second session page would switch the first. `--reps` restarts, the sessions in turn.
   async 'restart-continuity'() {
     const samples = [], steps = [];
-    const startedAt = Date.now();
-    await inContext(async context => {
-      for (let rep = 0; rep < reps; rep++) {
-        const opened = await openMarked(context, sessions);
-        for (const item of opened) { await item.handle.clearLog(); item.handle.reset(); }
-        const start = Date.now();
+    for (let rep = 0; rep < reps; rep++) {
+      const session = sessions[rep % sessions.length];
+      const start = await inContext(async context => {
+        const [item] = await openMarked(context, [session]);
+        await item.handle.clearLog(); item.handle.reset();
+        const begin = Date.now();
         await restartInstance();
-        const restartCommandMs = Date.now() - start;
-        for (const item of opened) item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${item.session.address}`, 90_000).then(() => Date.now() - start, () => null);
+        item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${session.address}`, 90_000).then(() => Date.now() - begin, () => null);
         await delay(1000);
-        for (const item of opened) samples.push({ rep, ...(await settledRows(item, start)), restartCommandMs });
-        steps.push({ rep, fromMs: start, toMs: Date.now() });
-        for (const item of opened) await item.handle.page.close();
-        await delay(5000);
-      }
-    });
-    return { method: 'Every session open in its own page, every row node marked, `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready. rows.alive of rows.total marked nodes remain in the document; rowlessStates counts observer states that showed no rows after the first rows. journalServed per the journal signal.',
-      label: options.label ?? null, samples, windowsByRep: await windowsByRep(steps, startedAt) };
+        samples.push({ rep, ...(await settledRows(item, begin)), restartCommandMs: Date.now() - begin });
+        return begin;
+      });
+      steps.push({ rep, fromMs: start, toMs: Date.now() });
+      await delay(5000);
+    }
+    return { method: 'One page open on a session, every row node marked, `pnpm local up --no-build` (restarts the Controller and the Relay together), watch until ready; the sessions in turn, one restart per sample. rows.alive of rows.total marked nodes remain in the document; rowlessStates counts observer states that showed no rows after the first rows. journalServed per the journal signal.',
+      label: options.label ?? null, samples, windowSteps: steps };
   },
-  // T6: a forced replacement. A turn with a long tool runs in each Copilot session when the instance restarts, so the Controller's
-  // window differs from the journal's open item and the Relay replaces the journal (reason `open_item`). Each page holds a draft in its
-  // composer and a scroll position; every row node is marked.
+  // T6: a forced replacement. A turn with a long tool runs in the Copilot session when the instance restarts, so the Controller's
+  // window differs from the journal's open item and the Relay replaces the journal (reason `open_item`). The page holds a draft in its
+  // composer and a scroll position; every row node is marked. One page per restart (see restart-continuity).
   async 'replacement-absorbed'() {
     const own = copilotSessions();
     const samples = [], steps = [];
-    const startedAt = Date.now();
-    await inContext(async context => {
-      for (let rep = 0; rep < reps; rep++) {
-        for (const session of own) startLongTool(session);
-        for (const session of own) await approveToolAndWait(session);
-        const opened = await openMarked(context, own, state => state.entries > 0 && !state.loading.length);
-        for (const [index, item] of opened.entries()) {
-          await item.handle.page.evaluate(() => window.__baseline.scrollToMiddle());
-          await item.handle.page.locator('[data-testid="prompt-input"]').click();
-          await item.handle.page.keyboard.type(`draft ${rep}-${index}`);
-          await delay(400);
-          item.anchor = await item.handle.page.evaluate(() => window.__baseline.anchor());
-          item.composerBefore = await item.handle.page.evaluate(() => window.__baseline.composer());
-          await item.handle.clearLog(); item.handle.reset();
-        }
-        const start = Date.now();
+    for (let rep = 0; rep < reps; rep++) {
+      const session = own[rep % own.length];
+      startLongTool(session);
+      await approveToolAndWait(session);
+      const start = await inContext(async context => {
+        const [item] = await openMarked(context, [session], state => state.entries > 0 && !state.loading.length);
+        await item.handle.page.evaluate(() => window.__baseline.scrollToMiddle());
+        await item.handle.page.locator('[data-testid="prompt-input"]').click();
+        await item.handle.page.keyboard.type(`draft ${rep}`);
+        await delay(400);
+        item.anchor = await item.handle.page.evaluate(() => window.__baseline.anchor());
+        item.composerBefore = await item.handle.page.evaluate(() => window.__baseline.composer());
+        await item.handle.clearLog(); item.handle.reset();
+        const begin = Date.now();
         await restartInstance();
-        for (const item of opened) item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${item.session.address}`, 90_000).then(() => Date.now() - start, () => null);
+        item.readyAgainMs = await waitForState(item.handle, isReady, `ready after restart of ${session.address}`, 90_000).then(() => Date.now() - begin, () => null);
         await delay(1000);
-        for (const item of opened) {
-          const sample = await settledRows(item, start);
-          const composerAfter = await item.handle.page.evaluate(() => window.__baseline.composer()).catch(() => null);
-          const anchorOffset = item.anchor ? await item.handle.page.evaluate(key => window.__baseline.offsetOf(key), item.anchor.key).catch(() => null) : null;
-          samples.push({ rep, ...sample,
-            composerUnchanged: !!composerAfter && !!item.composerBefore && composerUnchanged(item.composerBefore, composerAfter),
-            composerBefore: item.composerBefore, composerAfter,
-            anchorKey: item.anchor?.key ?? null, anchorSurvived: anchorOffset !== null, anchorShiftPx: anchorOffset !== null && item.anchor ? Math.abs(anchorOffset - item.anchor.offset) : null });
-        }
-        steps.push({ rep, fromMs: start, toMs: Date.now() });
-        for (const item of opened) await item.handle.page.close();
-        await delay(5000);
-      }
-    });
-    const windows = await windowsByRep(steps, startedAt);
-    for (const sample of samples) sample.replacementForced = (windows[sample.rep]?.[sample.address]?.byReason.open_item ?? 0) + (windows[sample.rep]?.[sample.address]?.byReason.changed ?? 0) > 0;
-    return { method: 'Per rep: every Copilot session runs a turn whose shell command takes two minutes; every row node is marked, a draft is typed in the composer and the timeline is scrolled to its middle; `pnpm local up --no-build` restarts the instance during the tool, so the Relay replaces the journal. replacementForced says the Relay recorded a `changed` or `open_item` window for the session; only those samples count.',
-      label: options.label ?? null, samples, windowsByRep: windows };
+        const sample = await settledRows(item, begin);
+        const composerAfter = await item.handle.page.evaluate(() => window.__baseline.composer()).catch(() => null);
+        const anchorOffset = item.anchor ? await item.handle.page.evaluate(key => window.__baseline.offsetOf(key), item.anchor.key).catch(() => null) : null;
+        samples.push({ rep, ...sample,
+          composerUnchanged: !!composerAfter && !!item.composerBefore && composerUnchanged(item.composerBefore, composerAfter),
+          composerBefore: item.composerBefore, composerAfter,
+          anchorKey: item.anchor?.key ?? null, anchorSurvived: anchorOffset !== null, anchorShiftPx: anchorOffset !== null && item.anchor ? Math.abs(anchorOffset - item.anchor.offset) : null });
+        return begin;
+      });
+      steps.push({ rep, fromMs: start, toMs: Date.now() });
+      await delay(5000);
+    }
+    return { method: 'Per rep: a Copilot session runs a turn whose shell command takes two minutes (the runner answers its tool approval); one page holds it with every row node marked, a draft typed in the composer and the timeline scrolled to its middle; `pnpm local up --no-build` restarts the instance during the tool, so the Relay replaces the journal. replacementForced says the Relay recorded a `changed` or `open_item` window for the session; only those samples count.',
+      label: options.label ?? null, samples, windowSteps: steps };
   },
   // S3: the opens of Copilot sessions, journal or Controller. Run it with smart reading on and off (`--label`), at throttle 1 and 4.
   async 'journal-open'() {
@@ -751,17 +744,28 @@ async function settledRows(item, start) {
     states: stateSummary(capture.states, 0), requests: capture.requests, consoleErrors: capture.consoleErrors };
 }
 
-/** The Relay's windows of each session, by reason, for each step `{ rep, fromMs, toMs }`: `{ [rep]: { [address]: windowCounts } }`. */
-async function windowsByRep(steps, startedAt) {
-  const relay = await relayDiagnostics(startedAt);
-  return Object.fromEntries(steps.map(step => [step.rep, Object.fromEntries(sessions.filter(item => item.provider === 'copilot').map(item =>
-    [item.address, windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 3000, agentId: `copilot:${item.address.split('/').at(-1)}` })]))]));
+/**
+ * Adds the Relay's windows to the samples of the scenarios that recorded `windowSteps` (`{ rep, fromMs, toMs }` per sample), once for
+ * the whole run: the Relay's diagnostics reach the Controller's log in batches, so they are read after the last scenario. A sample
+ * gets the windows of its session by reason, and `replacementForced` when the Relay replaced its journal.
+ */
+async function attachWindows() {
+  const withSteps = Object.values(result.scenarios).filter(scenario => scenario.windowSteps);
+  if (!withSteps.length) return;
+  const relay = await relayDiagnostics(Date.parse(result.startedAt));
+  for (const scenario of withSteps) {
+    for (const sample of scenario.samples ?? []) {
+      const step = scenario.windowSteps.find(item => item.rep === sample.rep);
+      if (!step) continue;
+      sample.windows = windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 5000, agentId: `${sample.provider}:${sample.address.split('/').at(-1)}` });
+      sample.replacementForced = (sample.windows.byReason.open_item ?? 0) + (sample.windows.byReason.changed ?? 0) > 0;
+    }
+  }
 }
 
 /** T6: every session open in its own page with its rows marked, its runtime released, and what the pages kept. */
 async function releaseContinuity(list, withWindows) {
   const samples = [], steps = [];
-  const startedAt = Date.now();
   await inContext(async context => {
     for (const session of list) {
       await makeResident(session);
@@ -772,16 +776,16 @@ async function releaseContinuity(list, withWindows) {
       await delay(Math.max(15_000, releaseWaitMs + 15_000));
       const alive = await item.handle.page.evaluate(() => window.__baseline.markAlive());
       const sample = await settledRows(item, start);
-      samples.push({ ...sample, released, markedEntryStillInDocument: alive, stateLog: (await item.handle.capture(start)).states.slice(0, 40) });
+      samples.push({ rep: samples.length, ...sample, released, markedEntryStillInDocument: alive, stateLog: (await item.handle.capture(start)).states.slice(0, 40) });
       steps.push({ rep: samples.length - 1, fromMs: start, toMs: Date.now() });
       await item.handle.page.close();
     }
   });
   return { method: 'Open the conversation, mark every row node, release the runtime, watch at least 15 s (release wait plus 15 s) without acting. Codex gets one tiny turn first, so there is a runtime to release. released says whether the Controller had one (always false for Claude Code and Copilot).',
-    label: options.label ?? null, samples, ...(withWindows ? { windows: await windowsByRep(steps, startedAt) } : {}) };
+    label: options.label ?? null, samples, ...(withWindows ? { windowSteps: steps } : {}) };
 }
 
-const LONG_TOOL_PROMPT = 'Run this exact shell command and wait for it to finish: for i in $(seq 1 24); do echo line-$i; sleep 5; done. Then reply with the single word DONE.';
+const LONG_TOOL_PROMPT = 'Run this exact shell command and wait for it to finish: for i in $(seq 1 12); do echo line-$i; sleep 5; done. Then reply with the single word DONE.';
 const startLongTool = session => { controller('session', 'send', session.address, LONG_TOOL_PROMPT); };
 /** Answers the tool approval of a session that was just sent the long-tool prompt, then waits until the tool runs. */
 async function approveToolAndWait(session) {
@@ -905,6 +909,7 @@ try {
     save();
     await delay(3000); // sign-in budget between scenarios
   }
+  await attachWindows();
 } finally {
   clearTimeout(outer);
   result.finishedAt = new Date().toISOString();

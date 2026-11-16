@@ -1,4 +1,4 @@
-import { watchPagePolling } from '../client/page-polling.js';
+import { watchList } from '../client/feed-reopen.js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { HttpPreviewClient, PinnedPreviewName, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
@@ -110,7 +110,7 @@ export function PreviewProvider({ client, hostId, canManage, polling = true, ena
     };
   }, [scope, snapshots]);
   const pollingInterval = polling || currentBrowsers.length > 0 ? 5_000 : 30_000;
-  useEffect(() => enabled ? watchPagePolling(refresh, pollingInterval) : undefined, [refresh, pollingInterval, enabled]);
+  useEffect(() => enabled ? watchList(refresh, pollingInterval) : undefined, [refresh, pollingInterval, enabled]);
 
   const renewalIssues = usePreviewRenewal(client, hostId, canManage && enabled, currentBrowsers, currentState.registrations, refresh);
 

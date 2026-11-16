@@ -596,7 +596,7 @@ it.each((['primary', 'dock', 'attached', 'float'] as const).flatMap(placement =>
 });
 
 it('refreshes TPM catalogs every 10 s while TPM is in view and once a minute otherwise', async () => {
-  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     let lists = 0;
     const service: TpmService = { tpmList: async () => { lists++; return { supported: true, supportedProviders: ['codex'], works: [work()] }; },

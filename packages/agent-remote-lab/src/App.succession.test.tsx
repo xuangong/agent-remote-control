@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import 'fake-indexeddb/auto';
 import { createServer, type Server } from 'node:http';
 import { createHash, webcrypto } from 'node:crypto';
@@ -802,7 +803,7 @@ it('allows a manual refresh to confirm the retained source after a native restor
   expect(f.requests.some(request => /succession\/(prepare|commit)/.test(request.url))).toBe(false);
 }, testDeadline);
 
-it('keeps the last confirmed locator when a resume refresh cannot reach the Relay', async () => {
+it('keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay', async () => {
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
@@ -811,7 +812,7 @@ it('keeps the last confirmed locator when a resume refresh cannot reach the Rela
   const binding = succession.binding!, source = binding.session;
   const reads = () => f.requests.filter(item => item.url.includes('/session-successions')).length, before = reads();
   f.failReplay('network');
-  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await act(async () => { notifyFeedReopened(); });
   await settleApp(() => { expect(reads()).toBeGreaterThan(before); expect(succession.discovering).toBe(false); });
   // The failed refresh restores the confirmed locator without reporting a failure, but marks it stale: views keep
   // their attachment while input waits for a refresh that reaches the Relay.
@@ -825,7 +826,7 @@ it('keeps the last confirmed locator when a resume refresh cannot reach the Rela
   // A Relay answer still applies: a failed replay is reported.
   await settleApp(() => expect(succession.discovering).toBe(false));
   f.failReplay('temporary_failure');
-  await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+  await act(async () => { notifyFeedReopened(); });
   await settleApp(() => expect(succession.error).toContain('Fixture succession route unavailable'));
   f.failReplay();
   expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
@@ -1807,14 +1808,13 @@ it('keeps A outbox, question drafts and reading cursor concrete through B confir
     await primary.actions.loadOlder!();
   });
   const operations = f.frames.slice(before).filter(frame => ['send_message', 'interaction_response', 'timeline_request'].includes(frame.message?.type ?? ''));
+  // Older history reads over the session wire, like every other timeline read.
   expect(operations.map(frame => [frame.message?.type, frame.message?.payload?.agentId])).toEqual([
-    ['send_message', 'agent-A'], ['interaction_response', 'agent-A'],
+    ['send_message', 'agent-A'], ['interaction_response', 'agent-A'], ['timeline_request', 'agent-A'],
   ]);
-  const older = new URL(f.requests.filter(item => item.url.includes('/timeline?')).at(-1)!.url, f.scope);
-  expect(older.pathname).toContain('/agent-A/timeline');
-  expect(older.searchParams.get('direction')).toBe('before');
-  expect(older.searchParams.get('epoch')).toBe('epoch-agent-A');
-  expect(older.searchParams.get('seq')).toBe('1');
+  const older = operations.find(frame => frame.message?.type === 'timeline_request')!.message!.payload!;
+  expect(older.direction).toBe('before');
+  expect(older.cursor).toEqual({ epoch: 'epoch-agent-A', seq: 1 });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['A', 'B']);
 });
 

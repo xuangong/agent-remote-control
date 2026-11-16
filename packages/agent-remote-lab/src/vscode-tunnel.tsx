@@ -1,5 +1,5 @@
 import { workspaceFetch } from './workspace-access.js';
-import { watchPagePolling } from '@orchardworks/agent-remote-web';
+import { watchList } from '@orchardworks/agent-remote-web';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from './components/HostPairing.js';
@@ -76,7 +76,7 @@ function HostTunnelState({ host, service, polling, children }: { host: RemoteHos
     }
   }, [host.id, host.online, service]);
   const refresh = useCallback(() => request('status'), [request]);
-  useEffect(() => host.online ? watchPagePolling(refresh, polling ? 2_000 : 30_000) : undefined, [refresh, polling, host.online]);
+  useEffect(() => host.online ? watchList(refresh, polling ? 2_000 : 30_000) : undefined, [refresh, polling, host.online]);
 
   return <Context.Provider value={host.id === 'local' ? undefined : { host, state, error, errorCode, busy, refresh,
     start: () => request('start'), stop: () => request('stop') }}>{children}</Context.Provider>;

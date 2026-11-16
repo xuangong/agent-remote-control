@@ -1,7 +1,7 @@
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { workspaceFetch } from '../workspace-access.js';
 import { useEffect, useRef, useState } from 'react';
-import { watchPageResume, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { watchList, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
 import { decodeSessionChannelServerMessage, PROTOCOL_VERSION, type SessionMigration } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
@@ -82,8 +82,7 @@ export function useSessionMigrations(options: {
     }
     refreshRef.current = async () => { if (fetching) await fetching; return refresh(); };
     const remove = options.transport.onSessionMigration?.(receive);
-    const resume = watchPageResume(() => void refresh());
-    void refresh();
+    const resume = watchList(() => refresh());
     return () => { abort.abort(); refreshRef.current = undefined; clearTimeout(referencesTimer); remove?.(); resume(); };
   }, [scope, options.transport, options.enabled]);
   async function openBranch(migration: SessionMigration, source: OpenedSession) {

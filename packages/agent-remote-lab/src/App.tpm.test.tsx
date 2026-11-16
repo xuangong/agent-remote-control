@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { App } from './App.js';
@@ -85,7 +86,7 @@ it('asks only paired Hosts for TPM works, never the Lab server', async () => {
   // The Lab server's local providers make it selectable for new sessions, but it is not a Controller and has no TPM.
   await vi.waitFor(() => expect([...view.querySelectorAll('option')].some(option => option.textContent?.startsWith('Lab server'))).toBe(true));
   const before = tpmList.mock.calls.length;
-  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  await act(async () => { notifyFeedReopened(); });
   await vi.waitFor(() => expect(tpmList.mock.calls.length).toBeGreaterThan(before));
   expect(tpmList).toHaveBeenCalledWith('host');
   expect(tpmList.mock.calls.map(([hostId]) => hostId)).not.toContain('local');

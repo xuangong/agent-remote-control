@@ -79,7 +79,10 @@ it('polls pending outcomes only while the management panel is visible and the pa
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(30000); });
   expect(f.service.codexDaemon).toHaveBeenCalledTimes(2);
   hidden = false;
+  // Becoming visible checks nothing at once; the pending restart is polled again on its own interval.
   await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  expect(f.service.codexDaemon).toHaveBeenCalledTimes(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
   expect(f.service.codexDaemon).toHaveBeenCalledTimes(3);
   await click(container, 'Toggle panel');
   await act(async () => { await vi.advanceTimersByTimeAsync(30000); });

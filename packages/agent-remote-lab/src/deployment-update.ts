@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { watchFeedReopen } from '@orchardworks/agent-remote-web';
 
 /** The content-hashed module entry an index document loads; development servers have none. */
 export function deploymentEntry(html: string): string | undefined {
@@ -26,7 +26,7 @@ async function fetchIndex(): Promise<string> {
 
 /**
  * Pages and installed apps can stay open across deployments and keep running superseded code, including
- * fixes that only reach a page when it loads. Compares the deployed entry when the page resumes and periodically.
+ * fixes that only reach a page when it loads. Compares the deployed entry periodically and when the feed socket reopens (a deployment restarts the Relay).
  */
 export function watchDeploymentUpdate(options: { running: string | undefined; onUpdate(): void; fetchIndex?: () => Promise<string>; intervalMs?: number }): () => void {
   const running = options.running;
@@ -38,10 +38,10 @@ export function watchDeploymentUpdate(options: { running: string | undefined; on
     try {
       const deployed = deploymentEntry(await (options.fetchIndex ?? fetchIndex)());
       if (!stopped && deployed && deployed !== running) { updated = true; options.onUpdate(); }
-    } catch { /* Offline and failed checks try again on the next resume or interval. */ }
+    } catch { /* Offline and failed checks try again on the next interval or reopened feed. */ }
     finally { checking = false; }
   };
   const timer = setInterval(() => void check(), options.intervalMs ?? 10 * 60_000);
-  const unwatch = watchPageResume(() => void check());
+  const unwatch = watchFeedReopen(() => void check());
   return () => { stopped = true; clearInterval(timer); unwatch(); };
 }

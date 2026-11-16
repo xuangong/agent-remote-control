@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
+import { RemoteTeamClient, watchList } from '@orchardworks/agent-remote-web/headless';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
@@ -68,9 +68,9 @@ export function TeamMenu(props: Props) {
       catch (error) { if (!stopped) setLoadError(errorMessage(error)); } finally { inFlight = false; if (!stopped) setLoading(false); }
     };
     loader.current = load;
-    setLoading(true); void load();
-    document.addEventListener('visibilitychange', load);
-    return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; document.removeEventListener('visibilitychange', load); };
+    setLoading(true);
+    const unwatch = watchList(load);
+    return () => { stopped = true; ++generation.current; if (loader.current === load) loader.current = undefined; unwatch(); };
   }, [client, enabled, baseUrl]);
   // The roster follows changes closely while someone looks at it, a Team is forming or a member's conversation is open (its
   // seat follows the member's successor through the roster); otherwise it stays current for

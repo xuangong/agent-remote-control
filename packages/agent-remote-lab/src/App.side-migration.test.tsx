@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
@@ -135,7 +136,7 @@ it.each([false, true])('follows an edited Side without retargeting its original 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close side conversation, back to source"]')!.click());
     if (!localDelivery) {
       projection = { ...projection, source: advanced, roleRevision: 3 };
-      await act(async () => window.dispatchEvent(new Event('focus')));
+      await act(async () => notifyFeedReopened());
       await waitFor(() => expect(container.querySelector('.lab-fork-entry > button')).toBeNull());
       expect(new ForkStore(baseUrl).allLocal()).toEqual([]);
       await unmount(container);

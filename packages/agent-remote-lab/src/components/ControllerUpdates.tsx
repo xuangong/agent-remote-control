@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { compareControllerVersions, releaseCoversHost, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
-import { watchPagePolling } from '@orchardworks/agent-remote-web';
+import { watchList } from '@orchardworks/agent-remote-web';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { hostDisplayLabel } from './host-environment.js';
 import { readControllerHealth, type ControllerHealthView } from '../controller-health-view.js';
@@ -49,7 +49,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
       finally { loading = false; if (!retired) setChecking(false); }
     };
     refreshRelease.current = () => { void discover(true); };
-    const stop = watchPagePolling(() => discover(), 300000);
+    const stop = watchList(() => discover(), 300000);
     return () => { retired = true; stop(); };
   }, [service]);
   const pending = Object.values(statuses).some(status => ['downloading', 'waiting', 'restarting'].includes(status.phase));
@@ -58,7 +58,7 @@ export function ControllerUpdates({ service, hosts }: { service: HostPairingServ
   useEffect(() => {
     // A collapsed panel still checks occasionally so Controller problems surface in its heading.
     let retired = false, loading = false;
-    const stop = watchPagePolling(async () => {
+    const stop = watchList(async () => {
       if (loading || !service.controllerUpdate) return; loading = true;
       const epoch = mutationEpoch.current;
       try {

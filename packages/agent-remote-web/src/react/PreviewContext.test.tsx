@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '../client/feed-reopen.js';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 
@@ -110,7 +111,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-it('does not poll while the page is hidden and refreshes once on return', async () => {
+it('does not poll while the page is hidden, and returning refreshes nothing until the interval or a reopened feed', async () => {
   vi.useFakeTimers();
   let visibility = 'visible';
   const property = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility as DocumentVisibilityState);
@@ -123,6 +124,8 @@ it('does not poll while the page is hidden and refreshes once on return', async 
     expect(client.snapshot).toHaveBeenCalledTimes(1);
     visibility = 'visible';
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(client.snapshot).toHaveBeenCalledTimes(1);
+    await act(async () => { notifyFeedReopened(); });
     expect(client.snapshot).toHaveBeenCalledTimes(2);
   } finally { property.mockRestore(); vi.useRealTimers(); }
 });

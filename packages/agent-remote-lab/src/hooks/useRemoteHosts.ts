@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { watchFeedReopen } from '@orchardworks/agent-remote-web';
 import { useCallback, useEffect, useState } from 'react';
 import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
 
@@ -31,9 +31,16 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean, di
         if (!retired) timer = setTimeout(() => void load(), discovery || offline ? 5000 : 30000);
       }
     };
-    const unwatch = watchPageResume(() => void load());
+    // A hidden page stops the interval. Becoming visible starts it again and loads nothing; a reopened feed loads at once.
+    const visible = () => {
+      if (document.visibilityState === 'hidden' || inFlight || retired) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), discovery || offline ? 5000 : 30000);
+    };
+    document.addEventListener('visibilitychange', visible);
+    const unwatch = watchFeedReopen(() => void load());
     void load();
-    return () => { retired = true; unwatch(); clearTimeout(timer); };
+    return () => { retired = true; unwatch(); document.removeEventListener('visibilitychange', visible); clearTimeout(timer); };
   }, [service, enabled, generation, discovery, activeHostId]);
   return { hosts, loaded, error, retry };
 }

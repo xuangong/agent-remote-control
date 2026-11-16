@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
@@ -62,7 +63,7 @@ it('creates a fresh operation when discovery advances to another release', async
   await act(async () => button(container, 'Update Host').click());
   await act(async () => button(container, 'Confirm update').click());
   latest = { ...release, version: '0.3.0' };
-  await act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  await act(async () => notifyFeedReopened());
   await act(async () => button(container, 'Update Host').click());
   await act(async () => button(container, 'Confirm update').click());
   expect(requests.map(r => r.version)).toEqual(['0.2.0', '0.3.0']);

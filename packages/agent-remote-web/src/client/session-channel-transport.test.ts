@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { watchFeedReopen } from './feed-reopen.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
@@ -51,6 +52,8 @@ describe('shared session states', () => {
     const harness = await server();
     const views: Array<(ref: { hostId: string; providerId: string; nativeSessionId: string }) => string> = [];
     const stop = harness.transport.watchSessionStates(view => views.push(ref => view.state(ref).state));
+    const reopened = vi.fn();
+    const stopFeed = watchFeedReopen(reopened);
     await vi.waitFor(() => expect(harness.urls).toHaveLength(1));
     expect(harness.urls[0]).toContain('observation=activity');
     expect(harness.urls[0]).toContain('states=2');
@@ -62,10 +65,14 @@ describe('shared session states', () => {
     connect(harness.transport, 'session');
     await vi.waitFor(() => expect(harness.urls).toHaveLength(2));
     expect(harness.urls[1]).not.toContain('states=');
+    expect(reopened).not.toHaveBeenCalled();
     harness.sockets[0]!.terminate();
     await vi.waitFor(() => expect(harness.urls.filter(url => url.includes('states=2'))).toHaveLength(2), { timeout: 4000 });
     harness.sockets.at(-1)!.send(JSON.stringify({ protocolVersion: version, type: 'session_states', snapshot: true, hosts: [{ hostId: 'host', online: false }] }));
     await vi.waitFor(() => expect(views.at(-1)!(thread)).toBe('offline'));
+    // Lists refetch when the feed reopens after a loss, and not when it opened the first time.
+    expect(reopened).toHaveBeenCalledTimes(1);
+    stopFeed();
     stop();
   });
 });

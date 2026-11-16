@@ -6,7 +6,7 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
-import type { TpmActionInput } from '@orchardworks/agent-remote-web/headless';
+import { watchList, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 
@@ -158,16 +158,13 @@ export function useTpmWork(service: TpmService | undefined, hosts: readonly TpmH
     setLoading(false);
   }, [service, enabled, stableHosts, accept]);
   // Catalogs follow changes closely while TPM is in view and stay current once a minute otherwise; a page in the background
-  // does not poll, and refreshes when it comes back to the front (stage 6).
+  // does not poll, and a page that comes back to the front waits for the next interval unless the feed reopened.
   const watching = presentationVisible && (listOpen || expanded);
   useEffect(() => {
     generation.current++;
-    void refresh();
-    if (!enabled || !service) { setLoading(false); return; }
-    const timer = window.setInterval(() => { if (document.visibilityState !== 'hidden') void refresh(); }, watching ? TPM_REFRESH_MS : TPM_IDLE_REFRESH_MS);
-    const foreground = () => void refresh();
-    window.addEventListener('focus', foreground);
-    return () => { generation.current++; window.clearInterval(timer); window.removeEventListener('focus', foreground); };
+    if (!enabled || !service) { void refresh(); setLoading(false); return; }
+    const stop = watchList(() => refresh(), watching ? TPM_REFRESH_MS : TPM_IDLE_REFRESH_MS);
+    return () => { generation.current++; stop(); };
   }, [refresh, enabled, service, watching]);
 
   const works = useMemo<TpmItem[]>(() => sameScope ? stableHosts.filter(host => host.access !== 'shared').flatMap(host => (catalogs[host.id]?.works ?? []).map(work => {

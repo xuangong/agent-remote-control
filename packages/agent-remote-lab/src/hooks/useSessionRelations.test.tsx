@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
@@ -23,12 +24,12 @@ it('refreshes both navigation kinds on foreground without persisting remote deli
   await render(<Harness />);
   expect(sides.all()).toEqual([]);
   shared = [relation('side'), relation('ask')];
-  await act(async () => { window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(150); });
+  await act(async () => { notifyFeedReopened(); await vi.advanceTimersByTimeAsync(150); });
   expect(sides.all().map(item => item.id)).toEqual(['side']);
   expect(asks.all().map(item => item.id)).toEqual(['ask']);
   expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
   shared = [];
-  await act(async () => { window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(150); });
+  await act(async () => { notifyFeedReopened(); await vi.advanceTimersByTimeAsync(150); });
   expect(sides.all()).toEqual([]); expect(asks.all()).toEqual([]);
 });
 

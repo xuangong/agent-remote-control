@@ -6,6 +6,7 @@ import {
   type ClientMessage, type SessionChannelClientMessage,
 } from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
+import { notifyFeedReopened } from './feed-reopen.js';
 import { watchPageResume } from './page-resume.js';
 import type {
   RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
@@ -89,6 +90,7 @@ export class SessionChannelPool {
   private stateWatchers = 0;
   private stateRetry?: ReturnType<typeof setTimeout>;
   private stateRetryDelay = 1_000;
+  private feedOpened = false;
 
   constructor(private readonly dependencies: Dependencies) {
     this.unwatch = watchPageResume(() => {
@@ -309,7 +311,11 @@ export class SessionChannelPool {
         clearTimeout(channel.readyTimer);
         channel.readyTimer = undefined;
         this.startHeartbeat(channel);
-        if (mode === 'activity') this.stateRetryDelay = 1_000;
+        if (mode === 'activity') {
+          this.stateRetryDelay = 1_000;
+          if (this.feedOpened) notifyFeedReopened();
+          this.feedOpened = true;
+        }
         for (const subscription of [...channel.subscriptions.values()]) this.subscribe(subscription);
       } else if (!channel.ready || frame.type === 'ready') {
         this.invalidBody(); this.failChannel(channel);

@@ -14,12 +14,14 @@ it('suspends timers while hidden and serializes wakeups with a pending request',
     visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
     finish(); await Promise.resolve();
     expect(vi.getTimerCount()).toBe(0);
+    // Becoming visible polls nothing; the interval starts again.
     visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(poll).toHaveBeenCalledTimes(2);
-    visibility = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
-    visibility = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
-    expect(poll).toHaveBeenCalledTimes(2);
-    finish(); await vi.advanceTimersByTimeAsync(1);
+    finish(); await vi.advanceTimersByTimeAsync(5000);
     expect(poll).toHaveBeenCalledTimes(3);
   } finally { stop(); finish(); }
 });

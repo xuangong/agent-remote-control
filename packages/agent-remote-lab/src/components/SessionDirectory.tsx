@@ -1,3 +1,4 @@
+import { watchList } from '@orchardworks/agent-remote-web';
 import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { StarButton } from './SessionFavorites.js';
 import type { SessionStars } from '../hooks/useSessionStars.js';
@@ -148,8 +149,8 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
       } catch { /* A revision failure must not replace an already loaded directory. */ }
       finally { checking = false; }
     };
-    const timer = window.setInterval(() => void inspect(), 5_000);
-    return () => { retired = true; window.clearInterval(timer); };
+    const stop = watchList(inspect, 5_000);
+    return () => { retired = true; stop(); };
   }, [providerId, directory]);
 
   const discovered = new Map<string, SessionEntry>((page?.items ?? []).map((item) => [sessionKey({ ...item, hostId }), { ...item, hostId }]));

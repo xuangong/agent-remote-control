@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { appendSessionReferences, sessionReferencesAttachment, splitSessionExcerpts, splitSessionReferences, type SessionReferenceNote } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { watchList, type AgentReplicaState } from '@orchardworks/agent-remote-web';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { DirectoryError, SessionDirectoryClient } from './directory-client.js';
 
@@ -57,11 +57,8 @@ export function useSessionRefs(scope: string, holder: SessionRefHolder | undefin
   useEffect(() => {
     if (!providerId || !nativeSessionId) return;
     const target = { hostId, providerId, nativeSessionId };
-    void loadSessionRefs(scope, target);
-    // References also change from the agent's shell; a page that becomes visible asks again.
-    const refresh = () => { if (document.visibilityState === 'visible') void loadSessionRefs(scope, target); };
-    document.addEventListener('visibilitychange', refresh);
-    return () => document.removeEventListener('visibilitychange', refresh);
+    // References also change from the agent's shell, so they follow the list schedule.
+    return watchList(() => loadSessionRefs(scope, target));
   }, [scope, hostId, providerId, nativeSessionId]);
   return entry ?? {};
 }

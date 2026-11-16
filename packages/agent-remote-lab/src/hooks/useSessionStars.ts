@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type RemoteAgentTransport, watchPageResume } from '@orchardworks/agent-remote-web';
+import { type RemoteAgentTransport, watchList } from '@orchardworks/agent-remote-web';
 import { SessionStarsClient, FavoritesConflict, type FavoriteChange, type FavoritesSnapshot, type StarInput } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';
@@ -38,8 +38,7 @@ export function useSessionStars(baseUrl: string, enabled: boolean, transport?: R
   useEffect(() => {
     lifetime.mounted = true;
     setError(undefined); setPending(undefined); busy.current = false; setLoading(enabled);
-    void refresh();
-    const unwatch = watchPageResume(() => void refresh());
+    const unwatch = watchList(() => refresh());
     return () => { lifetime.mounted = false; ++generation.current; requestController.current?.abort(); unwatch(); };
   }, [refresh, enabled]);
   useEffect(() => {

@@ -816,7 +816,8 @@ async function approveToolAndWait(session) {
 async function hiddenScenario(hiddenMs, freeze) {
   return inContext(async context => {
     const samples = [];
-    const targets = [byProvider('claude')[0], byProvider('codex')[0]].filter(Boolean);
+    // One session of each provider the instance has.
+    const targets = [...new Set(sessions.map(item => item.provider))].map(provider => byProvider(provider)[0]);
     for (let i = 0; i < Math.max(1, reps - (freeze ? 1 : 0)); i++) for (const session of targets) {
       const handle = await instrument(context);
       await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });

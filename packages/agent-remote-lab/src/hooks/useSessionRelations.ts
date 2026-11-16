@@ -1,6 +1,7 @@
 import { relationEditScope, RelationEditStore } from '../relation-edit-store.js';
 import { isNativeSessionRef, isSourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useMemo, useRef } from 'react';
+import { watchList } from '@orchardworks/agent-remote-web';
 import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { workspaceFetch } from '../workspace-access.js';
@@ -169,11 +170,8 @@ export function useSessionRelations(baseUrl: string, enabled: boolean, sides: Fo
     };
     const schedule = () => { clearTimeout(timer); timer = setTimeout(backgroundRefresh, 100); };
     const removeSides = sides.subscribe(schedule); const removeAsks = asks.subscribe(schedule);
-    window.addEventListener('focus', schedule); document.addEventListener('visibilitychange', schedule);
-    const poll = setInterval(backgroundRefresh, 10000);
-    backgroundRefresh();
-    return () => { refreshRef.current = undefined; setLinkedRef.current = undefined; reconcileRef.current = undefined; controller.abort(); clearTimeout(timer); clearInterval(poll); removeSides(); removeAsks();
-      window.removeEventListener('focus', schedule); document.removeEventListener('visibilitychange', schedule); };
+    const poll = watchList(backgroundRefresh, 10000);
+    return () => { refreshRef.current = undefined; setLinkedRef.current = undefined; reconcileRef.current = undefined; controller.abort(); clearTimeout(timer); poll(); removeSides(); removeAsks(); };
   }, [baseUrl, enabled, sides, asks]);
   // Focus requests fresh relations without retiring other views' in-flight recovery.
   useEffect(() => { if (enabled) void refreshRef.current?.().catch(() => {}); }, [enabled, current]);

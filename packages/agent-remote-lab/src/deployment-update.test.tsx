@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -30,7 +31,7 @@ it('reads only a built module entry from an index document', () => {
   expect(runningDeploymentEntry(document)).toBe('/assets/index-A.js');
 });
 
-it('reports a different deployed entry once, on resume or on its interval, and ignores failed checks', async () => {
+it('reports a different deployed entry once, when the feed reopens or on its interval, and ignores failed checks', async () => {
   vi.useFakeTimers();
   setVisibility('visible');
   let deployed = '/assets/index-A.js', failing = false;
@@ -40,10 +41,10 @@ it('reports a different deployed entry once, on resume or on its interval, and i
   await vi.advanceTimersByTimeAsync(60_000);
   expect(fetchIndex).toHaveBeenCalledTimes(1); expect(onUpdate).not.toHaveBeenCalled();
   failing = true; deployed = '/assets/index-B.js';
-  setVisibility('hidden'); setVisibility('visible'); await vi.advanceTimersByTimeAsync(0);
+  setVisibility('hidden'); setVisibility('visible'); notifyFeedReopened(); await vi.advanceTimersByTimeAsync(0);
   expect(onUpdate).not.toHaveBeenCalled();
   failing = false;
-  setVisibility('hidden'); setVisibility('visible'); await vi.advanceTimersByTimeAsync(0);
+  setVisibility('hidden'); setVisibility('visible'); notifyFeedReopened(); await vi.advanceTimersByTimeAsync(0);
   expect(onUpdate).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(5 * 60_000);
   expect(onUpdate).toHaveBeenCalledTimes(1);
@@ -67,7 +68,7 @@ it('loads a newer deployment at once when the page is hidden', async () => {
   setVisibility('hidden');
   const reload = vi.fn();
   await mount(reload);
-  await act(async () => { setVisibility('visible'); });
+  await act(async () => { setVisibility('visible'); notifyFeedReopened(); });
   await act(async () => { setVisibility('hidden'); respond(new Response(index('/assets/index-B.js'))); });
   await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   expect(document.body.textContent).not.toContain('Update available');
@@ -78,7 +79,7 @@ it('offers a newer deployment in a visible page and loads it once the page is le
   setVisibility('hidden');
   const reload = vi.fn();
   await mount(reload);
-  await act(async () => { setVisibility('visible'); });
+  await act(async () => { setVisibility('visible'); notifyFeedReopened(); });
   await vi.waitFor(() => expect(document.body.textContent).toContain('Update available'));
   expect(reload).not.toHaveBeenCalled();
   await act(async () => { setVisibility('hidden'); });
@@ -90,7 +91,7 @@ it('reloads from the update notification', async () => {
   setVisibility('hidden');
   const reload = vi.fn();
   await mount(reload);
-  await act(async () => { setVisibility('visible'); });
+  await act(async () => { setVisibility('visible'); notifyFeedReopened(); });
   await vi.waitFor(() => expect(document.body.textContent).toContain('Update available'));
   const button = [...document.body.querySelectorAll('button')].find(item => item.textContent === 'Reload')!;
   await act(async () => { button.click(); });

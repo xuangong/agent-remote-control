@@ -54,7 +54,7 @@ function DaemonControl({ host, request, visible }: {
       timer = setTimeout(async () => { await refresh(); schedule(); }, failure ? 5000 : 1500);
     };
     const onVisibility = () => {
-      if (!document.hidden) { deadline.current = Date.now() + daemonStatusPollingWindowMs; void refresh(); }
+      if (!document.hidden) deadline.current = Date.now() + daemonStatusPollingWindowMs;
       schedule();
     };
     schedule(); document.addEventListener('visibilitychange', onVisibility);

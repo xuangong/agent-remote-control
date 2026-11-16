@@ -1,3 +1,4 @@
+import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { HttpPreviewClient } from '@orchardworks/agent-remote-web';
@@ -46,7 +47,7 @@ it('groups identical local origins by Host and sends mutations and opens to the 
   expect(container.textContent).not.toContain('Home Mac');
   expect(container.textContent).toContain('Work Mac');
   removed.delete('empty');
-  await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+  await act(async () => { notifyFeedReopened(); });
   expect(container.querySelectorAll('.lab-host-previews')).toHaveLength(2);
   expect(container.textContent).toContain('Empty Host');
 });

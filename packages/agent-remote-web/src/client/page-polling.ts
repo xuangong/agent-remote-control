@@ -1,5 +1,5 @@
-/** A single polling task that sleeps in hidden pages and never overlaps itself. */
-export function watchPagePolling(poll: () => void | Promise<void>, intervalMs: number): () => void {
+/** A single polling task that sleeps in hidden pages and never overlaps itself. Becoming visible restarts the interval; it does not poll. */
+export function watchPagePolling(poll: () => unknown, intervalMs: number): () => void {
   let stopped = false;
   let running = false;
   let wakePending = false;
@@ -23,7 +23,7 @@ export function watchPagePolling(poll: () => void | Promise<void>, intervalMs: n
   };
   const visibility = () => {
     clearTimeout(timer);
-    if (visible()) void run();
+    if (visible()) { if (!running) timer = setTimeout(() => void run(), intervalMs); }
     else wakePending = false;
   };
   document.addEventListener('visibilitychange', visibility);

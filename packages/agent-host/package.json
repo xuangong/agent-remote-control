@@ -29,6 +29,7 @@
     "@orchardworks/agent-provider-opencode": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-remote-relay": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*",

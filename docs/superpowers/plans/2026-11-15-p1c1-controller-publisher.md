@@ -4869,11 +4869,16 @@ describe('the journal grant on the Host uplink', () => {
 
   it('hands every journal message of the Relay to its owner, decoded', async () => {
     const { messages, relaySocket } = await connect({ acknowledge: true, journal: true });
-    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 3, cursor: { epoch: 'epoch-1', seq: 2 } }));
-    relaySocket().send(JSON.stringify({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'codex:thread-1', limit: 50 }));
-    await until(() => messages.length === 2);
-    expect(messages.map(message => message.type)).toEqual(['journal_ack', 'journal_older_request']);
+    const send = (message: Record<string, unknown>) => relaySocket().send(JSON.stringify({ uplinkVersion: 2, ...message }));
+    send({ type: 'journal_ack', sessionKey: 'codex:thread-1', generation: 1, watermark: 3, cursor: { epoch: 'epoch-1', seq: 2 } });
+    send({ type: 'journal_older_request', requestId: 'older-1', sessionKey: 'codex:thread-1', limit: 50 });
+    send({ type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'codex:thread-1', itemKeys: ['a'] });
+    send({ type: 'journal_refused', sessionKey: 'codex:thread-1', generation: 1, sequence: 4, reason: 'body_missing', itemKey: 'a' });
+    send({ type: 'journal_open_refused', requestId: 'open-1', sessionKey: 'codex:thread-1', reason: 'index_too_large' });
+    await until(() => messages.length === 5);
+    expect(messages.map(message => message.type)).toEqual(['journal_ack', 'journal_older_request', 'journal_fill_request', 'journal_refused', 'journal_open_refused']);
     expect(messages[0]).toMatchObject({ watermark: 3, cursor: { seq: 2 } });
+    expect(messages[3]).toMatchObject({ reason: 'body_missing', itemKey: 'a' });
   });
 
   it('is told that no connection may write when the Relay does not acknowledge journals', async () => {
@@ -4903,7 +4908,7 @@ describe('the journal grant on the Host uplink', () => {
 - [ ] **Step 2: Run it and see it fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/transport/remote-host-uplink-journal.test.ts --testTimeout=10000`
-Expected: FAIL (`journal` is not an option, so the client never asks for it).
+Expected: FAIL, 5 of the 6 tests (`journal` is not an option, so the client never asks for it).
 
 - [ ] **Step 3: Implement.** In `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts`, import the message type:
 
@@ -5011,7 +5016,22 @@ Tell the owner what the Relay granted:
         }
 ```
 
-Hand the messages over:
+Hand the messages over. Only the messages the Relay sends are handed over (a `journal_open` echoed by a faulty Relay is not one), so the check names them instead of matching the `journal_` prefix:
+
+<!-- edit: packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts -->
+<!-- old -->
+```ts
+export interface RemoteHostUplinkDiagnostic {
+```
+<!-- new -->
+```ts
+const JOURNAL_RELAY_MESSAGE_TYPES: ReadonlySet<string> = new Set<JournalRelayMessage['type']>([
+  'journal_opened', 'journal_index_page', 'journal_open_refused', 'journal_ack', 'journal_refused', 'journal_fill_request', 'journal_older_request',
+]);
+const isJournalRelayMessage = (message: { type: string }): message is JournalRelayMessage => JOURNAL_RELAY_MESSAGE_TYPES.has(message.type);
+
+export interface RemoteHostUplinkDiagnostic {
+```
 
 <!-- edit: packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts -->
 <!-- old -->
@@ -5020,9 +5040,9 @@ Hand the messages over:
 ```
 <!-- new -->
 ```ts
-      if (decoded.value.type.startsWith('journal_')) {
+      if (isJournalRelayMessage(decoded.value)) {
         if (!journalWriter) { retire({ reason: 'protocol_error' }); return; }
-        options.journal!.receive(decoded.value as JournalRelayMessage);
+        options.journal!.receive(decoded.value);
         return;
       }
       if (decoded.value.type === 'outbox_response') {
@@ -5031,7 +5051,7 @@ Hand the messages over:
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-relay exec vitest run src/transport/remote-host-uplink-journal.test.ts --testTimeout=10000` then `pnpm --filter @orchardworks/agent-remote-relay run test` then `pnpm --filter @orchardworks/agent-remote-relay run typecheck` then `pnpm --filter @orchardworks/agent-remote-relay run build`
-Expected: PASS for all.
+Expected: PASS for all (the relay package: 438 tests).
 
 - [ ] **Step 5: Commit.**
 
@@ -5043,6 +5063,8 @@ git commit -m "feat(relay): let the Host uplink client ask for the journal grant
 ### Task 8: Items from the Controller's timeline, and the plan that brings a journal up to date
 
 The first two modules of the publisher are pure: they turn the Controller's rows into journal items and entries (`journal-items.ts`), and compare a reread of the timeline with the item index the Relay holds to say what to publish (`journal-reconcile.ts`). Nothing here talks to the Relay.
+
+Two rules are worth stating. An item under the reserved `controller:` key prefix is the Controller's own and live-only, whatever its rows say (Decision 17). `planPublication` checks every item against the wire limits before it compares anything, and names the refused ones in `refused` for the publisher's diagnostic, because a refused item left in the comparison would make a timeline that holds it look like a rewrite on every reconcile.
 
 **Files:**
 - Modify: `packages/agent-host/package.json`
@@ -5064,7 +5086,7 @@ The first two modules of the publisher are pure: they turn the Controller's rows
     "@orchardworks/agent-remote-journal": "workspace:*",
 ```
 
-Run: `pnpm install --offline` (it links the workspace package and updates `pnpm-lock.yaml`), then `pnpm --filter @orchardworks/agent-remote-journal run build`.
+Run: `pnpm install --offline` (it links the workspace package; it also rewrites the `resolution` lines of unrelated packages in `pnpm-lock.yaml`, so restore the lockfile with `git checkout pnpm-lock.yaml`, add only the `agent-host` importer entry for `@orchardworks/agent-remote-journal` by hand, and check it with `pnpm install --offline --frozen-lockfile`), then `pnpm --filter @orchardworks/agent-remote-journal run build`.
 Expected: the install finishes without a network request, and `packages/agent-host/node_modules/@orchardworks/agent-remote-journal` exists.
 
 - [ ] **Step 2: Write the failing test of items and sizes.** Create `packages/agent-host/src/journal-items.test.ts`:
@@ -5105,6 +5127,11 @@ describe('items of the Controller timeline', () => {
   it('gives a row without identity a key of its own, completes it at once and keeps it live-only', () => {
     const [item] = groupItems([row(undefined, 'Made by the Controller')]);
     expect(item).toMatchObject({ key: expect.stringMatching(/^controller:source:\d+$/), complete: true, liveOnly: true });
+  });
+
+  it('keeps every item under the reserved controller key prefix live-only, whatever the row says', () => {
+    const [item] = groupItems([row('controller:question-1', 'Asked', { identity: { key: 'controller:question-1', completes: true } })]);
+    expect(item).toMatchObject({ key: 'controller:question-1', complete: true, liveOnly: true });
   });
 
   it('marks an item live-only when any of its rows says so', () => {
@@ -5197,6 +5224,9 @@ import { entryFromRow, mergeRowIntoEntry, rowItemKey, type CanonicalTimelineRow 
 /** What one publication message may carry in bytes: half of the 8 MiB the Relay accepts, so every estimate has room. */
 export const MESSAGE_BUDGET_BYTES = 4 * 1024 * 1024;
 
+/** The key prefix of items the Controller makes itself, such as a question it asks. A provider never supplies a key that starts with it. */
+export const CONTROLLER_ITEM_KEY_PREFIX = 'controller:';
+
 /** One item of the Controller's timeline: its rows in order, and what the provider said about it. */
 export interface TimelineItem {
   key: string;
@@ -5213,8 +5243,9 @@ export type PublishOp = JournalPublishEntry extends infer Entry ? Entry extends 
 export interface SizedOp { op: PublishOp; bytes: number }
 export interface SizedItem { item: JournalItemInput; bytes: number }
 
-/** Whether the provider has no word about a row's item: the Controller then made the key, and nothing can rebuild the item. */
-export const isLiveOnlyRow = (row: CanonicalTimelineRow): boolean => row.identity === undefined || row.identity.liveOnly === true;
+/** Whether a row's item is the Controller's own, or the provider said native history cannot rebuild it. */
+export const isLiveOnlyRow = (row: CanonicalTimelineRow): boolean =>
+  row.identity === undefined || row.identity.liveOnly === true || rowItemKey(row).startsWith(CONTROLLER_ITEM_KEY_PREFIX);
 
 /** Groups rows by item, in the order the items first appear. An item is complete when its last row completes it. A row without identity is a complete, live-only item of its own. */
 export function groupItems(rows: readonly CanonicalTimelineRow[]): TimelineItem[] {
@@ -5332,7 +5363,7 @@ export function chunkOps(ops: readonly SizedOp[]): Array<{ ops: PublishOp[]; byt
 - [ ] **Step 5: Run the test and see it pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts --testTimeout=10000`
-Expected: PASS.
+Expected: PASS (13 tests).
 
 - [ ] **Step 6: Write the failing test of the plan.** Create `packages/agent-host/src/journal-reconcile.test.ts`. `index` is what the Relay's journal reports; `items` is the reread:
 
@@ -5467,6 +5498,19 @@ describe('bringing a journal up to date', () => {
     expect(summary(plan)).toEqual([]);
   });
 
+  it('does not take a refused item in the middle of the timeline for a rewrite, and names it in every kind of plan', async () => {
+    const long = 'k'.repeat(4097);
+    const timeline = items(row('a', 'One'), row(long, 'Too long'), row('c', 'Three'));
+    const known = items(row('a', 'One'), row('c', 'Three'));
+    const continued = await planPublication(await indexOf(known), timeline, digest);
+    expect(continued).toMatchObject({ kind: 'continue', refused: [long] });
+    expect(summary(continued)).toEqual([]);
+    const initial = await planPublication([], timeline, digest);
+    expect(initial).toMatchObject({ kind: 'replace', reason: 'initial', refused: [long] });
+    expect(summary(initial)).toEqual(['replace:a,c']);
+    expect(await planPublication(await indexOf(known), timeline, digest, { forceReplace: true })).toMatchObject({ kind: 'replace', refused: [long] });
+  });
+
   it('publishes older history apart from the other operations, so a head can go between them', async () => {
     const full = items(row('a', 'One'), row('b', 'Two'), row('c', 'Three'), row('d', 'Four'));
     const known = items(row('b', 'Two'), row('c', 'Three Changed'));
@@ -5486,10 +5530,9 @@ describe('bringing a journal up to date', () => {
   });
 
   it('says again the outcome of every background in the window, with the strongest status', async () => {
-    const withBackground = (key: string, status: 'pending' | 'visible') => row(key, key, { key, completes: true });
-    const first = withBackground('a', 'pending');
+    const first = row('a', 'a');
     first.item = { type: 'assistant_message', text: 'a', messageId: 'a', background: { id: 'review-1', kind: 'review', status: 'pending' } };
-    const second = withBackground('b', 'visible');
+    const second = row('b', 'b');
     second.item = { type: 'assistant_message', text: 'b', messageId: 'b', background: { id: 'review-1', kind: 'review', status: 'visible' } };
     const timeline = items(first, second, row('c', 'No background'));
     const continued = await planPublication(await indexOf(timeline), timeline, digest);
@@ -5515,7 +5558,8 @@ Expected: FAIL (`./journal-reconcile.js` does not exist).
 
 <!-- write: packages/agent-host/src/journal-reconcile.ts -->
 ```ts
-import { planReconcile, type JournalIndexEntry } from '@orchardworks/agent-remote-journal';
+import { planReconcile } from '@orchardworks/agent-remote-journal';
+import type { JournalIndexEntry } from '@orchardworks/agent-remote-journal';
 import { mergeBackgroundActivity, type BackgroundActivity } from '@orchardworks/agent-remote-protocol';
 
 import { blocksOf, entryBytes, mergedRow, newestItems, sizedItems, type PublishOp, type SizedOp, type TimelineItem } from './journal-items.js';
@@ -5529,6 +5573,7 @@ export type PublicationPlan =
   /**
    * The epoch continues. `ops` are corrections, new items, seals and background outcomes, in the order to publish them;
    * `older` is older history, newest block first, which is published after the head so a long history never delays it.
+   * `refused` names the items the wire does not accept; they are left out of the plan and of the comparison.
    */
   | { kind: 'continue'; ops: SizedOp[]; older: SizedOp[]; refused: string[] }
   /** The newest items as a new epoch, with the outcomes of their backgrounds. Older items follow as older history once the journal is opened again. */
@@ -5541,6 +5586,21 @@ export interface PlanOptions {
   window?: number;
   /** Replace without comparing, as a quota refusal asks. */
   forceReplace?: boolean;
+}
+
+type Digest = (item: TimelineItem) => Promise<string>;
+
+/** Takes each item's digest once, however many comparisons ask for it. */
+function memoized(digest: Digest): Digest {
+  const known = new Map<TimelineItem, Promise<string>>();
+  return item => {
+    let value = known.get(item);
+    if (!value) {
+      value = digest(item);
+      known.set(item, value);
+    }
+    return value;
+  };
 }
 
 /**
@@ -5569,7 +5629,7 @@ export function outcomeOps(items: readonly TimelineItem[]): SizedOp[] {
 }
 
 /** A replacement from the newest items that fit one message. An empty reread has nothing to replace with. */
-export async function replacementPlan(timeline: readonly TimelineItem[], digest: (item: TimelineItem) => Promise<string>, reason: ReplaceReason): Promise<PublicationPlan> {
+export async function replacementPlan(timeline: readonly TimelineItem[], digest: Digest, reason: ReplaceReason): Promise<PublicationPlan> {
   const { block, keys, refused } = await newestItems(timeline, digest);
   const op: PublishOp = { op: 'replace', items: block };
   const bytes = entryBytes(op);
@@ -5582,66 +5642,71 @@ export async function replacementPlan(timeline: readonly TimelineItem[], digest:
  * Compares the Controller's timeline, read again, with the item index the Relay holds and says what to publish. The
  * epoch continues unless native history was genuinely rewritten: unknown items are appended, a known item that is open or
  * whose digest differs is corrected, leading items the journal never saw are older history, and an open item that history
- * no longer holds is sealed. `index` is in journal order; `timeline` is oldest first. Items the wire refuses must be left
- * out of `timeline` by the caller, so that one cannot make every reconcile look like a rewrite.
+ * no longer holds is sealed. `index` is in journal order; `timeline` is oldest first. Items the wire refuses are taken out
+ * of the comparison first and named in `refused`, so that one cannot make every reconcile look like a rewrite.
  */
 export async function planPublication(
-  index: readonly JournalIndexEntry[], timeline: readonly TimelineItem[], digest: (item: TimelineItem) => Promise<string>, options: PlanOptions = {},
+  index: readonly JournalIndexEntry[], timeline: readonly TimelineItem[], digest: Digest, options: PlanOptions = {},
 ): Promise<PublicationPlan> {
-  const items = options.window === undefined ? [...timeline] : timeline.slice(-options.window);
-  if (options.forceReplace) return replacementPlan(items, digest, 'quota');
+  const takeDigest = memoized(digest);
+  const windowed = options.window === undefined ? [...timeline] : timeline.slice(-options.window);
+  const { refused } = await sizedItems(windowed, takeDigest);
+  const refusedKeys = new Set(refused);
+  const items = windowed.filter(item => !refusedKeys.has(item.key));
+  const named = (plan: PublicationPlan): PublicationPlan => plan.kind === 'gap' ? plan : { ...plan, refused: [...new Set([...refused, ...plan.refused])] };
+
+  if (options.forceReplace) return named(await replacementPlan(items, takeDigest, 'quota'));
   if (index.length === 0) {
-    return items.length === 0 ? { kind: 'continue', ops: [], older: [], refused: [] } : replacementPlan(items, digest, 'initial');
+    return named(items.length === 0 ? { kind: 'continue', ops: [], older: [], refused: [] } : await replacementPlan(items, takeDigest, 'initial'));
   }
   const candidates = [];
-  for (const item of items) candidates.push({ itemKey: item.key, digest: item.complete ? await digest(item) : OPEN_DIGEST });
+  for (const item of items) candidates.push({ itemKey: item.key, digest: item.complete ? await takeDigest(item) : OPEN_DIGEST });
   const plan = planReconcile(index, candidates);
   if (plan.kind === 'gap') return { kind: 'gap' };
-  if (plan.kind === 'replace') return replacementPlan(items, digest, plan.reason);
+  if (plan.kind === 'replace') return named(await replacementPlan(items, takeDigest, plan.reason));
 
   const byKey = new Map(items.map(item => [item.key, item]));
   const revisions = new Map(index.map(entry => [entry.itemKey, entry.revision]));
   const ops: SizedOp[] = [];
   const older: SizedOp[] = [];
-  const refused: string[] = [];
-  const add = (op: PublishOp, key: string): void => {
+  const add = (op: PublishOp): boolean => {
     const bytes = entryBytes(op);
-    if (bytes === undefined) refused.push(key);
-    else ops.push({ op, bytes });
+    if (bytes === undefined) return false;
+    ops.push({ op, bytes });
+    return true;
   };
 
   // Older history lands below the oldest item, so the block next to it goes first.
-  const prepended = await sizedItems(plan.prepend.map(key => byKey.get(key) as TimelineItem), digest);
-  refused.push(...prepended.refused);
+  const prepended = await sizedItems(plan.prepend.map(key => byKey.get(key) as TimelineItem), takeDigest);
   const sizeOf = new Map(prepended.accepted.map(sized => [sized.item.row.itemKey, sized.bytes]));
   for (const block of blocksOf(prepended.accepted).reverse()) {
     older.push({ op: { op: 'prepend', items: block }, bytes: block.reduce((sum, { row }) => sum + (sizeOf.get(row.itemKey) ?? 0), 0) });
   }
+  const unaccepted = [...prepended.refused];
   for (const key of plan.correct) {
     const item = byKey.get(key) as TimelineItem;
-    add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await digest(item) } : {}), expectedRevision: revisions.get(key) as number }, key);
+    if (!add({ op: 'correct', row: mergedRow(item), ...(item.complete ? { digest: await takeDigest(item) } : {}), expectedRevision: revisions.get(key) as number })) unaccepted.push(key);
   }
   for (const key of plan.append) {
     const item = byKey.get(key) as TimelineItem;
-    const before = ops.length;
-    add({ op: 'append', row: mergedRow(item) }, key);
-    if (item.complete && ops.length > before) add({ op: 'complete', itemKey: key, digest: await digest(item) }, key);
+    if (!add({ op: 'append', row: mergedRow(item) })) unaccepted.push(key);
+    else if (item.complete && !add({ op: 'complete', itemKey: key, digest: await takeDigest(item) })) unaccepted.push(key);
   }
-  for (const key of plan.abandon) add({ op: 'seal', itemKey: key }, key);
+  for (const key of plan.abandon) if (!add({ op: 'seal', itemKey: key })) unaccepted.push(key);
   ops.push(...outcomeOps(items));
-  return { kind: 'continue', ops, older, refused };
+  return named({ kind: 'continue', ops, older, refused: unaccepted });
 }
 ```
 
 - [ ] **Step 9: Run the tests and see them pass.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts src/journal-reconcile.test.ts --testTimeout=10000`
-Expected: PASS.
+Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-items.test.ts src/journal-reconcile.test.ts --testTimeout=10000`, then the package (`pnpm --filter @orchardworks/agent-remote-controller run test`, 1507 tests) and its typecheck, then `pnpm compatibility:update` and `pnpm compatibility:check` after `git add` of the new files.
+Expected: PASS (32 tests in the two files).
 
 - [ ] **Step 10: Commit.**
 
 ```bash
-git add packages/agent-host/package.json pnpm-lock.yaml packages/agent-host/src/journal-items.ts packages/agent-host/src/journal-items.test.ts packages/agent-host/src/journal-reconcile.ts packages/agent-host/src/journal-reconcile.test.ts
+git add packages/agent-remote-lab/compatibility.json packages/agent-host/package.json pnpm-lock.yaml packages/agent-host/src/journal-items.ts packages/agent-host/src/journal-items.test.ts packages/agent-host/src/journal-reconcile.ts packages/agent-host/src/journal-reconcile.test.ts
 git commit -m "feat(host): turn the Controller's timeline into journal items, and plan what a reopened journal needs" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

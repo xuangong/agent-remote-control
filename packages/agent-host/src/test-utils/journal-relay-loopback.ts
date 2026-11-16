@@ -1,6 +1,6 @@
 import { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalPublished } from '@orchardworks/agent-remote-hosted';
 import { createJournalConnection, type JournalConnection } from '@orchardworks/agent-remote-hosted/journal-uplink';
-import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
+import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
 import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublisher } from '../journal-publisher.js';
@@ -13,22 +13,30 @@ export interface RelayLoopbackOptions {
   store?: MemoryJournalStore;
   /** The service's own limits, to make a quota refuse what a test publishes. */
   limits?: HostJournalsOptions['limits'];
-  /** The index size above which an open is refused as too large; the Relay's own is far above what a test builds. */
-  maxIndexItems?: number;
+  /** Makes the Relay refuse the open the publisher sends as its `n`th (1-based). */
+  refuseOpen?(n: number): boolean;
   /**
    * Refuses one entry of a publication before the journal sees it, as a Relay that rejects an item for its own reasons
    * does: the entries before it are stored by the real journal, the refused one and those after it are not.
    */
-  refuseEntry?(entry: { sequence: number; op: string; itemKey?: string }): { reason: 'body_missing' | 'invalid' | 'type_changed'; itemKey: string } | undefined;
+  refuseEntry?(entry: { sequence: number; op: string; itemKey?: string }): { reason: 'body_missing' | 'invalid' | 'type_changed' | 'quota_exceeded'; itemKey: string } | undefined;
 }
 
 /** The Relay's journal service and its per-connection adapter, wired to a publisher through asynchronous hand-offs. */
 export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions = {}) {
   const store = options.store ?? new MemoryJournalStore();
-  const real = createHostJournals({ store, now: () => 1_000, ...(options.limits === undefined ? {} : { limits: options.limits }) });
+  /** What every write to the store carried, so a test can tell an item write from a write of the meta alone. */
+  const writes: Array<{ upsert: string[]; removed: string[]; replaced: boolean }> = [];
+  const counted: JournalStore = {
+    load: key => store.load(key),
+    apply: changes => { writes.push({ upsert: changes.upsert.map(item => item.itemKey), removed: changes.removed, replaced: changes.replaced }); return store.apply(changes); },
+    delete: key => store.delete(key), catalog: store.catalog,
+  };
+  const real = createHostJournals({ store: counted, now: () => 1_000, ...(options.limits === undefined ? {} : { limits: options.limits }) });
+  let opens = 0;
   const journals: HostJournals = {
     ...real,
-    open: (hostId, sessionKey, publisherId, openOptions) => real.open(hostId, sessionKey, publisherId, { ...openOptions, ...(options.maxIndexItems === undefined ? {} : { maxIndexItems: options.maxIndexItems }) }),
+    open: (hostId, sessionKey, publisherId, openOptions) => options.refuseOpen?.(++opens) ? Promise.resolve({ refused: 'unavailable' as const }) : real.open(hostId, sessionKey, publisherId, openOptions),
     publish: async (hostId, sessionKey, generation, entries) => {
       let at = -1;
       let refusal: ReturnType<NonNullable<RelayLoopbackOptions['refuseEntry']>>;
@@ -44,6 +52,8 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
   const fromPublisher: Array<Record<string, any>> = [];
   const fromRelay: JournalRelayMessage[] = [];
   const published: Array<{ sessionKey: string; result: JournalPublished }> = [];
+  /** What the Relay recorded about its journals. */
+  const diagnostics: string[] = [];
   let publisher: JournalPublisher | undefined;
   let online = true;
   const connection: JournalConnection = createJournalConnection({
@@ -54,6 +64,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
       fromRelay.push(relayMessage);
       queueMicrotask(() => publisher?.receive(relayMessage));
     },
+    diagnostic: event => { diagnostics.push(event); },
     published: (sessionKey, result) => { published.push({ sessionKey, result }); },
   });
   const writer = {
@@ -64,11 +75,18 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
     },
   };
   return {
-    store, journals, connection, writer, fromPublisher, fromRelay, published,
+    store, writes, diagnostics, journals, connection, writer, fromPublisher, fromRelay, published,
     /** The publisher the Relay's messages go to. */
     connect(next: JournalPublisher): void { publisher = next; next.available(writer); },
     /** Ends the connection: the Relay forgets which sessions it opened, and the publisher is told. */
     disconnect(): void { online = false; connection.close(); publisher?.available(undefined); },
+    /** Marks the stored journal of a session incomplete, as a quota refusal of a live row does while the Controller is away. */
+    async makeIncomplete(sessionKey: string): Promise<void> {
+      const state = await store.load(`${HOST_ID}:${sessionKey}`);
+      const journal = new SessionJournal(state!);
+      journal.markIncomplete();
+      await store.apply(journal.takeChanges());
+    },
     /** The journal the Relay holds for a session. */
     async journal(sessionKey: string): Promise<SessionJournal | undefined> {
       const state = await store.load(`${HOST_ID}:${sessionKey}`);

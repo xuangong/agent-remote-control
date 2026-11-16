@@ -1,4 +1,4 @@
-import type { JournalItemInput, JournalRowInput } from '@orchardworks/agent-remote-journal';
+import { itemDigest, type JournalItemInput, type JournalRowInput } from '@orchardworks/agent-remote-journal';
 import {
   encodeRemoteHostUplinkMessage, JOURNAL_ITEMS_PER_ENTRY_MAX, JOURNAL_PUBLISH_MAX_ENTRIES, REMOTE_HOST_UPLINK_VERSION, type JournalPublishEntry,
 } from '@orchardworks/agent-remote-protocol';
@@ -64,6 +64,9 @@ export function mergedRow(item: TimelineItem): JournalRowInput {
   };
 }
 
+/** The digest of an item's whole content, as the journal compares it. */
+export const digestOf = (item: TimelineItem): Promise<string> => itemDigest(mergedRow(item).item);
+
 /** What a message carries besides its entries, under the longest session key; counted once per message. */
 export const MESSAGE_ENVELOPE_BYTES = Buffer.byteLength(JSON.stringify({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: 'k'.repeat(4609), generation: 1, entries: [] })) - 2;
 
@@ -113,9 +116,8 @@ export function blocksOf(items: readonly SizedItem[]): JournalItemInput[][] {
 }
 
 /** The newest items that fit one message, oldest first, taken from the end; at least one when there is any the wire accepts. */
-export async function newestItems(items: readonly TimelineItem[], digest: (item: TimelineItem) => Promise<string>): Promise<{ block: JournalItemInput[]; keys: string[]; refused: string[] }> {
+export async function newestItems(items: readonly TimelineItem[], digest: (item: TimelineItem) => Promise<string>): Promise<{ block: JournalItemInput[]; refused: string[] }> {
   const block: JournalItemInput[] = [];
-  const keys: string[] = [];
   const refused: string[] = [];
   let bytes = 0;
   for (let at = items.length - 1; at >= 0; at -= 1) {
@@ -125,10 +127,9 @@ export async function newestItems(items: readonly TimelineItem[], digest: (item:
     if (!sized) continue;
     if (block.length > 0 && (block.length >= JOURNAL_ITEMS_PER_ENTRY_MAX || MESSAGE_ENVELOPE_BYTES + bytes + sized.bytes > MESSAGE_BUDGET_BYTES)) break;
     block.unshift(sized.item);
-    keys.unshift((items[at] as TimelineItem).key);
     bytes += sized.bytes;
   }
-  return { block, keys, refused };
+  return { block, refused };
 }
 
 /** Publications, in order, each within the entry count and the byte budget of one message. */

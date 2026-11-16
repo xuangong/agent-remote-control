@@ -1,9 +1,8 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
-import { itemDigest, type JournalIndexEntry } from '@orchardworks/agent-remote-journal';
+import { SessionJournal, type JournalItemInput, type SyncResult } from '@orchardworks/agent-remote-journal';
 import { expect } from 'vitest';
 
-import { groupItems, mergedRow, type TimelineItem } from '../journal-items.js';
-import { planPublication, type PublicationPlan } from '../journal-reconcile.js';
+import { digestOf, groupItems, mergedRow, type TimelineItem } from '../journal-items.js';
 import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
 
 /** What one native session produced: everything it emitted while it ran, and what the adapter returns after it is reopened. */
@@ -47,41 +46,30 @@ export async function itemsOf(observations: readonly ProviderObservation[]): Pro
   }
 }
 
-const digest = (timelineItem: TimelineItem): Promise<string> => itemDigest(mergedRow(timelineItem).item);
+/** The items as a Controller's window carries them: complete ones with their digest, open ones without. */
+const windowOf = (items: readonly TimelineItem[]): Promise<JournalItemInput[]> =>
+  Promise.all(items.map(async item => ({ row: mergedRow(item), ...(item.complete ? { digest: await digestOf(item) } : {}) })));
 
-/** The index a journal would hold after publishing the live run: every item, complete ones with their digest. */
-async function journalOf(items: readonly TimelineItem[]): Promise<JournalIndexEntry[]> {
-  const index: JournalIndexEntry[] = [];
-  for (const [at, timelineItem] of items.entries()) {
-    index.push({
-      itemKey: timelineItem.key, seqStart: at + 1, seqEnd: at + 1, state: timelineItem.complete ? 'complete' : 'open', ...(timelineItem.complete ? { digest: await digest(timelineItem) } : {}),
-      liveOnly: timelineItem.liveOnly, revision: at + 1, resident: true,
-    });
-  }
-  return index;
-}
-
-/** What the Controller would publish to the journal of the live run, when the session is reopened and read again. */
-export async function continuityPlan(run: ContinuityRun): Promise<PublicationPlan> {
+/**
+ * What the Relay's journal does with the reread of a session: a journal built from the live run's window meets the window
+ * the Controller would send when the session is reopened and read again.
+ */
+export async function continuityOutcome(run: ContinuityRun): Promise<SyncResult['outcome']> {
   const live = await itemsOf(run.live);
   const reread = await itemsOf(run.reread.map(observation => ({ ...observation, delivery: 'history' as const })));
   const open = reread.filter(entry => !entry.complete).map(entry => entry.key);
   if (open.length > 0) throw new Error(`History must complete every item it returns; these are not complete: ${open.join(', ')}.`);
-  return planPublication(await journalOf(live), reread, digest);
+  const journal = SessionJournal.create('host-1:continuity');
+  const { generation } = journal.claim('controller-1');
+  const roomBytes = Number.MAX_SAFE_INTEGER;
+  journal.sync({ publisherId: 'controller-1', generation, sequence: 1 }, await windowOf(live), { roomBytes });
+  return journal.sync({ publisherId: 'controller-1', generation, sequence: 2 }, await windowOf(reread), { roomBytes }).outcome;
 }
 
-/** Describes a plan that is not empty, naming the operations it would publish. */
-const describePlan = (plan: PublicationPlan): string => plan.kind === 'gap' ? 'a gap'
-  : `${plan.kind}${plan.kind === 'replace' ? ` (${plan.reason})` : ''}: ${[...plan.ops, ...(plan.kind === 'continue' ? plan.older : [])].map(({ op }) => op.op).join(', ') || 'nothing'}`;
-
 /**
- * Proves continuity: the items of the reread have the keys and the content of the items the live run built, so
- * reconciling publishes no row, and the epoch continues. Fails with the operations it would have published.
- * Every reconcile restates the outcome of each background it holds, which changes nothing in a journal that has it, so
- * outcome entries do not count against continuity.
+ * Proves continuity: the items of the reread have the keys and the content of the items the live run built, so the Relay
+ * leaves its journal as it is when the Controller opens it again. Fails with what the Relay would do instead.
  */
 export async function expectContinuity(run: ContinuityRun): Promise<void> {
-  const plan = await continuityPlan(run);
-  const publishes = plan.kind !== 'continue' || plan.ops.some(({ op }) => op.op !== 'outcome') || plan.older.length > 0 || plan.refused.length > 0;
-  expect(publishes, `Reconciling would publish ${describePlan(plan)}.`).toBe(false);
+  expect(await continuityOutcome(run), 'The journal of the live run, meeting the reread').toBe('unchanged');
 }

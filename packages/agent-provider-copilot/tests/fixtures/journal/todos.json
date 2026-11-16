@@ -1,0 +1,662 @@
+{
+ "live": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8",
+   "nativeRevision": 1,
+   "occurredAt": 1794826198557,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "First",
+     "messageId": "915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "user:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:73f5fd4e-55e3-4b96-a19d-18483266257b",
+   "nativeRevision": 2,
+   "occurredAt": 1794826198558,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+   "nativeRevision": 4,
+   "occurredAt": 1794826198566,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:local:6dcb0815-43b9-48c3-9f61-3428b08f6ffc",
+   "occurredAt": 1794826198568,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "todo",
+     "items": [
+      {
+       "text": "Write the test",
+       "completed": false,
+       "id": "one",
+       "status": "in_progress"
+      }
+     ]
+    }
+   },
+   "itemIdentity": {
+    "key": "todo:plan",
+    "completes": true,
+    "liveOnly": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+   "nativeRevision": 5,
+   "occurredAt": 1794826198568,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "Executed 2 statement(s):\n\n1. CREATE\n   Schema operation completed successfully.\n\n2. INSERT\n   1 row(s) inserted. Last inserted row ID: 1."
+       },
+       {
+        "type": "text",
+        "text": "SQL: CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT); INSERT INTO todos (id, title, status) VALUES ('one', 'Write the test', 'in_progress');\n\nExecuted 2 statement(s):\n\n1. CREATE\n   Schema operation completed successfully.\n\n2. INSERT\n   1 row(s) inserted. Last inserted row ID: 1."
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+   "nativeRevision": 7,
+   "occurredAt": 1794826198575,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSW",
+     "messageId": "92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "assistant:92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+   "nativeRevision": 8,
+   "occurredAt": 1794826198575,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ER_2",
+     "messageId": "92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "assistant:92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+   "nativeRevision": 9,
+   "occurredAt": 1794826198576,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "assistant:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:14a842c9-3031-4b18-9926-bdb13433ea44",
+   "nativeRevision": 10,
+   "occurredAt": 1794826198577,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:47849576-6372-49c8-9d6b-b88881c064a4",
+   "nativeRevision": 11,
+   "occurredAt": 1794826198594,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Second",
+     "messageId": "47849576-6372-49c8-9d6b-b88881c064a4"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "user:47849576-6372-49c8-9d6b-b88881c064a4",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:6fdd5160-d75f-4cb0-b0e2-8838586ac8c2",
+   "nativeRevision": 12,
+   "occurredAt": 1794826198594,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+   "nativeRevision": 14,
+   "occurredAt": 1794826198603,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+   "nativeRevision": 15,
+   "occurredAt": 1794826198604,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "1 row(s) updated."
+       },
+       {
+        "type": "text",
+        "text": "SQL: UPDATE todos SET status = 'done' WHERE id = 'one';\n\n1 row(s) updated."
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:local:9a239c19-32bc-4006-83fa-e5ea1766dd3b",
+   "occurredAt": 1794826198605,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "todo",
+     "items": [
+      {
+       "text": "Write the test",
+       "completed": true,
+       "id": "one",
+       "status": "completed"
+      }
+     ]
+    }
+   },
+   "itemIdentity": {
+    "key": "todo:plan",
+    "completes": true,
+    "liveOnly": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:3752a83f-f199-45ee-bffa-d27e2110e613",
+   "nativeRevision": 17,
+   "occurredAt": 1794826198612,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSW",
+     "messageId": "3752a83f-f199-45ee-bffa-d27e2110e613"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "assistant:3752a83f-f199-45ee-bffa-d27e2110e613"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:3752a83f-f199-45ee-bffa-d27e2110e613",
+   "nativeRevision": 18,
+   "occurredAt": 1794826198612,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ER_4",
+     "messageId": "3752a83f-f199-45ee-bffa-d27e2110e613"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "assistant:3752a83f-f199-45ee-bffa-d27e2110e613"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:3752a83f-f199-45ee-bffa-d27e2110e613",
+   "nativeRevision": 19,
+   "occurredAt": 1794826198614,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "3752a83f-f199-45ee-bffa-d27e2110e613"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "assistant:3752a83f-f199-45ee-bffa-d27e2110e613",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:a93e26e4-0223-4ebb-a7db-84c6a7bd6f44",
+   "nativeRevision": 20,
+   "occurredAt": 1794826198614,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   }
+  }
+ ],
+ "reread": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8",
+   "nativeRevision": 1,
+   "occurredAt": 1794826198557,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "First",
+     "messageId": "915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "user:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:73f5fd4e-55e3-4b96-a19d-18483266257b",
+   "nativeRevision": 2,
+   "occurredAt": 1794826198558,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+   "nativeRevision": 3,
+   "occurredAt": 1794826198566,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+   "nativeRevision": 4,
+   "occurredAt": 1794826198568,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "Executed 2 statement(s):\n\n1. CREATE\n   Schema operation completed successfully.\n\n2. INSERT\n   1 row(s) inserted. Last inserted row ID: 1."
+       },
+       {
+        "type": "text",
+        "text": "SQL: CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT, description TEXT, status TEXT); INSERT INTO todos (id, title, status) VALUES ('one', 'Write the test', 'in_progress');\n\nExecuted 2 statement(s):\n\n1. CREATE\n   Schema operation completed successfully.\n\n2. INSERT\n   1 row(s) inserted. Last inserted row ID: 1."
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0d79c50b-d54d-439d-9d22-ad54b8d99bf0",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+   "nativeRevision": 5,
+   "occurredAt": 1794826198576,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSWER_2",
+     "messageId": "92464068-cb80-4bdc-a499-c8c10bb7ffbe"
+    },
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   },
+   "itemIdentity": {
+    "key": "assistant:92464068-cb80-4bdc-a499-c8c10bb7ffbe",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:5d0e1206-29f4-47fd-8b09-c6fbb0c3f597",
+   "nativeRevision": 6,
+   "occurredAt": 1794826198576,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:915e2cf7-f353-4f9a-9ec3-70cb1c729ba8"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:47849576-6372-49c8-9d6b-b88881c064a4",
+   "nativeRevision": 7,
+   "occurredAt": 1794826198594,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Second",
+     "messageId": "47849576-6372-49c8-9d6b-b88881c064a4"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "user:47849576-6372-49c8-9d6b-b88881c064a4",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:6fdd5160-d75f-4cb0-b0e2-8838586ac8c2",
+   "nativeRevision": 8,
+   "occurredAt": 1794826198594,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+   "nativeRevision": 9,
+   "occurredAt": 1794826198603,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+   "nativeRevision": 10,
+   "occurredAt": 1794826198604,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+     "name": "sql",
+     "detail": {
+      "type": "other",
+      "description": "sql"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "1 row(s) updated."
+       },
+       {
+        "type": "text",
+        "text": "SQL: UPDATE todos SET status = 'done' WHERE id = 'one';\n\n1 row(s) updated."
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-61902a5f-fc1d-4f5e-88d3-8761e722c731",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:message:3752a83f-f199-45ee-bffa-d27e2110e613",
+   "nativeRevision": 11,
+   "occurredAt": 1794826198614,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSWER_4",
+     "messageId": "3752a83f-f199-45ee-bffa-d27e2110e613"
+    },
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   },
+   "itemIdentity": {
+    "key": "assistant:3752a83f-f199-45ee-bffa-d27e2110e613",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:96f3a025-ff57-49b2-b0c8-ec5805bdaee6:30a488fe-0046-4822-8dba-8742de41a644",
+   "nativeRevision": 12,
+   "occurredAt": 1794826198614,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:47849576-6372-49c8-9d6b-b88881c064a4"
+   }
+  }
+ ]
+}

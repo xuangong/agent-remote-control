@@ -1,0 +1,239 @@
+{
+ "live": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:a88343e6-52b7-4b92-a4ff-0176c3d8c66c",
+   "nativeRevision": 1,
+   "occurredAt": 1794826197702,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Think",
+     "messageId": "a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "user:a88343e6-52b7-4b92-a4ff-0176c3d8c66c",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:77ffa5a7-3406-4e66-8978-5074e00a5c68",
+   "nativeRevision": 2,
+   "occurredAt": 1794826197703,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:f18c9b9c-9872-4334-b8ef-0aadc345300d",
+   "nativeRevision": 4,
+   "occurredAt": 1794826197712,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "reasoning",
+     "text": "Let me "
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "reasoning:4214dd10-ef2e-452c-96d1-0729c7a612a0",
+    "liveOnly": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:13758a97-9129-4a01-b155-11e92d30fd24",
+   "nativeRevision": 5,
+   "occurredAt": 1794826197712,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "reasoning",
+     "text": "think."
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "reasoning:4214dd10-ef2e-452c-96d1-0729c7a612a0",
+    "liveOnly": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:message:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+   "nativeRevision": 6,
+   "occurredAt": 1794826197713,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANS",
+     "messageId": "38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "assistant:38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:message:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+   "nativeRevision": 7,
+   "occurredAt": 1794826197713,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "WER",
+     "messageId": "38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "assistant:38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:message:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+   "nativeRevision": 8,
+   "occurredAt": 1794826197714,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "assistant:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:32453218-82e4-4a04-92fa-f89ae65aee9e",
+   "nativeRevision": 9,
+   "occurredAt": 1794826197714,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "reasoning",
+     "text": ""
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "reasoning:4214dd10-ef2e-452c-96d1-0729c7a612a0",
+    "completes": true,
+    "liveOnly": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:c455b387-8f3e-4ce4-8c26-24a9a112977b",
+   "nativeRevision": 10,
+   "occurredAt": 1794826197715,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   }
+  }
+ ],
+ "reread": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:a88343e6-52b7-4b92-a4ff-0176c3d8c66c",
+   "nativeRevision": 1,
+   "occurredAt": 1794826197702,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Think",
+     "messageId": "a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "user:a88343e6-52b7-4b92-a4ff-0176c3d8c66c",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:77ffa5a7-3406-4e66-8978-5074e00a5c68",
+   "nativeRevision": 2,
+   "occurredAt": 1794826197703,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:message:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+   "nativeRevision": 3,
+   "occurredAt": 1794826197714,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSWER",
+     "messageId": "38992ae4-c0a8-4c82-89f8-97f3d5905b11"
+    },
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   },
+   "itemIdentity": {
+    "key": "assistant:38992ae4-c0a8-4c82-89f8-97f3d5905b11",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:ebde1b69-38a1-4eab-a802-7d0e6b807ebb:d9a849bf-9a4a-4b7e-ba7e-7c49ffdb8e3e",
+   "nativeRevision": 4,
+   "occurredAt": 1794826197715,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:a88343e6-52b7-4b92-a4ff-0176c3d8c66c"
+   }
+  }
+ ]
+}

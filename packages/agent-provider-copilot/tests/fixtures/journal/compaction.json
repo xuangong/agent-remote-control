@@ -1,0 +1,376 @@
+{
+ "live": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:0588b867-e4a4-4c67-86f1-dd1477e7996a",
+   "nativeRevision": 1,
+   "occurredAt": 1794826199013,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Hello",
+     "messageId": "0588b867-e4a4-4c67-86f1-dd1477e7996a"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "user:0588b867-e4a4-4c67-86f1-dd1477e7996a",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:ad03c2e0-4eb4-4f11-933f-08ecb4379050",
+   "nativeRevision": 2,
+   "occurredAt": 1794826199014,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:message:fe013213-7770-447a-afbd-9ee729f5f040",
+   "nativeRevision": 4,
+   "occurredAt": 1794826199022,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "FIR",
+     "messageId": "fe013213-7770-447a-afbd-9ee729f5f040"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "assistant:fe013213-7770-447a-afbd-9ee729f5f040"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:message:fe013213-7770-447a-afbd-9ee729f5f040",
+   "nativeRevision": 5,
+   "occurredAt": 1794826199022,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ST",
+     "messageId": "fe013213-7770-447a-afbd-9ee729f5f040"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "assistant:fe013213-7770-447a-afbd-9ee729f5f040"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:message:fe013213-7770-447a-afbd-9ee729f5f040",
+   "nativeRevision": 6,
+   "occurredAt": 1794826199024,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "fe013213-7770-447a-afbd-9ee729f5f040"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "assistant:fe013213-7770-447a-afbd-9ee729f5f040",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:a4f3dc1a-f382-4a1b-ba9c-0fef6a8d5528",
+   "nativeRevision": 7,
+   "occurredAt": 1794826199025,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:a6f3de77-048d-4035-b2a6-20eb06c54ee0",
+   "nativeRevision": 8,
+   "occurredAt": 1794826199032,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:a6f3de77-048d-4035-b2a6-20eb06c54ee0"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:1b5c2df4-b4b1-4230-8bc1-67127e78e856",
+   "nativeRevision": 9,
+   "occurredAt": 1794826199043,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "completed",
+     "preTokens": 39
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:a6f3de77-048d-4035-b2a6-20eb06c54ee0",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:797f127a-b008-4aad-aa90-afe08e601baa",
+   "nativeRevision": 11,
+   "occurredAt": 1794826199047,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:797f127a-b008-4aad-aa90-afe08e601baa"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:c4826a49-55c9-4b12-b953-efef276029c7",
+   "nativeRevision": 12,
+   "occurredAt": 1794826199047,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:797f127a-b008-4aad-aa90-afe08e601baa",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:c4826a49-55c9-4b12-b953-efef276029c7:error",
+   "nativeRevision": 13,
+   "occurredAt": 1794826199047,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "error",
+     "message": "Copilot compaction failed: Nothing to compact."
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "error:c4826a49-55c9-4b12-b953-efef276029c7",
+    "completes": true
+   }
+  }
+ ],
+ "reread": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:0588b867-e4a4-4c67-86f1-dd1477e7996a",
+   "nativeRevision": 1,
+   "occurredAt": 1794826199013,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Hello",
+     "messageId": "0588b867-e4a4-4c67-86f1-dd1477e7996a"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "user:0588b867-e4a4-4c67-86f1-dd1477e7996a",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:ad03c2e0-4eb4-4f11-933f-08ecb4379050",
+   "nativeRevision": 2,
+   "occurredAt": 1794826199014,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:message:fe013213-7770-447a-afbd-9ee729f5f040",
+   "nativeRevision": 3,
+   "occurredAt": 1794826199024,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "FIRST",
+     "messageId": "fe013213-7770-447a-afbd-9ee729f5f040"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "assistant:fe013213-7770-447a-afbd-9ee729f5f040",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:c1fa8d0c-d22a-423f-9dbe-d8ada9d6cc40",
+   "nativeRevision": 4,
+   "occurredAt": 1794826199024,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:a6f3de77-048d-4035-b2a6-20eb06c54ee0",
+   "nativeRevision": 5,
+   "occurredAt": 1794826199032,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:a6f3de77-048d-4035-b2a6-20eb06c54ee0"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:1b5c2df4-b4b1-4230-8bc1-67127e78e856",
+   "nativeRevision": 6,
+   "occurredAt": 1794826199043,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "completed",
+     "preTokens": 39
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:a6f3de77-048d-4035-b2a6-20eb06c54ee0",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:797f127a-b008-4aad-aa90-afe08e601baa",
+   "nativeRevision": 7,
+   "occurredAt": 1794826199047,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:797f127a-b008-4aad-aa90-afe08e601baa"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:c4826a49-55c9-4b12-b953-efef276029c7",
+   "nativeRevision": 8,
+   "occurredAt": 1794826199047,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "compaction",
+     "status": "loading"
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "compaction:797f127a-b008-4aad-aa90-afe08e601baa",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:1cdd3216-d59c-4d92-a4a0-fcfa9b079f39:c4826a49-55c9-4b12-b953-efef276029c7:error",
+   "nativeRevision": 9,
+   "occurredAt": 1794826199047,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "error",
+     "message": "Copilot compaction failed: Nothing to compact."
+    },
+    "turnId": "turn:0588b867-e4a4-4c67-86f1-dd1477e7996a"
+   },
+   "itemIdentity": {
+    "key": "error:c4826a49-55c9-4b12-b953-efef276029c7",
+    "completes": true
+   }
+  }
+ ]
+}

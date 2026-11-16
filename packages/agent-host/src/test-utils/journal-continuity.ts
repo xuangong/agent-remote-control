@@ -1,6 +1,5 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
-import { SessionJournal, type JournalItemInput, type SyncResult } from '@orchardworks/agent-remote-journal';
-import { expect } from 'vitest';
+import { SessionJournal, type JournalItemInput, type ReplacementReason, type SyncResult } from '@orchardworks/agent-remote-journal';
 
 import { digestOf, groupItems, mergedRow, type TimelineItem } from '../journal-items.js';
 import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
@@ -50,26 +49,41 @@ export async function itemsOf(observations: readonly ProviderObservation[]): Pro
 const windowOf = (items: readonly TimelineItem[]): Promise<JournalItemInput[]> =>
   Promise.all(items.map(async item => ({ row: mergedRow(item), ...(item.complete ? { digest: await digestOf(item) } : {}) })));
 
+/** What the Relay's journal did with a window: left it, appended, or replaced itself for a reason. */
+export type ContinuityOutcome = { outcome: 'unchanged' | 'appended' } | { outcome: 'replaced'; reason: ReplacementReason };
+
+const outcomeOf = (result: SyncResult): ContinuityOutcome => result.outcome === 'replaced' ? { outcome: 'replaced', reason: result.reason } : { outcome: result.outcome };
+
 /**
- * What the Relay's journal does with the reread of a session: a journal built from the live run's window meets the window
- * the Controller would send when the session is reopened and read again.
+ * A Relay journal built from what a live run produced, which meets the windows a Controller would send when the session is
+ * opened again and read again. Items the reread leaves open (a tool with no completion) are allowed: they are sent without a digest.
  */
-export async function continuityOutcome(run: ContinuityRun): Promise<SyncResult['outcome']> {
-  const live = await itemsOf(run.live);
-  const reread = await itemsOf(run.reread.map(observation => ({ ...observation, delivery: 'history' as const })));
-  const open = reread.filter(entry => !entry.complete).map(entry => entry.key);
-  if (open.length > 0) throw new Error(`History must complete every item it returns; these are not complete: ${open.join(', ')}.`);
+export async function journalOfRun(live: readonly ProviderObservation[]) {
   const journal = SessionJournal.create('host-1:continuity');
   const { generation } = journal.claim('controller-1');
   const roomBytes = Number.MAX_SAFE_INTEGER;
-  journal.sync({ publisherId: 'controller-1', generation, sequence: 1 }, await windowOf(live), { roomBytes });
-  return journal.sync({ publisherId: 'controller-1', generation, sequence: 2 }, await windowOf(reread), { roomBytes }).outcome;
+  let sequence = 0;
+  const meet = async (items: readonly TimelineItem[]): Promise<ContinuityOutcome> => {
+    sequence += 1;
+    return outcomeOf(journal.sync({ publisherId: 'controller-1', generation, sequence }, await windowOf(items), { roomBytes }));
+  };
+  await meet(await itemsOf(live));
+  return {
+    /** The window of a reread of native history. */
+    async reread(observations: readonly ProviderObservation[]): Promise<ContinuityOutcome> {
+      return meet(await itemsOf(observations.map(observation => ({ ...observation, delivery: 'history' as const }))));
+    },
+    /** The window of the newest `count` items of a reread. */
+    async newest(observations: readonly ProviderObservation[], count: number): Promise<ContinuityOutcome> {
+      return meet((await itemsOf(observations.map(observation => ({ ...observation, delivery: 'history' as const })))).slice(-count));
+    },
+    keys: (): string[] => journal.state().items.map(({ itemKey }) => itemKey),
+    openKeys: (): string[] => journal.state().items.filter(({ state }) => state === 'open').map(({ itemKey }) => itemKey),
+    liveOnlyKeys: (): string[] => journal.state().items.filter(({ liveOnly }) => liveOnly).map(({ itemKey }) => itemKey),
+  };
 }
 
-/**
- * Proves continuity: the items of the reread have the keys and the content of the items the live run built, so the Relay
- * leaves its journal as it is when the Controller opens it again. Fails with what the Relay would do instead.
- */
-export async function expectContinuity(run: ContinuityRun): Promise<void> {
-  expect(await continuityOutcome(run), 'The journal of the live run, meeting the reread').toBe('unchanged');
+/** What the Relay's journal does with the reread of a session: a journal built from the live run meets the window the Controller would send. */
+export async function continuityOutcome(run: ContinuityRun): Promise<ContinuityOutcome> {
+  return (await journalOfRun(run.live)).reread(run.reread);
 }

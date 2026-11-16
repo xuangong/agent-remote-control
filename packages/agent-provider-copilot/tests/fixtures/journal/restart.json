@@ -1,0 +1,540 @@
+{
+ "live": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb",
+   "nativeRevision": 1,
+   "occurredAt": 1794826196930,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "First",
+     "messageId": "cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "user:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:1ef7cee0-c032-498e-92b2-ceb4fd1652dc",
+   "nativeRevision": 2,
+   "occurredAt": 1794826196931,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 4,
+   "occurredAt": 1794826196941,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 5,
+   "occurredAt": 1794826196960,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "status": "running",
+     "error": null,
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "SETTLED_OK\n"
+       }
+      ]
+     }
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 6,
+   "occurredAt": 1794826196960,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "status": "running",
+     "error": null,
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "SETTLED_OK\nSETTLED_OK\n"
+       }
+      ]
+     }
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 7,
+   "occurredAt": 1794826196961,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "SETTLED_OK\n<shellId: 0 completed with exit code 0>"
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+   "nativeRevision": 9,
+   "occurredAt": 1794826196970,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSW",
+     "messageId": "7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "assistant:7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+   "nativeRevision": 10,
+   "occurredAt": 1794826196970,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ER_2",
+     "messageId": "7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "assistant:7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+   "nativeRevision": 11,
+   "occurredAt": 1794826196971,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "assistant:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:77bea0ed-7ed5-41ef-b3f0-9bffe9e8dc3e",
+   "nativeRevision": 12,
+   "occurredAt": 1794826196972,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:5e94ff4f-6be4-4ffe-a1ad-8942243cc077",
+   "nativeRevision": 13,
+   "occurredAt": 1794826196989,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Second",
+     "messageId": "5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "user:5e94ff4f-6be4-4ffe-a1ad-8942243cc077",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:33189ca9-f63a-4400-a6f7-1303d4110f02",
+   "nativeRevision": 14,
+   "occurredAt": 1794826196990,
+   "delivery": "live",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:1219e74f-4214-42c2-a984-286b55888bd9",
+   "nativeRevision": 16,
+   "occurredAt": 1794826196997,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSW",
+     "messageId": "1219e74f-4214-42c2-a984-286b55888bd9"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "assistant:1219e74f-4214-42c2-a984-286b55888bd9"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:1219e74f-4214-42c2-a984-286b55888bd9",
+   "nativeRevision": 17,
+   "occurredAt": 1794826196997,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ER_3",
+     "messageId": "1219e74f-4214-42c2-a984-286b55888bd9"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "assistant:1219e74f-4214-42c2-a984-286b55888bd9"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:1219e74f-4214-42c2-a984-286b55888bd9",
+   "nativeRevision": 18,
+   "occurredAt": 1794826196999,
+   "delivery": "live",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "",
+     "messageId": "1219e74f-4214-42c2-a984-286b55888bd9"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "assistant:1219e74f-4214-42c2-a984-286b55888bd9",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:8fe5300c-a91b-4f2f-8aeb-06e9bbad55bb",
+   "nativeRevision": 19,
+   "occurredAt": 1794826196999,
+   "delivery": "live",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   }
+  }
+ ],
+ "reread": [
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb",
+   "nativeRevision": 1,
+   "occurredAt": 1794826196930,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "First",
+     "messageId": "cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "user:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:1ef7cee0-c032-498e-92b2-ceb4fd1652dc",
+   "nativeRevision": 2,
+   "occurredAt": 1794826196931,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 3,
+   "occurredAt": 1794826196941,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "status": "running",
+     "error": null
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+   "nativeRevision": 4,
+   "occurredAt": 1794826196961,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "tool_call",
+     "callId": "fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+     "name": "bash",
+     "detail": {
+      "type": "shell",
+      "command": "echo SETTLED_OK"
+     },
+     "result": {
+      "content": [
+       {
+        "type": "text",
+        "text": "SETTLED_OK\n<shellId: 0 completed with exit code 0>"
+       }
+      ]
+     },
+     "status": "completed",
+     "error": null
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "tool:fixture-tool-0f845f95-d80c-4fae-80c5-ed915cea0033",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+   "nativeRevision": 5,
+   "occurredAt": 1794826196971,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSWER_2",
+     "messageId": "7b134b83-9b7f-41a3-8dcd-381c00a09e05"
+    },
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   },
+   "itemIdentity": {
+    "key": "assistant:7b134b83-9b7f-41a3-8dcd-381c00a09e05",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:33bfb9ac-2f70-44be-a34c-92cdccfb360a",
+   "nativeRevision": 6,
+   "occurredAt": 1794826196972,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:cd9d74ba-f7aa-4b4d-a544-d576bc4a58fb"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:5e94ff4f-6be4-4ffe-a1ad-8942243cc077",
+   "nativeRevision": 7,
+   "occurredAt": 1794826196989,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "user_message",
+     "text": "Second",
+     "messageId": "5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "user:5e94ff4f-6be4-4ffe-a1ad-8942243cc077",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:33189ca9-f63a-4400-a6f7-1303d4110f02",
+   "nativeRevision": 8,
+   "occurredAt": 1794826196990,
+   "delivery": "history",
+   "event": {
+    "type": "turn_started",
+    "provider": "copilot",
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:message:1219e74f-4214-42c2-a984-286b55888bd9",
+   "nativeRevision": 9,
+   "occurredAt": 1794826196999,
+   "delivery": "history",
+   "event": {
+    "type": "timeline",
+    "provider": "copilot",
+    "item": {
+     "type": "assistant_message",
+     "text": "ANSWER_3",
+     "messageId": "1219e74f-4214-42c2-a984-286b55888bd9"
+    },
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   },
+   "itemIdentity": {
+    "key": "assistant:1219e74f-4214-42c2-a984-286b55888bd9",
+    "completes": true
+   }
+  },
+  {
+   "type": "observation",
+   "sourceKey": "copilot:f6144380-affb-4719-b94a-f301b763fb8b:799078c3-e496-42b0-8535-5da8abb5ea9d",
+   "nativeRevision": 10,
+   "occurredAt": 1794826196999,
+   "delivery": "history",
+   "event": {
+    "type": "turn_completed",
+    "provider": "copilot",
+    "turnId": "turn:5e94ff4f-6be4-4ffe-a1ad-8942243cc077"
+   }
+  }
+ ]
+}

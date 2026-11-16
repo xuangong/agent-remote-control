@@ -65,7 +65,6 @@ type Host = {
   smartReading?: string[];
   /** The Controller publishes session journals on this connection; set when the Relay acknowledges it, never persisted. */
   journal?: JournalConnection;
-  /** The journal level acknowledged to this Controller: 2 includes amendments, open items, unserving and request refusals. */
   teamManagement?: true;
   teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
@@ -154,7 +153,6 @@ export interface HostBrokerOptions {
   now?(): number;
   scheduler?: BrokerScheduler;
 }
-/** How long a connection waits for the journal service to say what it supports before it is closed to connect again. */
 
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
@@ -842,7 +840,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested: 0 | 1 = 0) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested: 0 | typeof JOURNAL_VERSION = 0) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -2019,7 +2017,10 @@ export function createHostBroker(options: HostBrokerOptions) {
           previews.forget(host.id);
           if (journals) {
             journalDeletions = draft.journalDeletions ?? [];
-            if (droppedDeletion !== undefined) options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' });
+            pendingSerial.set(host.id, ++deletionSerial);
+            if (droppedDeletion !== undefined) { pendingSerial.delete(droppedDeletion); options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' }); }
+            // An id that the running pass already tried is tried again when the pass ends.
+            if (draining) rerun = true;
             drainJournalDeletions();
           }
           if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
@@ -2237,7 +2238,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === '1' ? 1 : 0);
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0);
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
@@ -2299,42 +2300,68 @@ export function createHostBroker(options: HostBrokerOptions) {
   /**
    * Pending journal deletions. A revoke records a Host's id in the state; one sequential pass then clears the ids:
    * - a Host's id receives no journal while it is pending (`registered` grants none), so a deletion that returns has nothing
-   *   left to delete for that id, a re-revoke during a deletion included, and the id is cleared when the call returns;
-   * - a call that does not answer within `journalDeletionTimeoutMs` is abandoned for this pass and the id stays pending: the
-   *   journal service runs the calls of one Host in order, so the abandoned one ends before any later deletion of that id;
-   * - a revoke or a registration while a pass runs is picked up by that pass or starts the next one; a start, a registration
-   *   and a revoke are the three triggers, and a failed id waits for the next of them.
+   *   left to delete for the entry it started under;
+   * - each id has one call in flight, the store call and its confirming commit, shared by the pass and by a returning Host's
+   *   wait; every caller races it against its own deadline, so a call that never answers is abandoned by each caller and is
+   *   never followed by another store call for the same entry. The confirmation clears the entry only if the entry was
+   *   created before the call started: a Host revoked again meanwhile stays pending and gets a call of its own after the
+   *   first one ends. The journal service runs one Host's calls in order, so an abandoned call ends before any later one;
+   * - a revoke or a registration while a pass runs is picked up by that pass, and an id the pass already tried is tried
+   *   again when the pass ends if it was revoked meanwhile; a start, a registration and a revoke are the triggers.
    */
   let draining = false;
-  /** Deletes one Host's journals and removes its id from the state if it is still there. Resolves false when the call failed or timed out, and leaves the id pending. Never rejects. */
+  let rerun = false;
+  /** Orders the revokes: the serial of the revoke that put an id into the pending list, and the serial a call started at. */
+  let deletionSerial = 0;
+  const pendingSerial = new Map<string, number>();
+  const deletionCalls = new Map<string, { startedAt: number; run: Promise<boolean> }>();
+  /** The call that deletes an id's journals and clears the entries up to its start. Resolves false on a failure and leaves the id pending. Never rejects. */
+  function deletionCall(hostId: string): Promise<boolean> {
+    const existing = deletionCalls.get(hostId);
+    if (existing && (pendingSerial.get(hostId) ?? 0) <= existing.startedAt) return existing.run;
+    const startedAt = deletionSerial;
+    const run: Promise<boolean> = (async () => {
+      await existing?.run;
+      try { await journals!.deleteHost(hostId); }
+      catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
+      try {
+        await commit(draft => {
+          const pending = draft.journalDeletions ?? [];
+          if (!pending.includes(hostId) || (pendingSerial.get(hostId) ?? 0) > startedAt) return { value: undefined, unchanged: true, publish() {} };
+          const rest = pending.filter(id => id !== hostId);
+          if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+          return { value: undefined, publish() { journalDeletions = rest; pendingSerial.delete(hostId); } };
+        });
+      } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
+      return true;
+    })().finally(() => { if (deletionCalls.get(hostId)?.run === run) deletionCalls.delete(hostId); });
+    deletionCalls.set(hostId, { startedAt, run });
+    return run;
+  }
+  /** Waits for the id's call for at most `journalDeletionTimeoutMs`. Resolves false when the call failed or the deadline came first. Never rejects. */
   async function deleteOne(hostId: string): Promise<boolean> {
-    const service = journals;
-    if (!service) return false;
+    if (!journals) return false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), options.journalDeletionTimeoutMs ?? 30_000); });
     try {
-      await Promise.race([service.deleteHost(hostId), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Journal deletion timed out')), options.journalDeletionTimeoutMs ?? 30_000); })]);
-    } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
-    finally { clearTimeout(timer); }
-    try {
-      await commit(draft => {
-        const pending = draft.journalDeletions ?? [];
-        if (!pending.includes(hostId)) return { value: undefined, unchanged: true, publish() {} };
-        const rest = pending.filter(id => id !== hostId);
-        if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-        return { value: undefined, publish() { journalDeletions = rest; } };
-      });
-    } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
-    return true;
+      const done = await Promise.race([deletionCall(hostId), deadline]);
+      if (!done) options.diagnostics?.record(hostId, { event: 'journal_store_failed' });
+      return done;
+    } finally { clearTimeout(timer); }
   }
   /** Deletes the pending ids one after another, each at most once per pass; a revoke that arrives meanwhile joins the pass. Never rejects. */
   function drainJournalDeletions(): void {
     if (draining || !journals) return;
     draining = true;
     void (async () => {
-      const tried = new Set<string>();
+      let tried = new Set<string>();
       for (;;) {
         const hostId = journalDeletions.find(id => !tried.has(id));
-        if (hostId === undefined) { draining = false; return; }
+        if (hostId === undefined) {
+          if (rerun) { rerun = false; tried = new Set(); continue; }
+          draining = false;
+          return;
+        }
         tried.add(hostId);
         await deleteOne(hostId);
       }

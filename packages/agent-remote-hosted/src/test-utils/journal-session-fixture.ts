@@ -96,7 +96,7 @@ export interface RelayOptions {
   requestTimeoutMs?: number;
   seed?(store: MemoryJournalStore): Promise<void>;
   /** Broker options that tests vary, such as `ownerSubject` and `userStreamCount`. */
-  broker?: Partial<Pick<HostBrokerOptions, 'ownerSubject' | 'userStreamCount' | 'onStateChange' | 'journalDeletionWaitMs' | 'diagnostics'>>;
+  broker?: Partial<Pick<HostBrokerOptions, 'ownerSubject' | 'userStreamCount' | 'onStateChange' | 'journalDeletionWaitMs' | 'journalDeletionTimeoutMs' | 'diagnostics'>>;
   /** Safety limits of the journal service, for tests of a quota. */
   journalLimits?: HostJournalsOptions['limits'];
   /** Wraps the in-memory store the broker keeps its journals in, for tests of a store that is slow or fails. */

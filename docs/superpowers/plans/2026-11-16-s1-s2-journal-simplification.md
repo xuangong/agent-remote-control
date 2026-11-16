@@ -208,6 +208,11 @@ Nothing user-visible changes in S1 except the timing note in Section 2. Each tas
 - [ ] Step 2: tests, then changes; run `-hosted` `journal-session-stream`, `journal-session-stream-amendments`, `broker-journal-sessions`, `journal-sessions`; `-web` `remote-session-client`; `-lab` `pnpm test:conformance`.
 - [ ] Step 3: Gate S1 (full suites) and Gate G; commit. Record the S1 totals against the baseline: expected production about -325, tests about -375.
 
+**S1 notes (recorded after review).**
+- Known, not fixed in S1: with the four open slots gone, many sessions of one Controller can ask for their index pages at the same time and flood the uplink. S2 removes the index, so S1 must not ship alone.
+- Deletion: one in-flight call per id (store call plus its confirming commit) is shared by the pass and the restored Host's wait; a confirmation clears an entry only if the entry is older than the call; a revoke of an id the running pass already tried reruns the pass.
+- A refused open (a partition that cannot answer the Relay's version) removes the session from the head index and reports it unserved, so its streams close with 1012 and read crude.
+
 ---
 
 ## 6. S2: the Relay decides how a window joins the journal

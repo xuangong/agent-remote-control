@@ -224,6 +224,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
       protectedPorts: (environment.AGENT_HOST_PREVIEW_PROTECTED_PORTS ?? '').split(',').filter(Boolean).map(Number),
       diagnostic: event => { writeDiagnostic(JSON.stringify({ event, time: new Date().toISOString() }), diagnosticSecrets); } },
     onSessionLifecycleDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
+    onJournalDiagnostic: diagnostic => { writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets); },
     onRequestDiagnostic: diagnostic => {
       if (diagnostic.event === 'host_request_completed' && diagnostic.status !== undefined) health.request(diagnostic.operation, diagnostic.status, diagnostic.code);
       writeDiagnostic(JSON.stringify({ ...diagnostic, timestamp: new Date().toISOString(), pid: process.pid }), diagnosticSecrets);

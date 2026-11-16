@@ -1,5 +1,5 @@
 import { TeamRuntime } from './team.js';
-import { isTeamSeat, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { isTeamSeat, type JournalRelayMessage, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { directoryNativeEffect, directoryOperationId, type DirectoryMutationEvidence } from './directory-mutation.js';
 import { admitNativeOwnerTransfer } from './native-owner-admission.js';
 import { isCreationSource } from '@orchardworks/agent-remote-protocol';
@@ -42,6 +42,7 @@ import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
 import { SessionOutbox } from './session-outbox.js';
+import { createJournalPublisher, type JournalPublisher, type JournalPublisherDiagnostic } from './journal-publisher.js';
 import { loadResourceIdKey } from './resource-id-key.js';
 import { FileResourceIdIndex } from './resource-id-index-file.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
@@ -122,6 +123,8 @@ export interface AgentHostRuntimeOptions {
   idleGraceMs?: number;
   idleReconcileMs?: number;
   onSessionLifecycleDiagnostic?: (diagnostic: { event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled'; agentId: string; providerId: string }) => void;
+  /** Told what the journal publisher could not publish. The entries carry no conversation content. */
+  onJournalDiagnostic?: (diagnostic: JournalPublisherDiagnostic) => void;
   shutdownTimeoutMs?: number;
   cancelTimeoutMs?: number;
   executionPolicy?: HostExecutionPolicy;
@@ -188,6 +191,8 @@ export interface AgentHostRuntime {
   readonly relay: AgentRemoteRelay;
   /** Session states the Relay shares with the owner's pages. */
   readonly sessionStates: SessionStatePublisher;
+  /** Publishes the sessions of providers that declare journal support to their journals on the Relay. */
+  readonly journals: JournalPublisher;
   /** The Host's sessions as session commands read them. */
   readonly sessionCatalog: SessionCallerCatalog;
   /** The sessions each session refers to, for session commands; absent without a reference store. */
@@ -280,19 +285,20 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
           if (request.method === 'GET') {
             if (!updater && !options.onRelayDiagnostics) return { status: 404, body: '' };
             // Health rides on the update status, which every Relay already forwards to the owner unchanged.
-            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}),
+            return { status: 200, body: JSON.stringify({ ...(await updater?.status()), ...(options.onRelayDiagnostics ? { diagnosticDelivery: 4 } : {}),
               ...(options.health ? { health: options.health.snapshot() } : {}) }) };
           }
           if (!updater) return { status: 404, body: '' };
           const body = JSON.parse(request.body ?? '{}');
           return { status: 202, body: JSON.stringify(await updater.request(body.version, body.operationId)) };
         } catch (error) { return { status: 409, body: JSON.stringify({ error: error instanceof Error ? error.message : 'Controller update failed.',
-          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 3 } : {}) }) }; }
+          ...(request.method === 'GET' && options.onRelayDiagnostics ? { diagnosticDelivery: 4 } : {}) }) }; }
       })() : request.path === '/remote/provider-settings' && options.providerDiscovery ? options.providerDiscovery.control(request) : request.path === '/remote/codex-daemon' && codexDaemon ? codexDaemon.control(request) : request.path.startsWith('/remote/vscode-tunnel') && vscodeTunnel ? vscodeTunnel.control(request)
         : request.path.startsWith('/remote/previews') && previews ? previews.control(request) : runtime.control(request);
   const connect = (config: AgentHostOptions['uplink']): Connection => {
     uplinkUrl = config.url;
     runtime.setRelayConnected(false);
+    runtime.journals.available(undefined);
     const current = ++generation;
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       ...(options.team ? { teamManagement: true, callForSupport: true,
@@ -303,6 +309,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         onAvailable: (available: boolean) => { if (generation === current && !closed) runtime.outbox!.setAvailable(available); },
         onReady: () => { if (generation === current && !closed) runtime.outbox!.wake(); } } } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
+      // A Controller with no journal-capable provider does not ask for the grant, and a Relay without it never offers one.
+      ...(runtime.journals.capable() ? { journal: {
+        available: (writer: { send(json: string): void } | undefined) => { if (generation === current && !closed) runtime.journals.available(writer); },
+        receive: (message: JournalRelayMessage) => { if (generation === current && !closed) runtime.journals.receive(message); } } } : {}),
       sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
       onCredential: config.onCredential ? credential => {
@@ -409,6 +419,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     if (registrations.has(id)) throw new Error(`Duplicate Agent Host provider: ${id}.`);
     registrations.set(id, registration);
   }
+  /** Only providers whose adapters declare journal support are published; every other provider keeps today's forwarding. */
+  const journals = createJournalPublisher({
+    providers: () => [...registrations.values()]
+      .filter(({ adapter, directory }) => adapter.journal !== undefined && options.providerEnabled?.(directory.providerId) !== false)
+      .map(({ adapter }) => adapter.descriptor.providerId),
+    ...(options.onJournalDiagnostic ? { diagnostic: options.onJournalDiagnostic } : {}),
+  });
   const relayAdapters = options.registrations.map(({ adapter }) => ({
     descriptor: adapter.descriptor,
     ...(adapter.journal === undefined ? {} : { journal: adapter.journal }),
@@ -863,6 +880,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       return true;
     }, async () => {
+      await journals.release(binding.agentId);
       await relay.closeAgent(binding.agentId);
       await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
       lifecycle('session_idle_released', binding);
@@ -985,6 +1003,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         nativeAttachments.set(relay.requireAgent(proposedAgentId), { session: nativeSession, ...(creationIdentity ? { nativeCreation: creationIdentity } : {}), ...(prefixIdentity ? { nativePrefix: prefixIdentity } : {}) });
         for (const relative of nativeFamily(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
         watch(binding);
+        journals.attach({ agentId: proposedAgentId, providerId, nativeSessionId, source: relay.requireAgent(proposedAgentId) });
         if (existing) lifecycle('session_idle_restored', binding);
       } catch (error) { prepared.delete(proposedAgentId); throw error; }
       finally { parent?.release(); }
@@ -1505,6 +1524,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && liveAgent(binding.agentId);
       if (!binding || !agent) return true;
       if (idle.hasDemand(binding.agentId) || !registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
+      await journals.release(binding.agentId);
       await relay.closeAgent(binding.agentId);
       await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
       return true;
@@ -1610,7 +1630,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }
     return enrollment.control(request, context);
   };
-  return { relay, sessionStates, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
+  return { relay, sessionStates, journals, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     beginControllerRestart() {
       if (closed || draining) return false;
       // An owner-confirmed update closes admission immediately. Shutdown and the
@@ -1625,6 +1645,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
       if (workerSupportTimer) clearInterval(workerSupportTimer);
       await bounded(team?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
+      await bounded(journals.drain(1000), shutdownTimeoutMs).catch(() => undefined);
+      journals.close();
       await bounded(outbox?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       await bounded(tpm?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
       try {

@@ -190,6 +190,10 @@ Diagnostic delivery versions are independent of the public session protocol:
 - Version 2 additionally accepts authority renewal events and lease/retry timing.
 - Version 3 additionally accepts `wasClean`, `runtimeInstanceId`, `workerVersionId`,
   and `startReason` (`runtime_start` or `core_recovery`, on `relay_started` only).
+- Version 4 additionally accepts the journal events (`journal_message_unencodable`,
+  `journal_store_failed`, `journal_fanout_failed`, `journal_quota_exceeded`,
+  `journal_live_only_dropped` and `journal_deletion_dropped`). A Controller advertises 4
+  once it decodes them through the shared hosted module.
 
 Relay removes unsupported optional fields/events before sending to older
 Controllers. `closeCode` records the native socket close code; `wasClean` is

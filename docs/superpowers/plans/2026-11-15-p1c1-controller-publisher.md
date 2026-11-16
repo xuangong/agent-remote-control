@@ -9305,7 +9305,7 @@ it('rotates complete records within both file size and archive count bounds', as
 ```
 <!-- new -->
 ```ts
-it.each(['journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped'] as const)('appends the journal diagnostic %s that Controllers of delivery version 4 receive', async event => {
+it.each(['journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped'] as const)('appends the journal diagnostic %s that Controllers of delivery version 4 receive', async event => {
   const path = await location(); const sink = createRelayDiagnosticSink({ path });
   await sink.append([{ ...entry, event }]);
   expect(JSON.parse((await readFile(path, 'utf8')).trim())).toEqual({ ...entry, event });
@@ -9349,7 +9349,7 @@ Update the three expectations of delivery version 3 in `packages/agent-host/src/
 - [ ] **Step 2: Run them and see them fail.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/host-journal.test.ts src/relay-diagnostics.test.ts src/host.test.ts --testTimeout=15000`
-Expected: FAIL (`onJournalDiagnostic` and the uplink option do not exist; delivery version is still 3).
+Expected: FAIL (the uplink does not ask for the journal grant, so no journal is opened; delivery version is still 3). The shared diagnostics module already decodes the journal events, so the new `relay-diagnostics` cases pass at once: they pin the contract that version 4 relies on.
 
 - [ ] **Step 3: Implement.** In `packages/agent-host/src/host.ts`, import the publisher, the capability test and the message type:
 
@@ -9362,9 +9362,9 @@ import { SessionOutbox } from './session-outbox.js';
 ```ts
 import { SessionOutbox } from './session-outbox.js';
 import { createJournalPublisher, type JournalPublisher, type JournalPublisherDiagnostic } from './journal-publisher.js';
-import { supportsJournal } from '@orchardworks/agent-provider-sdk';
-import type { JournalRelayMessage } from '@orchardworks/agent-remote-protocol';
 ```
+
+`JournalRelayMessage` joins the existing import of `@orchardworks/agent-remote-protocol` at the top of the file (`import { isTeamSeat, type JournalRelayMessage, type OutboxHostCall, type TeamHostCall } ...`). The capability test reads `adapter.journal` directly, as the relay adapters already do.
 
 The runtime takes a place to record what the publisher cannot do, and exposes the publisher:
 
@@ -9410,8 +9410,8 @@ Create the publisher where the registrations are known:
   /** Only providers whose adapters declare journal support are published; every other provider keeps today's forwarding. */
   const journals = createJournalPublisher({
     providers: () => [...registrations.values()]
-      .filter(registration => supportsJournal(registration.adapter) && options.providerEnabled?.(registration.directory.providerId) !== false)
-      .map(registration => registration.adapter.descriptor.providerId),
+      .filter(({ adapter, directory }) => adapter.journal !== undefined && options.providerEnabled?.(directory.providerId) !== false)
+      .map(({ adapter }) => adapter.descriptor.providerId),
     ...(options.onJournalDiagnostic ? { diagnostic: options.onJournalDiagnostic } : {}),
   });
   const relayAdapters = options.registrations.map(({ adapter }) => ({
@@ -9443,6 +9443,21 @@ Follow a session while the Host holds it, and publish what it still has before a
       await journals.release(binding.agentId);
       await relay.closeAgent(binding.agentId);
       await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
+```
+
+The Controller's own `release` (the CLI's release of an idle session) closes the manager the same way, so it publishes first as well:
+
+<!-- edit: packages/agent-host/src/host.ts -->
+<!-- old -->
+```ts
+      await relay.closeAgent(binding.agentId);
+      await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
+```
+<!-- new -->
+```ts
+      await journals.release(binding.agentId);
+      await relay.closeAgent(binding.agentId);
+      await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
 ```
 
 Return the publisher, and publish what is queued before the runtime closes:
@@ -9550,14 +9565,15 @@ Document version 4 next to the other delivery versions in `packages/agent-remote
 - Version 3 additionally accepts `wasClean`, `runtimeInstanceId`, `workerVersionId`,
   and `startReason` (`runtime_start` or `core_recovery`, on `relay_started` only).
 - Version 4 additionally accepts the journal events (`journal_message_unencodable`,
-  `journal_store_failed`, `journal_fanout_failed` and the quota events that follow them).
-  A Controller advertises 4 once it decodes them through the shared hosted module.
+  `journal_store_failed`, `journal_fanout_failed`, `journal_quota_exceeded`,
+  `journal_live_only_dropped` and `journal_deletion_dropped`). A Controller advertises 4
+  once it decodes them through the shared hosted module.
 ```
 
 - [ ] **Step 4: Run the tests and see them pass, then the package.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/host-journal.test.ts src/relay-diagnostics.test.ts src/host.test.ts --testTimeout=15000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck` then `pnpm --filter @orchardworks/agent-remote-controller run test`
-Expected: PASS for all.
+Expected: PASS for all (the package runs 1,637 tests with the continuity fixture of Task 11).
 
 - [ ] **Step 5: Commit.**
 
@@ -9568,7 +9584,7 @@ git commit -m "feat(host): publish the sessions of journal-capable providers, re
 
 ### Task 11: The continuity fixture every provider adapter must pass
 
-Provider adapters (P1-C2) prove that live and reread observations of one native session agree, with this helper. It runs the Controller's own code: it feeds the observations to a real agent manager, so the rows are the rows the manager keeps, including the interaction items it builds from `interaction_resolved`; groups them into items; and asks `planPublication` what a reopened journal would need. This task proves the helper with a fake provider, including the ways an adapter fails it.
+Provider adapters (P1-C2) prove that live and reread observations of one native session agree, with this helper. It runs the Controller's own code: it feeds the observations to a real agent manager that checks the identity contract, and follows it with a journal tap, so a breach (a missing identity, a `controller:` key, an empty or oversized key) is the manager's own verdict; the rows are the rows the manager keeps, including the interaction items it builds from `interaction_resolved`; it groups them into items; and asks `planPublication` what a reopened journal would need. This task proves the helper with a fake provider, including the ways an adapter fails it.
 
 **Files:**
 - Create: `packages/agent-host/src/test-utils/journal-continuity.ts`
@@ -9649,6 +9665,16 @@ describe('the continuity fixture', () => {
     await expect(expectContinuity({ live: [bare], reread: [bare] })).rejects.toThrow(/identity/);
   });
 
+  it('fails an adapter whose key uses the prefix the Controller reserves for its own items', async () => {
+    const reserved = item('history', 'controller:answer', 'Hello');
+    await expect(expectContinuity({ live: [reserved], reread: [reserved] })).rejects.toThrow(/identity contract/);
+  });
+
+  it('fails an adapter whose live observation, after a well-formed history, lacks an identity', async () => {
+    const bare = { ...item('live', 'x', 'Late', { completes: true }), itemIdentity: undefined };
+    await expect(expectContinuity({ live: [...reread(), bare], reread: reread() })).rejects.toThrow(/identity/);
+  });
+
   it('covers the interaction items the agent manager builds: an adapter that gives them an identity passes, one that does not fails', async () => {
     const question = { kind: 'question' as const, requestId: 'q1', questions: [{ questionId: 'q', header: 'Pick', prompt: 'Which?', required: true, selection: 'single' as const, options: [{ value: 'a', label: 'A' }], allowCustomText: false, allowDismiss: false }] };
     const asked = { type: 'observation' as const, sourceKey: 'ask', occurredAt: 1, delivery: 'live' as const, event: { type: 'interaction_requested' as const, provider: 'fake', request: question } };
@@ -9700,23 +9726,30 @@ const SENTINEL = 'continuity:sentinel';
 /**
  * The items a journal would hold for these observations: they go through a real agent manager, history before its boundary
  * and live observations after it, so the rows are the ones the Controller keeps, including the interaction items the
- * manager builds from `interaction_resolved`. Every row must carry an item identity.
+ * manager builds from `interaction_resolved`. Every row must carry an item identity, and no key may use the prefix the Controller reserves for its own items.
  */
 export async function itemsOf(observations: readonly ProviderObservation[]): Promise<TimelineItem[]> {
   const session = new ScriptedSession('continuity', 'continuity', [...observations.filter(observation => observation.delivery === 'history'), boundary()]);
   const manager = await attachScripted(session, 'continuity');
+  let breached = false;
+  const subscription = manager.subscribeJournal({ event: () => undefined, closed: () => undefined, identityMissing: () => { breached = true; } });
   try {
     for (const observation of observations.filter(observation => observation.delivery === 'live')) session.push(observation);
     // Live observations are applied in order after this call returns; the last one says when they all were.
     session.push(item('live', SENTINEL, ''));
     await until(() => manager.timelineRows().some(row => row.identity?.key === SENTINEL), 'the observations to reach the timeline');
+    await new Promise<void>(resolve => { setTimeout(resolve, 0); });
     const rows = manager.timelineRows().filter(row => row.identity?.key !== SENTINEL);
     const bare = rows.filter(row => row.identity === undefined);
     if (bare.length > 0) {
       throw new Error(`${bare.length} timeline row(s) carry no item identity, for example the one from ${bare[0]!.sourceKey}; a journal-capable adapter gives every observation that becomes a row one, including the interaction_resolved observations the manager turns into interaction items.`);
     }
+    if (breached) {
+      throw new Error('An observation broke the item identity contract: its key is empty, longer than 4096 characters or starts with the reserved "controller:" prefix, or a timeline or interaction_resolved observation lacks an identity.');
+    }
     return groupItems(rows);
   } finally {
+    subscription.release();
     await manager.close();
   }
 }

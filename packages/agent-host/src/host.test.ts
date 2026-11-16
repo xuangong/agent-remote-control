@@ -1147,7 +1147,7 @@ it('reports Controller health with the update status over the uplink', async () 
     await host.ready;
     const result = await broker.rpc('GET', '/remote/controller-update');
     expect(result.status).toBe(200);
-    expect(JSON.parse(result.body)).toEqual({ diagnosticDelivery: 3, health: { warnings: [{ code: 'uplink_unstable' }] } });
+    expect(JSON.parse(result.body)).toEqual({ diagnosticDelivery: 4, health: { warnings: [{ code: 'uplink_unstable' }] } });
   } finally { await host.close(); await broker.close(); }
 });
 
@@ -1770,7 +1770,7 @@ it.each([false, true])('advertises diagnostic delivery only when a local sink ex
     await host.ready;
     const response = await broker.rpc('GET', '/remote/controller-update');
     expect(response.status).toBe(installed ? 200 : 404);
-    if (installed) expect(JSON.parse(response.body)).toEqual({ diagnosticDelivery: 3 });
+    if (installed) expect(JSON.parse(response.body)).toEqual({ diagnosticDelivery: 4 });
   } finally { await host.close(); await broker.close(); }
 });
 
@@ -1789,7 +1789,7 @@ it.each([false, true])('preserves diagnostic capability independently of unreada
     const response = await broker.rpc('GET', '/remote/controller-update');
     expect(response.status).toBe(409);
     expect(JSON.parse(response.body).error).toEqual(expect.any(String));
-    expect(JSON.parse(response.body).diagnosticDelivery).toBe(installed ? 3 : undefined);
+    expect(JSON.parse(response.body).diagnosticDelivery).toBe(installed ? 4 : undefined);
     if (installed) {
       const entry = { id: 'event-1', timestamp: '2026-09-20T01:02:03.000Z', source: 'relay', hostId: 'host-1', relayInstanceId: 'relay-1', event: 'host_disconnected', closeCode: 1006, wasClean: false, runtimeInstanceId: 'runtime-1', workerVersionId: 'worker-version-1' };
       expect((await broker.rpc('POST', '/remote/diagnostics/relay', undefined, { entries: [entry] })).status).toBe(204);

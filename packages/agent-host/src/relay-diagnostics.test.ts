@@ -17,6 +17,12 @@ it('appends complete private records with the original event timestamp', async (
   expect((await stat(path)).mode & 0o777).toBe(0o600);
 });
 
+it.each(['journal_message_unencodable', 'journal_store_failed', 'journal_fanout_failed', 'journal_quota_exceeded', 'journal_live_only_dropped', 'journal_deletion_dropped'] as const)('appends the journal diagnostic %s that Controllers of delivery version 4 receive', async event => {
+  const path = await location(); const sink = createRelayDiagnosticSink({ path });
+  await sink.append([{ ...entry, event }]);
+  expect(JSON.parse((await readFile(path, 'utf8')).trim())).toEqual({ ...entry, event });
+});
+
 it('rotates complete records within both file size and archive count bounds', async () => {
   const path = await location(); const sink = createRelayDiagnosticSink({ path, maxBytes: 250, archiveCount: 2 });
   for (let index = 0; index < 6; index++) await sink.append([{ ...entry, id: `event-${index}` }]);

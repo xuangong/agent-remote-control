@@ -206,19 +206,24 @@ export class SessionJournal {
       this.insertLast(opened);
       return row;
     }
+    this.foldRow(existing, row, input.liveOnly === true);
+    this.advance(publication);
+    this.meta.nextSeq += 1;
+    return row;
+  }
+
+  /** Merges a stamped row into the resident item it continues, which is open again afterwards. */
+  protected foldRow(existing: JournalItem, row: JournalRow, liveOnly: boolean): void {
     const body = existing.body as JournalBody;
     const entry = residentEntry(existing);
     mergeRowIntoEntry(entry, canonicalRow(structuredClone(row)));
-    this.advance(publication);
-    this.meta.nextSeq += 1;
     body.item = entry.item;
     existing.seqEnd = row.seq;
     extendSequenceRanges(existing.sourceSeqRanges, row.seq);
-    if (input.liveOnly) existing.liveOnly = true;
+    if (liveOnly) existing.liveOnly = true;
     existing.state = 'open';
     delete existing.digest;
     this.touch(existing.itemKey);
-    return row;
   }
 
   /**
@@ -337,58 +342,99 @@ export class SessionJournal {
   sync(publication: JournalPublication, window: readonly JournalItemInput[], options: { roomBytes: number }): SyncResult {
     if (this.duplicate(publication)) return { outcome: 'unchanged' };
     this.requireDistinct(window);
-    const extension = this.incomplete ? 'incomplete' : this.extensionOf(window);
-    if (typeof extension !== 'string' && extension.length === 0) {
+    const plan = this.incomplete ? 'incomplete' : this.planOf(window);
+    if (typeof plan !== 'string' && plan.append.size === 0 && plan.update.size === 0) {
       this.advance(publication);
       return { outcome: 'unchanged' };
     }
-    if (typeof extension !== 'string' && this.residentBytes() + this.extensionBytes(window)! <= options.roomBytes) {
+    if (typeof plan !== 'string' && this.residentBytes() + this.planBytes(window, plan) <= options.roomBytes) {
       this.advance(publication);
-      const rows = extension.map(item => {
-        this.insertLast(this.completeItem(this.meta.epoch, item, this.meta.nextSeq));
-        return stampRow(this.meta.epoch, this.meta.nextSeq++, item.row);
-      });
+      const rows: JournalRow[] = [];
+      for (const item of window) {
+        const key = item.row.itemKey;
+        if (plan.append.has(key)) {
+          this.insertLast(this.completeItem(this.meta.epoch, item, this.meta.nextSeq));
+          rows.push(stampRow(this.meta.epoch, this.meta.nextSeq++, item.row));
+        } else if (plan.update.has(key)) {
+          const held = this.byKey.get(key) as JournalItem;
+          const row = stampRow(this.meta.epoch, this.meta.nextSeq++, item.row);
+          this.foldRow(held, row, true);
+          if (item.digest !== undefined) { held.state = 'complete'; held.digest = item.digest; }
+          rows.push(row);
+        }
+      }
       return { outcome: 'appended', rows };
     }
-    return { outcome: 'replaced', epoch: this.rebuild(publication, window), reason: typeof extension === 'string' ? extension : 'changed' };
+    return { outcome: 'replaced', epoch: this.rebuild(publication, window), reason: typeof plan === 'string' ? plan : 'changed' };
   }
 
   /**
-   * How many bytes `sync` would append for `window`: zero when the journal already holds it, and undefined when the window
+   * How many bytes `sync` would write for `window`: zero when the journal already holds it, and undefined when the window
    * replaces the journal instead. The Relay makes body room for this before it syncs.
    */
   extensionBytes(window: readonly JournalItemInput[]): number | undefined {
-    const extension = this.incomplete ? undefined : this.extensionOf(window);
-    return typeof extension === 'string' ? undefined : extension?.reduce((sum, item) => sum + utf8ByteLength(JSON.stringify(item)), 0);
+    const plan = this.incomplete ? undefined : this.planOf(window);
+    return plan === undefined || typeof plan === 'string' ? undefined : this.planBytes(window, plan);
+  }
+
+  protected planBytes(window: readonly JournalItemInput[], plan: SyncPlan): number {
+    return window.reduce((sum, item) => sum + (plan.append.has(item.row.itemKey) || plan.update.has(item.row.itemKey) ? utf8ByteLength(JSON.stringify(item)) : 0), 0);
   }
 
   /**
-   * The items of `window` that the journal lacks at its end, when everything else of the window is already in the
+   * What `sync` writes for `window`, or why the journal must be replaced. Live-only items take no part in the positional
+   * comparison, because the Controller adds them at every open at a place the journal does not share:
+   * - the native items of the window are compared with the native items of the journal (`nativeExtension`);
+   * - a live-only item of the window that the journal holds is updated in place when its content differs and its type
+   *   replaces its content (`tool_call` and `todo`), and is left alone when it is equal;
+   * - a live-only item with a new key is appended;
+   * - a live-only item the journal holds and the window lacks stays.
+   * A key that is live-only on one side and native on the other, and a live-only item whose content differs but cannot be
+   * replaced in place, replace the journal.
+   */
+  protected planOf(window: readonly JournalItemInput[]): SyncPlan | ReplacementReason {
+    for (const { row } of window) {
+      const held = this.byKey.get(row.itemKey);
+      if (held && held.liveOnly !== (row.liveOnly === true)) return 'changed';
+    }
+    const extension = this.nativeExtension(window.filter(({ row }) => row.liveOnly !== true));
+    if (typeof extension === 'string') return extension;
+    const plan: SyncPlan = { append: new Set(extension.map(({ row }) => row.itemKey)), update: new Set() };
+    for (const item of window) {
+      if (item.row.liveOnly !== true) continue;
+      const held = this.byKey.get(item.row.itemKey);
+      if (!held) plan.append.add(item.row.itemKey);
+      else if (held.body === null || canonicalContent(held.body.item) !== canonicalContent(item.row.item)) {
+        if (held.body === null || held.body.item.type !== item.row.item.type || !CONTENT_REPLACING_TYPES.has(item.row.item.type)) return held.state === 'open' ? 'open_item' : 'changed';
+        plan.update.add(item.row.itemKey);
+      }
+    }
+    return plan;
+  }
+
+  /**
+   * The native items of `window` that the journal lacks at its end, when everything else of the window is already in the
    * journal as it is; otherwise why the journal must be replaced: `new` when it holds no native item yet, `open_item`
    * when the first difference involves an open item, `changed` when a complete item differs, is missing or is out of order.
    */
-  protected extensionOf(window: readonly JournalItemInput[]): JournalItemInput[] | ReplacementReason {
-    const heldNative = this.items.some(item => !item.liveOnly);
-    if (window.length === 0) return heldNative ? 'changed' : [];
-    const position = new Map(this.items.map((item, at) => [item.itemKey, at] as const));
+  protected nativeExtension(window: readonly JournalItemInput[]): JournalItemInput[] | ReplacementReason {
+    const held = this.items.filter(item => !item.liveOnly);
+    if (window.length === 0) return held.length > 0 ? 'changed' : [];
+    const position = new Map(held.map((item, at) => [item.itemKey, at] as const));
     const first = window.findIndex(({ row }) => position.has(row.itemKey));
-    if (first < 0) return heldNative ? 'changed' : 'new';
+    if (first < 0) return held.length > 0 ? 'changed' : 'new';
     let at = position.get((window[first] as JournalItemInput).row.itemKey) as number;
-    if (first > 0 && this.items.slice(0, at).some(item => !item.liveOnly)) return 'changed';
-    const windowKeys = new Set(window.map(({ row }) => row.itemKey));
+    if (first > 0 && at > 0) return 'changed';
     let next = first;
-    for (; at < this.items.length; at += 1) {
-      const held = this.items[at] as JournalItem;
+    for (; at < held.length; at += 1) {
+      const current = held[at] as JournalItem;
       const wanted = window[next];
-      if (wanted && held.itemKey === wanted.row.itemKey) {
-        if (!sameItem(held, wanted)) return held.state === 'open' || wanted.digest === undefined ? 'open_item' : 'changed';
-        next += 1;
-      } else if (!held.liveOnly || windowKeys.has(held.itemKey)) {
-        return held.state === 'open' ? 'open_item' : 'changed';
-      }
+      if (!wanted || current.itemKey !== wanted.row.itemKey) return current.state === 'open' ? 'open_item' : 'changed';
+      if (!sameItem(current, wanted)) return current.state === 'open' || wanted.digest === undefined ? 'open_item' : 'changed';
+      next += 1;
     }
     const extension = window.slice(next);
-    return extension.some(({ row }) => position.has(row.itemKey)) ? 'changed' : extension;
+    return extension.some(({ row }) => this.byKey.has(row.itemKey)) ? 'changed' : extension;
   }
 
   /** Starts the new epoch of a replacement: the items in order with the carried ones, and resets what depended on the old epoch. */
@@ -590,6 +636,8 @@ export class SessionJournal {
 }
 
 /** Whether the journal's item is the window's item: the same key and live-only mark, and the same digest when complete or the same resident content when open. */
+interface SyncPlan { append: Set<string>; update: Set<string> }
+
 function sameItem(held: JournalItem, wanted: JournalItemInput): boolean {
   if (held.liveOnly !== (wanted.row.liveOnly === true)) return false;
   if (wanted.digest !== undefined) return held.state === 'complete' && held.digest === wanted.digest;

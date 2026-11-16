@@ -191,6 +191,66 @@ describe('live-only items', () => {
   });
 });
 
+describe('live-only items stay out of the positional comparison', () => {
+  const board = (completed: boolean, key = 'todo'): JournalItemInput => ({
+    row: row(key, 'board', { item: { type: 'todo', items: [{ text: 'alpha', completed }] }, liveOnly: true }), digest: `digest:${key}:${completed}`,
+  });
+
+  it('is unchanged when the Controller re-adds the same board at the end of its window, wherever the journal holds it', () => {
+    const { journal, sync } = seeded([done('a'), board(false), done('b')]);
+    const epoch = journal.epoch;
+    expect(sync([done('a'), done('b'), board(false)])).toEqual({ outcome: 'unchanged' });
+    expect(sync([board(false), done('a'), done('b')])).toEqual({ outcome: 'unchanged' });
+    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
+    expect(journal.epoch).toBe(epoch);
+  });
+
+  it('updates a changed board in place as one appended row, and never replaces', () => {
+    const { journal, sync } = seeded([done('a'), board(false), done('b')]);
+    const epoch = journal.epoch;
+    const result = sync([done('a'), done('b'), board(true)]);
+    expect(result).toMatchObject({ outcome: 'appended', rows: [{ itemKey: 'todo', item: { type: 'todo', items: [{ text: 'alpha', completed: true }] } }] });
+    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
+    expect(journal.state().items[1]).toMatchObject({ itemKey: 'todo', liveOnly: true, state: 'complete' });
+    expect(journal.epoch).toBe(epoch);
+    expect(sync([done('a'), done('b'), board(true)])).toEqual({ outcome: 'unchanged' });
+  });
+
+  it('appends a live-only item with a new key after the items it follows in the window', () => {
+    const { journal, sync } = seeded([done('a')]);
+    expect(sync([done('a'), board(false), done('b')])).toMatchObject({ outcome: 'appended', rows: [{ itemKey: 'todo' }, { itemKey: 'b' }] });
+    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
+  });
+
+  it('keeps one board through five Controller starts, with the epoch of the journal never replaced', () => {
+    const { journal, sync } = seeded([done('a'), board(false)]);
+    const epoch = journal.epoch;
+    const outcomes = [false, false, true, true, true].map(completed => sync([done('a'), board(completed)]).outcome);
+    expect(outcomes).toEqual(['unchanged', 'unchanged', 'appended', 'unchanged', 'unchanged']);
+    expect(keys(journal).filter(key => key.startsWith('todo'))).toEqual(['todo']);
+    expect(journal.epoch).toBe(epoch);
+  });
+
+  it('replaces for a key that is live-only in one place and native in the other', () => {
+    const { journal, sync } = seeded([done('a'), live('l')]);
+    expect(sync([done('a'), done('l')])).toMatchObject({ outcome: 'replaced', reason: 'changed' });
+    expect(journal.state().items[1]).toMatchObject({ itemKey: 'l', liveOnly: false });
+  });
+
+  it('replaces for a live-only item whose content differs and cannot be replaced in place', () => {
+    const { sync } = seeded([done('a'), live('l')]);
+    expect(sync([done('a'), done('l', 'other', { liveOnly: true })])).toMatchObject({ outcome: 'replaced' });
+  });
+
+  it('carries a live-only item the window lacks through an append and a replacement', () => {
+    const { journal, sync } = seeded([done('a'), board(false)]);
+    expect(sync([done('a'), done('b')])).toMatchObject({ outcome: 'appended' });
+    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
+    expect(sync([done('a', 'edited'), done('b')])).toMatchObject({ outcome: 'replaced' });
+    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
+  });
+});
+
 describe('open items', () => {
   it('counts an open item whose resident content equals the window as unchanged, and a changed one as a replacement', () => {
     const { journal, sync } = seeded([done('a'), open('o', 'streaming')]);

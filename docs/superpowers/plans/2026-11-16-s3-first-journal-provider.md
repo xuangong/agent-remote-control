@@ -73,7 +73,7 @@ Filters: `@orchardworks/agent-provider-sdk`, `@orchardworks/agent-provider-copil
 | tool call | `tool:<toolCallId>` | start, partial and complete rows share it |
 | tool approval | `interaction:<requestId>` | `permission.*` is on disk |
 | question, form, plan approval | `interaction:<requestId>`, live-only | never written to disk |
-| compaction | `compaction:<start event id>` | completion and failure take the pending start (`pendingCompaction`); a failure finishes the item, it is not an `error` item |
+| compaction | `compaction:<start event id>` | completion and failure take the pending start (`pendingCompaction`); a failure finishes the item, it is not an `error` item. As built: the compaction item has no failed status, so a failed one ends as `loading` with `completes`, beside an `error` item; S4 adds a `failed` status and removes the error item |
 | error | `error:<event.id>`; adapter-made: `error:<uuid>`, live-only | |
 | todo | `todo:plan`, live-only | see Todo |
 | corrected final message | `assistant:<messageId>:correction` | live only; not live-only-marked, so the next replacement drops it |

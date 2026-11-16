@@ -32,7 +32,7 @@ import { createRequire } from 'node:module';
 import { arch, cpus, platform, release, totalmem } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { agentIdOfSocket, answeredBy, controllerJournalEvents, holeCheck, mixThresholds, stats, windowCounts } from './journal-measurement.mjs';
+import { answeredBy, controllerJournalEvents, holeCheck, mixThresholds, stats, windowCounts } from './journal-measurement.mjs';
 
 const root = process.cwd();
 function parseOptions(argv) {
@@ -168,7 +168,7 @@ async function instrument(context) {
   await cdp.send('Network.enable');
   await cdp.send('Performance.enable');
   if (throttle > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: throttle });
-  cdp.on('Network.webSocketCreated', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'created', path: normalizePath(event.url.replace(/^ws/, 'http')), agentId: agentIdOfSocket(event.url.replace(/^ws/, 'http')) }));
+  cdp.on('Network.webSocketCreated', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'created', path: normalizePath(event.url.replace(/^ws/, 'http')) }));
   cdp.on('Network.webSocketClosed', event => sockets.push({ t: Date.now(), id: event.requestId, event: 'closed' }));
   cdp.on('Network.webSocketFrameSent', event => frames.push({ t: Date.now(), id: event.requestId, dir: 'out', kind: messageKind(event.response.payloadData), bytes: event.response.payloadData.length }));
   cdp.on('Network.webSocketFrameReceived', event => {
@@ -239,7 +239,6 @@ function summarizeRequests(http, sockets, frames, start) {
     httpSlowest: apiHttp.sort((a, b) => b.ms - a.ms).slice(0, 5).map(item => ({ endpoint: `${item.method} ${item.path}`, startMs: item.t - start, ms: item.ms })),
     webSocketsCreated: sockets.filter(item => item.event === 'created').length,
     webSocketPaths: count(sockets.filter(item => item.event === 'created'), item => item.path),
-    webSocketAgentIds: [...new Set(sockets.filter(item => item.event === 'created' && item.agentId).map(item => item.agentId))],
     framesIn: inFrames.length, framesOut: outFrames.length,
     bytesIn: inFrames.reduce((sum, frame) => sum + frame.bytes, 0), bytesOut: outFrames.reduce((sum, frame) => sum + frame.bytes, 0),
     framesInByKind: count(inFrames, frame => frame.kind), framesOutByKind: count(outFrames, frame => frame.kind),
@@ -464,9 +463,10 @@ const scenarios = {
       for (let i = 0; i < reps; i++) for (const session of own) { await clearDeviceStorage(handle); fresh.push(await openSample(handle, session, 'goto')); }
     });
     const relay = await relayDiagnostics(startedAt);
-    const describe = samples => samples.map(sample => describeOpen(sample, relay));
+    const attaches = controllerLog(startedAt);
+    const describe = samples => samples.map(sample => describeOpen(sample, relay, attaches));
     const knownOpens = describe(known), freshOpens = describe(fresh);
-    return { method: 'Copilot sessions only. open-known: the first open is discarded, then reloads in the same context; open-fresh: device storage cleared before each goto. answeredBy is "controller" when the Relay opened a Controller stream for the session during the open (a stream_opening diagnostic), otherwise "journal".',
+    return { method: 'Copilot sessions only. open-known: the first open is discarded, then reloads in the same context; open-fresh: device storage cleared before each goto. answeredBy is "controller" when a Controller session attach completed before the page showed its first message, otherwise "journal".',
       label: options.label ?? null, sessions: own.map(item => item.address), known: openStats(knownOpens), fresh: openStats(freshOpens),
       firstOpenMisses: freshOpens.filter(sample => sample.answeredBy === 'controller').length, controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
       knownSamples: knownOpens, freshSamples: freshOpens };
@@ -490,6 +490,7 @@ const scenarios = {
       }
     });
     const relay = await relayDiagnostics(startedAt);
+    const attaches = controllerLog(startedAt);
     const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `copilot:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay) }));
     return { method: 'One Copilot session: 10 reloads, 10 releases then a reload, 5 Controller restarts (pnpm local up --no-build) then a reload, 5 interruptions (a turn cancelled through session cancel, then a release and a reload). After each: the Relay windows since the previous step, and a full native read compared with the messages the page shows after scrolling to the start (the hole check).',
       label: options.label ?? null, address: session.address, thresholds: mixThresholds(described), controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
@@ -551,7 +552,7 @@ function readNative(address) {
   const entries = [];
   let cursor;
   for (let page = 0; page < 40; page++) {
-    const read = controller('session', 'read', address, '--limit', '200', ...(cursor ? ['--cursor', cursor] : []));
+    const read = controller('session', 'read', address, '--limit', '10', ...(cursor ? ['--cursor', cursor] : []));
     entries.push(...(read.entries ?? []));
     cursor = read.nextCursor;
     if (!cursor) break;
@@ -585,11 +586,10 @@ const openStats = samples => ({
 });
 
 /** An open with what the Relay did for it: which side answered, the windows of its session, and the bytes the page received. */
-function describeOpen(sample, relay) {
-  const agentId = sample.requests.webSocketAgentIds[0];
+function describeOpen(sample, relay, controllerEntries) {
   const range = { fromMs: sample.startMs - 1000, toMs: sample.endMs + 2000 };
   const sessionKey = `${sample.provider}:${sample.address.split('/').at(-1)}`;
-  return { ...sample, agentId, answeredBy: agentId ? answeredBy(relay, { agentId, ...range }) : 'unknown',
+  return { ...sample, answeredBy: answeredBy(controllerEntries, { fromMs: sample.startMs, toMs: sample.startMs + (sample.contentMs ?? sample.endMs - sample.startMs) }),
     pageBytes: sample.requests.bytesIn + (sample.apiBytes ?? 0), windows: windowCounts(relay, { ...range, agentId: sessionKey }) };
 }
 

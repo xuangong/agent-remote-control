@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { agentIdOfSocket, answeredBy, controllerJournalEvents, holeCheck, mixThresholds, percentile, stats, windowCounts } from '../performance/journal-measurement.mjs';
+import { answeredBy, controllerJournalEvents, holeCheck, mixThresholds, percentile, stats, windowCounts } from '../performance/journal-measurement.mjs';
 
 const at = (ms: number) => new Date(ms).toISOString();
 const diagnostic = (ms: number, event: string, fields: Record<string, unknown> = {}) => ({ timestamp: at(ms), event, ...fields });
@@ -32,16 +32,10 @@ describe('what the Relay\'s diagnostics say about an open', () => {
     expect(windowCounts(log).windows).toBe(4);
   });
 
-  it('says the Controller answered an open when the Relay opened a Controller stream for the session during it, and the journal otherwise', () => {
-    const streams = [diagnostic(1200, 'stream_opening', { agentId: 'agent-1' }), diagnostic(5000, 'stream_opening', { agentId: 'agent-2' })];
-    expect(answeredBy(streams, { agentId: 'agent-1', fromMs: 1000, toMs: 2000 })).toBe('controller');
-    expect(answeredBy(streams, { agentId: 'agent-1', fromMs: 2000, toMs: 3000 })).toBe('journal');
-    expect(answeredBy(streams, { agentId: 'agent-3', fromMs: 0, toMs: 9000 })).toBe('journal');
-  });
-
-  it('reads the session\'s public agent id from the socket the page opened', () => {
-    expect(agentIdOfSocket('wss://relay.test/u/alice/v1/sessions/agent-7/events')).toBe('agent-7');
-    expect(agentIdOfSocket('wss://relay.test/other')).toBeUndefined();
+  it('says the Controller answered an open when one of its attaches completed before the first message, and the journal otherwise', () => {
+    const attaches = [diagnostic(1200, 'host_request_completed', { operation: 'session_attach' }), diagnostic(5000, 'host_request_completed', { operation: 'catalog_read' })];
+    expect(answeredBy(attaches, { fromMs: 1000, toMs: 2000 })).toBe('controller');
+    expect(answeredBy(attaches, { fromMs: 2000, toMs: 9000 })).toBe('journal');
   });
 
   it('counts the Controller\'s refusals and stops of journals', () => {
@@ -58,6 +52,10 @@ describe('the hole check', () => {
 
   it('finds no hole when every user and assistant message of the native read is shown, whatever the whitespace', () => {
     expect(holeCheck(native, ['Fix the bug', 'The cause is a race.'])).toEqual({ nativeMessages: 2, servedMessages: 2, missing: [] });
+  });
+
+  it('ignores the Markdown marks the page renders as elements', () => {
+    expect(holeCheck([{ id: '4', role: 'assistant', text: 'Added `alpha` and *beta*.' }], ['Added alpha and beta.']).missing).toEqual([]);
   });
 
   it('names a message the journal-served read does not show', () => {

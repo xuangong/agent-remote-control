@@ -32,15 +32,13 @@ export function windowCounts(entries, { fromMs, toMs, agentId } = {}) {
 }
 
 /**
- * Which side answered an open: the Controller when the Relay opened a Controller stream for the session (`stream_opening`
- * with the session's public agent id) during the open, the journal otherwise. A journal-served stream opens none to read.
+ * Which side answered an open: the Controller when one of its session attaches completed before the page had its first
+ * message (`fromMs` to `toMs`, in `diagnostics --source controller`), the journal otherwise. A journal-served open shows its
+ * rows without waiting for an attach; the page's Controller stream still opens and attaches after the rows are shown.
  */
-export function answeredBy(entries, { agentId, fromMs, toMs }) {
-  return entries.some(entry => entry.event === 'stream_opening' && entry.agentId === agentId && within(entry, fromMs, toMs)) ? 'controller' : 'journal';
+export function answeredBy(controllerEntries, { fromMs, toMs }) {
+  return controllerEntries.some(entry => entry.event === 'host_request_completed' && entry.operation === 'session_attach' && within(entry, fromMs, toMs)) ? 'controller' : 'journal';
 }
-
-/** The public agent id a page's session socket names, from `/v1/sessions/<agentId>/events`. */
-export const agentIdOfSocket = url => /\/v1\/sessions\/([^/]+)\/events/.exec(new URL(url).pathname)?.[1];
 
 /** Controller log lines (`diagnostics --source controller`) of the journal events that say a session was stopped, unserved or refused. */
 export function controllerJournalEvents(entries, { fromMs, toMs } = {}) {
@@ -53,7 +51,8 @@ export function controllerJournalEvents(entries, { fromMs, toMs } = {}) {
   return counts;
 }
 
-const normalized = text => String(text).replace(/\s+/g, ' ').trim();
+// Markdown marks are not in the page's text: the page renders `code` and *emphasis* as elements.
+const normalized = text => String(text).replace(/[`*]/g, '').replace(/\s+/g, ' ').trim();
 
 /**
  * The hole check: every user and assistant message of a full native read (`session read` entries) is among the texts a

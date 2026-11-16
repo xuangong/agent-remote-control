@@ -5,8 +5,7 @@ export interface MixStep { kind: string; windows: WindowCounts; holes?: HoleChec
 export function percentile(values: number[], p: number): number | null;
 export function stats(values: number[]): { n: number; p50: number | null; p95: number | null; max: number | null };
 export function windowCounts(entries: DiagnosticEntry[], range?: { fromMs?: number; toMs?: number; agentId?: string }): WindowCounts;
-export function answeredBy(entries: DiagnosticEntry[], open: { agentId: string; fromMs: number; toMs: number }): 'controller' | 'journal';
-export function agentIdOfSocket(url: string): string | undefined;
+export function answeredBy(controllerEntries: DiagnosticEntry[], open: { fromMs: number; toMs: number }): 'controller' | 'journal';
 export function controllerJournalEvents(entries: DiagnosticEntry[], range?: { fromMs?: number; toMs?: number }): Record<string, number>;
 export function holeCheck(nativeEntries: Array<{ id?: unknown; role?: string; text?: string }>, servedTexts: string[]): HoleCheck;
 export function mixThresholds(steps: MixStep[]): Record<string, number | boolean | null>;

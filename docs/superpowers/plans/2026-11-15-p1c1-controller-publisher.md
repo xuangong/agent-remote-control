@@ -5716,12 +5716,18 @@ git commit -m "feat(host): turn the Controller's timeline into journal items, an
 
 How one session publishes, which the code below follows:
 
-1. **Open.** The publication follows the agent manager (a tap that is not a viewer), so the timeline it reads and the events after it join without a gap. It sends `journal_open`, takes the first page of the item index and pulls the rest with `journal_index_request` while `indexAfter` is present. Events of the manager wait.
-2. **Reconcile.** It reads the timeline again as items and calls `planPublication` against the index (Task 8). A `gap` means none of the reread is in the journal: it reads older native history through the manager, at most `gapReadsMax` pages, and replaces when it still finds nothing. It publishes the plan's operations in messages that fit the wire, and ends with the head. A replacement is followed by opening again, which adds the older items as older history.
+1. **Open.** The publication follows the agent manager (a tap that is not a viewer), so the timeline it reads and the events after it join without a gap. A manager that already broke the identity contract says so in the next tick, before any message is sent. It sends `journal_open`, takes the first page of the item index and pulls the rest with `journal_index_request` (with the epoch it was opened in) while `indexAfter` is present; the place among the four concurrent opens is given back once the index is read. Events of the manager wait.
+2. **Reconcile.** It reads the timeline again as items and calls `planPublication` against the index (Task 8). A `gap` means none of the reread is in the journal: it reads older native history through the manager, at most `gapReadsMax` pages, and replaces when it still finds nothing. It publishes the plan's operations in messages that fit the wire, and ends with the head; an empty replacement is not published. A replacement is followed by opening again, which adds the older items as older history. After the head the session is live: held events are applied, and every block of older history is preceded by a flush of what the session emitted meanwhile, so older history never delays what the session shows now.
 3. **Live.** It publishes what the manager emits. Rows of the same item that follow each other merge; a completion carries the digest of the whole item; an item that is still open stays open. Messages go out one per session at a time: the next waits for the Relay's acknowledgement, because the Relay acknowledges only what its store holds. Messages of all sessions share a budget of bytes and messages in flight, so the uplink writer, which closes the connection when its queue fills, never overflows.
-4. **Recover.** A refusal that names an item (and only that kind) skips the item and renumbers what follows it from the refused sequence, because a refused entry never consumes its sequence. Any other refusal, a `sequence_gap` among them, a timeout or a lost connection opens the session again and reconciles from the manager's timeline, which is the Controller's source of truth. A `quota_exceeded` refusal replaces with narrower windows; when the narrowest is refused the session stops with a diagnostic. An `incomplete` refusal replaces again with the same window, then sends the head. An open refused with `index_too_large` is repeated once with `reset: true`, whose first publication is a replacement that fits; any other refused open ends the session's publishing until the next connection.
+4. **Recover.** A refusal that names an item (and only that kind) skips the item and renumbers what follows it from the refused sequence, because a refused entry never consumes its sequence. Any other refusal, a `sequence_gap` among them, a timeout or a lost connection opens the session again and reconciles from the manager's timeline, which is the Controller's source of truth. A `quota_exceeded` refusal replaces with narrower windows (the Relay has already unserved the session and fenced the generation); when the narrowest is refused the session stops with a diagnostic and an unserve. The replacement a quota asked for clears `forceReplace` when it is acknowledged and does not count towards the rewrite loop guard. The journal core's `replace` carries existing live-only items itself, so the publisher never adds them. An `incomplete` refusal replaces again with the same window, then sends the head. An open refused with `index_too_large` is repeated once with `reset: true`, whose first publication is a replacement that fits; any other refused open ends the session's publishing until the next connection.
 
-Heads: the head is the manager's Snapshot, taken when a batch is drained, so it never claims more than the rows before it. A head whose pending interactions changed is published at once instead of after the batch window.
+An item the Relay refuses stays out until one of its rows changes or a connection returns, so that a refused item in the middle of the timeline does not make every reconcile look like a rewrite. A refusal of an item inside a `replace` or `prepend` entry removes that item from the entry and sends the rest. The wire's refusal sequence is the Relay's number of the entry; the publisher maps it to its own entries.
+
+Giving up (quota exhausted, `incomplete` or a replacement loop, a head that cannot be encoded, a missing identity) records `journal_session_stopped`, sends `journal_unserve` with the generation, and publishes nothing more of the session until a connection returns, which tries it again. A missing identity found before the journal was opened on the connection opens it only to learn the generation, sends the unserve, and stops, so a head from an earlier connection stops being served. A tap's `closed()` (the manager closed, or dropped the tap because its `event` threw) stops the publication; attaching the manager again follows it again. A request the publication cannot answer is refused with `journal_request_refused` (`not_ready`) at once instead of at the Relay's deadline.
+
+Timing: every timer goes through a scheduler and `now` the publisher is given, so the tests move a virtual clock (`virtualClock` and `driver` in the scripted-session helper) instead of sleeping. Tests whose other side is a real transport use `untilReal`.
+
+Heads: the head is the manager's Snapshot, taken when a batch is drained, so it never claims more than the rows before it. A head whose pending interactions changed is published at once instead of after the batch window. The backoff (250 ms up to 30 s) doubles with failures that follow each other closely and starts over only after the session was live for a sustained minute.
 
 **Files:**
 - Create: `packages/agent-host/src/journal-publication.ts`
@@ -5731,7 +5737,7 @@ Heads: the head is the manager's Snapshot, taken when a batch is drained, so it 
 - Create: `packages/agent-host/src/journal-publisher.test.ts`
 - Create: `packages/agent-host/src/journal-publisher.relay.test.ts`
 
-- [ ] **Step 1: Write the test helpers.** The scripted session is a provider session whose history and live observations a test controls, with older history pages. Create `packages/agent-host/src/test-utils/journal-scripted-session.ts`:
+- [x] **Step 1: Write the test helpers.** The scripted session is a provider session whose history and live observations a test controls, with older history pages; the virtual clock and its driver replace sleeping. Create `packages/agent-host/src/test-utils/journal-scripted-session.ts`:
 
 <!-- write: packages/agent-host/src/test-utils/journal-scripted-session.ts -->
 ```ts
@@ -5813,10 +5819,69 @@ export async function attachScripted(session: ScriptedSession, agentId = 'agent-
   return manager;
 }
 
-export const settle = (ms = 30) => new Promise<void>(resolve => setTimeout(resolve, ms));
+/**
+ * A clock a test moves by hand, handed to the publisher as its scheduler and its `now`. Timers fire in order as it advances,
+ * so every timing behaviour of the publisher is exercised without waiting.
+ */
+export function virtualClock(start = 1_000_000) {
+  let now = start;
+  let nextId = 0;
+  const timers = new Map<number, { at: number; callback: () => void }>();
+  const clock = {
+    now: (): number => now,
+    setTimeout(callback: () => void, delayMs: number): unknown {
+      const id = ++nextId;
+      timers.set(id, { at: now + Math.max(0, delayMs), callback });
+      return id;
+    },
+    clearTimeout(timer: unknown): void { timers.delete(timer as number); },
+    advance(ms: number): void {
+      const target = now + ms;
+      while (true) {
+        let due: [number, { at: number; callback: () => void }] | undefined;
+        for (const entry of timers) if (entry[1].at <= target && (!due || entry[1].at < due[1].at)) due = entry;
+        if (!due) break;
+        timers.delete(due[0]);
+        now = Math.max(now, due[1].at);
+        due[1].callback();
+      }
+      now = target;
+    },
+    pending: (): number => timers.size,
+  };
+  return clock;
+}
 
-/** Polls until the check passes, so a failure names what never happened. */
-export async function until(check: () => boolean | Promise<boolean>, label: string, timeoutMs = 4000): Promise<void> {
+export type VirtualClock = ReturnType<typeof virtualClock>;
+
+const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+/**
+ * Lets work that runs on the event loop (digests, the loopback's hand-offs) finish while the clock moves a step at a time.
+ * `until` polls a condition; `settle` lets a stretch of virtual time pass. Neither waits on the wall clock.
+ */
+export function driver(clock: VirtualClock, stepMs = 5) {
+  return {
+    async settle(ms = 30): Promise<void> {
+      for (let spent = 0; spent < ms; spent += stepMs) { for (let at = 0; at < 3; at += 1) await tick(); clock.advance(stepMs); }
+      for (let at = 0; at < 3; at += 1) await tick();
+    },
+    async until(check: () => boolean | Promise<boolean>, label: string, virtualMs = 20_000): Promise<void> {
+      for (let spent = 0; spent <= virtualMs; spent += stepMs) {
+        if (await check()) return;
+        await tick();
+        clock.advance(stepMs);
+      }
+      throw new Error(`Timed out waiting for ${label}.`);
+    },
+  };
+}
+
+/**
+ * Polls on the wall clock until the check passes, for tests whose other side is a real transport (a socket, a timer of the Host)
+ * that no virtual clock drives. The deadline bounds it, and a failure names what never happened.
+ */
+export async function untilReal(check: () => boolean | Promise<boolean>, label: string, timeoutMs = 4000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await check()) return;
@@ -5826,7 +5891,7 @@ export async function until(check: () => boolean | Promise<boolean>, label: stri
 }
 ```
 
-The loopback joins the publisher to the Relay's real journal logic: `createHostJournals` over a `MemoryJournalStore`, and the real per-connection adapter. Both directions are asynchronous, as a socket is. Create `packages/agent-host/src/test-utils/journal-relay-loopback.ts`:
+The loopback joins the publisher to the Relay's real journal logic: `createHostJournals` over a `MemoryJournalStore`, and the real per-connection adapter, with the same virtual clock. Both directions are asynchronous, as a socket is. Create `packages/agent-host/src/test-utils/journal-relay-loopback.ts`:
 
 <!-- write: packages/agent-host/src/test-utils/journal-relay-loopback.ts -->
 ```ts
@@ -5836,11 +5901,12 @@ import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-j
 import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
 import type { JournalPublisher } from '../journal-publisher.js';
+import type { VirtualClock } from './journal-scripted-session.js';
 
 export const HOST_ID = 'host-1';
 
 /** The Relay's journal service and its per-connection adapter, wired to a publisher through asynchronous hand-offs. */
-export function relayLoopback() {
+export function relayLoopback(clock: VirtualClock) {
   const store = new MemoryJournalStore();
   const journals = createHostJournals({ store, now: () => 1_000 });
   const fromPublisher: Array<Record<string, any>> = [];
@@ -5850,7 +5916,7 @@ export function relayLoopback() {
   let online = true;
   const connection: JournalConnection = createJournalConnection({
     hostId: HOST_ID, journals, current: () => online,
-    scheduler: { setTimeout: (callback, ms) => setTimeout(callback, ms), clearTimeout: timer => clearTimeout(timer as ReturnType<typeof setTimeout>) },
+    scheduler: clock,
     send: (message: RemoteHostUplinkMessage) => {
       const relayMessage = message as JournalRelayMessage;
       fromRelay.push(relayMessage);
@@ -5880,24 +5946,29 @@ export function relayLoopback() {
 }
 ```
 
-- [ ] **Step 2: Write the failing tests against a scripted Relay.** The scripted Relay answers like the real one and lets a test refuse, delay or drop. Create `packages/agent-host/src/journal-publisher.test.ts`:
+- [x] **Step 2: Write the failing tests against a scripted Relay (56 tests).** The scripted Relay answers like the real one and lets a test refuse, delay or drop. Create `packages/agent-host/src/journal-publisher.test.ts`:
 
 <!-- write: packages/agent-host/src/journal-publisher.test.ts -->
 ```ts
-import type { JournalIndexEntry } from '@orchardworks/agent-remote-journal';
+import { itemDigest, type JournalIndexEntry } from '@orchardworks/agent-remote-journal';
 import type { JournalRelayMessage } from '@orchardworks/agent-remote-protocol';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AgentJournalTap } from '@orchardworks/agent-remote-relay';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { groupItems, mergedRow } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
-import { attachScripted, boundary, item, ScriptedSession, settle, until } from './test-utils/journal-scripted-session.js';
+import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
 
 type Wire = Record<string, any>;
-const realSetTimeout = setTimeout;
+const clock = virtualClock();
+const { settle, until } = driver(clock);
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 
 const entry = (itemKey: string, at: number, extra: Partial<JournalIndexEntry> = {}): JournalIndexEntry =>
   ({ itemKey, seqStart: at, seqEnd: at, state: 'complete', digest: 'd', liveOnly: false, revision: at, resident: true, ...extra });
+
+interface Answer { ack(): void; refuse(reason: string, itemKey?: string, sequence?: number): void; ignore(): void }
 
 /** A Relay that answers the publisher by script and keeps the item index of what it was sent. Every message the publisher writes is recorded. */
 function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIndexEntry[][]; watermark?: number; staleFirstPage?: boolean; holdOpened?: boolean; refuseOpen?(opens: number, reset: boolean): boolean; onPublish?(message: Wire, answer: Answer): void } = {}) {
@@ -5911,27 +5982,26 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
   let revision = 100;
   const heldOpens: Array<() => void> = [];
   const send = (message: JournalRelayMessage) => queueMicrotask(() => publisher.receive(message));
-  interface Answer { ack(): void; refuse(reason: string, itemKey?: string, sequence?: number): void; ignore(): void }
   const known = (items: Wire[], first: number): JournalIndexEntry[] => items.map((value, at) => ({
-    itemKey: value.row.itemKey, seqStart: first + at, seqEnd: first + at, state: 'complete' as const, digest: value.digest, liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true,
+    itemKey: value.row.itemKey, seqStart: first + at, seqEnd: first + at, state: value.digest ? 'complete' as const : 'open' as const, digest: value.digest, liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true,
   }));
   const apply = (entries: Wire[]): void => {
     for (const value of entries) {
-      const at = model.findIndex(item => item.itemKey === (value.itemKey ?? value.row?.itemKey));
+      const at = model.findIndex(entry => entry.itemKey === (value.itemKey ?? value.row?.itemKey));
       if (value.op === 'replace') model = known(value.items, 1);
       else if (value.op === 'prepend') model = [...known(value.items, (model[0]?.seqStart ?? 1) - value.items.length), ...model];
       else if (value.op === 'append' && at < 0) model.push({ itemKey: value.row.itemKey, seqStart: (model.at(-1)?.seqEnd ?? 0) + 1, seqEnd: (model.at(-1)?.seqEnd ?? 0) + 1, state: 'open', liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true });
       else if (value.op === 'complete' && at >= 0) model[at] = { ...model[at]!, state: 'complete', digest: value.digest, revision: ++revision };
       else if (value.op === 'correct' && at >= 0) model[at] = { ...model[at]!, state: value.digest ? 'complete' : 'open', digest: value.digest, revision: ++revision };
-      else if (value.op === 'seal' && at >= 0) model[at] = { ...model[at]!, state: 'complete', liveOnly: true, digest: undefined, revision: ++revision };
+      else if (value.op === 'seal' && at >= 0) model[at] = { ...model[at]!, state: 'complete', liveOnly: true, revision: ++revision };
     }
   };
   const writer = { send(json: string) {
     const message: Wire = JSON.parse(json);
     written.push(message);
-    writtenAt.push(Date.now());
+    writtenAt.push(clock.now());
     if (message.type === 'journal_open') {
-      if (options.refuseOpen?.(written.filter(item => item.type === 'journal_open').length, message.reset === true)) {
+      if (options.refuseOpen?.(written.filter(entry => entry.type === 'journal_open').length, message.reset === true)) {
         send({ uplinkVersion: 2, type: 'journal_open_refused', requestId: message.requestId, sessionKey: message.sessionKey, reason: 'index_too_large' });
         return;
       }
@@ -5943,33 +6013,33 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
         ...(paged ? { indexAfter: first.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
       if (options.holdOpened) heldOpens.push(reply); else reply();
     } else if (message.type === 'journal_index_request') {
-      const requests = written.filter(item => item.type === 'journal_index_request').length;
+      const requests = written.filter(entry => entry.type === 'journal_index_request').length;
       if (options.staleFirstPage && requests === 1) {
         send({ uplinkVersion: 2, type: 'journal_open_refused', requestId: message.requestId, sessionKey: message.sessionKey, reason: 'stale_epoch' });
         return;
       }
-      const page = (options.pages ?? [])[options.staleFirstPage ? requests - 2 : requests - 1] ?? [];
+      const at = options.staleFirstPage ? requests - 2 : requests - 1;
+      const page = (options.pages ?? [])[at] ?? [];
       send({ uplinkVersion: 2, type: 'journal_index_page', requestId: message.requestId, sessionKey: message.sessionKey, index: page,
-        ...((options.staleFirstPage ? requests - 1 : requests) < (options.pages ?? []).length ? { indexAfter: page.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
+        ...(at + 1 < (options.pages ?? []).length ? { indexAfter: page.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
     } else if (message.type === 'journal_publish') {
       const last = message.entries.at(-1).sequence as number;
       // As the journal does: a publication starts exactly after the watermark, and a refused entry consumes no sequence.
       if (message.entries[0].sequence !== applied + 1) {
-        refusedAt.push(Date.now());
+        refusedAt.push(clock.now());
         send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence: message.entries[0].sequence, reason: 'sequence_gap' });
         return;
       }
       const answer: Answer = {
         ack: () => { apply(message.entries); applied = last; send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: message.generation, watermark: last, cursor: { epoch: 'epoch-1', seq: last } }); },
-        refuse: (reason, itemKey, sequence = message.entries[0].sequence) => { refusedAt.push(Date.now()); send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage); },
+        refuse: (reason, itemKey, sequence = message.entries[0].sequence) => {
+          refusedAt.push(clock.now());
+          // The entries before the refused one are stored; the refused one and those after it are not, and `applied` stops before it.
+          const before = message.entries.filter((value: Wire) => value.sequence < sequence);
+          if (before.length > 0 && reason !== 'quota_exceeded') { apply(before); applied = sequence - 1; }
+          send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage);
+        },
         ignore: () => undefined,
-      };
-      const refuse = answer.refuse;
-      answer.refuse = (reason, itemKey, sequence = message.entries[0].sequence) => {
-        // The entries before the refused one are stored; the refused one and those after it are not, and `applied` stops before it.
-        const before = message.entries.filter((entry: Wire) => entry.sequence < sequence);
-        if (itemKey !== undefined && before.length > 0) { apply(before); applied = sequence - 1; }
-        refuse(reason, itemKey, sequence);
       };
       if (options.onPublish) options.onPublish(message, answer); else answer.ack();
     }
@@ -5977,29 +6047,60 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
   return {
     written, send, connect(next: JournalPublisher) { publisher = next; next.available(writer); },
     types: () => written.map(message => message.type),
-    ops: () => written.filter(message => message.type === 'journal_publish').flatMap(message => message.entries.map((entry: Wire) => entry.op)),
+    ops: () => written.filter(message => message.type === 'journal_publish').flatMap(message => message.entries.map((value: Wire) => value.op)),
+    publishes: () => written.filter(message => message.type === 'journal_publish'),
     opens: () => written.filter(message => message.type === 'journal_open').length,
     opensAt: () => written.flatMap((message, at) => message.type === 'journal_open' ? [writtenAt[at]!] : []),
     refusedAt: () => refusedAt,
     releaseOpens: () => { for (const reply of heldOpens.splice(0)) reply(); },
     model: () => model,
+    /** Makes the Relay hold these items already, as an earlier Controller left them. */
+    seed: (entries: JournalIndexEntry[]) => { model = entries; },
+    unserves: () => written.filter(message => message.type === 'journal_unserve'),
   };
 }
+type Relay = ReturnType<typeof scriptedRelay>;
 
-const publisherFor = (relay: ReturnType<typeof scriptedRelay>, limits: Record<string, unknown> = {}, diagnostics: Wire[] = []) => {
-  const publisher = createJournalPublisher({ providers: () => ['fake'], limits: { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 400, ...limits }, diagnostic: event => diagnostics.push(event) });
+const publisherFor = (relay: Relay, limits: Record<string, unknown> = {}, diagnostics: Wire[] = []) => {
+  const publisher = createJournalPublisher({
+    providers: () => ['fake'], scheduler: clock, now: clock.now, diagnostic: event => diagnostics.push(event),
+    limits: { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 10_000, ...limits },
+  });
   closers.push(() => publisher.close());
   relay.connect(publisher);
   return publisher;
 };
 
-async function attachSession(publisher: JournalPublisher, history: ReturnType<typeof item>[], older?: Array<{ observations: ReturnType<typeof item>[]; nextCursor?: string }>, ids = { agentId: 'agent-1', nativeSessionId: 'thread-1' }) {
+type Observation = ReturnType<typeof item>;
+async function attachSession(publisher: JournalPublisher, history: Observation[], older?: Array<{ observations: Observation[]; nextCursor?: string }>, ids = { agentId: 'agent-1', nativeSessionId: 'thread-1' }, held?: { relay: Relay; keys: string[] }) {
   const session = new ScriptedSession('fake', ids.nativeSessionId, [...history, boundary(older ? 'older-1' : undefined)], older);
   const manager = await attachScripted(session, ids.agentId);
   closers.push(() => { void manager.close(); });
+  if (held) held.relay.seed(await entriesFor(manager, held.keys));
   publisher.attach({ agentId: ids.agentId, providerId: 'fake', nativeSessionId: ids.nativeSessionId, source: manager });
   return { session, manager };
 }
+
+/** The index entries a journal holds for these items of the manager's timeline, with the digests it computes. */
+async function entriesFor(manager: Awaited<ReturnType<typeof attachScripted>>, keys: string[]): Promise<JournalIndexEntry[]> {
+  const entries: JournalIndexEntry[] = [];
+  for (const group of groupItems(manager.timelineRows()).filter(candidate => keys.includes(candidate.key))) {
+    entries.push({ itemKey: group.key, seqStart: entries.length + 1, seqEnd: entries.length + 1, state: 'complete', digest: await itemDigest(mergedRow(group).item), liveOnly: false, revision: entries.length + 1, resident: true });
+  }
+  return entries;
+}
+
+/** The session is live: its journal was replaced if it had to be, reopened, and the head published. */
+async function live(relay: Relay): Promise<void> {
+  await until(() => relay.ops().includes('head'), 'the first head');
+  await settle(30);
+}
+
+const sourceOf = (manager: Awaited<ReturnType<typeof attachScripted>>, overrides: Partial<JournalSource> = {}): JournalSource => ({
+  subscribeJournal: tap => manager.subscribeJournal(tap), timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key),
+  attentionItemKey: () => manager.attentionItemKey(), snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(),
+  loadOlderHistory: () => manager.loadOlderHistory(), ...overrides,
+});
 
 describe('publishing a session', () => {
   it('opens the journal, publishes the history as one replacement of an empty journal, and ends with the head', async () => {
@@ -6009,10 +6110,10 @@ describe('publishing a session', () => {
     await until(() => relay.ops().includes('head'), 'the head');
     expect(relay.types()[0]).toBe('journal_open');
     expect(relay.written[0]).toMatchObject({ sessionKey: 'fake:thread-1', publisherId: expect.any(String) });
-    const publish = relay.written.find(message => message.type === 'journal_publish')!;
+    const publish = relay.publishes()[0]!;
     expect(publish.generation).toBe(1);
-    expect(publish.entries.map((entry: Wire) => entry.op)).toEqual(['replace', 'head']);
-    expect(publish.entries[0].items.map((entry: Wire) => entry.row.itemKey)).toEqual(['m1', 'm2']);
+    expect(publish.entries.map((value: Wire) => value.op)).toEqual(['replace', 'head']);
+    expect(publish.entries[0].items.map((value: Wire) => value.row.itemKey)).toEqual(['m1', 'm2']);
     expect(publish.entries[1].head.snapshot.id).toBe('agent-1');
   });
 
@@ -6030,13 +6131,13 @@ describe('publishing a session', () => {
     const publisher = publisherFor(relay);
     const { session } = await attachSession(publisher, []);
     await until(() => pending.length === 1, 'the first publication');
-    expect(relay.written.find(message => message.type === 'journal_publish')!.entries.map((entry: Wire) => entry.sequence)).toEqual([8]);
+    expect(relay.publishes()[0]!.entries.map((value: Wire) => value.sequence)).toEqual([8]);
     session.push(item('live', 'a', 'Streaming', { completes: false }));
     await settle(40);
-    expect(relay.written.filter(message => message.type === 'journal_publish')).toHaveLength(1);
+    expect(relay.publishes()).toHaveLength(1);
     pending.shift()!();
     await until(() => pending.length === 1, 'the next publication after the acknowledgement');
-    expect(relay.written.filter(message => message.type === 'journal_publish').at(-1)!.entries.map((entry: Wire) => [entry.sequence, entry.op])).toEqual([[9, 'append']]);
+    expect(relay.publishes().at(-1)!.entries.map((value: Wire) => [value.sequence, value.op])).toEqual([[9, 'append']]);
   });
 
   it('pulls the rest of a paged index with the epoch it was opened in, one page at a time', async () => {
@@ -6056,44 +6157,46 @@ describe('publishing a session', () => {
     expect(relay.opens()).toBe(2);
   });
 
-  it('stops publishing a session whose journal the Relay refuses to open, and says why', async () => {
-    const diagnostics: Wire[] = [];
-    const relay = scriptedRelay();
-    const publisher = createJournalPublisher({ providers: () => ['fake'], limits: { responseTimeoutMs: 400 }, diagnostic: event => diagnostics.push(event) });
-    closers.push(() => publisher.close());
-    const writer = { send(json: string) { const message = JSON.parse(json); relay.written.push(message); if (message.type === 'journal_open') relay.send({ uplinkVersion: 2, type: 'journal_open_refused', requestId: message.requestId, sessionKey: message.sessionKey, reason: 'index_too_large' }); } };
-    publisher.available(writer);
-    relay.connect(publisher);
-    publisher.available(writer);
-    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => diagnostics.some(entry => entry.event === 'journal_open_refused'), 'the diagnostic');
-    expect(diagnostics.find(entry => entry.event === 'journal_open_refused')).toMatchObject({ providerId: 'fake', reason: 'index_too_large' });
-    await settle(60);
-    const opens = relay.written.filter(message => message.type === 'journal_open');
-    expect(opens.map(message => message.reset)).toEqual([undefined, true]);
-    expect(diagnostics.filter(entry => entry.event === 'journal_open_refused')).toHaveLength(2);
-    expect(relay.written.filter(message => message.type === 'journal_unserve')).toEqual([]);
+  it('plans against the whole index before it publishes anything, so a journal read in pages is not replaced', async () => {
+    const relay = scriptedRelay({ index: [entry('m1', 1)], pages: [[entry('m2', 2)]] });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two')]);
+    await until(() => relay.ops().includes('head'), 'the head');
+    expect(relay.ops()).not.toContain('replace');
   });
 
-  it('gets out of an index that is too large by opening without it and replacing first, then continues normally', async () => {
+  it('opens again without the index when the Relay refuses it as too large, publishes a replacement that fits first, and goes on', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay({ refuseOpen: (opens, reset) => opens === 1 && !reset });
     const publisher = publisherFor(relay, {}, diagnostics);
     const { session } = await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two')]);
     await until(() => relay.opens() === 3 && relay.ops().includes('head'), 'the open after the replacement');
-    const opens = relay.written.filter(message => message.type === 'journal_open');
-    expect(opens.map(message => message.reset)).toEqual([undefined, true, undefined]);
-    const published = relay.written.filter(message => message.type === 'journal_publish');
-    expect(published[0].entries.map((entry: Wire) => entry.op)).toEqual(['replace', 'head']);
-    expect(relay.written.filter(message => message.type === 'journal_unserve')).toEqual([]);
+    expect(relay.written.filter(message => message.type === 'journal_open').map(message => message.reset)).toEqual([undefined, true, undefined]);
+    expect(relay.publishes()[0]!.entries.map((value: Wire) => value.op)).toEqual(['replace', 'head']);
+    expect(relay.unserves()).toEqual([]);
+    expect(diagnostics.filter(entry => entry.event === 'journal_open_refused')).toEqual([{ event: 'journal_open_refused', providerId: 'fake', reason: 'index_too_large' }]);
     session.push(item('live', 'later', 'Still publishing', { completes: true }));
     await until(() => relay.ops().includes('complete'), 'a live item after the way out');
     expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
   });
 
+  it('gives up publishing a session whose reset open is refused too, and opens it again only when a connection returns', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay({ refuseOpen: () => true });
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => diagnostics.filter(entry => entry.event === 'journal_open_refused').length === 2, 'both refusals');
+    await settle(200);
+    expect(relay.written.filter(message => message.type === 'journal_open').map(message => message.reset)).toEqual([undefined, true]);
+    expect(relay.unserves()).toEqual([]);
+    publisher.available(undefined);
+    relay.connect(publisher);
+    await until(() => relay.opens() === 3, 'the open on the next connection');
+  });
+
   it('does not publish a session of a provider that does not declare journal support', async () => {
     const relay = scriptedRelay();
-    const publisher = createJournalPublisher({ providers: () => ['other'], limits: { batchWindowMs: 5 } });
+    const publisher = createJournalPublisher({ providers: () => ['other'], scheduler: clock, now: clock.now, limits: { batchWindowMs: 5 } });
     closers.push(() => publisher.close());
     relay.connect(publisher);
     const session = new ScriptedSession('fake', 'thread-1', [boundary()]);
@@ -6110,7 +6213,7 @@ describe('live rows', () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 25 });
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     const before = relay.written.length;
     session.push(item('live', 'a', 'Wor', { completes: false }));
     session.push(item('live', 'a', 'ld', { completes: false }));
@@ -6118,20 +6221,34 @@ describe('live rows', () => {
     session.push(item('live', 'b', 'Still ', { completes: false }));
     await until(() => relay.written.slice(before).some(message => message.type === 'journal_publish'), 'the live publication');
     const entries = relay.written.slice(before).filter(message => message.type === 'journal_publish').flatMap(message => message.entries) as Wire[];
-    expect(entries.map(entry => entry.op)).toEqual(['append', 'complete', 'append']);
-    expect(entries[0].row).toMatchObject({ itemKey: 'a', item: { text: 'World!' } });
+    expect(entries.map(value => value.op)).toEqual(['append', 'complete', 'append']);
+    expect(entries[0]!.row).toMatchObject({ itemKey: 'a', item: { text: 'World!' } });
     expect(entries[1]).toMatchObject({ itemKey: 'a', digest: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(entries[2]).toMatchObject({ row: { itemKey: 'b', item: { text: 'Still ' } } });
+  });
+
+  it('collects rows for the batch window before it publishes them', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 50 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    const before = relay.publishes().length;
+    const startedAt = clock.now();
+    session.push(item('live', 'a', 'Streaming', { completes: false }));
+    await until(() => relay.publishes().length > before, 'the live publication');
+    expect(clock.now() - startedAt).toBeGreaterThanOrEqual(50);
   });
 
   it('publishes a head that carries a new pending interaction at once, not after the batch window', async () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 5000 });
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     const before = relay.written.length;
+    const startedAt = clock.now();
     session.push({ type: 'observation', sourceKey: 'ask-1', occurredAt: 1, delivery: 'live', event: { type: 'interaction_requested', provider: 'fake', request: { kind: 'question', requestId: 'question-1', questions: [{ questionId: 'q', header: 'Pick', prompt: 'Which?', required: true, selection: 'single', options: [{ value: 'a', label: 'A' }], allowCustomText: false, allowDismiss: false }] } } });
-    await until(() => relay.written.slice(before).some(message => message.type === 'journal_publish'), 'an urgent head', 1500);
+    await until(() => relay.written.slice(before).some(message => message.type === 'journal_publish'), 'an urgent head');
+    expect(clock.now() - startedAt).toBeLessThan(1000);
     const head = relay.written.slice(before).flatMap(message => message.entries ?? []).find((value: Wire) => value.op === 'head') as Wire;
     expect(head.head.snapshot.pendingInteractions.map((request: Wire) => request.requestId)).toEqual(['question-1']);
   });
@@ -6140,7 +6257,7 @@ describe('live rows', () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 25 });
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     const before = relay.written.length;
     session.push({ type: 'observation', sourceKey: 'turn-1', occurredAt: 5, delivery: 'live', event: { type: 'turn_started', provider: 'fake', turnId: 'turn-9' } });
     session.push(item('live', 'a', 'Done', { completes: true }));
@@ -6153,18 +6270,79 @@ describe('live rows', () => {
     expect(head.head.snapshot.activeTurn).toMatchObject({ turnId: 'turn-9' });
   });
 
-  it('drops a row the wire refuses, tells the diagnostics, and keeps publishing the rest', async () => {
+  it('drops a row the wire refuses, tells the diagnostics once, and keeps publishing the rest', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 5 }, diagnostics);
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     session.push(item('live', 'bad', 'x', { turnId: 't'.repeat(600) }));
     session.push(item('live', 'good', 'Fine', { completes: true }));
     await until(() => relay.ops().includes('complete'), 'the rest');
-    expect(diagnostics).toContainEqual({ event: 'journal_row_rejected', providerId: 'fake' });
-    const appended = relay.written.flatMap(message => message.entries ?? []).filter((value: Wire) => value.op === 'append').map((value: Wire) => value.row.itemKey);
+    expect(diagnostics.filter(entry => entry.event === 'journal_row_rejected')).toEqual([{ event: 'journal_row_rejected', providerId: 'fake' }]);
+    const appended = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'append').map((value: Wire) => value.row.itemKey);
     expect(appended).toEqual(['good']);
+  });
+
+  it('does not tell the diagnostics again about an item the wire refuses when the session reconciles again', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, [item('history', 'bad', 'x', { turnId: 't'.repeat(600) }), item('history', 'm1', 'Hello')]);
+    await live(relay);
+    publisher.available(undefined);
+    relay.connect(publisher);
+    await until(() => relay.opens() === 2 && relay.ops().filter(op => op === 'head').length >= 2, 'the second reconcile');
+    expect(diagnostics.filter(entry => entry.event === 'journal_row_rejected')).toHaveLength(1);
+    expect(relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace')).toHaveLength(1);
+  });
+
+  it('skips a replacement that has nothing to replace with', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'bad', 'x', { turnId: 't'.repeat(600) })]);
+    await until(() => relay.ops().includes('head'), 'the head');
+    expect(relay.ops()).toEqual(['head']);
+    expect(relay.opens()).toBe(1);
+  });
+});
+
+describe('events the manager emits besides rows', () => {
+  async function reachable(publisher: JournalPublisher) {
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'Hello'), boundary()]);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    const taps: AgentJournalTap[] = [];
+    const source = sourceOf(manager, { subscribeJournal: tap => { taps.push(tap); return manager.subscribeJournal(tap); } });
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source });
+    return { tap: () => taps.at(-1)! };
+  }
+
+  it('publishes a replaced resource binding as an amendment of the item it belongs to', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const { tap } = await reachable(publisher);
+    await live(relay);
+    const previous = { locator: 'out.png', resourceId: 'r1', status: 'pending' as const };
+    const replacement = { locator: 'out.png', resourceId: 'r2', status: 'available' as const };
+    tap().event({ type: 'timeline_resource_binding_replaced', agentId: 'agent-1', epoch: 'e', seq: 1, itemKey: 'm1', previous, replacement });
+    await until(() => relay.ops().includes('rebind'), 'the amendment');
+    expect(relay.publishes().flatMap(message => message.entries).find((value: Wire) => value.op === 'rebind')).toMatchObject({ itemKey: 'm1', previous, replacement });
+  });
+
+  it('reconciles again after the provider replaces its timeline, and publishes nothing of the rows in between', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const { tap } = await reachable(publisher);
+    await live(relay);
+    const opens = relay.opens();
+    tap().event({ type: 'timeline_replacement', agentId: 'agent-1', epoch: 'e2' });
+    tap().event({ type: 'agent_stream', agentId: 'agent-1', delivery: 'history', timestamp: new Date(1).toISOString(), event: { type: 'timeline', provider: 'fake', item: { type: 'assistant_message', text: 'Mid-rebuild', messageId: 'x' } },
+      row: { epoch: 'e2', seq: 1, providerId: 'fake', sourceKey: 'rebuild:1', occurredAt: 1, timestamp: new Date(1).toISOString(), item: { type: 'assistant_message', text: 'Mid-rebuild', messageId: 'x' }, resources: [], identity: { key: 'x', completes: true } } });
+    tap().event({ type: 'timeline_rebuilt', agentId: 'agent-1', cursor: { epoch: 'e2', seq: 1 } });
+    await until(() => relay.opens() === opens + 1, 'the reopening');
+    await settle(40);
+    expect(relay.ops().filter(op => op === 'append')).toEqual([]);
   });
 });
 
@@ -6172,17 +6350,17 @@ describe('recovering', () => {
   it('opens again and reconciles from the manager after the Relay refuses a publication', async () => {
     let refused = false;
     const relay = scriptedRelay({ onPublish: (message, answer) => {
-      if (!refused && message.entries.some((entry: Wire) => entry.op === 'append')) { refused = true; answer.refuse('stale_revision', 'a'); return; }
+      if (!refused && message.entries.some((value: Wire) => value.op === 'append')) { refused = true; answer.refuse('stale_revision', 'a'); return; }
       answer.ack();
     } });
     const publisher = publisherFor(relay);
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     await settle(30);
     const opens = relay.opens();
     session.push(item('live', 'a', 'Hi', { completes: true }));
-    await until(() => relay.opens() === opens + 1, 'the open after the refusal');
-    await settle(40);
+    await until(() => relay.opens() === opens + 1 && relay.model().some(value => value.itemKey === 'a' && value.state === 'complete'), 'the open after the refusal, and the item');
+    await settle(100);
     expect(relay.opens()).toBe(opens + 1);
   });
 
@@ -6191,37 +6369,147 @@ describe('recovering', () => {
     const relay = scriptedRelay({ onPublish: (_message, answer) => { if (silent) { silent = false; answer.ignore(); } else answer.ack(); } });
     const publisher = publisherFor(relay, { responseTimeoutMs: 60 });
     await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.types().filter(type => type === 'journal_open').length >= 2, 'a second open', 2000);
+    await until(() => relay.opens() >= 2, 'a second open');
+    await until(() => relay.model().length === 1, 'the replacement after the second open');
   });
 
-  it('replaces with narrower windows after a quota refusal, and stops with a diagnostic when the narrowest is refused', async () => {
+  it('opens again when the Relay answers sequence_gap, which no per-item refusal explains', async () => {
+    const diagnostics: Wire[] = [];
+    let gaps = 0;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (gaps === 0 && message.entries.some((value: Wire) => value.op === 'append')) { gaps += 1; answer.refuse('sequence_gap'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 25 }, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    const opens = relay.opens();
+    session.push(item('live', 'm2', 'Next', { completes: true }));
+    await until(() => relay.opens() === opens + 1 && relay.model().some(value => value.itemKey === 'm2'), 'the journal to be opened again and to hold the item');
+    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'sequence_gap' });
+  });
+
+  it('leaves out an item the Relay refuses for its own sake, sends the rest again numbered from the refused entry, and does not open again', async () => {
+    const diagnostics: Wire[] = [];
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      const bad = message.entries.find((value: Wire) => value.op === 'append' && value.row.itemKey === 'bad');
+      if (!refused && bad) { refused = true; answer.refuse('body_missing', 'bad', bad.sequence); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 25 }, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    await settle(40);
+    const opens = relay.opens();
+    session.push(item('live', 'bad', 'Never stored', { completes: true }));
+    session.push(item('live', 'good', 'Stored', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'good' && value.state === 'complete'), 'the item after the refused one');
+    const publishes = relay.publishes().slice(-2);
+    const shape = publishes.map(message => message.entries.filter((value: Wire) => value.op !== 'head').map((value: Wire) => [value.op, value.row?.itemKey ?? value.itemKey]));
+    expect(shape).toEqual([
+      [['append', 'bad'], ['complete', 'bad'], ['append', 'good'], ['complete', 'good']],
+      [['append', 'good'], ['complete', 'good']],
+    ]);
+    // The second message starts at the refused entry's own number: the refused entry consumed none.
+    expect(publishes[1]!.entries[0].sequence).toBe(publishes[0]!.entries[0].sequence);
+    expect(relay.opens()).toBe(opens);
+    expect(relay.model().map(value => value.itemKey)).not.toContain('bad');
+    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'body_missing:item' });
+  });
+
+  it('leaves a refused item out of a replacement, publishes the rest, and does not mistake the reread that follows for a rewrite', async () => {
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      const replace = message.entries.find((value: Wire) => value.op === 'replace' && value.items.some((input: Wire) => input.row.itemKey === 'bad'));
+      if (!refused && replace) { refused = true; answer.refuse('invalid', 'bad', replace.sequence); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'bad', 'Refused'), item('history', 'm2', 'Two')]);
+    await live(relay);
+    const replaces = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace');
+    expect(replaces.map((value: Wire) => value.items.map((input: Wire) => input.row.itemKey))).toEqual([['m1', 'bad', 'm2'], ['m1', 'm2']]);
+    expect(relay.model().map(value => value.itemKey)).toEqual(['m1', 'm2']);
+    expect(relay.unserves()).toEqual([]);
+    expect(relay.opens()).toBe(2);
+  });
+
+  it('maps the sequence of a refusal back to its own numbering when the refused entry is not the first of the message', async () => {
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      const bad = message.entries.find((value: Wire) => value.op === 'complete' && value.itemKey === 'b');
+      if (!refused && bad) { refused = true; answer.refuse('invalid', 'b', bad.sequence); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 25 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    const opens = relay.opens();
+    session.push(item('live', 'a', 'One', { completes: true }));
+    session.push(item('live', 'b', 'Two', { completes: true }));
+    session.push(item('live', 'c', 'Three', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'c' && value.state === 'complete'), 'the items after the refused one');
+    const [first, second] = relay.publishes().slice(-2) as [Wire, Wire];
+    const refusedAt = first.entries.find((value: Wire) => value.op === 'complete' && value.itemKey === 'b').sequence;
+    expect(second.entries[0].sequence).toBe(refusedAt);
+    expect(second.entries.map((value: Wire) => [value.op, value.row?.itemKey ?? value.itemKey])).toEqual([['append', 'c'], ['complete', 'c']]);
+    expect(relay.opens()).toBe(opens);
+  });
+
+  it('replaces with narrower windows after a quota refusal, and stops with a diagnostic and an unserve when the narrowest is refused', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay({ onPublish: (message, answer) => {
-      if (message.entries.some((entry: Wire) => entry.op === 'replace')) answer.refuse('quota_exceeded'); else answer.ack();
+      if (message.entries.some((value: Wire) => value.op === 'replace')) answer.refuse('quota_exceeded'); else answer.ack();
     } });
     const publisher = publisherFor(relay, { quotaWindows: [3, 2, 1] }, diagnostics);
     await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
-    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop', 3000);
-    const windows = relay.written.filter(message => message.type === 'journal_publish').map(message => message.entries[0].items.length);
-    expect(windows).toEqual([5, 3, 2, 1]);
+    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop');
+    expect(relay.publishes().map(message => message.entries[0].items.length)).toEqual([5, 3, 2, 1]);
     expect(diagnostics.find(entry => entry.event === 'journal_session_stopped')).toMatchObject({ providerId: 'fake', reason: 'quota_exceeded' });
-    await settle(60);
-    expect(relay.written.filter(message => message.type === 'journal_publish')).toHaveLength(4);
-    const unserve = relay.written.filter(message => message.type === 'journal_unserve');
-    expect(unserve).toEqual([{ uplinkVersion: 2, type: 'journal_unserve', sessionKey: 'fake:thread-1', generation: 4 }]);
+    await settle(100);
+    expect(relay.publishes()).toHaveLength(4);
+    expect(relay.unserves()).toEqual([{ uplinkVersion: 2, type: 'journal_unserve', sessionKey: 'fake:thread-1', generation: 4 }]);
+  });
+
+  it('does not loop when the replacement a quota asked for is accepted: it reopens once, finds the window known, publishes the head and goes live', async () => {
+    const diagnostics: Wire[] = [];
+    let refusals = 0;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (refusals === 0 && message.entries.some((value: Wire) => value.op === 'replace')) { refusals += 1; answer.refuse('quota_exceeded'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { quotaWindows: [3, 2, 1] }, diagnostics);
+    const { session } = await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
+    await until(() => relay.model().length === 3 && relay.ops().includes('head'), 'the window to be accepted');
+    session.push(item('live', 'later', 'Still publishing', { completes: true }));
+    await until(() => relay.ops().includes('complete'), 'a live item after the window');
+    await settle(100);
+    const replaces = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace');
+    expect(replaces.map((value: Wire) => value.items.length)).toEqual([5, 3]);
+    expect(relay.opens()).toBe(3);
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
+    expect(diagnostics.find(entry => entry.event === 'journal_quota_window')).toMatchObject({ reason: '3' });
+  });
+
+  it('does not count the replacements a quota asks for as a rewrite loop: every window may be tried', async () => {
+    const diagnostics: Wire[] = [];
+    let refusals = 0;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (refusals < 3 && message.entries.some((value: Wire) => value.op === 'replace')) { refusals += 1; answer.refuse('quota_exceeded'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { quotaWindows: [4, 3, 2, 1] }, diagnostics);
+    await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
+    await until(() => relay.model().length === 2 && relay.ops().includes('head'), 'the third window to be accepted');
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
   });
 
   it('answers an incomplete journal with a replacement of the same window, then the head, without narrowing', async () => {
     const diagnostics: Wire[] = [];
     let refusals = 0;
     const relay = scriptedRelay({ onPublish: (message, answer) => {
-      if (refusals === 0 && message.entries.some((entry: Wire) => entry.op === 'head')) { refusals += 1; answer.refuse('incomplete', undefined, message.entries.at(-1).sequence); } else answer.ack();
+      if (refusals === 0 && message.entries.some((value: Wire) => value.op === 'head')) { refusals += 1; answer.refuse('incomplete', undefined, message.entries.at(-1).sequence); } else answer.ack();
     } });
     const publisher = publisherFor(relay, { quotaWindows: [3, 2, 1] }, diagnostics);
     const { session } = await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
     await until(() => relay.model().length === 5 && relay.opens() === 3 && relay.ops().filter(op => op === 'head').length >= 2, 'the replacement, its head and the open that follows');
-    const replaces = relay.written.filter(message => message.type === 'journal_publish').flatMap(message => message.entries).filter((entry: Wire) => entry.op === 'replace');
-    expect(replaces.map((entry: Wire) => entry.items.length)).toEqual([5, 5]);
+    const replaces = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace');
+    expect(replaces.map((value: Wire) => value.items.length)).toEqual([5, 5]);
     expect(diagnostics.map(entry => entry.event)).not.toContain('journal_quota_window');
     session.push(item('live', 'later', 'Still publishing', { completes: true }));
     await until(() => relay.ops().includes('complete'), 'a live item after the head');
@@ -6232,115 +6520,85 @@ describe('recovering', () => {
     const relay = scriptedRelay({ onPublish: (message, answer) => answer.refuse('incomplete', undefined, message.entries.at(-1).sequence) });
     const publisher = publisherFor(relay, {}, diagnostics);
     await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop', 3000);
+    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop');
     expect(diagnostics.find(entry => entry.event === 'journal_session_stopped')).toMatchObject({ providerId: 'fake', reason: 'incomplete' });
-    expect(relay.written.filter(message => message.type === 'journal_unserve')).toHaveLength(1);
+    expect(relay.unserves()).toHaveLength(1);
   });
 
-  it('does not loop when the replacement a quota asked for is accepted: it reopens once, finds the window known, and goes live', async () => {
-    const diagnostics: Wire[] = [];
-    let refusals = 0;
-    const relay = scriptedRelay({ onPublish: (message, answer) => {
-      if (refusals === 0 && message.entries.some((entry: Wire) => entry.op === 'replace')) { refusals += 1; answer.refuse('quota_exceeded'); } else answer.ack();
-    } });
-    const publisher = publisherFor(relay, { quotaWindows: [3, 2, 1] }, diagnostics);
-    const { session } = await attachSession(publisher, Array.from({ length: 5 }, (_, at) => item('history', `m${at}`, `Item ${at}`)));
-    await until(() => relay.model().length === 3 && relay.ops().includes('head'), 'the window to be accepted');
-    session.push(item('live', 'later', 'Still publishing', { completes: true }));
-    await until(() => relay.ops().includes('complete'), 'a live item after the window');
-    await settle(60);
-    const replaces = relay.written.filter(message => message.type === 'journal_publish').flatMap(message => message.entries).filter((entry: Wire) => entry.op === 'replace');
-    expect(replaces.map((entry: Wire) => entry.items.length)).toEqual([5, 3]);
-    expect(relay.opens()).toBe(3);
-    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
-    expect(diagnostics.find(entry => entry.event === 'journal_quota_window')).toMatchObject({ reason: '3' });
-  });
-
-  it('stops publishing, unserves the session and records the breach when the provider emits an observation without identity', async () => {
+  it('stops, tells the Relay to stop serving the journal and records the breach when the provider emits an observation without identity', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, {}, diagnostics);
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     session.push({ ...item('live', 'm2', 'No identity', { completes: true }), itemIdentity: undefined });
-    await until(() => relay.written.some(message => message.type === 'journal_unserve'), 'the unserve');
-    expect(relay.written.find(message => message.type === 'journal_unserve')).toMatchObject({ sessionKey: 'fake:thread-1', generation: 1 });
+    await until(() => relay.unserves().length > 0, 'the unserve');
+    // The journal was opened twice: for the replacement of the empty journal, and again for the head. The unserve names the second.
+    expect(relay.unserves()[0]).toMatchObject({ sessionKey: 'fake:thread-1', generation: relay.opens() });
     expect(diagnostics).toContainEqual({ event: 'journal_session_stopped', providerId: 'fake', reason: 'identity_missing' });
-    const published = relay.written.filter(message => message.type === 'journal_publish').length;
-    session.push(item('live', 'm3', 'Later', { completes: true }));
-    await settle(60);
-    expect(relay.written.filter(message => message.type === 'journal_publish')).toHaveLength(published);
-    expect(relay.opens()).toBe(1);
-  });
-
-  it('opens again when the Relay answers sequence_gap, which no per-item refusal explains', async () => {
-    const diagnostics: Wire[] = [];
-    let gaps = 0;
-    const relay = scriptedRelay({ onPublish: (message, answer) => {
-      if (gaps === 0 && message.entries.some((entry: Wire) => entry.op === 'append')) { gaps += 1; answer.refuse('sequence_gap'); } else answer.ack();
-    } });
-    const publisher = publisherFor(relay, { batchWindowMs: 25 }, diagnostics);
-    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    const published = relay.publishes().length;
     const opens = relay.opens();
-    session.push(item('live', 'm2', 'Next', { completes: true }));
-    await until(() => relay.opens() === opens + 1 && relay.model().some(entry => entry.itemKey === 'm2'), 'the journal to be opened again and to hold the item');
-    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'sequence_gap' });
+    session.push(item('live', 'm3', 'Later', { completes: true }));
+    await settle(100);
+    expect(relay.publishes()).toHaveLength(published);
+    expect(relay.opens()).toBe(opens);
+    expect(relay.unserves()).toHaveLength(1);
   });
 
-  it('stops a session whose provider uses the key prefix reserved for the Controller', async () => {
+  it('stops a session whose provider uses the key prefix reserved for the Controller, and unserves it on the first open, which holds the head of an earlier connection', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, {}, diagnostics);
     await attachSession(publisher, [item('history', 'controller:m1', 'Hello')]);
-    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop');
+    await until(() => relay.unserves().length === 1, 'the unserve');
     expect(diagnostics).toContainEqual({ event: 'journal_session_stopped', providerId: 'fake', reason: 'identity_missing' });
+    expect(relay.opens()).toBe(1);
+    expect(relay.unserves()[0]).toMatchObject({ sessionKey: 'fake:thread-1', generation: 1 });
+    expect(relay.publishes()).toEqual([]);
   });
 
-  it('leaves out an item the Relay refuses for its own sake, sends the rest again numbered from the refused entry, and does not open again', async () => {
-    const diagnostics: Wire[] = [];
-    let refused = false;
-    const relay = scriptedRelay({ onPublish: (message, answer) => {
-      const bad = message.entries.find((entry: Wire) => entry.op === 'append' && entry.row.itemKey === 'bad');
-      if (!refused && bad) { refused = true; answer.refuse('body_missing', 'bad', bad.sequence); } else answer.ack();
-    } });
-    const publisher = publisherFor(relay, { batchWindowMs: 25 }, diagnostics);
-    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
-    await settle(40);
+  it('unserves a session whose identity is missing when the connection comes back, if it could not before', async () => {
+    const relay = scriptedRelay();
+    const publisher = createJournalPublisher({ providers: () => ['fake'], scheduler: clock, now: clock.now, limits: { responseTimeoutMs: 10_000 } });
+    closers.push(() => publisher.close());
+    await attachSession(publisher, [item('history', 'controller:m1', 'Hello')]);
+    await settle(30);
+    expect(relay.written).toEqual([]);
+    relay.connect(publisher);
+    await until(() => relay.unserves().length === 1, 'the unserve on the first connection');
+    expect(relay.publishes()).toEqual([]);
+  });
+
+  it('keeps publishing nothing for a session it gave up on until a connection returns, then tries it again', async () => {
+    const relay = scriptedRelay({ onPublish: (message, answer) => answer.refuse('incomplete', undefined, message.entries.at(-1).sequence) });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.unserves().length === 1, 'the unserve');
     const opens = relay.opens();
-    session.push(item('live', 'bad', 'Never stored', { completes: true }));
-    session.push(item('live', 'good', 'Stored', { completes: true }));
-    await until(() => relay.model().some(entry => entry.itemKey === 'good' && entry.state === 'complete'), 'the item after the refused one');
-    const publishes = relay.written.filter(message => message.type === 'journal_publish').slice(-2);
-    expect(publishes.map(message => message.entries.map((entry: Wire) => [entry.sequence, entry.op, entry.row?.itemKey ?? entry.itemKey]))).toEqual([
-      [[4, 'append', 'bad'], [5, 'complete', 'bad'], [6, 'append', 'good'], [7, 'complete', 'good']],
-      [[4, 'append', 'good'], [5, 'complete', 'good']],
-    ]);
+    await settle(200);
     expect(relay.opens()).toBe(opens);
-    expect(relay.model().map(entry => entry.itemKey)).not.toContain('bad');
-    expect(diagnostics).toContainEqual({ event: 'journal_publication_refused', providerId: 'fake', reason: 'body_missing:item' });
+    publisher.available(undefined);
+    relay.connect(publisher);
+    await until(() => relay.opens() === opens + 1, 'the open on the next connection');
   });
 
-  /** Moves the fake clock in small steps, with real time between them for the digests, which the platform computes and no timer drives. */
-  const realWait = () => new Promise<void>(resolve => realSetTimeout(resolve, 20));
-  const run = async (ms: number) => { for (let spent = 0; spent < ms; spent += 10) { await realWait(); await vi.advanceTimersByTimeAsync(10); } await realWait(); };
-
-  const failsOnce = (failed = new Set<string>()) => (message: Wire, answer: { ack(): void; refuse(reason: string, itemKey?: string, sequence?: number): void }) => {
-    const live = message.entries.find((value: Wire) => value.op === 'append' && ['a', 'b'].includes(value.row.itemKey) && !failed.has(value.row.itemKey));
-    if (live) { failed.add(live.row.itemKey); answer.refuse('stale_revision', live.row.itemKey, live.sequence); } else answer.ack();
-  };
+  function failsOnce(failed = new Set<string>()) {
+    return (message: Wire, answer: Answer) => {
+      const live = message.entries.find((value: Wire) => value.op === 'append' && ['a', 'b'].includes(value.row.itemKey) && !failed.has(value.row.itemKey));
+      if (live) { failed.add(live.row.itemKey); answer.refuse('stale_revision', live.row.itemKey, live.sequence); } else answer.ack();
+    };
+  }
 
   /** How long the publisher waited to open again after each of its two failures. */
   async function waitsAfterTwoFailures(secondPushAfterMs: number, sustainedMs: number): Promise<[number, number]> {
     const relay = scriptedRelay({ onPublish: failsOnce() });
-    const publisher = publisherFor(relay, { batchWindowMs: 1, backoffBaseMs: 100, backoffMaxMs: 10_000, sustainedMs, responseTimeoutMs: 60_000 });
+    const publisher = publisherFor(relay, { batchWindowMs: 1, backoffBaseMs: 100, backoffMaxMs: 10_000, sustainedMs });
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await run(100);
+    await settle(100);
     session.push(item('live', 'a', 'One', { completes: true }));
-    await run(secondPushAfterMs);
+    await settle(secondPushAfterMs);
     session.push(item('live', 'b', 'Two', { completes: true }));
-    await run(600);
+    await settle(600);
     const opens = relay.opensAt();
     const refused = relay.refusedAt();
     expect(refused).toHaveLength(2);
@@ -6349,25 +6607,19 @@ describe('recovering', () => {
   }
 
   it('starts the backoff over only after the session published for a sustained time', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    try {
-      const [first, second] = await waitsAfterTwoFailures(1500, 500);
-      expect(first).toBeGreaterThanOrEqual(100);
-      expect(first).toBeLessThan(150);
-      expect(second).toBeGreaterThanOrEqual(100);
-      expect(second).toBeLessThan(150);
-    } finally { vi.useRealTimers(); }
+    const [first, second] = await waitsAfterTwoFailures(1500, 500);
+    expect(first).toBeGreaterThanOrEqual(100);
+    expect(first).toBeLessThan(150);
+    expect(second).toBeGreaterThanOrEqual(100);
+    expect(second).toBeLessThan(150);
   });
 
   it('doubles the backoff when failures follow each other closely', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    try {
-      const [first, second] = await waitsAfterTwoFailures(200, 5000);
-      expect(first).toBeGreaterThanOrEqual(100);
-      expect(first).toBeLessThan(150);
-      expect(second).toBeGreaterThanOrEqual(200);
-      expect(second).toBeLessThan(250);
-    } finally { vi.useRealTimers(); }
+    const [first, second] = await waitsAfterTwoFailures(200, 5000);
+    expect(first).toBeGreaterThanOrEqual(100);
+    expect(first).toBeLessThan(150);
+    expect(second).toBeGreaterThanOrEqual(200);
+    expect(second).toBeLessThan(250);
   });
 
   it('keeps reading a head change that arrives while the session reconciles, and publishes it once the session is live', async () => {
@@ -6380,11 +6632,25 @@ describe('recovering', () => {
     relay.releaseOpens();
     await until(() => relay.ops().filter(op => op === 'head').length >= 2, 'a head after going live');
     expect(relay.opens()).toBe(1);
-    const heads = relay.written.flatMap(message => message.entries ?? []).filter((value: Wire) => value.op === 'head') as Wire[];
+    const heads = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'head') as Wire[];
     expect(heads.at(-1)!.head.snapshot.activeTurn).toMatchObject({ turnId: 'turn-9' });
   });
 
-  it('does not make a session wait for the others to finish publishing before it opens', async () => {
+  it('holds the rows that arrive while it reconciles, and publishes them after the reconcile is acknowledged', async () => {
+    const relay = scriptedRelay({ holdOpened: true, index: [entry('zz', 1, { liveOnly: true })] });
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() === 1, 'the open');
+    session.push(item('live', 'late', 'Arrived during the open', { completes: true }));
+    await settle(30);
+    expect(relay.publishes()).toEqual([]);
+    relay.releaseOpens();
+    await until(() => relay.model().some(value => value.itemKey === 'late' && value.state === 'complete'), 'the held row');
+    const entries = relay.publishes().flatMap(message => message.entries) as Wire[];
+    expect(entries.findIndex(value => value.op === 'head')).toBeLessThan(entries.findIndex(value => value.op === 'append' && value.row.itemKey === 'late'));
+  });
+
+  it('opens at most the allowed number of sessions at a time, and frees the place once a session has read its index', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
     const publisher = publisherFor(relay, { concurrentOpens: 1 });
@@ -6392,7 +6658,30 @@ describe('recovering', () => {
     await until(() => pending.length === 1, 'the first session to wait for its acknowledgement');
     await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
     await until(() => relay.opens() === 2, 'the second session to open while the first waits');
+    await until(() => pending.length === 2, 'the second session to publish while the first waits');
+  });
+
+  it('keeps a session from opening while the allowed number of sessions are still reading their index', async () => {
+    const relay = scriptedRelay({ holdOpened: true });
+    const publisher = publisherFor(relay, { concurrentOpens: 1 });
+    await attachSession(publisher, [item('history', 'a1', 'First')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' });
+    await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
+    await settle(60);
+    expect(relay.opens()).toBe(1);
+    relay.releaseOpens();
+    await until(() => relay.opens() === 2, 'the second open once the first index is read');
+  });
+
+  it('keeps no more messages in flight than the shared budget allows, across sessions', async () => {
+    const pending: Array<() => void> = [];
+    const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
+    const publisher = publisherFor(relay, { inFlightMessages: 2 });
+    for (const at of [1, 2, 3]) await attachSession(publisher, [item('history', `a${at}`, 'Text')], undefined, { agentId: `agent-${at}`, nativeSessionId: `thread-${at}` });
+    await until(() => pending.length === 2, 'two messages in flight');
+    await settle(60);
     expect(pending).toHaveLength(2);
+    pending.shift()!();
+    await until(() => relay.publishes().some(message => message.sessionKey === 'fake:thread-3'), 'the third session once room is given back');
   });
 
   it('closes a gap without publishing twice the rows that arrive while it reads older history', async () => {
@@ -6402,19 +6691,17 @@ describe('recovering', () => {
     const manager = await attachScripted(session);
     closers.push(() => { void manager.close(); });
     let injected = false;
-    const source: JournalSource = {
-      subscribeJournal: tap => manager.subscribeJournal(tap), timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key),
-      attentionItemKey: () => manager.attentionItemKey(), snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(),
+    const source = sourceOf(manager, {
       async loadOlderHistory() {
         const loaded = await manager.loadOlderHistory();
         if (!injected) { injected = true; session.push(item('live', 'x', 'Live during the gap', { completes: true })); await settle(20); }
         return loaded;
       },
-    };
+    });
     publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source });
-    await until(() => relay.model().some(entry => entry.itemKey === 'x' && entry.state === 'complete'), 'the live item');
+    await until(() => relay.model().some(value => value.itemKey === 'x' && value.state === 'complete'), 'the live item');
     await settle(40);
-    const appended = relay.written.flatMap(message => message.entries ?? []).filter((value: Wire) => value.op === 'append' && value.row.itemKey === 'x');
+    const appended = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'append' && value.row.itemKey === 'x');
     expect(appended).toHaveLength(1);
     expect(appended[0].row.item.text).toBe('Live during the gap');
   });
@@ -6423,19 +6710,17 @@ describe('recovering', () => {
     const relay = scriptedRelay({ index: [] });
     const publisher = publisherFor(relay);
     await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     publisher.available(undefined);
-    const opens = relay.types().filter(type => type === 'journal_open').length;
+    const opens = relay.opens();
     await settle(30);
-    expect(relay.types().filter(type => type === 'journal_open')).toHaveLength(opens);
+    expect(relay.opens()).toBe(opens);
     relay.connect(publisher);
-    await until(() => relay.types().filter(type => type === 'journal_open').length === opens + 1, 'the open after the connection returned');
+    await until(() => relay.opens() === opens + 1, 'the open after the connection returned');
   });
 });
 
 describe('giving up on a session, and following another source of it', () => {
-  const unserves = (relay: ReturnType<typeof scriptedRelay>) => relay.written.filter(message => message.type === 'journal_unserve');
-
   it('stops, tells the Relay to stop serving the journal and says why when the Snapshot cannot be published', async () => {
     const diagnostics: Wire[] = [];
     const relay = scriptedRelay();
@@ -6444,40 +6729,36 @@ describe('giving up on a session, and following another source of it', () => {
     const manager = await attachScripted(session);
     closers.push(() => { void manager.close(); });
     let broken = false;
-    const source: JournalSource = {
-      subscribeJournal: tap => manager.subscribeJournal(tap), timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key),
-      attentionItemKey: () => manager.attentionItemKey(), loadOlderHistory: () => manager.loadOlderHistory(), hasOlderHistory: () => manager.hasOlderHistory(),
-      snapshot: () => { const snapshot = manager.snapshot(); if (broken) snapshot.payload.id = ''; return snapshot; },
-    };
+    const source = sourceOf(manager, { snapshot: () => { const snapshot = manager.snapshot(); if (broken) snapshot.payload.id = ''; return snapshot; } });
     publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source });
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     broken = true;
     session.push({ type: 'observation', sourceKey: 'turn-1', occurredAt: 5, delivery: 'live', event: { type: 'turn_started', provider: 'fake', turnId: 'turn-9' } });
-    await until(() => unserves(relay).length === 1, 'the unserve');
+    await until(() => relay.unserves().length === 1, 'the unserve');
     expect(diagnostics).toContainEqual({ event: 'journal_session_stopped', providerId: 'fake', reason: 'head_rejected' });
-    expect(unserves(relay)[0]).toMatchObject({ generation: expect.any(Number) });
+    expect(relay.unserves()[0]).toMatchObject({ generation: expect.any(Number) });
   });
 
   it('follows a manager that replaces the one it followed, and ignores the old one', async () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 5 });
     const first = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     const opens = relay.opens();
     const second = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
     await until(() => relay.opens() === opens + 1, 'the open of the new source');
     await until(() => relay.types().at(-1) === 'journal_publish', 'the head of the new source');
     first.session.push(item('live', 'old', 'From the manager that closed', { completes: true }));
     second.session.push(item('live', 'new', 'From the woken manager', { completes: true }));
-    await until(() => relay.model().some(entry => entry.itemKey === 'new' && entry.state === 'complete'), 'the new source\'s item');
-    expect(relay.model().map(entry => entry.itemKey)).not.toContain('old');
+    await until(() => relay.model().some(value => value.itemKey === 'new' && value.state === 'complete'), 'the new source\'s item');
+    expect(relay.model().map(value => value.itemKey)).not.toContain('old');
   });
 
   it('keeps following the same manager when it is attached again', async () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay);
     const { manager } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     const opens = relay.opens();
     expect(publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager })).toBe(true);
     await settle(40);
@@ -6493,14 +6774,33 @@ describe('giving up on a session, and following another source of it', () => {
     publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager });
     await settle(50);
     expect(relay.ops()).toEqual([]);
-    const live = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
     await until(() => relay.ops().includes('head'), 'a live manager of the same session');
-    void live;
   });
 
-  it('refuses at once a fill or an older-history request for a session it does not follow, or cannot answer yet', async () => {
-    const relay = scriptedRelay({ holdOpened: true });
-    const publisher = publisherFor(relay);
+  it('stops following a manager whose tap was dropped, and follows it again when it is attached again', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'Hello'), boundary()]);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    let tap: AgentJournalTap | undefined;
+    const source = sourceOf(manager, { subscribeJournal: next => { tap = next; return manager.subscribeJournal(next); } });
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source });
+    await live(relay);
+    const opens = relay.opens();
+    tap!.closed();
+    await settle(60);
+    session.push(item('live', 'a', 'Nobody follows', { completes: true }));
+    await settle(60);
+    expect(relay.ops()).not.toContain('append');
+    expect(publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager })).toBe(true);
+    await until(() => relay.opens() === opens + 1 && relay.model().some(value => value.itemKey === 'a' && value.state === 'complete'), 'the open of the source followed again');
+  });
+
+  it('refuses at once a fill or an older-history request for a session it does not follow', async () => {
+    const relay = scriptedRelay();
+    publisherFor(relay);
     relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:unknown', itemKeys: ['m1'] });
     relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:unknown', limit: 10 });
     await until(() => relay.written.filter(message => message.type === 'journal_request_refused').length === 2, 'the refusals');
@@ -6508,19 +6808,29 @@ describe('giving up on a session, and following another source of it', () => {
       { uplinkVersion: 2, type: 'journal_request_refused', requestId: 'fill-1', sessionKey: 'fake:unknown', reason: 'not_followed' },
       { uplinkVersion: 2, type: 'journal_request_refused', requestId: 'older-1', sessionKey: 'fake:unknown', reason: 'not_followed' },
     ]);
-    void publisher;
+  });
+
+  it('refuses a request for a session it follows but cannot answer, as not ready', async () => {
+    const relay = scriptedRelay({ onPublish: (message, answer) => answer.refuse('incomplete', undefined, message.entries.at(-1).sequence) });
+    const diagnostics: Wire[] = [];
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to be given up');
+    relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+    await until(() => relay.written.some(message => message.type === 'journal_request_refused'), 'the refusal');
+    expect(relay.written.find(message => message.type === 'journal_request_refused')).toMatchObject({ requestId: 'fill-1', reason: 'not_ready' });
   });
 });
 
 describe('older history and fills the Relay asks for', () => {
   it('publishes the manager\'s older items as a prepend, and reads further native history when it has none left', async () => {
-    const relay = scriptedRelay({ index: [entry('m3', 1), entry('m4', 2)] });
+    const relay = scriptedRelay();
     const publisher = publisherFor(relay);
     const { manager } = await attachSession(publisher, [item('history', 'm3', 'Three'), item('history', 'm4', 'Four')], [
       { observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')], nextCursor: 'older-2' },
       { observations: [item('history', 'm0', 'Zero')], nextCursor: 'older-3' },
-    ]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    ], { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m3', 'm4'] });
+    await live(relay);
     const before = relay.written.length;
     relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 3 });
     await until(() => relay.written.slice(before).some(message => message.type === 'journal_older_done'), 'the answer');
@@ -6533,25 +6843,68 @@ describe('older history and fills the Relay asks for', () => {
   });
 
   it('says that no older history is left once native history is read to its start', async () => {
-    const relay = scriptedRelay({ index: [entry('m2', 1)] });
+    const relay = scriptedRelay();
     const publisher = publisherFor(relay);
-    await attachSession(publisher, [item('history', 'm2', 'Two')], [{ observations: [item('history', 'm1', 'One')] }]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await attachSession(publisher, [item('history', 'm2', 'Two')], [{ observations: [item('history', 'm1', 'One')] }], { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m2'] });
+    await live(relay);
     relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 10 });
     await until(() => relay.written.some(message => message.type === 'journal_older_done'), 'the answer');
     expect(relay.written.find(message => message.type === 'journal_older_done')).toMatchObject({ olderAvailable: false });
   });
 
   it('answers a fill request with the bodies it still has, complete and with their digests', async () => {
-    const relay = scriptedRelay({ index: [entry('m1', 1)] });
+    const relay = scriptedRelay();
     const publisher = publisherFor(relay);
-    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m1'] });
+    await live(relay);
     relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1', 'missing'] });
     await until(() => relay.written.some(message => message.type === 'journal_fill'), 'the fill');
     const fill = relay.written.find(message => message.type === 'journal_fill')!;
     expect(fill).toMatchObject({ requestId: 'fill-1', sessionKey: 'fake:thread-1' });
     expect(fill.items.map((value: Wire) => [value.row.itemKey, value.row.item.text, typeof value.digest])).toEqual([['m1', 'One', 'string']]);
+  });
+
+  it('takes room from the shared budget for a fill, like a publication', async () => {
+    const pending: Array<() => void> = [];
+    const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
+    const publisher = publisherFor(relay, { inFlightMessages: 1 });
+    await attachSession(publisher, [item('history', 'm1', 'One')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m1'] });
+    await until(() => pending.length === 1, 'the head waiting for its acknowledgement');
+    relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+    await settle(60);
+    expect(relay.written.some(message => message.type === 'journal_fill')).toBe(false);
+    pending.shift()!();
+    await until(() => relay.written.some(message => message.type === 'journal_fill'), 'the fill after the room was given back');
+  });
+
+  it('publishes the head before the older history of a reconcile, which follows as prepends', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two'), item('history', 'm3', 'Three'), item('history', 'm4', 'Four')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m3', 'm4'] });
+    await until(() => relay.ops().includes('prepend'), 'the older items');
+    expect(relay.publishes().map(message => message.entries.map((value: Wire) => value.op))).toEqual([['head'], ['prepend']]);
+  });
+
+  it('publishes a live row that arrives between the blocks of older history before the next block', async () => {
+    const big = 'x'.repeat(2_600_000);
+    let liveRow: (() => void) | undefined;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (liveRow && message.entries.some((value: Wire) => value.op === 'prepend')) {
+        liveRow();
+        liveRow = undefined;
+        setImmediate(() => answer.ack());
+      } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 1 });
+    const { session } = await attachSession(publisher, [item('history', 'm3', 'Three')], [{ observations: [item('history', 'm1', big), item('history', 'm2', big)] }], { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m3'] });
+    await until(() => relay.ops().includes('head'), 'the head');
+    liveRow = () => session.push(item('live', 'between', 'Between the blocks', { completes: true }));
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 2 });
+    await until(() => relay.written.some(message => message.type === 'journal_older_done'), 'the answer');
+    const ops = relay.publishes().flatMap(message => message.entries.map((value: Wire) => value.op));
+    expect(ops.filter(op => op === 'prepend')).toHaveLength(2);
+    expect(ops.indexOf('append')).toBeGreaterThan(ops.indexOf('prepend'));
+    expect(ops.indexOf('append')).toBeLessThan(ops.lastIndexOf('prepend'));
   });
 });
 
@@ -6560,45 +6913,50 @@ describe('releasing a session', () => {
     const relay = scriptedRelay();
     const publisher = publisherFor(relay, { batchWindowMs: 5000 });
     const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.ops().includes('head'), 'the first head');
+    await live(relay);
     session.push(item('live', 'a', 'Last words', { completes: true }));
     await settle(30);
-    await publisher.release('agent-1');
+    let done = false;
+    void publisher.release('agent-1').then(() => { done = true; });
+    await until(() => done, 'the release');
     expect(relay.ops()).toContain('complete');
     const opens = relay.opens();
     session.push(item('live', 'b', 'After release', { completes: true }));
-    await settle(40);
+    await settle(100);
     expect(relay.ops().filter(op => op === 'append')).toHaveLength(1);
     expect(relay.opens()).toBe(opens);
   });
 });
 ```
 
-- [ ] **Step 3: Write the failing tests against the Relay's real journal logic.** Create `packages/agent-host/src/journal-publisher.relay.test.ts`. They prove the Controller's side and the Relay's side agree:
+- [x] **Step 3: Write the failing tests against the Relay's real journal logic (9 tests).** Create `packages/agent-host/src/journal-publisher.relay.test.ts`. They prove the Controller's side and the Relay's side agree:
 
 <!-- write: packages/agent-host/src/journal-publisher.relay.test.ts -->
 ```ts
-import { itemDigest, SessionJournal } from '@orchardworks/agent-remote-journal';
+import { itemDigest, type JournalChanges, type SessionJournal } from '@orchardworks/agent-remote-journal';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { mergedRow, groupItems } from './journal-items.js';
+import { groupItems, mergedRow } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher } from './journal-publisher.js';
 import { relayLoopback } from './test-utils/journal-relay-loopback.js';
-import { attachScripted, boundary, item, ScriptedSession, settle, until } from './test-utils/journal-scripted-session.js';
+import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
 
+const clock = virtualClock();
+const { settle, until } = driver(clock);
 const closers: Array<() => void> = [];
 afterEach(() => { for (const close of closers.splice(0)) close(); });
 const SESSION = 'fake:thread-1';
-const limits = { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 1000 };
+const limits = { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 10_000 };
 
 function start(relay: ReturnType<typeof relayLoopback>, publisherId?: string): JournalPublisher {
-  const publisher = createJournalPublisher({ providers: () => ['fake'], limits, ...(publisherId ? { publisherId } : {}) });
+  const publisher = createJournalPublisher({ providers: () => ['fake'], scheduler: clock, now: clock.now, limits, ...(publisherId ? { publisherId } : {}) });
   closers.push(() => publisher.close());
   relay.connect(publisher);
   return publisher;
 }
 
-async function follow(publisher: JournalPublisher, history: ReturnType<typeof item>[], older?: Array<{ observations: ReturnType<typeof item>[]; nextCursor?: string }>) {
+type Observation = ReturnType<typeof item>;
+async function follow(publisher: JournalPublisher, history: Observation[], older?: Array<{ observations: Observation[]; nextCursor?: string }>) {
   const session = new ScriptedSession('fake', 'thread-1', [...history, boundary(older ? 'older-1' : undefined)], older);
   const manager = await attachScripted(session);
   closers.push(() => { void manager.close(); });
@@ -6612,99 +6970,105 @@ const texts = async (relay: ReturnType<typeof relayLoopback>) => {
   return page?.kind === 'page' ? page.page.payload.entries.map(entry => 'text' in entry.item ? entry.item.text : '') : undefined;
 };
 
+/** What a Relay restart keeps: the journal's state, in a store of a new Relay. */
+async function carryOver(from: SessionJournal, to: ReturnType<typeof relayLoopback>): Promise<void> {
+  const changes: JournalChanges = { meta: from.state().meta, upsert: from.state().items, removed: [], replaced: true, bytes: 0 };
+  await to.store.apply(changes);
+}
+
 describe('the publisher against the Relay\'s journal service', () => {
   it('builds the journal of a session from its history, with digests, a head and its epoch', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const publisher = start(relay);
     await follow(publisher, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     const journal = (await relay.journal(SESSION))!;
     expect(await texts(relay)).toEqual(['Hello', 'World']);
-    expect(journal.index().map(entry => [entry.itemKey, entry.state, typeof entry.digest])).toEqual([['m1', 'complete', 'string'], ['m2', 'complete', 'string']]);
+    expect(journal.index().map(value => [value.itemKey, value.state, typeof value.digest])).toEqual([['m1', 'complete', 'string'], ['m2', 'complete', 'string']]);
     expect(journal.head?.snapshot.id).toBe('agent-1');
   });
 
-  it('keeps the epoch and every row across a Controller restart, and publishes nothing for an unchanged session (T6)', async () => {
-    const relay = relayLoopback();
+  it('keeps the epoch and every row across a Controller restart, and publishes nothing for an unchanged session', async () => {
+    const relay = relayLoopback(clock);
     const first = start(relay, 'controller-before');
     const run = await follow(first, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     run.session.push(item('live', 'a', 'Wor', { completes: false }));
     run.session.push(item('live', 'a', 'ld', { completes: true }));
     await until(async () => (await texts(relay))?.length === 3, 'the live item');
-    const before = await relay.journal(SESSION);
+    await settle(20);
+    const before = (await relay.journal(SESSION))!;
     first.close();
     relay.disconnect();
     await run.manager.close();
 
-    const restarted = relayLoopback();
-    await restarted.store.apply(before!.takeChanges() ?? { meta: before!.state().meta, upsert: before!.state().items, removed: [], replaced: true, bytes: 0 });
+    const restarted = relayLoopback(clock);
+    await carryOver(before, restarted);
     const second = start(restarted, 'controller-after');
     const reopened = await follow(second, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World'), item('history', 'a', 'World')]);
     await until(async () => ((await restarted.journal(SESSION))?.publisher?.publisherId) === 'controller-after' && (await restarted.journal(SESSION))?.head !== undefined, 'the reconcile');
     await settle(50);
     const after = (await restarted.journal(SESSION))!;
-    expect(after.epoch).toBe(before!.epoch);
-    expect(after.index().map(entry => [entry.itemKey, entry.seqStart])).toEqual(before!.index().map(entry => [entry.itemKey, entry.seqStart]));
+    expect(after.epoch).toBe(before.epoch);
+    expect(after.index().map(value => [value.itemKey, value.seqStart])).toEqual(before.index().map(value => [value.itemKey, value.seqStart]));
     expect(restarted.published.flatMap(({ result }) => result.events.filter(event => event.kind === 'row' || event.kind === 'replaced'))).toEqual([]);
     expect(await texts(restarted)).toEqual(['Hello', 'World', 'World']);
     await reopened.manager.close();
   });
 
   it('corrects an item whose native content changed without starting a new epoch', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const first = start(relay);
     const run = await follow(first, [item('history', 'm1', 'Hello'), item('history', 'm2', 'Wor')]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
-    const epoch = (await relay.journal(SESSION))!.epoch;
+    const old = (await relay.journal(SESSION))!;
     first.close();
     relay.disconnect();
     await run.manager.close();
-    const next = relayLoopback();
-    const old = (await relay.journal(SESSION))!;
-    await next.store.apply({ meta: old.state().meta, upsert: old.state().items, removed: [], replaced: true, bytes: 0 });
+    const next = relayLoopback(clock);
+    await carryOver(old, next);
     const second = start(next, 'controller-2');
     await follow(second, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World, complete')]);
     await until(async () => (await texts(next))?.[1] === 'World, complete', 'the correction');
-    expect((await next.journal(SESSION))!.epoch).toBe(epoch);
+    expect((await next.journal(SESSION))!.epoch).toBe(old.epoch);
   });
 
   it('starts a new epoch only when native history was rewritten, carrying its live-only items over', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const first = start(relay);
     const run = await follow(first, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World'), item('history', 'm3', 'Again')]);
     run.session.push(item('live', 'question', 'Which one?', { completes: true, liveOnly: true }));
     await until(async () => (await texts(relay))?.length === 4, 'the live-only item');
-    const epoch = (await relay.journal(SESSION))!.epoch;
+    await settle(20);
+    const old = (await relay.journal(SESSION))!;
     first.close();
     relay.disconnect();
     await run.manager.close();
-    const next = relayLoopback();
-    const old = (await relay.journal(SESSION))!;
-    await next.store.apply({ meta: old.state().meta, upsert: old.state().items, removed: [], replaced: true, bytes: 0 });
+    const next = relayLoopback(clock);
+    await carryOver(old, next);
     const second = start(next, 'controller-2');
     await follow(second, [item('history', 'm1', 'Hello'), item('history', 'm3', 'Again')]);
-    await until(async () => (await next.journal(SESSION))!.epoch !== epoch, 'the replacement');
+    await until(async () => (await next.journal(SESSION))!.epoch !== old.epoch, 'the replacement');
     await until(async () => (await texts(next))?.length === 3, 'the new epoch');
     expect(await texts(next)).toEqual(['Hello', 'Again', 'Which one?']);
   });
 
   it('answers the Relay\'s request for older history with a prepend, and for evicted bodies with a fill', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const publisher = start(relay);
     await follow(publisher, [item('history', 'm3', 'Three'), item('history', 'm4', 'Four')], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
     expect(await relay.connection.requestOlder(SESSION, 10)).toEqual({ olderAvailable: false });
     expect(await texts(relay)).toEqual(['One', 'Two', 'Three', 'Four']);
     const journal = (await relay.journal(SESSION))!;
-    expect(journal.index().map(entry => entry.seqStart)).toEqual([-1, 0, 1, 2]);
+    expect(journal.index().map(value => value.seqStart)).toEqual([-1, 0, 1, 2]);
     const digest = journal.index()[0]!.digest;
     expect(digest).toBe(await itemDigest(mergedRow(groupItems([{ epoch: 'e', seq: 1, providerId: 'fake', sourceKey: 's', occurredAt: 1, timestamp: new Date(1).toISOString(), turnId: 'turn-1', item: { type: 'assistant_message', text: 'One', messageId: 'm1' }, resources: [], identity: { key: 'm1', completes: true } }])[0]!).item));
     expect(await relay.connection.requestFill(SESSION, ['m3', 'm4'])).toMatchObject({ filled: ['m3', 'm4'] });
   });
 
   it('publishes the head before older history, which follows as a prepend', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const first = start(relay, 'controller-before');
     const run = await follow(first, [item('history', 'm3', 'Three'), item('history', 'm4', 'Four')]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
@@ -6713,12 +7077,12 @@ describe('the publisher against the Relay\'s journal service', () => {
     first.close();
     relay.disconnect();
     await run.manager.close();
-    const next = relayLoopback();
-    await next.store.apply({ meta: before.state().meta, upsert: before.state().items, removed: [], replaced: true, bytes: 0 });
+    const next = relayLoopback(clock);
+    await carryOver(before, next);
     const second = start(next, 'controller-after');
     await follow(second, [item('history', 'm1', 'One'), item('history', 'm2', 'Two'), item('history', 'm3', 'Three'), item('history', 'm4', 'Four')]);
     await until(async () => (await texts(next))?.length === 4, 'the older items');
-    const sequence = next.fromPublisher.filter(message => message.type === 'journal_publish').map(message => message.entries.map((entry: { op: string }) => entry.op));
+    const sequence = next.fromPublisher.filter(message => message.type === 'journal_publish').map(message => message.entries.map((value: { op: string }) => value.op));
     expect(sequence.slice(0, 2)).toEqual([['head'], ['prepend']]);
     expect(await texts(next)).toEqual(['One', 'Two', 'Three', 'Four']);
     expect((await next.journal(SESSION))!.epoch).toBe(before.epoch);
@@ -6728,7 +7092,7 @@ describe('the publisher against the Relay\'s journal service', () => {
     const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
     const withImage = () => item('history', 'm1', 'See ![shot](shot.png)');
     const resourceOf = async (relay: ReturnType<typeof relayLoopback>) => (await relay.journal(SESSION))?.state().items[0]?.body?.resources[0];
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const first = start(relay, 'controller-before');
     const session = new ScriptedSession('fake', 'thread-1', [withImage(), boundary()], undefined, { 'shot.png': png });
     const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'controller-secret' });
@@ -6741,8 +7105,8 @@ describe('the publisher against the Relay\'s journal service', () => {
     relay.disconnect();
     await manager.close();
 
-    const next = relayLoopback();
-    await next.store.apply({ meta: before.state().meta, upsert: before.state().items, removed: [], replaced: true, bytes: 0 });
+    const next = relayLoopback(clock);
+    await carryOver(before, next);
     const second = start(next, 'controller-after');
     const reopened = new ScriptedSession('fake', 'thread-1', [withImage(), boundary()], undefined, { 'shot.png': png });
     const again = await attachScripted(reopened, 'agent-1', { resourceIdKey: 'controller-secret' });
@@ -6751,14 +7115,13 @@ describe('the publisher against the Relay\'s journal service', () => {
     await settle(100);
     expect(await resourceOf(next)).toEqual(settled);
     expect(again.timelineRows()[0]!.resources[0]).toEqual(settled);
-    expect(again.readResource('r', settled.resourceId)).toBeDefined();
     expect((await again.readResource('r', settled.resourceId)).payload.state).toMatchObject({ status: 'available', mediaType: 'image/png' });
     expect(next.published.flatMap(({ result }) => result.events.filter(event => event.kind === 'row' || event.kind === 'replaced'))).toEqual([]);
     await again.close();
   });
 
   it('serves the attention cursor in the journal\'s epoch and sequence, as the item the Controller\'s cursor points at', async () => {
-    const relay = relayLoopback();
+    const relay = relayLoopback(clock);
     const publisher = start(relay);
     const { session } = await follow(publisher, [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')]);
     await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
@@ -6767,15 +7130,25 @@ describe('the publisher against the Relay\'s journal service', () => {
     const journal = (await relay.journal(SESSION))!;
     expect(journal.head?.snapshot.attention).toEqual({ cursor: { epoch: journal.epoch, seq: 2 }, background: { id: 'review-1', kind: 'review', status: 'visible' } });
   });
+
+  it('unserves a session whose provider broke the identity contract, so the Relay stops serving its journal', async () => {
+    const relay = relayLoopback(clock);
+    const publisher = start(relay);
+    const { session } = await follow(publisher, [item('history', 'm1', 'Hello')]);
+    await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
+    session.push({ ...item('live', 'm2', 'No identity', { completes: true }), itemIdentity: undefined });
+    await until(async () => (await relay.journal(SESSION))?.head === undefined, 'the head to be cleared');
+    expect(relay.published.some(({ result }) => result.unserved === true)).toBe(true);
+  });
 });
 ```
 
-- [ ] **Step 4: Run them and see them fail.**
+- [x] **Step 4: Run them and see them fail.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-publisher.test.ts src/journal-publisher.relay.test.ts --testTimeout=15000`
+Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-publisher.test.ts src/journal-publisher.relay.test.ts --testTimeout=20000`
 Expected: FAIL (`./journal-publisher.js` does not exist).
 
-- [ ] **Step 5: Implement the publication of one session.** Create `packages/agent-host/src/journal-publication.ts`:
+- [x] **Step 5: Implement the publication of one session.** Create `packages/agent-host/src/journal-publication.ts`:
 
 <!-- write: packages/agent-host/src/journal-publication.ts -->
 ```ts
@@ -6845,7 +7218,7 @@ export interface PublicationContext {
   limits: PublisherLimits;
   now(): number;
   /** Writes one message to the Relay: `offline` when no connection holds the grant, `unencodable` when the wire refuses it. */
-  send(message: RemoteHostUplinkMessage): 'sent' | 'offline' | 'unencodable';
+  send(message: RemoteHostUplinkMessage, providerId: string): 'sent' | 'offline' | 'unencodable';
   /** Waits for room to have one more message in flight; the returned function gives the room back. */
   reserve(bytes: number): Promise<() => void>;
   openSlot(): Promise<() => void>;
@@ -6860,7 +7233,7 @@ export interface SessionPublicationOptions {
   sessionKey: string;
   source: JournalSource;
   context: PublicationContext;
-  /** The publication ended for good: the session closed or was stopped. */
+  /** The publication ended for good: the session closed or was released. */
   onFinished(): void;
 }
 
@@ -6870,7 +7243,9 @@ type QueuedOp =
   | { kind: 'rebind'; key: string; previous: ResourceBinding; replacement: ResourceBinding }
   | { kind: 'outcome'; providerId: string; turnId?: string; background: BackgroundActivity; occurredAt: number };
 
-interface Waiter { match(message: JournalRelayMessage): boolean; resolve(message: JournalRelayMessage): void; reject(error: Error): void; timer: unknown }
+type Phase = 'suspended' | 'opening' | 'live' | 'refused' | 'gave_up' | 'stopped';
+
+interface Waiter { kind: 'publish' | 'other'; match(message: JournalRelayMessage): boolean; resolve(message: JournalRelayMessage): void; reject(error: Error): void; timer: unknown }
 
 /** The Relay refused a publication at `sequence`. */
 class Refused extends Error { constructor(readonly reason: string, readonly itemKey?: string, readonly sequence?: number) { super(`The Relay refused a journal publication: ${reason}.`); } }
@@ -6895,6 +7270,17 @@ const pendingKey = (payload: AgentSnapshotPayload): string => payload.pendingInt
 const opItemKey = (op: PublishOp): string | undefined => op.op === 'append' || op.op === 'correct' ? op.row.itemKey
   : op.op === 'complete' || op.op === 'seal' || op.op === 'rebind' || op.op === 'alias' ? op.itemKey : undefined;
 
+/** Whether the entry is about the item: it carries the item's rows or is made of its key. */
+const namesItem = (op: PublishOp, itemKey: string): boolean =>
+  opItemKey(op) === itemKey || ((op.op === 'replace' || op.op === 'prepend') && op.items.some(({ row }) => row.itemKey === itemKey));
+
+/** The entry without the item the Relay refused, or undefined when it holds no more items or does not hold that one. */
+function withoutItem(op: PublishOp, itemKey: string): PublishOp | undefined {
+  if (op.op !== 'replace' && op.op !== 'prepend') return undefined;
+  const items = op.items.filter(({ row }) => row.itemKey !== itemKey);
+  return items.length > 0 && items.length < op.items.length ? { ...op, items } : undefined;
+}
+
 /**
  * Publishes one session to its journal on the Relay: opens it, reconciles it with the Controller's timeline, and then
  * publishes what the session emits, one acknowledged message at a time. Everything that can go wrong ends in opening the
@@ -6902,10 +7288,13 @@ const opItemKey = (op: PublishOp): string | undefined => op.op === 'append' || o
  * in telling the Relay to stop serving the journal, which would otherwise show a session that no longer moves.
  */
 export class SessionPublication {
-  private phase: 'suspended' | 'opening' | 'live' | 'refused' | 'stopped' = 'suspended';
+  private phase: Phase = 'suspended';
   private cycle = 0;
   private subscription: AgentJournalSubscription | undefined;
+  /** The journal's generation on this connection, once it was opened; 0 before. */
   private generation = 0;
+  private openedInCycle = false;
+  private connected = false;
   private sequence = 0;
   private journalKeys = new Set<string>();
   private waiter: Waiter | undefined;
@@ -6918,7 +7307,7 @@ export class SessionPublication {
   private headPending = '';
   private flushTimer: unknown;
   private retryTimer: unknown;
-  private flushing = false;
+  private tasks = 0;
   private lane: Promise<void> = Promise.resolve();
   private restarts = 0;
   private liveSince: number | undefined;
@@ -6928,11 +7317,13 @@ export class SessionPublication {
   private resetOpen = false;
   private replaceStreak = 0;
   private incompleteStreak = 0;
+  /** The provider broke the identity contract: this connection's journal is only unserved, never published. */
+  private identityBreach = false;
   private rebuilding = false;
   /** Items the wire refused; they stay out for as long as the session is followed. */
   private readonly skipped = new Set<string>();
-  /** Items a publication refused; they stay out until the journal is opened again, which reads them again. */
-  private refusedItems = new Set<string>();
+  /** Items a publication refused, with the last row they had; they stay out until a row of theirs changes or a connection returns. */
+  private readonly refusedItems = new Map<string, number>();
   /** Whether the wire accepts an item as it stands, by its last row, so reconciling measures an item once. */
   private readonly checked = new Map<string, { lastSeq: number }>();
   private readonly digests = new Map<string, { lastSeq: number; digest: string }>();
@@ -6954,19 +7345,40 @@ export class SessionPublication {
 
   /** A connection holds the grant, or the session was just attached: open the journal. A connection that replaces another opens it again, because the Relay forgot what the earlier one opened. */
   resume(): void {
+    if (this.phase === 'stopped') return;
+    this.connected = true;
+    this.generation = 0;
+    this.refusedItems.clear();
+    if (this.phase === 'gave_up' || this.phase === 'refused') {
+      this.quotaStep = 0;
+      this.forceReplace = false;
+      this.resetOpen = false;
+      this.replaceStreak = 0;
+      this.incompleteStreak = 0;
+    }
+    if (this.identityBreach) {
+      this.cycle += 1;
+      this.teardown();
+      this.phase = 'gave_up';
+      this.unserveOnOpen();
+      return;
+    }
     this.restart(0, undefined, false);
   }
 
   /** The connection ended. The session opens its journal again when a connection returns. */
   suspend(): void {
     if (this.phase === 'stopped') return;
+    this.connected = false;
     this.cycle += 1;
     this.teardown();
+    this.generation = 0;
     this.requests.length = 0;
-    this.phase = 'suspended';
+    if (this.phase !== 'gave_up' && this.phase !== 'refused') this.phase = 'suspended';
     this.signalIdle();
   }
 
+  /** The session is no longer followed. */
   stop(): void {
     if (this.phase === 'stopped') return;
     this.cycle += 1;
@@ -6991,7 +7403,7 @@ export class SessionPublication {
   }
 
   private isIdle(): boolean {
-    return this.phase !== 'live' || (this.queue.length === 0 && !this.headDirty && !this.flushing);
+    return this.phase !== 'live' || (this.tasks === 0 && this.queue.length === 0 && !this.headDirty);
   }
 
   private signalIdle(): void {
@@ -7001,8 +7413,9 @@ export class SessionPublication {
   /** A message of the Relay about this session. */
   receive(message: JournalRelayMessage): void {
     if (message.type === 'journal_refused') {
-      if (message.generation !== this.generation || this.phase === 'stopped') return;
+      if (!this.openedInCycle || message.generation !== this.generation || this.phase === 'stopped') return;
       const refusal = new Refused(message.reason, message.itemKey, message.sequence);
+      if (this.waiter && this.waiter.kind !== 'publish') return;
       if (!this.rejectWaiter(refusal)) this.recover(this.cycle, refusal);
       return;
     }
@@ -7028,6 +7441,7 @@ export class SessionPublication {
     const token = ++this.cycle;
     this.teardown();
     this.phase = 'opening';
+    this.openedInCycle = false;
     this.liveSince = undefined;
     if (counted) this.restarts += 1;
     if (reason !== undefined) this.context.diagnostic({ event: 'journal_session_restarted', providerId: this.options.providerId, reason });
@@ -7054,11 +7468,11 @@ export class SessionPublication {
     this.headDirty = false;
     this.urgent = false;
     this.rebuilding = false;
-    this.refusedItems = new Set();
   }
 
   private enqueue(task: () => Promise<void>): void {
-    this.lane = this.lane.then(task).catch(() => undefined);
+    this.tasks += 1;
+    this.lane = this.lane.then(task).catch(() => undefined).finally(() => { this.tasks -= 1; this.signalIdle(); });
   }
 
   private async run(token: number): Promise<void> {
@@ -7084,6 +7498,9 @@ export class SessionPublication {
   private async reconcile(token: number, freeSlot: () => void): Promise<void> {
     const subscription = this.source.subscribeJournal({ event: event => this.onEvent(token, event), closed: () => this.onClosed(token), identityMissing: () => this.onIdentityMissing(token) });
     this.subscription = subscription;
+    // A manager that already broke the identity contract says so in the next tick; the journal is not opened for a session that is given up.
+    await Promise.resolve();
+    this.check(token);
     const opened = await this.open(token);
     freeSlot();
     this.check(token);
@@ -7101,13 +7518,14 @@ export class SessionPublication {
     if (plan.kind === 'gap') plan = await replacementPlan(await this.items(rows), item => this.digest(item), 'gap');
     this.check(token);
     if (plan.kind !== 'gap') for (const key of plan.refused) this.skip(key);
-    if (plan.kind === 'replace' && plan.reason !== 'initial') this.context.diagnostic({ event: 'journal_replacement_published', providerId: this.options.providerId, reason: plan.reason });
+    // A replacement with nothing to replace with is not published: the journal keeps what it has, and the head follows.
+    const replacing = plan.kind === 'replace' && plan.ops.length > 0;
+    if (plan.kind === 'replace' && replacing && plan.reason !== 'initial') this.context.diagnostic({ event: 'journal_replacement_published', providerId: this.options.providerId, reason: plan.reason });
     // The head goes before older history, which can be long and never delays what the session shows now.
     const head = this.headOp();
-    for (const chunk of chunkOps([...(plan.kind === 'gap' ? [] : plan.ops), head])) await this.publish(token, chunk);
-    if (plan.kind === 'continue') for (const chunk of chunkOps(plan.older)) await this.publish(token, chunk);
+    for (const chunk of chunkOps([...(plan.kind === 'gap' || (plan.kind === 'replace' && !replacing) ? [] : plan.ops), head])) await this.publish(token, chunk);
     this.check(token);
-    if (plan.kind === 'replace') {
+    if (replacing && plan.kind === 'replace') {
       this.resetOpen = false;
       // A replacement a quota asked for is not a rewrite: the window it kept is what fits, and the next open finds it known.
       if (plan.reason === 'quota') this.forceReplace = false;
@@ -7115,11 +7533,25 @@ export class SessionPublication {
         this.replaceStreak += 1;
         if (this.replaceStreak > MAX_REPLACEMENTS_IN_A_ROW) { this.giveUp('replace_loop'); return; }
       }
+      // Opening again finds the replacement known and adds the older items as older history.
       this.restart(0, undefined, false);
       return;
     }
     this.replaceStreak = 0;
     this.incompleteStreak = 0;
+    this.forceReplace = false;
+    this.goLive(token);
+    if (plan.kind === 'continue') {
+      for (const chunk of chunkOps(plan.older)) {
+        // What the session shows now goes before every further block of older history.
+        await this.flushLive(token);
+        await this.publish(token, chunk);
+      }
+    }
+    this.check(token);
+  }
+
+  private goLive(token: number): void {
     this.phase = 'live';
     this.liveSince = this.context.now();
     for (const event of this.held.splice(0)) {
@@ -7143,6 +7575,7 @@ export class SessionPublication {
     if (reply.type !== 'journal_opened') throw new OpenRefused(reply.type === 'journal_open_refused' ? reply.reason : 'unexpected');
     this.generation = reply.generation;
     this.sequence = reply.watermark;
+    this.openedInCycle = true;
     const index = [...reply.index];
     let after = reply.indexAfter;
     for (let pages = 0; after !== undefined; pages += 1) {
@@ -7169,8 +7602,9 @@ export class SessionPublication {
   private async items(rows: readonly CanonicalTimelineRow[]): Promise<TimelineItem[]> {
     const kept: TimelineItem[] = [];
     for (const item of groupItems(rows)) {
-      if (this.skipped.has(item.key) || this.refusedItems.has(item.key)) continue;
       const lastSeq = (item.rows[item.rows.length - 1] as CanonicalTimelineRow).seq;
+      if (this.skipped.has(item.key) || this.refusedItems.get(item.key) === lastSeq) continue;
+      this.refusedItems.delete(item.key);
       if (this.checked.get(item.key)?.lastSeq !== lastSeq) {
         const bytes = entryBytes({ op: 'prepend', items: [{ row: mergedRow(item), ...(item.complete ? { digest: await this.digest(item) } : {}) }] });
         if (bytes === undefined) { this.skip(item.key); continue; }
@@ -7188,6 +7622,7 @@ export class SessionPublication {
     });
   }
 
+  /** Leaves an item out for as long as the session is followed, and records it once. */
   private skip(key: string): void {
     if (this.skipped.has(key)) return;
     this.skipped.add(key);
@@ -7215,11 +7650,11 @@ export class SessionPublication {
 
   // Messages and answers.
 
-  private expect(token: number, match: (message: JournalRelayMessage) => boolean): Promise<JournalRelayMessage> {
+  private expect(token: number, kind: Waiter['kind'], match: (message: JournalRelayMessage) => boolean): Promise<JournalRelayMessage> {
     return new Promise((resolve, reject) => {
       if (token !== this.cycle) { reject(new Cancelled()); return; }
       const timer = this.context.schedule(() => { this.waiter = undefined; reject(new TimedOut('The Relay did not answer in time.')); }, this.limits.responseTimeoutMs);
-      this.waiter = { match, resolve, reject, timer };
+      this.waiter = { kind, match, resolve, reject, timer };
     });
   }
 
@@ -7232,17 +7667,17 @@ export class SessionPublication {
     return true;
   }
 
-  private async ask(token: number, message: RemoteHostUplinkMessage, match: (message: JournalRelayMessage) => boolean): Promise<JournalRelayMessage> {
-    const reply = this.expect(token, match);
-    const sent = this.context.send(message);
+  private async ask(token: number, message: RemoteHostUplinkMessage, match: (message: JournalRelayMessage) => boolean, kind: Waiter['kind'] = 'other'): Promise<JournalRelayMessage> {
+    const reply = this.expect(token, kind, match);
+    const sent = this.context.send(message, this.options.providerId);
     if (sent !== 'sent') this.rejectWaiter(sent === 'offline' ? new Cancelled() : new Refused('unencodable'));
     return reply;
   }
 
   /**
    * Numbers the entries after the last publication, sends them and waits until the Relay's store holds them. When the Relay
-   * refuses an entry because of its item, the entries before it are stored: the item is left out and the entries after
-   * it are sent again, numbered from the refused one, instead of opening the journal again.
+   * refuses an entry because of its item, the entries before it are stored and the refused one consumed no sequence: the
+   * item is left out and the entries after it are sent again, numbered from the refused one, instead of opening the journal again.
    */
   private async publish(token: number, chunk: { ops: PublishOp[]; bytes: number }): Promise<void> {
     let ops = chunk.ops;
@@ -7256,18 +7691,23 @@ export class SessionPublication {
         const generation = this.generation;
         try {
           await this.ask(token, { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_publish', sessionKey: this.options.sessionKey, generation, entries },
-            message => message.type === 'journal_ack' && message.generation === generation && message.watermark >= last);
+            message => message.type === 'journal_ack' && message.generation === generation && message.watermark >= last, 'publish');
           this.sequence = last;
           this.remember(ops);
           return;
         } catch (error) {
+          // The refusal carries the Relay's number of the entry; the entries before it are stored.
           const applied = error instanceof Refused && error.sequence !== undefined ? error.sequence - first : -1;
           if (!(error instanceof Refused) || error.itemKey === undefined || !ITEM_REFUSALS.has(error.reason) || applied < 0 || applied >= ops.length) throw error;
+          const itemKey = error.itemKey;
+          const refusedOp = ops[applied] as PublishOp;
+          if (!namesItem(refusedOp, itemKey)) throw error;
+          const remaining = withoutItem(refusedOp, itemKey);
           this.remember(ops.slice(0, applied));
           this.sequence = error.sequence as number - 1;
-          this.refusedItems.add(error.itemKey);
+          this.refusedItems.set(itemKey, this.source.itemRows(itemKey).at(-1)?.seq ?? -1);
           this.context.diagnostic({ event: 'journal_publication_refused', providerId: this.options.providerId, reason: `${error.reason}:item` });
-          ops = ops.slice(applied + 1).filter(op => opItemKey(op) !== error.itemKey);
+          ops = [...(remaining ? [remaining] : []), ...ops.slice(applied + 1)].filter(op => opItemKey(op) !== itemKey);
         }
       } finally {
         release();
@@ -7298,14 +7738,16 @@ export class SessionPublication {
         this.restart(0, undefined, false);
         return;
       }
-      // The Relay already took the session out of serving when it refused the open.
+      // The Relay already took the session out of serving when it refused the open; it is tried again on the next connection.
       this.cycle += 1;
       this.teardown();
       this.phase = 'refused';
+      this.signalIdle();
       return;
     }
     if (error instanceof HeadRejected) { this.giveUp('head_rejected'); return; }
     if (error instanceof Refused && error.reason === 'quota_exceeded') {
+      // The Relay has taken the session out of serving and fenced this generation: open again and replace with a window that fits.
       this.quotaStep += 1;
       if (this.quotaStep > this.limits.quotaWindows.length) { this.giveUp('quota_exceeded'); return; }
       this.forceReplace = true;
@@ -7329,17 +7771,48 @@ export class SessionPublication {
   }
 
   /** Tells the Relay to stop serving this session's journal, which this Controller can no longer keep current. */
-  private sendUnserve(reason: string): void {
-    if (this.generation < 1) return;
-    this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_unserve', sessionKey: this.options.sessionKey, generation: this.generation });
+  private sendUnserve(reason: string, generation = this.generation): void {
+    if (generation < 1) return;
+    this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_unserve', sessionKey: this.options.sessionKey, generation }, this.options.providerId);
     this.context.diagnostic({ event: 'journal_session_unserved', providerId: this.options.providerId, reason });
   }
 
-  /** The session cannot be published any more: the Relay stops serving its journal, and the session is no longer followed. */
+  /**
+   * The session cannot be published any more: the Relay stops serving its journal, and nothing more of it is published
+   * until a connection returns. When the journal was not opened on this connection yet, the unserve waits for the first
+   * open, because a head an earlier connection published would otherwise stay served.
+   */
   private giveUp(reason: string): void {
+    if (this.phase === 'stopped') return;
     this.context.diagnostic({ event: 'journal_session_stopped', providerId: this.options.providerId, reason });
-    this.sendUnserve(reason);
-    this.stop();
+    const opened = this.openedInCycle && this.generation >= 1;
+    this.cycle += 1;
+    this.teardown();
+    this.phase = 'gave_up';
+    this.signalIdle();
+    if (opened) this.sendUnserve(reason);
+    else {
+      this.identityBreach = true;
+      if (this.connected) this.unserveOnOpen();
+    }
+  }
+
+  /** Opens the journal only to say, with the generation it gets, that it is not to be served. */
+  private unserveOnOpen(): void {
+    const token = this.cycle;
+    this.enqueue(async () => {
+      if (token !== this.cycle) return;
+      const release = await this.context.openSlot();
+      try {
+        if (token !== this.cycle) return;
+        const requestId = randomUUID();
+        const reply = await this.ask(token, { uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_open', requestId, sessionKey: this.options.sessionKey, publisherId: this.context.publisherId },
+          message => (message.type === 'journal_opened' || message.type === 'journal_open_refused') && message.requestId === requestId);
+        if (reply.type === 'journal_opened') this.sendUnserve('identity_missing', reply.generation);
+      } catch { /* The connection ended or the Relay did not answer; the next connection says it again. */ } finally {
+        release();
+      }
+    });
   }
 
   // Live publishing.
@@ -7348,13 +7821,14 @@ export class SessionPublication {
     if (token !== this.cycle) return;
     if (this.phase === 'opening') {
       if (event.type === 'agent_state') { this.heldHeadDirty = true; return; }
-      if (this.held.length >= this.limits.heldEventsMax) { this.restart(0, 'held_events', true); return; }
+      if (this.held.length >= this.limits.heldEventsMax) { this.restart(this.backoffDelay(), 'held_events', true); return; }
       this.held.push(event);
       return;
     }
     if (this.phase === 'live') this.apply(event);
   }
 
+  /** The manager closed, or dropped this tap: it is not followed any more until it is attached again. */
   private onClosed(token: number): void {
     if (token === this.cycle) this.stop();
   }
@@ -7375,7 +7849,8 @@ export class SessionPublication {
         if (inner.type === 'timeline') {
           if (event.row && !this.rebuilding) this.pushRow(event.row);
         } else if (inner.type === 'background_activity_updated') {
-          this.queue.push({ kind: 'outcome', providerId: inner.provider, ...(inner.turnId === undefined ? {} : { turnId: inner.turnId }), background: inner.background, occurredAt: Date.parse(event.timestamp) });
+          const at = Date.parse(event.timestamp);
+          this.queue.push({ kind: 'outcome', providerId: inner.provider, ...(inner.turnId === undefined ? {} : { turnId: inner.turnId }), background: inner.background, occurredAt: Number.isFinite(at) ? at : this.context.now() });
         }
         // The other events of the session wire change the Snapshot, and the head carries it.
         break;
@@ -7415,22 +7890,23 @@ export class SessionPublication {
   }
 
   private async flush(token: number): Promise<void> {
-    this.flushing = true;
     try {
-      while (token === this.cycle && this.phase === 'live' && (this.queue.length > 0 || this.headDirty)) {
-        const queued = this.queue.splice(0);
-        const head = this.headDirty ? this.headOp() : undefined;
-        this.headDirty = false;
-        this.urgent = false;
-        const ops = await this.materialize(queued);
-        if (head) ops.push(head);
-        for (const chunk of chunkOps(ops)) await this.publish(token, chunk);
-      }
+      await this.flushLive(token);
     } catch (error) {
       this.recover(token, error);
-    } finally {
-      this.flushing = false;
-      this.signalIdle();
+    }
+  }
+
+  /** Publishes everything queued, and the head when it changed, until nothing is left. */
+  private async flushLive(token: number): Promise<void> {
+    while (token === this.cycle && this.phase === 'live' && (this.queue.length > 0 || this.headDirty)) {
+      const queued = this.queue.splice(0);
+      const head = this.headDirty ? this.headOp() : undefined;
+      this.headDirty = false;
+      this.urgent = false;
+      const ops = await this.materialize(queued);
+      if (head) ops.push(head);
+      for (const chunk of chunkOps(ops)) await this.publish(token, chunk);
     }
   }
 
@@ -7487,8 +7963,10 @@ export class SessionPublication {
       this.enqueue(async () => {
         try {
           if (request.type === 'journal_older_request') await this.answerOlder(token, request);
-          else await this.answerFill(request);
+          else await this.answerFill(token, request);
         } catch (error) {
+          // The Relay waits for an answer; one it will not get is refused at once instead of at its deadline.
+          this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
           this.recover(token, error);
         }
       });
@@ -7497,7 +7975,7 @@ export class SessionPublication {
 
   /** Publishes the items older than the journal's oldest, reading further native history when the timeline has none. */
   private async answerOlder(token: number, request: Extract<JournalRelayMessage, { type: 'journal_older_request' }>): Promise<void> {
-    if (token !== this.cycle) return;
+    this.check(token);
     const older = async (): Promise<TimelineItem[]> => {
       const items = await this.items(this.source.timelineRows());
       const first = items.findIndex(item => this.journalKeys.has(item.key));
@@ -7506,7 +7984,7 @@ export class SessionPublication {
     let candidates = await older();
     for (let reads = 0; candidates.length < request.limit && reads < OLDER_READS_PER_REQUEST && this.source.hasOlderHistory(); reads += 1) {
       const loaded = await this.source.loadOlderHistory().catch(() => ({ added: 0, more: false }));
-      if (token !== this.cycle) return;
+      this.check(token);
       candidates = await older();
       if (loaded.added === 0) break;
     }
@@ -7518,19 +7996,24 @@ export class SessionPublication {
       const op: PublishOp = { op: 'prepend', items: block };
       ops.push({ op, bytes: entryBytes(op) ?? MESSAGE_BUDGET_BYTES });
     }
-    for (const chunk of chunkOps(ops)) await this.publish(token, chunk);
-    if (token !== this.cycle) return;
+    for (const chunk of chunkOps(ops)) {
+      await this.flushLive(token);
+      await this.publish(token, chunk);
+    }
+    this.check(token);
     this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey,
-      olderAvailable: candidates.length > take.length || this.source.hasOlderHistory() });
+      olderAvailable: candidates.length > take.length || this.source.hasOlderHistory() }, this.options.providerId);
   }
 
   /** Answers a fill with the bodies of the items it can find, in the order asked, as many as fit one message; the answer takes room in flight like a publication. */
-  private async answerFill(request: Extract<JournalRelayMessage, { type: 'journal_fill_request' }>): Promise<void> {
+  private async answerFill(token: number, request: Extract<JournalRelayMessage, { type: 'journal_fill_request' }>): Promise<void> {
+    this.check(token);
     const wanted = new Set(request.itemKeys.slice(0, JOURNAL_FILL_MAX_ITEMS));
     const found = async (): Promise<TimelineItem[]> => (await this.items(this.source.timelineRows())).filter(item => wanted.has(item.key) && item.complete);
     let items = await found();
     for (let reads = 0; items.length < wanted.size && reads < OLDER_READS_PER_REQUEST && this.source.hasOlderHistory(); reads += 1) {
       const loaded = await this.source.loadOlderHistory().catch(() => ({ added: 0, more: false }));
+      this.check(token);
       items = await found();
       if (loaded.added === 0) break;
     }
@@ -7545,7 +8028,7 @@ export class SessionPublication {
     }
     const release = await this.context.reserve(bytes);
     try {
-      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill', requestId: request.requestId, sessionKey: this.options.sessionKey, items: fitting });
+      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_fill', requestId: request.requestId, sessionKey: this.options.sessionKey, items: fitting }, this.options.providerId);
     } finally {
       release();
     }
@@ -7553,7 +8036,7 @@ export class SessionPublication {
 }
 ```
 
-- [ ] **Step 6: Implement the connection.** Create `packages/agent-host/src/journal-publisher.ts`:
+- [x] **Step 6: Implement the connection.** Create `packages/agent-host/src/journal-publisher.ts`:
 
 <!-- write: packages/agent-host/src/journal-publisher.ts -->
 ```ts
@@ -7577,6 +8060,8 @@ export interface JournalPublisherOptions {
   publisherId?: string;
   limits?: Partial<PublisherLimits>;
   now?(): number;
+  /** Where timers run; tests drive it by hand. */
+  scheduler?: { setTimeout(callback: () => void, delayMs: number): unknown; clearTimeout(timer: unknown): void };
   diagnostic?(entry: JournalPublisherDiagnostic): void;
 }
 
@@ -7649,12 +8134,12 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
 
   const context: PublicationContext = {
     publisherId, limits, now: options.now ?? Date.now,
-    send(message) {
+    send(message, providerId) {
       const connection = writer;
       if (!connection) return 'offline';
       const encoded = encodeRemoteHostUplinkMessage(message);
       if (encoded.status !== 'ok') {
-        context.diagnostic({ event: 'journal_message_unencodable', providerId: 'unknown' });
+        context.diagnostic({ event: 'journal_message_unencodable', providerId });
         return 'unencodable';
       }
       connection.send(encoded.json);
@@ -7666,11 +8151,15 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
       try { options.diagnostic?.(entry); } catch { /* A diagnostic sink cannot stop publishing. */ }
     },
     schedule(callback, delayMs) {
+      if (options.scheduler) return options.scheduler.setTimeout(callback, delayMs);
       const timer = setTimeout(callback, delayMs);
       timer.unref?.();
       return timer;
     },
-    cancel(timer) { clearTimeout(timer as ReturnType<typeof setTimeout>); },
+    cancel(timer) {
+      if (options.scheduler) options.scheduler.clearTimeout(timer);
+      else clearTimeout(timer as ReturnType<typeof setTimeout>);
+    },
   };
 
   return {
@@ -7692,7 +8181,7 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
       if ((message.type === 'journal_fill_request' || message.type === 'journal_older_request') && !publication?.requestable) {
         // The Relay waits for an answer to a request; a session this Controller does not follow gets its refusal at once.
         context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: message.requestId, sessionKey: message.sessionKey,
-          reason: publication ? 'not_ready' : 'not_followed' });
+          reason: publication ? 'not_ready' : 'not_followed' }, 'unknown');
         return;
       }
       publication?.receive(message);
@@ -7738,12 +8227,12 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
 }
 ```
 
-- [ ] **Step 7: Run the tests and see them pass.**
+- [x] **Step 7: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-publisher.test.ts src/journal-publisher.relay.test.ts --testTimeout=15000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
-Expected: PASS.
+Expected: PASS (65 tests in the two files; the whole `agent-host` suite is 1,572 tests with them).
 
-- [ ] **Step 8: Commit.**
+- [x] **Step 8: Commit.**
 
 ```bash
 git add packages/agent-host/src/journal-publication.ts packages/agent-host/src/journal-publisher.ts packages/agent-host/src/journal-publisher.test.ts packages/agent-host/src/journal-publisher.relay.test.ts packages/agent-host/src/test-utils/journal-scripted-session.ts packages/agent-host/src/test-utils/journal-relay-loopback.ts
@@ -7776,7 +8265,7 @@ import { WebSocketServer } from 'ws';
 import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 import type { JournalPublisherDiagnostic } from './journal-publisher.js';
-import { boundary, item, ScriptedSession, until } from './test-utils/journal-scripted-session.js';
+import { boundary, item, ScriptedSession, untilReal as until } from './test-utils/journal-scripted-session.js';
 
 const closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
@@ -8172,7 +8661,6 @@ Provider adapters (P1-C2) prove that live and reread observations of one native 
 **Files:**
 - Create: `packages/agent-host/src/test-utils/journal-continuity.ts`
 - Create: `packages/agent-host/src/journal-continuity.test.ts`
-- Modify: `packages/agent-host/src/journal-publisher.test.ts`
 
 - [ ] **Step 1: Write the failing tests.** Create `packages/agent-host/src/journal-continuity.test.ts`. The fake provider is the scripted session's observations; each test is one way an adapter can behave:
 
@@ -8268,76 +8756,11 @@ describe('the continuity fixture', () => {
 });
 ```
 
-Add two tests of the publisher to `packages/agent-host/src/journal-publisher.test.ts`, which drive the manager's events through a source they can reach into. In the imports of that file, add the source and tap types:
-
-<!-- edit: packages/agent-host/src/journal-publisher.test.ts -->
-<!-- old -->
-```ts
-import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
-```
-<!-- new -->
-```ts
-import type { AgentJournalTap } from '@orchardworks/agent-remote-relay';
-
-import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
-```
-
-<!-- edit: packages/agent-host/src/journal-publisher.test.ts -->
-<!-- old -->
-```ts
-describe('recovering', () => {
-```
-<!-- new -->
-```ts
-describe('events the manager emits besides rows', () => {
-  async function reachable(publisher: JournalPublisher) {
-    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'Hello'), boundary()]);
-    const manager = await attachScripted(session);
-    closers.push(() => { void manager.close(); });
-    const taps: AgentJournalTap[] = [];
-    const source: JournalSource = {
-      subscribeJournal: tap => { taps.push(tap); return manager.subscribeJournal(tap); },
-      timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key), attentionItemKey: () => manager.attentionItemKey(),
-      snapshot: () => manager.snapshot(), loadOlderHistory: () => manager.loadOlderHistory(), hasOlderHistory: () => manager.hasOlderHistory(),
-    };
-    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source });
-    return { tap: () => taps.at(-1)!, taps };
-  }
-
-  it('publishes a replaced resource binding as an amendment of the item it belongs to', async () => {
-    const relay = scriptedRelay();
-    const publisher = publisherFor(relay, { batchWindowMs: 5 });
-    const { tap } = await reachable(publisher);
-    await until(() => relay.ops().includes('head'), 'the first head');
-    const previous = { locator: 'out.png', resourceId: 'r1', status: 'pending' as const };
-    const replacement = { locator: 'out.png', resourceId: 'r2', status: 'available' as const };
-    tap().event({ type: 'timeline_resource_binding_replaced', agentId: 'agent-1', epoch: 'e', seq: 1, itemKey: 'm1', previous, replacement });
-    await until(() => relay.ops().includes('rebind'), 'the amendment');
-    expect(relay.written.flatMap(message => message.entries ?? []).find((entry: Wire) => entry.op === 'rebind')).toMatchObject({ itemKey: 'm1', previous, replacement });
-  });
-
-  it('reconciles again after the provider replaces its timeline, and publishes nothing of the rows in between', async () => {
-    const relay = scriptedRelay();
-    const publisher = publisherFor(relay, { batchWindowMs: 5 });
-    const { tap } = await reachable(publisher);
-    await until(() => relay.ops().includes('head'), 'the first head');
-    const opens = relay.opens();
-    tap().event({ type: 'timeline_replacement', agentId: 'agent-1', epoch: 'e2' });
-    tap().event({ type: 'agent_stream', agentId: 'agent-1', delivery: 'history', timestamp: new Date(1).toISOString(), event: { type: 'timeline', provider: 'fake', item: { type: 'assistant_message', text: 'Mid-rebuild', messageId: 'x' } },
-      row: { epoch: 'e2', seq: 1, providerId: 'fake', sourceKey: 'rebuild:1', occurredAt: 1, timestamp: new Date(1).toISOString(), item: { type: 'assistant_message', text: 'Mid-rebuild', messageId: 'x' }, resources: [], identity: { key: 'x', completes: true } } });
-    tap().event({ type: 'timeline_rebuilt', agentId: 'agent-1', cursor: { epoch: 'e2', seq: 1 } });
-    await until(() => relay.opens() === opens + 1, 'the reopening');
-    await settle(40);
-    expect(relay.ops().filter(op => op === 'append')).toEqual([]);
-  });
-});
-
-describe('recovering', () => {
-```
+The two publisher tests that drive the manager's events through a source (a replaced resource binding published as `rebind`, and a reconcile after `timeline_replacement`) landed with the publisher in Task 9.
 
 - [ ] **Step 2: Run them and see them fail.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-continuity.test.ts src/journal-publisher.test.ts --testTimeout=15000`
+Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-continuity.test.ts --testTimeout=15000`
 Expected: FAIL (`./test-utils/journal-continuity.js` does not exist).
 
 - [ ] **Step 3: Implement the helper.** Create `packages/agent-host/src/test-utils/journal-continuity.ts`:
@@ -8350,7 +8773,7 @@ import { expect } from 'vitest';
 
 import { groupItems, mergedRow, type TimelineItem } from '../journal-items.js';
 import { planPublication, type PublicationPlan } from '../journal-reconcile.js';
-import { attachScripted, boundary, item, ScriptedSession, until } from './journal-scripted-session.js';
+import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
 
 /** What one native session produced: everything it emitted while it ran, and what the adapter returns after it is reopened. */
 export interface ContinuityRun {
@@ -8428,13 +8851,13 @@ export async function expectContinuity(run: ContinuityRun): Promise<void> {
 
 - [ ] **Step 4: Run the tests and see them pass.**
 
-Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-continuity.test.ts src/journal-publisher.test.ts --testTimeout=15000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
+Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-continuity.test.ts --testTimeout=15000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
 Expected: PASS.
 
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add packages/agent-host/src/test-utils/journal-continuity.ts packages/agent-host/src/journal-continuity.test.ts packages/agent-host/src/journal-publisher.test.ts
+git add packages/agent-host/src/test-utils/journal-continuity.ts packages/agent-host/src/journal-continuity.test.ts
 git commit -m "test(host): the continuity fixture that proves a provider adapter's item identities, proven with a fake provider" -m "Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 

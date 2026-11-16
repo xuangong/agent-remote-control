@@ -2,6 +2,7 @@ import type { JournalRelayMessage } from '@orchardworks/agent-remote-protocol';
 import type { AgentJournalTap } from '@orchardworks/agent-remote-relay';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
 import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
 
@@ -628,6 +629,17 @@ describe('requests of the Relay', () => {
     relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 5 });
     await until(() => refusals(relay).length === 1, 'the refusal');
     expect(refusals(relay)[0]).toMatchObject({ requestId: 'older-1', reason: 'not_ready' });
+  });
+
+  it('refuses at once the oldest request when more than 32 wait for the session to be live, instead of dropping it', async () => {
+    const relay = scriptedRelay({ holdOpened: true });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() === 1, 'the open');
+    const before = refusals(relay).length;
+    for (let at = 0; at < 34; at += 1) relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: `fill-${at}`, sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+    await settle(30);
+    expect(refusals(relay).slice(before).map(message => message.requestId)).toContain('fill-0');
   });
 
   it('refuses a request it had queued when the cycle that queued it ends before the session is live', async () => {

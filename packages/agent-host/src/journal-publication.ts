@@ -207,7 +207,8 @@ export class SessionPublication {
     }
     if (message.type === 'journal_fill_request' || message.type === 'journal_older_request') {
       if (this.phase === 'stopped') return;
-      if (this.requests.length >= MAX_PENDING_REQUESTS) this.requests.shift();
+      // A request that does not fit is refused at once: the Relay waits for each one.
+      if (this.requests.length >= MAX_PENDING_REQUESTS) this.refuse(this.requests.shift()!);
       this.requests.push(message);
       this.serveRequests();
       return;
@@ -241,9 +242,11 @@ export class SessionPublication {
 
   /** The Relay waits for an answer to each request; those this cycle can no longer answer are refused at once. */
   private refuseRequests(): void {
-    for (const request of this.requests.splice(0)) {
-      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
-    }
+    for (const request of this.requests.splice(0)) this.refuse(request);
+  }
+
+  private refuse(request: (typeof this.requests)[number]): void {
+    this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
   }
 
   private teardown(): void {
@@ -582,7 +585,7 @@ export class SessionPublication {
       else await this.answerFill(token, request);
     } catch (error) {
       // The Relay waits for an answer; one it will not get is refused at once instead of at its deadline.
-      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
+      this.refuse(request);
       this.recover(token, error);
     }
   }

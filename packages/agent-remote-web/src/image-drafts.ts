@@ -1,4 +1,5 @@
 import { clearResourceDraftScope } from './resource-drafts.js';
+import { requestBrowserDatabase } from './browser-database.js';
 import type { ImageUploadReceipt } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './react/composer-document.js';
 
@@ -183,7 +184,6 @@ export function lookupDraftImage(scope: string, imageId: string): Blob | undefin
   if (image) { localImages.delete(key); localImages.set(key, image); }
   return image?.blob;
 }
-const DATABASE = 'agent-remote-image-drafts';
 const blobBuffers = new WeakMap<Blob, Promise<ArrayBuffer>>();
 type StoredDraftImage = DraftImage & { blobBytes?: ArrayBuffer; blobMediaType?: string; blobKey?: string };
 async function withBinaryImages(draft: ImageDraft): Promise<ImageDraft> {
@@ -203,11 +203,7 @@ function openDatabase(): Promise<IDBDatabase> {
   if (connection) return connection;
   const pending = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('Browser storage is unavailable.')); return; }
-    const request = indexedDB.open(DATABASE, 2);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains('drafts')) request.result.createObjectStore('drafts', { keyPath: 'key' });
-      if (!request.result.objectStoreNames.contains('images')) request.result.createObjectStore('images', { keyPath: 'key' }).createIndex('imageId', 'imageId');
-    };
+    const request = requestBrowserDatabase();
     request.onerror = () => reject(request.error ?? new Error('Browser storage is unavailable.'));
     request.onblocked = () => reject(new Error('Browser storage is blocked.'));
     request.onsuccess = () => {

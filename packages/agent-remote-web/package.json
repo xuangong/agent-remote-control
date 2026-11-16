@@ -24,6 +24,10 @@
       "types": "./dist/react.d.ts",
       "import": "./dist/react.js"
     },
+    "./device-store": {
+      "types": "./dist/device-store.d.ts",
+      "import": "./dist/device-store.js"
+    },
     "./styles.css": "./dist/styles.css"
   },
   "types": "./dist/index.d.ts",

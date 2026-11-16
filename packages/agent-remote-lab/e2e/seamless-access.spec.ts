@@ -159,7 +159,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await input.fill('Private unsent draft');
     await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
-        const open = indexedDB.open('agent-remote-image-drafts', 2);
+        const open = indexedDB.open('agent-remote-image-drafts');
         open.onupgradeneeded = () => {
           if (!open.result.objectStoreNames.contains('drafts')) open.result.createObjectStore('drafts', { keyPath: 'key' });
           if (!open.result.objectStoreNames.contains('images')) open.result.createObjectStore('images', { keyPath: 'key' }).createIndex('imageId', 'imageId');
@@ -196,7 +196,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await expect(dialog).not.toBeVisible();
     await expect(toggle).toBeChecked();
     expect(await page.evaluate(async () => {
-      const db = await new Promise<IDBDatabase>(resolve => { const open = indexedDB.open('agent-remote-image-drafts', 2); open.onsuccess = () => resolve(open.result); });
+      const db = await new Promise<IDBDatabase>(resolve => { const open = indexedDB.open('agent-remote-image-drafts'); open.onsuccess = () => resolve(open.result); });
       const tx = db.transaction(['drafts', 'images'], 'readonly');
       const drafts = tx.objectStore('drafts').count(), images = tx.objectStore('images').count();
       await new Promise<void>(resolve => { tx.oncomplete = () => resolve(); }); db.close();

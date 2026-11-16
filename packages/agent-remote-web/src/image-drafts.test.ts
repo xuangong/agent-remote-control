@@ -6,7 +6,7 @@ import * as draftStorage from './image-drafts.js';
 
 async function storedDraft(key: string) {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('agent-remote-image-drafts', 2);
+    const request = indexedDB.open('agent-remote-image-drafts');
     request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   });
   try {
@@ -255,7 +255,7 @@ it('upgrades embedded version-one drafts without losing image bytes and can read
     const separated = await storage.readImageDraft(saved.key);
     expect(separated?.parts).toEqual(saved.parts);
     expect(separated?.images['version-one']?.blob?.size).toBe(11);
-    const open = isolated.open('agent-remote-image-drafts', 2);
+    const open = isolated.open('agent-remote-image-drafts');
     const upgraded = await new Promise<IDBDatabase>(resolve => { open.onsuccess = () => resolve(open.result); });
     const tx = upgraded.transaction('drafts', 'readonly');
     const request = tx.objectStore('drafts').get(saved.key);
@@ -288,7 +288,7 @@ it('uses memory for private image drafts, clears persisted bytes, and fences wri
   await writeImageDraft({ ...saved, parts: [{ type: 'text', text: 'private edit' }] });
   expect((await readImageDraft(saved.key))?.parts).toEqual([{ type: 'text', text: 'private edit' }]);
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const open = indexedDB.open('agent-remote-image-drafts', 2);
+    const open = indexedDB.open('agent-remote-image-drafts');
     open.onsuccess = () => resolve(open.result); open.onerror = () => reject(open.error);
   });
   try {

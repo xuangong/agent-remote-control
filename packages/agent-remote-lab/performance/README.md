@@ -46,6 +46,8 @@ IndexedDB version 2 keeps the existing metadata document shape and moves bytes i
 
 After deployment, rollback must preserve this version-2 reader/writer module. A version-1-only bundle cannot open the upgraded database. Do not delete drafts or downgrade the database. The migration test covers old embedded drafts and both readable representations; packaging a rollback build remains a release task.
 
+Version 3 adds the device store's `sessions` and `session_index` stores to the same database. The upgrade only creates missing stores (`browser-database.ts`); `browser-database.test.ts` upgrades version-one and version-two databases and checks that drafts, image bytes and the image index are unchanged. A rollback build must keep a version-3 opener for the same reason it must keep a version-2 one.
+
 Cache limits are soft: mounted Main/Side/Ask panes, uncertain/failed outgoing messages, and dirty or failed-to-save drafts take priority over eviction. Payload estimates are not heap measurements. Real iPhone home-screen keyboard behavior, suspension/resume, and energy impact remain device acceptance work.
 
 ## Long-conversation scrolling

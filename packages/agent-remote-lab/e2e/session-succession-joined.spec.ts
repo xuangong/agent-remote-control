@@ -79,7 +79,7 @@ async function storedImage(page: Page, key: string, imageId: string) {
     type Draft = { scope: string; parts: Array<{ type: string; imageId?: string }>; images: Record<string, unknown> };
     type Image = { blob?: Blob; blobBytes?: ArrayBuffer };
     const stored = await new Promise<{ draft?: Draft; image?: Image }>((resolve, reject) => {
-      const opened = indexedDB.open('agent-remote-image-drafts', 2);
+      const opened = indexedDB.open('agent-remote-image-drafts');
       opened.onerror = () => reject(opened.error);
       opened.onsuccess = () => {
         const database = opened.result, tx = database.transaction(['drafts', 'images'], 'readonly');

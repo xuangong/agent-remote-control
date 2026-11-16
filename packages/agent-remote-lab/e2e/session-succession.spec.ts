@@ -183,7 +183,7 @@ function observeInputs(page: Page) {
 async function storedImageBytes(page: Page) {
   return page.evaluate(async () => {
     const images = await new Promise<Array<{ imageId: string; blob?: Blob; blobBytes?: ArrayBuffer }>>((resolve, reject) => {
-      const opened = indexedDB.open('agent-remote-image-drafts', 2);
+      const opened = indexedDB.open('agent-remote-image-drafts');
       opened.onerror = () => reject(opened.error);
       opened.onsuccess = () => {
         const database = opened.result, tx = database.transaction('images', 'readonly'), request = tx.objectStore('images').getAll();
@@ -234,7 +234,7 @@ test('a fresh view retains Content, Ask preference and real image bytes after cl
     const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aMioAAAAASUVORK5CYII=', 'base64');
     await page.evaluate(async ({ scope, key, bytes }) => {
       await new Promise<void>((resolve, reject) => {
-        const opened = indexedDB.open('agent-remote-image-drafts', 2);
+        const opened = indexedDB.open('agent-remote-image-drafts');
         opened.onerror = () => reject(opened.error);
         opened.onupgradeneeded = () => {
           if (!opened.result.objectStoreNames.contains('drafts')) opened.result.createObjectStore('drafts', { keyPath: 'key' });
@@ -429,7 +429,7 @@ test('opaque image bytes survive failed-primary reload and stay with the same ed
     await (await chooser).setFiles({ name: 'retained.png', mimeType: 'image/png', buffer: bytes });
     await expect(page.locator('[data-image-id]')).toHaveCount(1);
     await expect.poll(() => page.evaluate(() => new Promise<number>((resolve, reject) => {
-      const opened = indexedDB.open('agent-remote-image-drafts', 2);
+      const opened = indexedDB.open('agent-remote-image-drafts');
       opened.onerror = () => reject(opened.error);
       opened.onsuccess = () => {
         const database = opened.result, tx = database.transaction('images', 'readonly'), request = tx.objectStore('images').getAll();
@@ -602,7 +602,7 @@ test('Ask payload retention failure recovers from the single view document after
     // drafts in the actual two-store schema; the product owns their recovery.
     await page.evaluate(async ({ scope, bytes }) => {
       await new Promise<void>((resolve, reject) => {
-        const opened = indexedDB.open('agent-remote-image-drafts', 2);
+        const opened = indexedDB.open('agent-remote-image-drafts');
         opened.onerror = () => reject(opened.error);
         opened.onupgradeneeded = () => {
           if (!opened.result.objectStoreNames.contains('drafts')) opened.result.createObjectStore('drafts', { keyPath: 'key' });

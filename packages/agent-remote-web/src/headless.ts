@@ -26,3 +26,7 @@ export * from './client/remote-call-for-support-client.js';
 
 export * from './client/window-client.js';
 export type { SessionDescriptionIdentity, SessionAttributionTarget, SessionAttribution, SessionDescription } from './session-description.js';
+
+export { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from './session-record.js';
+export type { SessionToStore, StoredSession } from './session-record.js';
+export type { DeviceScope, SessionIdentity } from './device-store.js';

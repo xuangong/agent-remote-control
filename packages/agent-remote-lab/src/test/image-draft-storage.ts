@@ -2,7 +2,7 @@ import type { ImageDraft } from '@orchardworks/agent-remote-web/browser';
 
 export async function persistedPrompt(key: string) {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('agent-remote-image-drafts', 2);
+    const request = indexedDB.open('agent-remote-image-drafts');
     request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
   });
   try {

@@ -3,7 +3,7 @@ import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/time
 import { describe, expect, it } from 'vitest';
 
 import { groupItems, mergedRow, MESSAGE_BUDGET_BYTES, type TimelineItem } from './journal-items.js';
-import { planPublication, type PlanOptions, type PublicationPlan } from './journal-reconcile.js';
+import { planPublication, replacementPlan, type PlanOptions, type PublicationPlan } from './journal-reconcile.js';
 
 let seq = 0;
 const row = (key: string, text: string, identity: CanonicalTimelineRow['identity'] = { key, completes: true }): CanonicalTimelineRow => ({
@@ -102,13 +102,33 @@ describe('a journal that is planned against again after a plan was published', (
     expect(await isStable(fixture, [done('b'), done('a'), done('o')])).toEqual([]);
   });
 
-  it('never wipes a journal with an empty reread, a forced replacement of an empty window or items the wire refuses', async () => {
+  it('never wipes a journal with an empty reread that is not forced', async () => {
     const fixture = await seed(done('a'), done('b'));
     expect(await fixture.reconcile([])).toMatchObject({ kind: 'continue', ops: [], older: [] });
-    expect(await fixture.reconcile([], { forceReplace: true })).toMatchObject({ kind: 'continue', ops: [] });
-    expect(await fixture.reconcile([done('k'.repeat(4097))], { forceReplace: true })).toMatchObject({ kind: 'continue', ops: [], refused: ['k'.repeat(4097)] });
     expect(fixture.keys()).toEqual(['a', 'b']);
     expect(fixture.journal.index().every(entry => entry.state === 'complete' && !entry.liveOnly)).toBe(true);
+  });
+
+  it('does not turn a rewrite into an empty replacement, whatever found it', async () => {
+    expect(await replacementPlan([], digest, 'gap')).toMatchObject({ kind: 'continue', ops: [] });
+    expect(await replacementPlan([], digest, 'missing')).toMatchObject({ kind: 'continue', ops: [] });
+    expect(await replacementPlan([], digest, 'quota', true)).toMatchObject({ kind: 'replace', ops: [{ op: { op: 'replace', items: [] } }] });
+  });
+
+  it('replaces with an empty block when the replacement is forced, because that is the only way to make an incomplete journal whole', async () => {
+    const fixture = await seed(done('a'), done('b'));
+    fixture.journal.markIncomplete();
+    const plan = await fixture.reconcile([], { forceReplace: true });
+    expect(plan).toMatchObject({ kind: 'replace', ops: [{ op: { op: 'replace', items: [] } }] });
+    expect(fixture.keys()).toEqual([]);
+    expect(fixture.journal.incomplete).toBe(false);
+  });
+
+  it('forces a replacement of what is left when the wire refuses some items, and names the refused ones', async () => {
+    const fixture = await seed(done('a'));
+    const plan = await fixture.reconcile([done('k'.repeat(4097))], { forceReplace: true });
+    expect(plan).toMatchObject({ kind: 'replace', refused: ['k'.repeat(4097)] });
+    expect(fixture.keys()).toEqual([]);
   });
 
   it('numbers the revision of a correction from the item, not from its place', async () => {

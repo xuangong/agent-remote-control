@@ -17,10 +17,10 @@ export class ScriptedSession implements AgentSession {
   readonly readTimelineHistory?: AgentSession['readTimelineHistory'];
   readonly readResource?: (locator: string) => Promise<AgentResourceReadResult>;
 
-  /** `resources` are the files the session can read, by locator; with any, the session says it can read resources. */
-  constructor(readonly providerId: string, readonly nativeSessionId: string, initial: ProviderStreamItem[], older?: OlderPage[], resources?: Record<string, Uint8Array>) {
+  /** `resources` are the files the session can read, by locator; with any, the session says it can read resources. `readGate` holds every read until it resolves. */
+  constructor(readonly providerId: string, readonly nativeSessionId: string, initial: ProviderStreamItem[], older?: OlderPage[], resources?: Record<string, Uint8Array>, readGate?: Promise<void>) {
     this.capabilities = { ...capabilities, ...(resources ? { readResource: true } : {}) };
-    if (resources) this.readResource = async locator => resources[locator] ? { status: 'available', bytes: resources[locator]!, mediaType: 'image/png' } : { status: 'unavailable', reason: 'No such file.' };
+    if (resources) this.readResource = async locator => { await readGate; return resources[locator] ? { status: 'available', bytes: resources[locator]!, mediaType: 'image/png' } : { status: 'unavailable', reason: 'No such file.' }; };
     this.queue = [...initial];
     if (older) {
       const pages = [...older];

@@ -65,8 +65,8 @@ export interface PublicationContext {
   now(): number;
   /** Writes one message to the Relay: `offline` when no connection holds the grant, `unencodable` when the wire refuses it. */
   send(message: RemoteHostUplinkMessage, providerId: string): 'sent' | 'offline' | 'unencodable';
-  /** Waits for room to have one more message in flight; the returned function gives the room back. */
-  reserve(bytes: number): Promise<() => void>;
+  /** Waits for room to have one more message in flight; the returned function gives the room back. A head has room of its own, so it never waits behind a message that does not fit. */
+  reserve(bytes: number, head?: boolean): Promise<() => void>;
   openSlot(): Promise<() => void>;
   diagnostic(entry: JournalPublisherDiagnostic): void;
   schedule(callback: () => void, delayMs: number): unknown;
@@ -93,8 +93,11 @@ type Phase = 'suspended' | 'opening' | 'live' | 'refused' | 'gave_up' | 'stopped
 
 interface Waiter { kind: 'publish' | 'other'; match(message: JournalRelayMessage): boolean; resolve(message: JournalRelayMessage): void; reject(error: Error): void; timer: unknown }
 
-/** The Relay refused a publication at `sequence`. */
-class Refused extends Error { constructor(readonly reason: string, readonly itemKey?: string, readonly sequence?: number) { super(`The Relay refused a journal publication: ${reason}.`); } }
+/** The Relay refused a publication at `sequence`. `carriedPrepend` says the refused message held older history. */
+class Refused extends Error {
+  carriedPrepend = false;
+  constructor(readonly reason: string, readonly itemKey?: string, readonly sequence?: number) { super(`The Relay refused a journal publication: ${reason}.`); }
+}
 /** The Relay could not open the journal. */
 class OpenRefused extends Error { constructor(readonly reason: string) { super(`The Relay refused to open the journal: ${reason}.`); } }
 /** The work was overtaken: the session opened again, stopped, or lost its connection. */
@@ -107,12 +110,15 @@ class HeadRejected extends Error {}
 
 const MAX_INDEX_PAGES = 200;
 const MAX_REPLACEMENTS_IN_A_ROW = 3;
+/** Rebinds sent and not yet acknowledged that are kept across cycles. */
+const MAX_UNACKNOWLEDGED_REBINDS = 1000;
 const OLDER_READS_PER_REQUEST = 3;
 /** The Relay has at most 32 requests open on a connection; these wait for the session to be live. */
 const MAX_PENDING_REQUESTS = 32;
 /** Refusals about one item: the item is left out and the rest of the publication is sent again, instead of opening the journal again. */
 const ITEM_REFUSALS: ReadonlySet<string> = new Set(['unknown_item', 'body_missing', 'type_changed', 'duplicate_item', 'invalid']);
 const pendingKey = (payload: AgentSnapshotPayload): string => payload.pendingInteractions.map(request => request.requestId).sort().join('\n');
+const rebindKey = (itemKey: string, binding: ResourceBinding): string => `${itemKey}\n${binding.locator}\n${binding.resourceId}\n${binding.status}`;
 const opItemKey = (op: PublishOp): string | undefined => op.op === 'append' || op.op === 'correct' ? op.row.itemKey
   : op.op === 'complete' || op.op === 'seal' || op.op === 'rebind' || op.op === 'alias' ? op.itemKey : undefined;
 
@@ -166,6 +172,12 @@ export class SessionPublication {
   /** The provider broke the identity contract: this connection's journal is only unserved, never published. */
   private identityBreach = false;
   private rebuilding = false;
+  /** A prepend was refused by the quota, or a quota window applies: older history is not published any more. */
+  private olderBlocked = false;
+  /** Whether the session is in the middle of a cycle's reconcile, which answers requests itself between blocks of older history. */
+  private reconciling = false;
+  /** Rebinds the manager told and the Relay has not acknowledged; a cycle that ends first sends them again. */
+  private readonly unacknowledgedRebinds = new Map<string, Extract<QueuedOp, { kind: 'rebind' }>>();
   /** Items the wire refused; they stay out for as long as the session is followed. */
   private readonly skipped = new Set<string>();
   /** Items a publication refused, with the last row they had; they stay out until a row of theirs changes or a connection returns. */
@@ -186,8 +198,8 @@ export class SessionPublication {
   /** The agent manager this publication follows. */
   get followed(): JournalSource { return this.options.source; }
 
-  /** Whether a request of the Relay can be answered now or soon: the journal is being opened or is live. */
-  get requestable(): boolean { return this.phase === 'opening' || this.phase === 'live'; }
+  /** Whether a request of the Relay can be answered soon: the journal is live, or was opened in this cycle and is being reconciled. */
+  get requestable(): boolean { return this.phase === 'live' || (this.phase === 'opening' && this.openedInCycle); }
 
   /** A connection holds the grant, or the session was just attached: open the journal. A connection that replaces another opens it again, because the Relay forgot what the earlier one opened. */
   resume(): void {
@@ -199,6 +211,7 @@ export class SessionPublication {
       this.quotaStep = 0;
       this.forceReplace = false;
       this.resetOpen = false;
+      this.olderBlocked = false;
       this.replaceStreak = 0;
       this.incompleteStreak = 0;
     }
@@ -219,7 +232,6 @@ export class SessionPublication {
     this.cycle += 1;
     this.teardown();
     this.generation = 0;
-    this.requests.length = 0;
     if (this.phase !== 'gave_up' && this.phase !== 'refused') this.phase = 'suspended';
     this.signalIdle();
   }
@@ -300,7 +312,15 @@ export class SessionPublication {
     return Math.min(this.limits.backoffMaxMs, this.limits.backoffBaseMs * 2 ** this.restarts);
   }
 
+  /** The Relay waits for an answer to each request; those this cycle can no longer answer are refused at once. */
+  private refuseRequests(): void {
+    for (const request of this.requests.splice(0)) {
+      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
+    }
+  }
+
   private teardown(): void {
+    this.refuseRequests();
     this.subscription?.release();
     this.subscription = undefined;
     this.rejectWaiter(new Cancelled());
@@ -326,13 +346,16 @@ export class SessionPublication {
     const release = await this.context.openSlot();
     let freed = false;
     const free = (): void => { if (!freed) { freed = true; release(); } };
+    this.reconciling = true;
     try {
       if (token !== this.cycle) return;
       await this.reconcile(token, free);
     } catch (error) {
       this.recover(token, error);
     } finally {
+      this.reconciling = false;
       free();
+      this.serveRequests();
     }
   }
 
@@ -363,21 +386,21 @@ export class SessionPublication {
     }
     if (plan.kind === 'gap') plan = await replacementPlan(await this.items(rows), item => this.digest(item), 'gap');
     this.check(token);
-    if (plan.kind !== 'gap') for (const key of plan.refused) this.skip(key);
     // A replacement with nothing to replace with is not published: the journal keeps what it has, and the head follows.
     const replacing = plan.kind === 'replace' && plan.ops.length > 0;
-    if (plan.kind === 'replace' && replacing && plan.reason !== 'initial') this.context.diagnostic({ event: 'journal_replacement_published', providerId: this.options.providerId, reason: plan.reason });
     // The head goes before older history, which can be long and never delays what the session shows now.
     const head = this.headOp();
-    for (const chunk of chunkOps([...(plan.kind === 'gap' || (plan.kind === 'replace' && !replacing) ? [] : plan.ops), head])) await this.publish(token, chunk);
+    const planned = plan.kind === 'gap' || (plan.kind === 'replace' && !replacing) ? [] : plan.ops;
+    for (const chunk of chunkOps([...planned, ...(replacing ? [] : this.carriedRebinds(planned)), head])) await this.publish(token, chunk);
     this.check(token);
     if (replacing && plan.kind === 'replace') {
+      if (plan.reason !== 'initial') this.context.diagnostic({ event: 'journal_replacement_published', providerId: this.options.providerId, reason: plan.reason });
       this.resetOpen = false;
       // A replacement a quota asked for is not a rewrite: the window it kept is what fits, and the next open finds it known.
       if (plan.reason === 'quota') this.forceReplace = false;
       else {
         this.replaceStreak += 1;
-        if (this.replaceStreak > MAX_REPLACEMENTS_IN_A_ROW) { this.giveUp('replace_loop'); return; }
+        if (this.replaceStreak >= MAX_REPLACEMENTS_IN_A_ROW) { this.giveUp('replace_loop'); return; }
       }
       // Opening again finds the replacement known and adds the older items as older history.
       this.restart(0, undefined, false);
@@ -387,14 +410,28 @@ export class SessionPublication {
     this.incompleteStreak = 0;
     this.forceReplace = false;
     this.goLive(token);
-    if (plan.kind === 'continue') {
+    if (plan.kind === 'continue' && !this.olderBlocked) {
       for (const chunk of chunkOps(plan.older)) {
-        // What the session shows now goes before every further block of older history.
+        // What the session shows now, and what the Relay asked for, go before every further block of older history.
         await this.flushLive(token);
+        await this.drainRequests(token);
         await this.publish(token, chunk);
       }
     }
     this.check(token);
+  }
+
+  /** The rebinds the manager told that no acknowledged publication carries yet, minus those the plan says again. */
+  private carriedRebinds(planned: readonly SizedOp[]): SizedOp[] {
+    const said = new Set(planned.flatMap(({ op }) => op.op === 'rebind' ? [rebindKey(op.itemKey, op.replacement)] : []));
+    const ops: SizedOp[] = [];
+    for (const change of this.unacknowledgedRebinds.values()) {
+      if (said.has(rebindKey(change.key, change.replacement))) continue;
+      const op: PublishOp = { op: 'rebind', itemKey: change.key, previous: change.previous, replacement: change.replacement };
+      const bytes = entryBytes(op);
+      if (bytes !== undefined) ops.push({ op, bytes });
+    }
+    return ops;
   }
 
   private goLive(token: number): void {
@@ -475,8 +512,14 @@ export class SessionPublication {
     this.context.diagnostic({ event: 'journal_row_rejected', providerId: this.options.providerId });
   }
 
+  /** Whether an item stays out: the wire refused it, or a publication did and none of its rows changed since. */
   private isSkipped(key: string): boolean {
-    return this.skipped.has(key) || this.refusedItems.has(key);
+    if (this.skipped.has(key)) return true;
+    const refusedAt = this.refusedItems.get(key);
+    if (refusedAt === undefined) return false;
+    if (refusedAt === (this.source.itemRows(key).at(-1)?.seq ?? -1)) return true;
+    this.refusedItems.delete(key);
+    return false;
   }
 
   /** The digest of an item's whole content, as the journal compares it; kept while the item's rows do not change. */
@@ -528,7 +571,7 @@ export class SessionPublication {
   private async publish(token: number, chunk: { ops: PublishOp[]; bytes: number }): Promise<void> {
     let ops = chunk.ops;
     while (ops.length > 0) {
-      const release = await this.context.reserve(chunk.bytes);
+      const release = await this.context.reserve(chunk.bytes, ops.every(op => op.op === 'head'));
       try {
         this.check(token);
         const first = this.sequence + 1;
@@ -544,6 +587,7 @@ export class SessionPublication {
         } catch (error) {
           // The refusal carries the Relay's number of the entry; the entries before it are stored.
           const applied = error instanceof Refused && error.sequence !== undefined ? error.sequence - first : -1;
+          if (error instanceof Refused) error.carriedPrepend = ops.some(op => op.op === 'prepend');
           if (!(error instanceof Refused) || error.itemKey === undefined || !ITEM_REFUSALS.has(error.reason) || applied < 0 || applied >= ops.length) throw error;
           const itemKey = error.itemKey;
           const refusedOp = ops[applied] as PublishOp;
@@ -564,7 +608,8 @@ export class SessionPublication {
   /** Notes the items a stored publication added, for older-history requests. */
   private remember(ops: readonly PublishOp[]): void {
     for (const op of ops) {
-      if (op.op === 'append') this.journalKeys.add(op.row.itemKey);
+      if (op.op === 'rebind') this.unacknowledgedRebinds.delete(rebindKey(op.itemKey, op.replacement));
+      else if (op.op === 'append') this.journalKeys.add(op.row.itemKey);
       else if (op.op === 'prepend') for (const { row } of op.items) this.journalKeys.add(row.itemKey);
     }
   }
@@ -594,6 +639,14 @@ export class SessionPublication {
     if (error instanceof HeadRejected) { this.giveUp('head_rejected'); return; }
     if (error instanceof Refused && error.reason === 'quota_exceeded') {
       // The Relay has taken the session out of serving and fenced this generation: open again and replace with a window that fits.
+      if (error.carriedPrepend) {
+        // Older history was what did not fit: the window the journal has stays, and older history is not published any more.
+        this.olderBlocked = true;
+        this.forceReplace = true;
+        this.context.diagnostic({ event: 'journal_quota_window', providerId, reason: 'older_history' });
+        this.restart(0, undefined, false);
+        return;
+      }
       this.quotaStep += 1;
       if (this.quotaStep > this.limits.quotaWindows.length) { this.giveUp('quota_exceeded'); return; }
       this.forceReplace = true;
@@ -619,8 +672,8 @@ export class SessionPublication {
   /** Tells the Relay to stop serving this session's journal, which this Controller can no longer keep current. */
   private sendUnserve(reason: string, generation = this.generation): void {
     if (generation < 1) return;
-    this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_unserve', sessionKey: this.options.sessionKey, generation }, this.options.providerId);
-    this.context.diagnostic({ event: 'journal_session_unserved', providerId: this.options.providerId, reason });
+    const sent = this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_unserve', sessionKey: this.options.sessionKey, generation }, this.options.providerId);
+    if (sent === 'sent') this.context.diagnostic({ event: 'journal_session_unserved', providerId: this.options.providerId, reason });
   }
 
   /**
@@ -702,7 +755,12 @@ export class SessionPublication {
         break;
       }
       case 'timeline_resource_binding_replaced':
-        if (!this.rebuilding) this.queue.push({ kind: 'rebind', key: event.itemKey, previous: event.previous, replacement: event.replacement });
+        if (!this.rebuilding) {
+          const change = { kind: 'rebind' as const, key: event.itemKey, previous: event.previous, replacement: event.replacement };
+          this.queue.push(change);
+          this.unacknowledgedRebinds.set(rebindKey(change.key, change.replacement), change);
+          if (this.unacknowledgedRebinds.size > MAX_UNACKNOWLEDGED_REBINDS) this.unacknowledgedRebinds.delete(this.unacknowledgedRebinds.keys().next().value as string);
+        }
         break;
       case 'timeline_replacement':
         this.rebuilding = true;
@@ -780,9 +838,15 @@ export class SessionPublication {
     };
     for (const change of queued) {
       switch (change.kind) {
-        case 'append':
-          if (!this.isSkipped(change.key)) add({ op: 'append', row: mergedRow({ key: change.key, rows: change.rows, complete: false, liveOnly: change.rows.some(isLiveOnlyRow) }) }, change.key);
+        case 'append': {
+          if (this.skipped.has(change.key)) break;
+          // An item a publication refused comes back whole once a row of it changed, not as the delta that follows what the journal lacks.
+          const refusedBefore = this.refusedItems.has(change.key);
+          if (this.isSkipped(change.key)) break;
+          const rows = refusedBefore ? this.source.itemRows(change.key) : change.rows;
+          add({ op: 'append', row: mergedRow({ key: change.key, rows, complete: false, liveOnly: rows.some(isLiveOnlyRow) }) }, change.key);
           break;
+        }
         case 'complete': {
           if (this.isSkipped(change.key)) break;
           const item = groupItems(this.source.itemRows(change.key))[0];
@@ -803,25 +867,36 @@ export class SessionPublication {
   // Requests of the Relay.
 
   private serveRequests(): void {
-    if (this.phase !== 'live') return;
+    // A reconcile answers the requests itself, between blocks of older history; the rest wait for it to end.
+    if (this.phase !== 'live' || this.reconciling) return;
     const token = this.cycle;
-    for (const request of this.requests.splice(0)) {
-      this.enqueue(async () => {
-        try {
-          if (request.type === 'journal_older_request') await this.answerOlder(token, request);
-          else await this.answerFill(token, request);
-        } catch (error) {
-          // The Relay waits for an answer; one it will not get is refused at once instead of at its deadline.
-          this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
-          this.recover(token, error);
-        }
-      });
+    for (const request of this.requests.splice(0)) this.enqueue(() => this.answer(token, request));
+  }
+
+  /** Answers the requests that arrived while a reconcile was sending older history. */
+  private async drainRequests(token: number): Promise<void> {
+    while (token === this.cycle && this.requests.length > 0) await this.answer(token, this.requests.shift() as (typeof this.requests)[number]);
+  }
+
+  private async answer(token: number, request: (typeof this.requests)[number]): Promise<void> {
+    try {
+      if (request.type === 'journal_older_request') await this.answerOlder(token, request);
+      else await this.answerFill(token, request);
+    } catch (error) {
+      // The Relay waits for an answer; one it will not get is refused at once instead of at its deadline.
+      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_request_refused', requestId: request.requestId, sessionKey: request.sessionKey, reason: 'not_ready' }, this.options.providerId);
+      this.recover(token, error);
     }
   }
 
   /** Publishes the items older than the journal's oldest, reading further native history when the timeline has none. */
   private async answerOlder(token: number, request: Extract<JournalRelayMessage, { type: 'journal_older_request' }>): Promise<void> {
     this.check(token);
+    // Under a quota window the journal holds no more than the window: older history would be refused again.
+    if (this.quotaStep > 0 || this.olderBlocked) {
+      this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey, olderAvailable: false }, this.options.providerId);
+      return;
+    }
     const older = async (): Promise<TimelineItem[]> => {
       const items = await this.items(this.source.timelineRows());
       const first = items.findIndex(item => this.journalKeys.has(item.key));

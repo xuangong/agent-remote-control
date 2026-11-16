@@ -28,6 +28,8 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
   let applied = options.watermark ?? 0;
   let model: JournalIndexEntry[] = [...(options.index ?? [])];
   let revision = 100;
+  let incomplete = false;
+  const fenced = new Set<number>();
   const heldOpens: Array<() => void> = [];
   const send = (message: JournalRelayMessage) => queueMicrotask(() => publisher.receive(message));
   const known = (items: Wire[], first: number): JournalIndexEntry[] => items.map((value, at) => ({
@@ -36,7 +38,7 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
   const apply = (entries: Wire[]): void => {
     for (const value of entries) {
       const at = model.findIndex(entry => entry.itemKey === (value.itemKey ?? value.row?.itemKey));
-      if (value.op === 'replace') model = known(value.items, 1);
+      if (value.op === 'replace') { model = known(value.items, 1); incomplete = false; }
       else if (value.op === 'prepend') model = [...known(value.items, (model[0]?.seqStart ?? 1) - value.items.length), ...model];
       else if (value.op === 'append' && at < 0) model.push({ itemKey: value.row.itemKey, seqStart: (model.at(-1)?.seqEnd ?? 0) + 1, seqEnd: (model.at(-1)?.seqEnd ?? 0) + 1, state: 'open', liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true });
       else if (value.op === 'complete' && at >= 0) model[at] = { ...model[at]!, state: 'complete', digest: value.digest, revision: ++revision };
@@ -55,7 +57,7 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
       }
       generation += 1;
       const paged = (options.pages?.length ?? 0) > 0;
-      if (message.reset) model = [];
+      if (message.reset) { model = []; incomplete = true; }
       const first = message.reset ? [] : paged ? (options.index ?? []) : structuredClone(model);
       const reply = () => send({ uplinkVersion: 2, type: 'journal_opened', requestId: message.requestId, sessionKey: message.sessionKey, generation, watermark: applied, epoch: 'epoch-1', index: first,
         ...(paged ? { indexAfter: first.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
@@ -71,22 +73,54 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
       send({ uplinkVersion: 2, type: 'journal_index_page', requestId: message.requestId, sessionKey: message.sessionKey, index: page,
         ...(at + 1 < (options.pages ?? []).length ? { indexAfter: page.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
     } else if (message.type === 'journal_publish') {
-      const last = message.entries.at(-1).sequence as number;
-      // As the journal does: a publication starts exactly after the watermark, and a refused entry consumes no sequence.
-      if (message.entries[0].sequence !== applied + 1) {
+      const generationOf: number = message.generation;
+      // As the Relay does: a generation a quota fenced publishes nothing more, entries at or below the watermark are duplicates and
+      // are ignored, and the rest must start exactly after it.
+      if (fenced.has(generationOf)) {
         refusedAt.push(clock.now());
-        send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence: message.entries[0].sequence, reason: 'sequence_gap' });
+        send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: message.entries[0].sequence, reason: 'quota_exceeded' });
         return;
       }
+      const fresh: Wire[] = message.entries.filter((value: Wire) => value.sequence > applied);
+      const last = message.entries.at(-1).sequence as number;
+      if (fresh.length === 0) {
+        send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: last, cursor: { epoch: 'epoch-1', seq: last } });
+        return;
+      }
+      if (fresh[0]!.sequence !== applied + 1) {
+        refusedAt.push(clock.now());
+        send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: fresh[0]!.sequence, reason: 'sequence_gap' });
+        return;
+      }
+      // The entries before a refused one are stored; the refused one and those after it are not, and the watermark stops before it.
+      const refuseFrom = (reason: string, sequence: number, itemKey?: string): void => {
+        refusedAt.push(clock.now());
+        const before = fresh.filter(value => value.sequence < sequence);
+        if (before.length > 0) {
+          apply(before);
+          applied = sequence - 1;
+          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: applied, cursor: { epoch: 'epoch-1', seq: applied } });
+        }
+        if (reason === 'quota_exceeded') { fenced.add(generationOf); incomplete = true; }
+        send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage);
+      };
+      // A journal that is missing rows takes a replacement before anything else, the head included.
+      let stillIncomplete = incomplete;
+      let blocked: Wire | undefined;
+      for (const value of fresh) {
+        if (value.op === 'replace') stillIncomplete = false;
+        else if (stillIncomplete) { blocked = value; break; }
+      }
+      const stored = blocked ? fresh.filter(value => value.sequence < blocked!.sequence) : fresh;
       const answer: Answer = {
-        ack: () => { apply(message.entries); applied = last; send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: message.generation, watermark: last, cursor: { epoch: 'epoch-1', seq: last } }); },
-        refuse: (reason, itemKey, sequence = message.entries[0].sequence) => {
-          refusedAt.push(clock.now());
-          // The entries before the refused one are stored; the refused one and those after it are not, and `applied` stops before it.
-          const before = message.entries.filter((value: Wire) => value.sequence < sequence);
-          if (before.length > 0 && reason !== 'quota_exceeded') { apply(before); applied = sequence - 1; }
-          send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: message.generation, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage);
+        ack: () => {
+          if (blocked && stored.length === 0) { refuseFrom('incomplete', blocked.sequence); return; }
+          apply(stored);
+          applied = blocked ? stored.at(-1)!.sequence : last;
+          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: applied, cursor: { epoch: 'epoch-1', seq: applied } });
+          if (blocked) { refusedAt.push(clock.now()); send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: blocked.sequence, reason: 'incomplete' }); }
         },
+        refuse: (reason, itemKey, sequence = fresh[0]!.sequence) => refuseFrom(reason, sequence, itemKey),
         ignore: () => undefined,
       };
       if (options.onPublish) options.onPublish(message, answer); else answer.ack();
@@ -701,7 +735,7 @@ describe('recovering', () => {
   it('opens at most the allowed number of sessions at a time, and frees the place once a session has read its index', async () => {
     const pending: Array<() => void> = [];
     const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
-    const publisher = publisherFor(relay, { concurrentOpens: 1 });
+    const publisher = publisherFor(relay, { concurrentOpens: 1, responseTimeoutMs: 600_000 });
     await attachSession(publisher, [item('history', 'a1', 'First')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' });
     await until(() => pending.length === 1, 'the first session to wait for its acknowledgement');
     await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
@@ -711,7 +745,7 @@ describe('recovering', () => {
 
   it('keeps a session from opening while the allowed number of sessions are still reading their index', async () => {
     const relay = scriptedRelay({ holdOpened: true });
-    const publisher = publisherFor(relay, { concurrentOpens: 1 });
+    const publisher = publisherFor(relay, { concurrentOpens: 1, responseTimeoutMs: 600_000 });
     await attachSession(publisher, [item('history', 'a1', 'First')], undefined, { agentId: 'agent-1', nativeSessionId: 'thread-1' });
     await attachSession(publisher, [item('history', 'b1', 'Second')], undefined, { agentId: 'agent-2', nativeSessionId: 'thread-2' });
     await settle(60);
@@ -765,6 +799,305 @@ describe('recovering', () => {
     expect(relay.opens()).toBe(opens);
     relay.connect(publisher);
     await until(() => relay.opens() === opens + 1, 'the open after the connection returned');
+  });
+});
+
+describe('what a replacement may be, and what survives a restart', () => {
+  it('publishes nothing but the head for an empty reread of a journal that holds items: that is no reason to wipe it', async () => {
+    const relay = scriptedRelay();
+    relay.seed([entry('x', 1)]);
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, []);
+    await live(relay);
+    expect(relay.ops()).toEqual(['head']);
+    expect(relay.model().map(value => value.itemKey)).toEqual(['x']);
+  });
+
+  it('clears an incomplete journal with an empty forced replacement when the native history is empty', async () => {
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (!refused && message.entries.some((value: Wire) => value.op === 'head')) { refused = true; answer.refuse('incomplete', undefined, message.entries.at(-1).sequence); } else answer.ack();
+    } });
+    relay.seed([entry('x', 1)]);
+    const diagnostics: Wire[] = [];
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, []);
+    await until(() => relay.model().length === 0, 'the journal to be cleared');
+    await live(relay);
+    const replaces = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace');
+    expect(replaces.map((value: Wire) => value.items)).toEqual([[]]);
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
+  });
+
+  const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
+  const settledBinding = (manager: Awaited<ReturnType<typeof attachScripted>>) => manager.timelineRows().flatMap(row => row.resources).find(binding => binding.status === 'available');
+  const rebindsOf = (relay: Relay) => relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'rebind') as Wire[];
+
+  it('sends a binding that settled while the first replacement awaited its acknowledgement, which the reopening dropped from the queue', async () => {
+    const pending: Array<() => void> = [];
+    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'replace')) pending.push(answer.ack); else answer.ack(); } });
+    const publisher = publisherFor(relay);
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'See ![shot](shot.png)'), boundary()], undefined, { 'shot.png': png }, gate);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager });
+    await until(() => pending.length === 1, 'the replacement to await its acknowledgement');
+    open();
+    await until(() => settledBinding(manager) !== undefined, 'the image to settle');
+    pending.shift()!();
+    await until(() => rebindsOf(relay).length > 0, 'the settled binding');
+    expect(rebindsOf(relay).at(-1)).toMatchObject({ itemKey: 'm1', replacement: settledBinding(manager) });
+  });
+
+  it('sends a binding that settled inside a batch window when the connection dropped before the batch went out', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay, { batchWindowMs: 500 });
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'Hello'), boundary()], undefined, { 'shot.png': png }, gate);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager });
+    await live(relay);
+    session.push(item('live', 'a', 'Here ![shot](shot.png)', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'a' && value.state === 'complete'), 'the item with its pending image');
+    open();
+    // The binding settles on the event loop; the clock does not move, so the batch window stays open.
+    for (let at = 0; at < 50 && settledBinding(manager) === undefined; at += 1) await new Promise<void>(resolve => setImmediate(resolve));
+    expect(settledBinding(manager)).toBeDefined();
+    expect(rebindsOf(relay)).toEqual([]);
+    publisher.available(undefined);
+    relay.connect(publisher);
+    await until(() => rebindsOf(relay).length > 0, 'the settled binding after the connection returned');
+    expect(rebindsOf(relay).at(-1)).toMatchObject({ itemKey: 'a', replacement: settledBinding(manager) });
+  });
+
+  it('sends the rebind the manager told again after a refusal reopened the session before it was acknowledged', async () => {
+    let refuse = true;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (refuse && message.entries.some((value: Wire) => value.op === 'rebind')) { refuse = false; answer.refuse('stale_revision'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm1', 'Hello'), boundary()]);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    let tap: AgentJournalTap | undefined;
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: sourceOf(manager, { subscribeJournal: next => { tap = next; return manager.subscribeJournal(next); } }) });
+    await live(relay);
+    const previous = { locator: 'gone.png', resourceId: 'r1', status: 'pending' as const };
+    const replacement = { locator: 'gone.png', resourceId: 'r2', status: 'available' as const };
+    tap!.event({ type: 'timeline_resource_binding_replaced', agentId: 'agent-1', epoch: 'e', seq: 1, itemKey: 'm1', previous, replacement });
+    await until(() => rebindsOf(relay).length >= 2, 'the rebind to be sent again after the refusal');
+    expect(rebindsOf(relay).at(-1)).toMatchObject({ itemKey: 'm1', previous, replacement });
+  });
+});
+
+describe('older history under a quota window', () => {
+  it('says that no older history is left while a quota window applies, and keeps publishing', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (message.entries.some((value: Wire) => value.op === 'replace' && value.items.length > 2)) answer.refuse('quota_exceeded'); else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { quotaWindows: [4, 2, 1] }, diagnostics);
+    const { session } = await attachSession(publisher, Array.from({ length: 6 }, (_, at) => item('history', `m${at}`, `Item ${at}`)), [{ observations: [item('history', 'old', 'Old')] }]);
+    await until(() => relay.model().length === 2 && relay.ops().includes('head'), 'the window of two items');
+    await live(relay);
+    const publishes = relay.publishes().length;
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 10 });
+    await until(() => relay.written.some(message => message.type === 'journal_older_done'), 'the answer');
+    expect(relay.written.find(message => message.type === 'journal_older_done')).toMatchObject({ requestId: 'older-1', olderAvailable: false });
+    expect(relay.publishes()).toHaveLength(publishes);
+    session.push(item('live', 'later', 'Still publishing', { completes: true }));
+    await until(() => relay.ops().includes('complete'), 'a live item after the scroll up');
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
+    expect(relay.unserves()).toEqual([]);
+  });
+
+  it('replaces at the same window, not a narrower one, when the quota refuses older history, and publishes no more of it', async () => {
+    const diagnostics: Wire[] = [];
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (!refused && message.entries.some((value: Wire) => value.op === 'prepend')) { refused = true; answer.refuse('quota_exceeded'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { quotaWindows: [4, 2, 1] }, diagnostics);
+    const { session } = await attachSession(publisher, [item('history', 'm3', 'Three'), item('history', 'm4', 'Four')], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }], { agentId: 'agent-1', nativeSessionId: 'thread-1' }, { relay, keys: ['m3', 'm4'] });
+    await live(relay);
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 10 });
+    await until(() => relay.publishes().flatMap(message => message.entries).some((value: Wire) => value.op === 'replace'), 'the replacement');
+    await live(relay);
+    await settle(60);
+    const replaces = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace');
+    expect(replaces.map((value: Wire) => value.items.map((input: Wire) => input.row.itemKey))).toEqual([['m1', 'm2', 'm3', 'm4']]);
+    expect(diagnostics.filter(entry => entry.event === 'journal_quota_window')).toEqual([{ event: 'journal_quota_window', providerId: 'fake', reason: 'older_history' }]);
+    expect(relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'prepend')).toHaveLength(1);
+    session.push(item('live', 'later', 'Still publishing', { completes: true }));
+    await until(() => relay.ops().includes('complete'), 'a live item');
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_session_stopped');
+  });
+});
+
+describe('requests of the Relay', () => {
+  const refusals = (relay: Relay) => relay.written.filter(message => message.type === 'journal_request_refused');
+
+  it('refuses a request at once while the session waits to open again, well inside the Relay\'s deadline', async () => {
+    let refuse = true;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (refuse && message.entries.some((value: Wire) => value.op === 'append')) { refuse = false; answer.refuse('stale_revision', 'a'); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 5, backoffBaseMs: 60_000, backoffMaxMs: 60_000 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    const opens = relay.opens();
+    session.push(item('live', 'a', 'Hi', { completes: true }));
+    await until(() => relay.refusedAt().length > 0, 'the refusal that starts the wait');
+    const startedAt = clock.now();
+    relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+    await until(() => refusals(relay).length === 1, 'the refusal of the request', 14_000);
+    expect(clock.now() - startedAt).toBeLessThan(15_000);
+    expect(refusals(relay)[0]).toMatchObject({ requestId: 'fill-1', reason: 'not_ready' });
+    expect(relay.opens()).toBe(opens);
+  });
+
+  it('refuses a request that arrives after the open was sent and before the Relay answered it', async () => {
+    const relay = scriptedRelay({ holdOpened: true });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() === 1, 'the open');
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', limit: 5 });
+    await until(() => refusals(relay).length === 1, 'the refusal');
+    expect(refusals(relay)[0]).toMatchObject({ requestId: 'older-1', reason: 'not_ready' });
+  });
+
+  it('refuses a request it had queued when the cycle that queued it ends before the session is live', async () => {
+    let refuse = true;
+    const relay = scriptedRelay({ holdOpened: true, onPublish: (_message, answer) => { if (refuse) { refuse = false; answer.refuse('stale_revision'); } else answer.ack(); } });
+    const publisher = publisherFor(relay);
+    await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await until(() => relay.opens() === 1, 'the open');
+    relay.releaseOpens();
+    await settle(0);
+    relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+    await until(() => refusals(relay).length === 1, 'the refusal when the cycle ended');
+    expect(refusals(relay)[0]).toMatchObject({ requestId: 'fill-1', reason: 'not_ready' });
+    expect(relay.written.some(message => message.type === 'journal_fill')).toBe(false);
+  });
+
+  it('answers a fill while the reconcile is still sending blocks of older history', async () => {
+    const big = (key: string) => item('history', key, 'x'.repeat(2_600_000));
+    let asked = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (!asked && message.entries.some((value: Wire) => value.op === 'prepend')) {
+        asked = true;
+        relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m4'] });
+        setImmediate(() => answer.ack());
+      } else answer.ack();
+    } });
+    const publisher = publisherFor(relay);
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm4', 'Four'), boundary('older-1')], [{ observations: [big('o1'), big('o2'), big('o3'), big('o4')] }]);
+    const manager = await attachScripted(session);
+    closers.push(() => { void manager.close(); });
+    await manager.loadOlderHistory();
+    relay.seed(await entriesFor(manager, ['m4']));
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: manager });
+    await until(() => relay.written.some(message => message.type === 'journal_fill'), 'the fill');
+    const kinds = relay.written.flatMap(message => message.type === 'journal_publish' ? message.entries.map((value: Wire) => value.op) : [message.type]);
+    expect(kinds.slice(0, kinds.indexOf('journal_fill')).filter(kind => kind === 'prepend').length).toBeLessThan(4);
+    await until(() => relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'prepend').length === 4, 'all four blocks');
+  });
+
+  it('lets a head go out at once while a message that does not fit the shared budget waits', async () => {
+    const pending: Array<() => void> = [];
+    const relay = scriptedRelay({ onPublish: (message, answer) => { if (message.entries.some((value: Wire) => value.op === 'replace')) pending.push(answer.ack); else answer.ack(); } });
+    const publisher = publisherFor(relay, { inFlightBytes: 6000 });
+    await attachSession(publisher, [item('history', 'a1', 'Small')], undefined, { agentId: 'agent-a', nativeSessionId: 'thread-a' });
+    await until(() => pending.length === 1, 'the first message in flight');
+    await attachSession(publisher, [item('history', 'c1', 'y'.repeat(9000))], undefined, { agentId: 'agent-c', nativeSessionId: 'thread-c' });
+    await until(() => relay.opens() === 2, 'the open of the large session');
+    await settle(100);
+    expect(pending).toHaveLength(1);
+    await attachSession(publisher, [item('history', 'b1', 'Other')], undefined, { agentId: 'agent-b', nativeSessionId: 'thread-b' }, { relay, keys: ['b1'] });
+    await until(() => relay.publishes().some(message => message.sessionKey === 'fake:thread-b' && message.entries.every((value: Wire) => value.op === 'head')), 'the head of the third session');
+    expect(pending).toHaveLength(1);
+  });
+});
+
+describe('what a flush sends, and what a refused item does', () => {
+  it('sends the messages of one flush one at a time, each after the acknowledgement of the one before', async () => {
+    const pending: Array<() => void> = [];
+    let hold = false;
+    const relay = scriptedRelay({ onPublish: (_message, answer) => { if (hold) pending.push(answer.ack); else answer.ack(); } });
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    hold = true;
+    for (let at = 0; at < 130; at += 1) session.push(item('live', `k${at}`, 'Row', { completes: true }));
+    await until(() => pending.length === 1, 'the first message of the flush');
+    await settle(60);
+    expect(pending).toHaveLength(1);
+    const first = relay.publishes().at(-1)!;
+    expect(first.entries.length).toBe(256);
+    hold = false;
+    pending.shift()!();
+    await until(() => relay.model().some(value => value.itemKey === 'k129' && value.state === 'complete'), 'the rest of the flush');
+    const sequences = relay.publishes().slice(-2).map(message => message.entries.map((value: Wire) => value.sequence));
+    expect(sequences[1]![0]).toBe(sequences[0]!.at(-1)! + 1);
+  });
+
+  it('sends a refused item whole once a row of it changes, and keeps it out for as long as none does', async () => {
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      const bad = message.entries.find((value: Wire) => value.op === 'append' && value.row.itemKey === 'bad');
+      if (!refused && bad) { refused = true; answer.refuse('body_missing', 'bad', bad.sequence); } else answer.ack();
+    } });
+    const publisher = publisherFor(relay, { batchWindowMs: 5 });
+    const { session } = await attachSession(publisher, [item('history', 'm1', 'Hello')]);
+    await live(relay);
+    session.push(item('live', 'bad', 'One ', { completes: false }));
+    await until(() => refused, 'the refusal');
+    await settle(60);
+    expect(relay.model().map(value => value.itemKey)).not.toContain('bad');
+    session.push(item('live', 'bad', 'Two', { completes: true }));
+    await until(() => relay.model().some(value => value.itemKey === 'bad' && value.state === 'complete'), 'the item once its rows changed');
+    const appended = relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'append' && value.row.itemKey === 'bad');
+    expect(appended.at(-1)!.row.item.text).toBe('One Two');
+  });
+
+  it('gives up at the third rewrite in a row, and says so', async () => {
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      // A Relay whose journal never keeps the replacement: every reopening finds it empty again.
+      answer.ack();
+      if (message.entries.some((value: Wire) => value.op === 'replace')) relay.seed([]);
+    } });
+    const publisher = publisherFor(relay, {}, diagnostics);
+    await attachSession(publisher, [item('history', 'm1', 'One'), item('history', 'm2', 'Two')]);
+    await until(() => diagnostics.some(entry => entry.event === 'journal_session_stopped'), 'the session to stop');
+    expect(diagnostics.find(entry => entry.event === 'journal_session_stopped')).toMatchObject({ reason: 'replace_loop' });
+    expect(relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace')).toHaveLength(3);
+    expect(relay.unserves()).toHaveLength(1);
+  });
+
+  it('records a replacement after the Relay acknowledged it, and an unserve only when it was sent', async () => {
+    const pending: Array<() => void> = [];
+    const diagnostics: Wire[] = [];
+    const relay = scriptedRelay({ onPublish: (_message, answer) => { pending.push(answer.ack); } });
+    const publisher = publisherFor(relay, {}, diagnostics);
+    const { manager } = await attachSession(publisher, [item('history', 'm2', 'Two'), item('history', 'm1', 'One')]);
+    await until(() => pending.length === 1, 'the first message');
+    pending.shift()!();
+    await until(() => pending.length === 1, 'the head after the replacement');
+    pending.shift()!();
+    await settle(30);
+    const entries = (await entriesFor(manager, ['m1', 'm2'])).reverse().map((value, at) => ({ ...value, seqStart: at + 1, seqEnd: at + 1 }));
+    publisher.available(undefined);
+    relay.seed(entries);
+    relay.connect(publisher);
+    await until(() => pending.length > 0, 'the rewrite');
+    expect(diagnostics.map(entry => entry.event)).not.toContain('journal_replacement_published');
+    while (pending.length > 0) { pending.shift()!(); await settle(10); }
+    await until(() => diagnostics.some(entry => entry.event === 'journal_replacement_published'), 'the diagnostic after the acknowledgement');
   });
 });
 

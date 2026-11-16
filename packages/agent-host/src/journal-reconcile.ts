@@ -68,11 +68,33 @@ export function outcomeOps(items: readonly TimelineItem[]): SizedOp[] {
   });
 }
 
-/** A replacement from the newest items that fit one message. With nothing to replace with, which would wipe the journal, nothing is published. */
-export async function replacementPlan(timeline: readonly TimelineItem[], digest: Digest, reason: ReplaceReason): Promise<PublicationPlan> {
+/**
+ * One rebind for each settled binding of the items. A journal built from a reread holds the bindings its rows had when they
+ * were published, and a rebind the Controller sent live can be lost with a restart or a lost connection, so each reconcile
+ * says the settled bindings again; the journal ignores a rebind that changes nothing.
+ */
+export function rebindOps(items: readonly TimelineItem[]): SizedOp[] {
+  const ops: SizedOp[] = [];
+  for (const item of items) {
+    for (const binding of mergedRow(item).resources ?? []) {
+      if (binding.status === 'pending') continue;
+      const op: PublishOp = { op: 'rebind', itemKey: item.key, previous: binding, replacement: binding };
+      const bytes = entryBytes(op);
+      if (bytes !== undefined) ops.push({ op, bytes });
+    }
+  }
+  return ops;
+}
+
+/**
+ * A replacement from the newest items that fit one message. A rewrite found by comparing is never published empty, because
+ * that would wipe a journal without cause. A `forced` one (a quota window, an incomplete journal, a reset) may be empty: it is
+ * the only way to make an incomplete journal whole, and the reread it is made from is read after the history boundary.
+ */
+export async function replacementPlan(timeline: readonly TimelineItem[], digest: Digest, reason: ReplaceReason, forced = false): Promise<PublicationPlan> {
   const { block, keys, refused } = await newestItems(timeline, digest);
   const op: PublishOp = { op: 'replace', items: block };
-  const bytes = block.length === 0 ? undefined : entryBytes(op);
+  const bytes = block.length === 0 && !forced ? undefined : entryBytes(op);
   if (bytes === undefined) return { kind: 'continue', ops: [], older: [], refused };
   const included = new Set(keys);
   return { kind: 'replace', reason, ops: [{ op, bytes }, ...outcomeOps(timeline.filter(item => included.has(item.key)))], refused };
@@ -95,9 +117,9 @@ export async function planPublication(
   const items = windowed.filter(item => !refusedKeys.has(item.key));
   const named = (plan: PublicationPlan): PublicationPlan => ({ ...plan, refused: [...new Set([...refused, ...plan.refused])] }) as PublicationPlan;
 
-  // An empty reread says nothing about the journal; it is never a replacement.
+  if (options.forceReplace) return named(await replacementPlan(items, takeDigest, 'quota', true));
+  // An empty reread says nothing about the journal; it is never a rewrite.
   if (items.length === 0) return named({ kind: 'continue', ops: [], older: [], refused: [] });
-  if (options.forceReplace) return named(await replacementPlan(items, takeDigest, 'quota'));
   if (index.length === 0) {
     return named(await replacementPlan(items, takeDigest, 'initial'));
   }
@@ -153,6 +175,6 @@ export async function planPublication(
     else if (item.complete && !add({ op: 'complete', itemKey: key, digest: await takeDigest(item) })) unaccepted.push(key);
   }
   for (const key of plan.abandon) if (!add({ op: 'seal', itemKey: key })) unaccepted.push(key);
-  ops.push(...outcomeOps(items));
+  ops.push(...outcomeOps(items), ...rebindOps(items));
   return named({ kind: 'continue', ops, older, refused: unaccepted });
 }

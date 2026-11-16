@@ -46,34 +46,51 @@ export interface JournalPublisher {
   close(): void;
 }
 
-/** A pool of room: how many messages and bytes may be in flight, handed out in the order they were asked for. */
-function createRoom(maxMessages: number, maxBytes: number) {
-  let messages = 0;
-  let bytes = 0;
+/** The room heads have besides the shared budget: a head is small, and a session whose head waits shows a stale state. */
+const HEAD_HEADROOM = { messages: 16, bytes: 2 * 1024 * 1024 };
+
+/**
+ * A pool of room: how many messages and bytes may be in flight, handed out in the order they were asked for. Heads have
+ * headroom of their own and a queue of their own, so a head never waits behind a message that does not fit.
+ */
+function createRoom(maxMessages: number, maxBytes: number, headroom?: { messages: number; bytes: number }) {
+  const used = { messages: 0, bytes: 0 };
+  const usedByHeads = { messages: 0, bytes: 0 };
   const waiting: Array<{ needed: number; grant(): void }> = [];
+  const waitingHeads: Array<{ needed: number; grant(): void }> = [];
   const pump = (): void => {
+    while (headroom && waitingHeads.length > 0) {
+      const next = waitingHeads[0]!;
+      if (usedByHeads.messages >= headroom.messages || (usedByHeads.messages > 0 && usedByHeads.bytes + next.needed > headroom.bytes)) break;
+      waitingHeads.shift();
+      usedByHeads.messages += 1;
+      usedByHeads.bytes += next.needed;
+      next.grant();
+    }
     while (waiting.length > 0) {
       const next = waiting[0]!;
-      if (messages >= maxMessages || (messages > 0 && bytes + next.needed > maxBytes)) return;
+      if (used.messages >= maxMessages || (used.messages > 0 && used.bytes + next.needed > maxBytes)) return;
       waiting.shift();
-      messages += 1;
-      bytes += next.needed;
+      used.messages += 1;
+      used.bytes += next.needed;
       next.grant();
     }
   };
   return {
-    reserve(needed: number): Promise<() => void> {
+    reserve(needed: number, head = false): Promise<() => void> {
       return new Promise(resolve => {
-        waiting.push({ needed, grant: () => {
+        const own = head && headroom !== undefined ? usedByHeads : used;
+        const entry = { needed, grant: () => {
           let released = false;
           resolve(() => {
             if (released) return;
             released = true;
-            messages -= 1;
-            bytes -= needed;
+            own.messages -= 1;
+            own.bytes -= needed;
             pump();
           });
-        } });
+        } };
+        (head && headroom !== undefined ? waitingHeads : waiting).push(entry);
         pump();
       });
     },
@@ -83,7 +100,7 @@ function createRoom(maxMessages: number, maxBytes: number) {
 export function createJournalPublisher(options: JournalPublisherOptions): JournalPublisher {
   const limits: PublisherLimits = { ...DEFAULT_PUBLISHER_LIMITS, ...options.limits };
   const publisherId = options.publisherId ?? randomUUID();
-  const room = createRoom(limits.inFlightMessages, limits.inFlightBytes);
+  const room = createRoom(limits.inFlightMessages, limits.inFlightBytes, HEAD_HEADROOM);
   const opens = createRoom(limits.concurrentOpens, Number.POSITIVE_INFINITY);
   const sessions = new Map<string, SessionPublication>();
   const byKey = new Map<string, SessionPublication>();
@@ -103,7 +120,7 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
       connection.send(encoded.json);
       return 'sent';
     },
-    reserve: bytes => room.reserve(bytes),
+    reserve: (bytes, head) => room.reserve(bytes, head),
     openSlot: () => opens.reserve(0),
     diagnostic(entry) {
       try { options.diagnostic?.(entry); } catch { /* A diagnostic sink cannot stop publishing. */ }

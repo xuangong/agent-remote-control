@@ -376,6 +376,15 @@ export class SessionPublication {
     // Rows above this one reach the session as events; a reread that reaches them would publish them twice.
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
     let rows = subscription.rows;
+    // A forced replacement of nothing would leave the journal empty: while native history may hold older pages, they are read first.
+    if (this.forceReplace) {
+      for (let reads = 0; reads < this.limits.gapReadsMax && this.source.hasOlderHistory() && (await this.items(rows)).length === 0; reads += 1) {
+        const loaded = await this.source.loadOlderHistory();
+        this.check(token);
+        if (loaded.added === 0) break;
+        rows = this.source.timelineRows().filter(row => row.seq <= lastSeq);
+      }
+    }
     let plan = await this.plan(opened.index, rows);
     for (let reads = 0; plan.kind === 'gap' && reads < this.limits.gapReadsMax; reads += 1) {
       const loaded = await this.source.loadOlderHistory();
@@ -500,8 +509,11 @@ export class SessionPublication {
 
   private async plan(index: readonly JournalIndexEntry[], rows: readonly CanonicalTimelineRow[]): Promise<PublicationPlan> {
     const window = this.quotaStep > 0 ? this.limits.quotaWindows[this.quotaStep - 1] : undefined;
-    return planPublication(index, await this.items(rows), item => this.digest(item), {
-      ...(window === undefined ? {} : { window }), ...(this.forceReplace ? { forceReplace: true } : {}),
+    const items = await this.items(rows);
+    // An empty forced replacement is sent only when native history is exhausted; otherwise the journal stays as it is.
+    const force = this.forceReplace && (items.length > 0 || !this.source.hasOlderHistory());
+    return planPublication(index, items, item => this.digest(item), {
+      ...(window === undefined ? {} : { window }), ...(force ? { forceReplace: true } : {}),
     });
   }
 
@@ -605,13 +617,29 @@ export class SessionPublication {
     }
   }
 
-  /** Notes the items a stored publication added, for older-history requests. */
+  /**
+   * Notes what a stored publication did: the items it added, for older-history requests, and the rebinds it carried. The
+   * Relay passes over a rebind for an item it does not hold, so one that came before its item stays unacknowledged and is
+   * queued again once an append or a prepend adds the item.
+   */
   private remember(ops: readonly PublishOp[]): void {
+    const added = new Set<string>();
     for (const op of ops) {
-      if (op.op === 'rebind') this.unacknowledgedRebinds.delete(rebindKey(op.itemKey, op.replacement));
-      else if (op.op === 'append') this.journalKeys.add(op.row.itemKey);
-      else if (op.op === 'prepend') for (const { row } of op.items) this.journalKeys.add(row.itemKey);
+      if (op.op === 'rebind') {
+        if (this.journalKeys.has(op.itemKey)) this.unacknowledgedRebinds.delete(rebindKey(op.itemKey, op.replacement));
+      } else if (op.op === 'append') {
+        if (!this.journalKeys.has(op.row.itemKey)) added.add(op.row.itemKey);
+        this.journalKeys.add(op.row.itemKey);
+      } else if (op.op === 'prepend') {
+        for (const { row } of op.items) {
+          if (!this.journalKeys.has(row.itemKey)) added.add(row.itemKey);
+          this.journalKeys.add(row.itemKey);
+        }
+      }
     }
+    if (added.size === 0) return;
+    for (const change of this.unacknowledgedRebinds.values()) if (added.has(change.key)) this.queue.push(change);
+    this.scheduleFlush();
   }
 
   // Recovery.
@@ -843,6 +871,11 @@ export class SessionPublication {
           // An item a publication refused comes back whole once a row of it changed, not as the delta that follows what the journal lacks.
           const refusedBefore = this.refusedItems.has(change.key);
           if (this.isSkipped(change.key)) break;
+          if (refusedBefore && this.journalKeys.has(change.key)) {
+            // The journal holds part of the item: sending it whole would repeat what it has. The next reconcile corrects it.
+            this.refusedItems.set(change.key, this.source.itemRows(change.key).at(-1)?.seq ?? -1);
+            break;
+          }
           const rows = refusedBefore ? this.source.itemRows(change.key) : change.rows;
           add({ op: 'append', row: mergedRow({ key: change.key, rows, complete: false, liveOnly: rows.some(isLiveOnlyRow) }) }, change.key);
           break;

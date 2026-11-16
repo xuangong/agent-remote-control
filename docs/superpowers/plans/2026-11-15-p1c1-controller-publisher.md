@@ -6041,7 +6041,7 @@ Requests and budget: a fill or older request is queued only after `journal_opene
 
 Rebinds: every reconcile says the settled bindings of the timeline's items again as `rebind` (the journal ignores one that changes nothing), and rebinds the manager told that no acknowledged publication carries yet are sent again by the next cycle.
 
-A forced replacement (`incomplete`, a reset open, a quota window) may be empty; an unforced one never is.
+A forced replacement (`incomplete`, a reset open, a quota window) may be empty only once native history is exhausted: from an empty reread the publisher first reads older pages while `hasOlderHistory()` is true; an unforced one is never empty. A rebind whose item the journal does not hold yet stays unacknowledged and is queued again when an append or prepend adds the item. An item a refusal left partly in the journal is not sent whole; the next reconcile corrects it.
 
 Timing: every timer goes through a scheduler and `now` the publisher is given, so the tests move a virtual clock (`virtualClock` and `driver` in the scripted-session helper) instead of sleeping. Tests whose other side is a real transport use `untilReal`.
 
@@ -6293,7 +6293,7 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
 }
 ```
 
-- [x] **Step 2: Write the failing tests against a scripted Relay (72 tests).** The scripted Relay answers like the real one and lets a test refuse, delay or drop. Create `packages/agent-host/src/journal-publisher.test.ts`:
+- [x] **Step 2: Write the failing tests against a scripted Relay (73 tests).** The scripted Relay answers like the real one and lets a test refuse, delay or drop. Create `packages/agent-host/src/journal-publisher.test.ts`:
 
 <!-- write: packages/agent-host/src/journal-publisher.test.ts -->
 ```ts
@@ -6323,22 +6323,26 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
   const writtenAt: number[] = [];
   const refusedAt: number[] = [];
   let publisher!: JournalPublisher;
-  let generation = 0;
-  let applied = options.watermark ?? 0;
-  let model: JournalIndexEntry[] = [...(options.index ?? [])];
+  /** What the Relay keeps of one session: its generation, watermark, items, whether it is incomplete, and the generations a quota fenced. */
+  interface Held { generation: number; applied: number; model: JournalIndexEntry[]; incomplete: boolean; fenced: Set<number> }
+  const sessions = new Map<string, Held>();
+  const heldBy = (sessionKey: string): Held => {
+    let held = sessions.get(sessionKey);
+    if (!held) { held = { generation: 0, applied: options.watermark ?? 0, model: [...(options.index ?? [])], incomplete: false, fenced: new Set() }; sessions.set(sessionKey, held); }
+    return held;
+  };
   let revision = 100;
-  let incomplete = false;
-  const fenced = new Set<number>();
   const heldOpens: Array<() => void> = [];
   const send = (message: JournalRelayMessage) => queueMicrotask(() => publisher.receive(message));
   const known = (items: Wire[], first: number): JournalIndexEntry[] => items.map((value, at) => ({
     itemKey: value.row.itemKey, seqStart: first + at, seqEnd: first + at, state: value.digest ? 'complete' as const : 'open' as const, digest: value.digest, liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true,
   }));
-  const apply = (entries: Wire[]): void => {
+  const apply = (held: Held, entries: Wire[]): void => {
     for (const value of entries) {
+      const model = held.model;
       const at = model.findIndex(entry => entry.itemKey === (value.itemKey ?? value.row?.itemKey));
-      if (value.op === 'replace') { model = known(value.items, 1); incomplete = false; }
-      else if (value.op === 'prepend') model = [...known(value.items, (model[0]?.seqStart ?? 1) - value.items.length), ...model];
+      if (value.op === 'replace') { held.model = known(value.items, 1); held.incomplete = false; }
+      else if (value.op === 'prepend') held.model = [...known(value.items, (model[0]?.seqStart ?? 1) - value.items.length), ...model];
       else if (value.op === 'append' && at < 0) model.push({ itemKey: value.row.itemKey, seqStart: (model.at(-1)?.seqEnd ?? 0) + 1, seqEnd: (model.at(-1)?.seqEnd ?? 0) + 1, state: 'open', liveOnly: value.row.liveOnly === true, revision: ++revision, resident: true });
       else if (value.op === 'complete' && at >= 0) model[at] = { ...model[at]!, state: 'complete', digest: value.digest, revision: ++revision };
       else if (value.op === 'correct' && at >= 0) model[at] = { ...model[at]!, state: value.digest ? 'complete' : 'open', digest: value.digest, revision: ++revision };
@@ -6349,16 +6353,17 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
     const message: Wire = JSON.parse(json);
     written.push(message);
     writtenAt.push(clock.now());
+    const held = heldBy(message.sessionKey);
     if (message.type === 'journal_open') {
       if (options.refuseOpen?.(written.filter(entry => entry.type === 'journal_open').length, message.reset === true)) {
         send({ uplinkVersion: 2, type: 'journal_open_refused', requestId: message.requestId, sessionKey: message.sessionKey, reason: 'index_too_large' });
         return;
       }
-      generation += 1;
+      held.generation += 1;
       const paged = (options.pages?.length ?? 0) > 0;
-      if (message.reset) { model = []; incomplete = true; }
-      const first = message.reset ? [] : paged ? (options.index ?? []) : structuredClone(model);
-      const reply = () => send({ uplinkVersion: 2, type: 'journal_opened', requestId: message.requestId, sessionKey: message.sessionKey, generation, watermark: applied, epoch: 'epoch-1', index: first,
+      if (message.reset) { held.model = []; held.incomplete = true; }
+      const first = message.reset ? [] : paged ? (options.index ?? []) : structuredClone(held.model);
+      const reply = () => send({ uplinkVersion: 2, type: 'journal_opened', requestId: message.requestId, sessionKey: message.sessionKey, generation: held.generation, watermark: held.applied, epoch: 'epoch-1', index: first,
         ...(paged ? { indexAfter: first.at(-1)?.seqStart ?? 0 } : {}) } as JournalRelayMessage);
       if (options.holdOpened) heldOpens.push(reply); else reply();
     } else if (message.type === 'journal_index_request') {
@@ -6375,18 +6380,18 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
       const generationOf: number = message.generation;
       // As the Relay does: a generation a quota fenced publishes nothing more, entries at or below the watermark are duplicates and
       // are ignored, and the rest must start exactly after it.
-      if (fenced.has(generationOf)) {
+      if (held.fenced.has(generationOf)) {
         refusedAt.push(clock.now());
         send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: message.entries[0].sequence, reason: 'quota_exceeded' });
         return;
       }
-      const fresh: Wire[] = message.entries.filter((value: Wire) => value.sequence > applied);
+      const fresh: Wire[] = message.entries.filter((value: Wire) => value.sequence > held.applied);
       const last = message.entries.at(-1).sequence as number;
       if (fresh.length === 0) {
         send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: last, cursor: { epoch: 'epoch-1', seq: last } });
         return;
       }
-      if (fresh[0]!.sequence !== applied + 1) {
+      if (fresh[0]!.sequence !== held.applied + 1) {
         refusedAt.push(clock.now());
         send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: fresh[0]!.sequence, reason: 'sequence_gap' });
         return;
@@ -6396,15 +6401,15 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
         refusedAt.push(clock.now());
         const before = fresh.filter(value => value.sequence < sequence);
         if (before.length > 0) {
-          apply(before);
-          applied = sequence - 1;
-          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: applied, cursor: { epoch: 'epoch-1', seq: applied } });
+          apply(held, before);
+          held.applied = sequence - 1;
+          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: held.applied, cursor: { epoch: 'epoch-1', seq: held.applied } });
         }
-        if (reason === 'quota_exceeded') { fenced.add(generationOf); incomplete = true; }
+        if (reason === 'quota_exceeded') { held.fenced.add(generationOf); held.incomplete = true; }
         send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence, reason, ...(itemKey ? { itemKey } : {}) } as JournalRelayMessage);
       };
       // A journal that is missing rows takes a replacement before anything else, the head included.
-      let stillIncomplete = incomplete;
+      let stillIncomplete = held.incomplete;
       let blocked: Wire | undefined;
       for (const value of fresh) {
         if (value.op === 'replace') stillIncomplete = false;
@@ -6414,9 +6419,9 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
       const answer: Answer = {
         ack: () => {
           if (blocked && stored.length === 0) { refuseFrom('incomplete', blocked.sequence); return; }
-          apply(stored);
-          applied = blocked ? stored.at(-1)!.sequence : last;
-          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: applied, cursor: { epoch: 'epoch-1', seq: applied } });
+          apply(held, stored);
+          held.applied = blocked ? stored.at(-1)!.sequence : last;
+          send({ uplinkVersion: 2, type: 'journal_ack', sessionKey: message.sessionKey, generation: generationOf, watermark: held.applied, cursor: { epoch: 'epoch-1', seq: held.applied } });
           if (blocked) { refusedAt.push(clock.now()); send({ uplinkVersion: 2, type: 'journal_refused', sessionKey: message.sessionKey, generation: generationOf, sequence: blocked.sequence, reason: 'incomplete' }); }
         },
         refuse: (reason, itemKey, sequence = fresh[0]!.sequence) => refuseFrom(reason, sequence, itemKey),
@@ -6434,9 +6439,9 @@ function scriptedRelay(options: { index?: JournalIndexEntry[]; pages?: JournalIn
     opensAt: () => written.flatMap((message, at) => message.type === 'journal_open' ? [writtenAt[at]!] : []),
     refusedAt: () => refusedAt,
     releaseOpens: () => { for (const reply of heldOpens.splice(0)) reply(); },
-    model: () => model,
-    /** Makes the Relay hold these items already, as an earlier Controller left them. */
-    seed: (entries: JournalIndexEntry[]) => { model = entries; },
+    model: (sessionKey = 'fake:thread-1') => heldBy(sessionKey).model,
+    /** Makes the Relay hold these items already for a session, as an earlier Controller left them. */
+    seed: (entries: JournalIndexEntry[], sessionKey = 'fake:thread-1') => { heldBy(sessionKey).model = entries; },
     unserves: () => written.filter(message => message.type === 'journal_unserve'),
   };
 }
@@ -6457,7 +6462,7 @@ async function attachSession(publisher: JournalPublisher, history: Observation[]
   const session = new ScriptedSession('fake', ids.nativeSessionId, [...history, boundary(older ? 'older-1' : undefined)], older);
   const manager = await attachScripted(session, ids.agentId);
   closers.push(() => { void manager.close(); });
-  if (held) held.relay.seed(await entriesFor(manager, held.keys));
+  if (held) held.relay.seed(await entriesFor(manager, held.keys), `fake:${ids.nativeSessionId}`);
   publisher.attach({ agentId: ids.agentId, providerId: 'fake', nativeSessionId: ids.nativeSessionId, source: manager });
   return { session, manager };
 }
@@ -7112,6 +7117,21 @@ describe('what a replacement may be, and what survives a restart', () => {
     expect(relay.model().map(value => value.itemKey)).toEqual(['x']);
   });
 
+  it('does not force an empty replacement while native history may still hold older pages it could not read', async () => {
+    let refused = false;
+    const relay = scriptedRelay({ onPublish: (message, answer) => {
+      if (!refused && message.entries.some((value: Wire) => value.op === 'head')) { refused = true; answer.refuse('incomplete', undefined, message.entries.at(-1).sequence); } else answer.ack();
+    } });
+    relay.seed([entry('x', 1)]);
+    const publisher = publisherFor(relay);
+    // The first older page is empty and says more follow: nothing was learned, and the journal must not be wiped on that.
+    await attachSession(publisher, [], [{ observations: [], nextCursor: 'older-2' }, { observations: [item('history', 'm1', 'One')] }]);
+    await until(() => refused, 'the incomplete refusal');
+    await settle(100);
+    expect(relay.publishes().flatMap(message => message.entries).filter((value: Wire) => value.op === 'replace' && value.items.length === 0)).toEqual([]);
+    expect(relay.model().map(value => value.itemKey)).toEqual(['x']);
+  });
+
   it('clears an incomplete journal with an empty forced replacement when the native history is empty', async () => {
     let refused = false;
     const relay = scriptedRelay({ onPublish: (message, answer) => {
@@ -7271,15 +7291,19 @@ describe('requests of the Relay', () => {
 
   it('refuses a request it had queued when the cycle that queued it ends before the session is live', async () => {
     let refuse = true;
-    const relay = scriptedRelay({ holdOpened: true, onPublish: (_message, answer) => { if (refuse) { refuse = false; answer.refuse('stale_revision'); } else answer.ack(); } });
+    const relay = scriptedRelay({ onPublish: (_message, answer) => {
+      if (refuse) {
+        refuse = false;
+        // The open was answered, so the request is queued for the reconcile; the refusal then ends the cycle.
+        relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
+        queueMicrotask(() => answer.refuse('stale_revision'));
+      } else answer.ack();
+    } });
     const publisher = publisherFor(relay);
     await attachSession(publisher, [item('history', 'm1', 'Hello')]);
-    await until(() => relay.opens() === 1, 'the open');
-    relay.releaseOpens();
-    await settle(0);
-    relay.send({ uplinkVersion: 2, type: 'journal_fill_request', requestId: 'fill-1', sessionKey: 'fake:thread-1', itemKeys: ['m1'] });
     await until(() => refusals(relay).length === 1, 'the refusal when the cycle ended');
     expect(refusals(relay)[0]).toMatchObject({ requestId: 'fill-1', reason: 'not_ready' });
+    await live(relay);
     expect(relay.written.some(message => message.type === 'journal_fill')).toBe(false);
   });
 
@@ -7609,7 +7633,7 @@ describe('releasing a session', () => {
 });
 ```
 
-- [x] **Step 3: Write the failing tests against the Relay's real journal logic (15 tests).** Create `packages/agent-host/src/journal-publisher.relay.test.ts`. They prove the Controller's side and the Relay's side agree:
+- [x] **Step 3: Write the failing tests against the Relay's real journal logic (20 tests).** Create `packages/agent-host/src/journal-publisher.relay.test.ts`. They prove the Controller's side and the Relay's side agree:
 
 <!-- write: packages/agent-host/src/journal-publisher.relay.test.ts -->
 ```ts
@@ -7959,6 +7983,124 @@ describe('the publisher against the Relay\'s journal service', () => {
     again.connect(publisher);
     await until(async () => (await rowOf(again))?.status === 'available', 'the settled binding in the journal');
     expect(await rowOf(again)).toEqual(settled);
+  });
+
+  it('reads older pages before it forces a replacement of an empty newest page, so an incomplete journal is not served empty', async () => {
+    const first = relayLoopback(clock);
+    const publisher = start(first, 'controller-1');
+    const run = await follow(publisher, [], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    // Another publisher resets the journal: it is incomplete and holds nothing.
+    await first.connection.receive({ uplinkVersion: 2, type: 'journal_open', requestId: 'intruder', sessionKey: SESSION, publisherId: 'intruder', reset: true });
+    first.disconnect();
+    const again = relayLoopback(clock, { store: first.store });
+    again.connect(publisher);
+    await until(async () => { const journal = await again.journal(SESSION); return journal?.incomplete === false && journal.head !== undefined; }, 'the journal to be whole again');
+    expect(await texts(again)).toEqual(['One', 'Two']);
+    const replaces = again.fromPublisher.filter(message => message.type === 'journal_publish').flatMap(message => message.entries).filter((entry: { op: string }) => entry.op === 'replace');
+    expect(replaces.map((entry: { items: unknown[] }) => entry.items.length)).toEqual([2]);
+    await run.manager.close();
+  });
+
+  it('clears an incomplete journal with an empty replacement only when native history is exhausted', async () => {
+    const first = relayLoopback(clock);
+    const publisher = start(first, 'controller-1');
+    await follow(publisher, [item('history', 'm1', 'One')]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await first.connection.receive({ uplinkVersion: 2, type: 'journal_open', requestId: 'intruder', sessionKey: SESSION, publisherId: 'intruder', reset: true });
+    first.disconnect();
+    const again = relayLoopback(clock, { store: first.store });
+    again.connect(publisher);
+    await until(async () => { const journal = await again.journal(SESSION); return journal?.incomplete === false && journal.head !== undefined; }, 'the journal to be whole again');
+    expect(await texts(again)).toEqual(['One']);
+  });
+
+  const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
+  const imageRow = async (relay: ReturnType<typeof relayLoopback>, key: string) => (await relay.journal(SESSION))?.state().items.find(value => value.itemKey === key)?.body?.resources[0];
+  const settledOf = (manager: Awaited<ReturnType<typeof attachScripted>>) => manager.timelineRows().flatMap(row => row.resources).find(binding => binding.status === 'available');
+
+  it('ends with the settled id in a row that older history prepended, when the image settled just after the timeline was read', async () => {
+    const relay = relayLoopback(clock);
+    const publisher = start(relay, 'controller-1');
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm3', 'Three'), item('history', 'm4', 'Four'), boundary('older-1')],
+      [{ observations: [item('history', 'm1', 'See ![shot](shot.png)')] }], { 'shot.png': png }, gate);
+    const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'controller-secret' });
+    closers.push(() => { void manager.close(); });
+    let read = false;
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: {
+      subscribeJournal: tap => manager.subscribeJournal(tap), itemRows: key => manager.itemRows(key), attentionItemKey: () => manager.attentionItemKey(),
+      snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(), loadOlderHistory: () => manager.loadOlderHistory(),
+      timelineRows: () => {
+        const rows = manager.timelineRows();
+        // The image settles right after the answer to the request read the timeline.
+        if (!read && rows.some(row => row.identity?.key === 'm1')) { read = true; queueMicrotask(open); }
+        return rows;
+      },
+    } });
+    await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    await relay.connection.requestOlder(SESSION, 5);
+    await until(async () => (await imageRow(relay, 'm1')) !== undefined && settledOf(manager) !== undefined, 'the prepended row');
+    await until(async () => (await imageRow(relay, 'm1'))?.status === 'available', 'the settled binding in the prepended row');
+    expect(await imageRow(relay, 'm1')).toEqual(settledOf(manager));
+  });
+
+  it('ends with the settled id in a row that the reconcile\'s older blocks prepended, when the image settled after the timeline was read', async () => {
+    const first = relayLoopback(clock);
+    const before = start(first, 'controller-before');
+    const run = await follow(before, [item('history', 'm3', 'Three')]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    const old = (await first.journal(SESSION))!;
+    before.close();
+    first.disconnect();
+    await run.manager.close();
+
+    const next = relayLoopback(clock);
+    await carryOver(old, next);
+    const after = start(next, 'controller-after');
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm3', 'Three'), boundary('older-1')],
+      [{ observations: [item('history', 'm1', 'See ![shot](shot.png)')] }], { 'shot.png': png }, gate);
+    const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'controller-secret' });
+    closers.push(() => { void manager.close(); });
+    await manager.loadOlderHistory();
+    after.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: {
+      subscribeJournal: tap => { const subscription = manager.subscribeJournal(tap); queueMicrotask(open); return subscription; },
+      timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key), attentionItemKey: () => manager.attentionItemKey(),
+      snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(), loadOlderHistory: () => manager.loadOlderHistory(),
+    } });
+    await until(async () => (await imageRow(next, 'm1')) !== undefined && settledOf(manager) !== undefined, 'the prepended row');
+    await until(async () => (await imageRow(next, 'm1'))?.status === 'available', 'the settled binding in the prepended row');
+    expect(await imageRow(next, 'm1')).toEqual(settledOf(manager));
+  });
+
+  it('does not send an item whole that a refusal left partly in the journal, which would repeat its content', async () => {
+    let appends = 0;
+    const relay = relayLoopback(clock, { refuseEntry: entry => {
+      if (entry.op !== 'append' || entry.itemKey !== 'x') return undefined;
+      appends += 1;
+      return appends === 2 ? { reason: 'type_changed', itemKey: 'x' } : undefined;
+    } });
+    const publisher = start(relay);
+    const { session } = await follow(publisher, [item('history', 'm1', 'Hello')]);
+    await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    session.push(item('live', 'x', 'first ', { completes: false }));
+    await until(async () => (await texts(relay))?.includes('first ') === true, 'the first row');
+    await settle(30);
+    session.push(item('live', 'x', 'second ', { completes: false }));
+    await until(() => appends === 2, 'the refusal');
+    await settle(30);
+    session.push(item('live', 'x', 'third', { completes: true }));
+    await settle(60);
+    const shown = (await texts(relay))!.filter(text => text.includes('first'));
+    expect(shown).toEqual(['first ']);
+    expect(appends).toBe(2);
   });
 });
 ```
@@ -8350,6 +8492,15 @@ export class SessionPublication {
     // Rows above this one reach the session as events; a reread that reaches them would publish them twice.
     const lastSeq = subscription.rows[subscription.rows.length - 1]?.seq ?? 0;
     let rows = subscription.rows;
+    // A forced replacement of nothing would leave the journal empty: while native history may hold older pages, they are read first.
+    if (this.forceReplace) {
+      for (let reads = 0; reads < this.limits.gapReadsMax && this.source.hasOlderHistory() && (await this.items(rows)).length === 0; reads += 1) {
+        const loaded = await this.source.loadOlderHistory();
+        this.check(token);
+        if (loaded.added === 0) break;
+        rows = this.source.timelineRows().filter(row => row.seq <= lastSeq);
+      }
+    }
     let plan = await this.plan(opened.index, rows);
     for (let reads = 0; plan.kind === 'gap' && reads < this.limits.gapReadsMax; reads += 1) {
       const loaded = await this.source.loadOlderHistory();
@@ -8474,8 +8625,11 @@ export class SessionPublication {
 
   private async plan(index: readonly JournalIndexEntry[], rows: readonly CanonicalTimelineRow[]): Promise<PublicationPlan> {
     const window = this.quotaStep > 0 ? this.limits.quotaWindows[this.quotaStep - 1] : undefined;
-    return planPublication(index, await this.items(rows), item => this.digest(item), {
-      ...(window === undefined ? {} : { window }), ...(this.forceReplace ? { forceReplace: true } : {}),
+    const items = await this.items(rows);
+    // An empty forced replacement is sent only when native history is exhausted; otherwise the journal stays as it is.
+    const force = this.forceReplace && (items.length > 0 || !this.source.hasOlderHistory());
+    return planPublication(index, items, item => this.digest(item), {
+      ...(window === undefined ? {} : { window }), ...(force ? { forceReplace: true } : {}),
     });
   }
 
@@ -8579,13 +8733,29 @@ export class SessionPublication {
     }
   }
 
-  /** Notes the items a stored publication added, for older-history requests. */
+  /**
+   * Notes what a stored publication did: the items it added, for older-history requests, and the rebinds it carried. The
+   * Relay passes over a rebind for an item it does not hold, so one that came before its item stays unacknowledged and is
+   * queued again once an append or a prepend adds the item.
+   */
   private remember(ops: readonly PublishOp[]): void {
+    const added = new Set<string>();
     for (const op of ops) {
-      if (op.op === 'rebind') this.unacknowledgedRebinds.delete(rebindKey(op.itemKey, op.replacement));
-      else if (op.op === 'append') this.journalKeys.add(op.row.itemKey);
-      else if (op.op === 'prepend') for (const { row } of op.items) this.journalKeys.add(row.itemKey);
+      if (op.op === 'rebind') {
+        if (this.journalKeys.has(op.itemKey)) this.unacknowledgedRebinds.delete(rebindKey(op.itemKey, op.replacement));
+      } else if (op.op === 'append') {
+        if (!this.journalKeys.has(op.row.itemKey)) added.add(op.row.itemKey);
+        this.journalKeys.add(op.row.itemKey);
+      } else if (op.op === 'prepend') {
+        for (const { row } of op.items) {
+          if (!this.journalKeys.has(row.itemKey)) added.add(row.itemKey);
+          this.journalKeys.add(row.itemKey);
+        }
+      }
     }
+    if (added.size === 0) return;
+    for (const change of this.unacknowledgedRebinds.values()) if (added.has(change.key)) this.queue.push(change);
+    this.scheduleFlush();
   }
 
   // Recovery.
@@ -8817,6 +8987,11 @@ export class SessionPublication {
           // An item a publication refused comes back whole once a row of it changed, not as the delta that follows what the journal lacks.
           const refusedBefore = this.refusedItems.has(change.key);
           if (this.isSkipped(change.key)) break;
+          if (refusedBefore && this.journalKeys.has(change.key)) {
+            // The journal holds part of the item: sending it whole would repeat what it has. The next reconcile corrects it.
+            this.refusedItems.set(change.key, this.source.itemRows(change.key).at(-1)?.seq ?? -1);
+            break;
+          }
           const rows = refusedBefore ? this.source.itemRows(change.key) : change.rows;
           add({ op: 'append', row: mergedRow({ key: change.key, rows, complete: false, liveOnly: rows.some(isLiveOnlyRow) }) }, change.key);
           break;
@@ -9142,7 +9317,7 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
 - [x] **Step 7: Run the tests and see them pass.**
 
 Run: `pnpm --filter @orchardworks/agent-remote-controller exec vitest run src/journal-publisher.test.ts src/journal-publisher.relay.test.ts --testTimeout=15000` then `pnpm --filter @orchardworks/agent-remote-controller run typecheck`
-Expected: PASS (87 tests in the two files; the whole `agent-host` suite is 1,615 tests with them).
+Expected: PASS (93 tests in the two files; the whole `agent-host` suite is 1,643 tests with them).
 
 - [x] **Step 8: Commit.**
 

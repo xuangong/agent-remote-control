@@ -345,4 +345,122 @@ describe('the publisher against the Relay\'s journal service', () => {
     await until(async () => (await rowOf(again))?.status === 'available', 'the settled binding in the journal');
     expect(await rowOf(again)).toEqual(settled);
   });
+
+  it('reads older pages before it forces a replacement of an empty newest page, so an incomplete journal is not served empty', async () => {
+    const first = relayLoopback(clock);
+    const publisher = start(first, 'controller-1');
+    const run = await follow(publisher, [], [{ observations: [item('history', 'm1', 'One'), item('history', 'm2', 'Two')] }]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    // Another publisher resets the journal: it is incomplete and holds nothing.
+    await first.connection.receive({ uplinkVersion: 2, type: 'journal_open', requestId: 'intruder', sessionKey: SESSION, publisherId: 'intruder', reset: true });
+    first.disconnect();
+    const again = relayLoopback(clock, { store: first.store });
+    again.connect(publisher);
+    await until(async () => { const journal = await again.journal(SESSION); return journal?.incomplete === false && journal.head !== undefined; }, 'the journal to be whole again');
+    expect(await texts(again)).toEqual(['One', 'Two']);
+    const replaces = again.fromPublisher.filter(message => message.type === 'journal_publish').flatMap(message => message.entries).filter((entry: { op: string }) => entry.op === 'replace');
+    expect(replaces.map((entry: { items: unknown[] }) => entry.items.length)).toEqual([2]);
+    await run.manager.close();
+  });
+
+  it('clears an incomplete journal with an empty replacement only when native history is exhausted', async () => {
+    const first = relayLoopback(clock);
+    const publisher = start(first, 'controller-1');
+    await follow(publisher, [item('history', 'm1', 'One')]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await first.connection.receive({ uplinkVersion: 2, type: 'journal_open', requestId: 'intruder', sessionKey: SESSION, publisherId: 'intruder', reset: true });
+    first.disconnect();
+    const again = relayLoopback(clock, { store: first.store });
+    again.connect(publisher);
+    await until(async () => { const journal = await again.journal(SESSION); return journal?.incomplete === false && journal.head !== undefined; }, 'the journal to be whole again');
+    expect(await texts(again)).toEqual(['One']);
+  });
+
+  const png = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOioAAAAASUVORK5CYII=', 'base64'));
+  const imageRow = async (relay: ReturnType<typeof relayLoopback>, key: string) => (await relay.journal(SESSION))?.state().items.find(value => value.itemKey === key)?.body?.resources[0];
+  const settledOf = (manager: Awaited<ReturnType<typeof attachScripted>>) => manager.timelineRows().flatMap(row => row.resources).find(binding => binding.status === 'available');
+
+  it('ends with the settled id in a row that older history prepended, when the image settled just after the timeline was read', async () => {
+    const relay = relayLoopback(clock);
+    const publisher = start(relay, 'controller-1');
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm3', 'Three'), item('history', 'm4', 'Four'), boundary('older-1')],
+      [{ observations: [item('history', 'm1', 'See ![shot](shot.png)')] }], { 'shot.png': png }, gate);
+    const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'controller-secret' });
+    closers.push(() => { void manager.close(); });
+    let read = false;
+    publisher.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: {
+      subscribeJournal: tap => manager.subscribeJournal(tap), itemRows: key => manager.itemRows(key), attentionItemKey: () => manager.attentionItemKey(),
+      snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(), loadOlderHistory: () => manager.loadOlderHistory(),
+      timelineRows: () => {
+        const rows = manager.timelineRows();
+        // The image settles right after the answer to the request read the timeline.
+        if (!read && rows.some(row => row.identity?.key === 'm1')) { read = true; queueMicrotask(open); }
+        return rows;
+      },
+    } });
+    await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    await relay.connection.requestOlder(SESSION, 5);
+    await until(async () => (await imageRow(relay, 'm1')) !== undefined && settledOf(manager) !== undefined, 'the prepended row');
+    await until(async () => (await imageRow(relay, 'm1'))?.status === 'available', 'the settled binding in the prepended row');
+    expect(await imageRow(relay, 'm1')).toEqual(settledOf(manager));
+  });
+
+  it('ends with the settled id in a row that the reconcile\'s older blocks prepended, when the image settled after the timeline was read', async () => {
+    const first = relayLoopback(clock);
+    const before = start(first, 'controller-before');
+    const run = await follow(before, [item('history', 'm3', 'Three')]);
+    await until(async () => (await first.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    const old = (await first.journal(SESSION))!;
+    before.close();
+    first.disconnect();
+    await run.manager.close();
+
+    const next = relayLoopback(clock);
+    await carryOver(old, next);
+    const after = start(next, 'controller-after');
+    let open!: () => void;
+    const gate = new Promise<void>(resolve => { open = resolve; });
+    const session = new ScriptedSession('fake', 'thread-1', [item('history', 'm3', 'Three'), boundary('older-1')],
+      [{ observations: [item('history', 'm1', 'See ![shot](shot.png)')] }], { 'shot.png': png }, gate);
+    const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'controller-secret' });
+    closers.push(() => { void manager.close(); });
+    await manager.loadOlderHistory();
+    after.attach({ agentId: 'agent-1', providerId: 'fake', nativeSessionId: 'thread-1', source: {
+      subscribeJournal: tap => { const subscription = manager.subscribeJournal(tap); queueMicrotask(open); return subscription; },
+      timelineRows: () => manager.timelineRows(), itemRows: key => manager.itemRows(key), attentionItemKey: () => manager.attentionItemKey(),
+      snapshot: () => manager.snapshot(), hasOlderHistory: () => manager.hasOlderHistory(), loadOlderHistory: () => manager.loadOlderHistory(),
+    } });
+    await until(async () => (await imageRow(next, 'm1')) !== undefined && settledOf(manager) !== undefined, 'the prepended row');
+    await until(async () => (await imageRow(next, 'm1'))?.status === 'available', 'the settled binding in the prepended row');
+    expect(await imageRow(next, 'm1')).toEqual(settledOf(manager));
+  });
+
+  it('does not send an item whole that a refusal left partly in the journal, which would repeat its content', async () => {
+    let appends = 0;
+    const relay = relayLoopback(clock, { refuseEntry: entry => {
+      if (entry.op !== 'append' || entry.itemKey !== 'x') return undefined;
+      appends += 1;
+      return appends === 2 ? { reason: 'type_changed', itemKey: 'x' } : undefined;
+    } });
+    const publisher = start(relay);
+    const { session } = await follow(publisher, [item('history', 'm1', 'Hello')]);
+    await until(async () => (await relay.journal(SESSION))?.head !== undefined, 'the head');
+    await settle(30);
+    session.push(item('live', 'x', 'first ', { completes: false }));
+    await until(async () => (await texts(relay))?.includes('first ') === true, 'the first row');
+    await settle(30);
+    session.push(item('live', 'x', 'second ', { completes: false }));
+    await until(() => appends === 2, 'the refusal');
+    await settle(30);
+    session.push(item('live', 'x', 'third', { completes: true }));
+    await settle(60);
+    const shown = (await texts(relay))!.filter(text => text.includes('first'));
+    expect(shown).toEqual(['first ']);
+    expect(appends).toBe(2);
+  });
 });

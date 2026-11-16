@@ -26,9 +26,9 @@ export type PublishOp = JournalPublishEntry extends infer Entry ? Entry extends 
 export interface SizedOp { op: PublishOp; bytes: number }
 export interface SizedItem { item: JournalItemInput; bytes: number }
 
-/** Whether a row's item is the Controller's own, or the provider said native history cannot rebuild it. */
+/** Whether a row's item is the Controller's own (a row without identity is keyed `controller:`), or the provider said native history cannot rebuild it. */
 export const isLiveOnlyRow = (row: CanonicalTimelineRow): boolean =>
-  row.identity === undefined || row.identity.liveOnly === true || rowItemKey(row).startsWith(CONTROLLER_ITEM_KEY_PREFIX);
+  row.identity?.liveOnly === true || rowItemKey(row).startsWith(CONTROLLER_ITEM_KEY_PREFIX);
 
 /** Groups rows by item, in the order the items first appear. An item is complete when its last row completes it. A row without identity is a complete, live-only item of its own. */
 export function groupItems(rows: readonly CanonicalTimelineRow[]): TimelineItem[] {

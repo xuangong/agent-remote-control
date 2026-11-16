@@ -618,7 +618,13 @@ describe('absorbing a replacement by item key', () => {
     }
     const sameEpoch = applyHistoryPage(state, page('after', [], { epoch: 'epoch-one', gap: true }));
     expect(sameEpoch).toMatchObject({ status: 'replaced', epoch: 'epoch-one' });
-    expect(sameEpoch.state.timeline.pendingEpoch).toBeUndefined();
+    // The epoch the replica holds is pending too: its frames wait for the tail, as for any replacement.
+    expect(sameEpoch.state.timeline.pendingEpoch).toBe('epoch-one');
+    const waiting = reduceTimelineEvent(sameEpoch.state, stream(2, { type: 'assistant_message', text: 'Waits', messageId: 'w' }));
+    expect(waiting.status).toBe('buffered');
+    const read = applyHistoryPage(waiting.state, tail([assistant('a', 'A', 1)], 'epoch-one'));
+    expect(read.state.timeline.pendingEpoch).toBeUndefined();
+    expect(read.state.timeline.entries.map(row => row.item.type === 'assistant_message' ? row.item.text : '')).toEqual(['A', 'Waits']);
   });
 
   it('replaces rows without keys, which key by epoch, through one transition and never an empty state', () => {
@@ -665,5 +671,39 @@ describe('absorbing a replacement by item key', () => {
     const [live] = state.timeline.entries;
     const reread = applyHistoryPage(state, tail([{ ...keyed('m', 1, { type: 'assistant_message', text: 'Hello', messageId: 'm' }, 3), collapsed: ['assistant_merge'] }], 'epoch-one', { window: { minSeq: 1, maxSeq: 3, nextSeq: 4 } }));
     expect(reread.state.timeline.entries[0]).toBe(live);
+  });
+
+  it('applies only the tail of the pending epoch: a tail of the held epoch does not end the replacement', () => {
+    const marked = applyTimelineReplacement(held(assistant('a', 'A', 1)), 'epoch-two');
+    const heldTail = applyHistoryPage(marked, tail([assistant('a', 'A', 1)], 'epoch-one'));
+    expect(heldTail.status).toBe('duplicate');
+    expect(heldTail.state).toBe(marked);
+    expect(applyHistoryPage(marked, page('after', [], { epoch: 'epoch-one' })).status).toBe('duplicate');
+  });
+
+  it('keeps an item updated above the window where it is, so older history stays reachable after a reconnect', () => {
+    // The journal updates `todo` in place and keeps its first sequence 1; the client holds only the newest rows.
+    const all = Array.from({ length: 40 }, (_, index) => assistant(`n${index + 2}`, `Row ${index + 2}`, index + 2));
+    const window = all.slice(20);
+    const state = applyHistoryPage(createReplicaState(), tail(window, 'epoch-one', { hasOlder: true })).state;
+    const updatedTodo = { ...keyed('todo', 1, { type: 'todo', items: [{ text: 'a', completed: true }] }), seqEnd: 43 };
+    const fresh = assistant('n42', 'Row 42', 42);
+    const after = page('after', [updatedTodo, fresh], { epoch: 'epoch-one', window: { minSeq: 1, maxSeq: 43, nextSeq: 44 }, startCursor: { epoch: 'epoch-one', seq: 1 }, endCursor: { epoch: 'epoch-one', seq: 43 } });
+    const next = applyHistoryPage(state, after).state;
+    // Sorted by first sequence: the todo is not at the top (it is older history), and the next older page starts below the oldest held row.
+    expect(next.timeline.entries.map(row => row.seqStart)).toEqual([...next.timeline.entries.map(row => row.seqStart)].sort((x, y) => x - y));
+    expect(keysOf(next)[0]).toBe('n22');
+    expect(next.timeline.entries.at(-1)?.itemKey).toBe('n42');
+    expect(next.timeline.hasOlder).toBe(true);
+    const older = applyHistoryPage(next, page('before', [keyed('todo', 1, { type: 'todo', items: [] }), ...all.slice(0, 20)], { epoch: 'epoch-one', hasOlder: false }));
+    expect(keysOf(older.state).slice(0, 3)).toEqual(['todo', 'n2', 'n3']);
+    expect(new Set(keysOf(older.state)).size).toBe(keysOf(older.state).length);
+  });
+
+  it('updates a held row in place without moving it when an after page carries its new content', () => {
+    const state = held(keyed('todo', 1, { type: 'todo', items: [] }), assistant('a', 'A', 2));
+    const after = applyHistoryPage(state, page('after', [{ ...keyed('todo', 1, { type: 'todo', items: [{ text: 'x', completed: false }] }), seqEnd: 3 }], { epoch: 'epoch-one', window: { minSeq: 1, maxSeq: 3, nextSeq: 4 } }));
+    expect(keysOf(after.state)).toEqual(['todo', 'a']);
+    expect(after.state.timeline.entries[0]).toMatchObject({ seqStart: 1, seqEnd: 3, item: { items: [{ text: 'x' }] } });
   });
 });

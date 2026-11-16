@@ -120,7 +120,8 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
       const timeline = replicaState?.timeline;
       // Opening a view is not a read receipt until its replica has received the notified content. A cursor in an epoch the
       // replica retired names content that a replacement carried over, which the replica now holds.
-      const retired = !!value.cursor && !!replicaState?.retiredEpochs.includes(value.cursor.epoch);
+      // A retargeted replacement retires an epoch whose content was never shown, so only an applied tail counts.
+      const retired = !!value.cursor && !!replicaState?.retiredEpochs.includes(value.cursor.epoch) && timeline?.pendingEpoch === undefined;
       if (!timeline?.initialized || (value.cursor && !retired && (timeline.epoch !== value.cursor.epoch || timeline.nextSeq - 1 < value.cursor.seq))) return value;
     }
     return { ...value, changed: false, attention: undefined };

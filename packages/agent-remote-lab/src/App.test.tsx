@@ -188,7 +188,7 @@ describe('App', () => {
       connect: (agentId, listener) => readyConnection(agentId, listener),
     });
     const container = await render(<App transport={transport} />);
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event #1 in Trace"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event in Trace"]')!.click());
     await act(async () => container.querySelector<HTMLButtonElement>('.lab-trace-close')!.click());
     for (let index = 0; index < 2; index += 1) {
       await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-create"]')!.click());
@@ -207,7 +207,7 @@ describe('App', () => {
     }] } };
     const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
     const conversation = container.querySelector('[data-entry-key]');
-    const inspect = conversation?.querySelector<HTMLButtonElement>('[aria-label="Inspect event #2 in Trace"]');
+    const inspect = conversation?.querySelectorAll<HTMLButtonElement>('[aria-label="Inspect event in Trace"]')[0];
     expect(inspect).not.toBeNull();
     expect(inspect).toBeDefined();
     await act(async () => inspect!.click());

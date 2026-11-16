@@ -59,7 +59,7 @@ export class MessageOutbox {
       if (start === undefined) return message;
       let afterAt = start;
       entries.forEach((entry, index) => { if (consumed.has(keys[index]!) && this.matches(message, entry)) afterAt = Math.max(afterAt, index); });
-      const afterKey = afterAt < 0 ? message.afterKey : keys[afterAt]!;
+      const afterKey = afterAt < 0 ? message.afterKey : anchorOfEntry(state, entries[afterAt]!);
       const consumedEchoKeys = [...new Set([...(message.consumedEchoKeys ?? []), ...consumed])].filter(key => keys.indexOf(key) > afterAt);
       return { ...message, afterKey, consumedEchoKeys };
     });
@@ -109,17 +109,32 @@ export class MessageOutbox {
 export function anchorNow(state: AgentReplicaState): string | undefined {
   if (!state.timeline.initialized) return undefined;
   const last = state.timeline.entries.at(-1);
-  return last ? timelineEntryKey(state.timeline.epoch, last) : `${EPOCH_START}${state.timeline.epoch ?? ''}`;
+  return last ? anchorOfEntry(state, last) : `${EPOCH_START}${state.timeline.epoch ?? ''}`;
+}
+
+/** A stream without item keys names a position, not a row: a row can be folded into an earlier one, and its key would then vanish. */
+function anchorOfEntry(state: AgentReplicaState, entry: AgentReplicaState['timeline']['entries'][number]): string {
+  return entry.itemKey === undefined ? `${SEQUENCE}${state.timeline.epoch ?? ''}:${entry.seqEnd}` : timelineEntryKey(state.timeline.epoch, entry);
 }
 
 const EPOCH_START = 'epoch-start:';
+const SEQUENCE = 'epoch-seq:';
 
 /**
  * Where the row of an anchor stands among the rows: its index, -1 for the start of the epoch the anchor names, undefined when the
- * replica no longer holds the row or the epoch (a replacement rewrote it).
+ * replica no longer holds the row or the epoch (a replacement rewrote it). A position anchor (a stream without item keys) stands
+ * after the last row that ends at or before its sequence.
  */
 export function anchorPosition(state: AgentReplicaState, afterKey: string, keys = state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry))): number | undefined {
   if (afterKey.startsWith(EPOCH_START)) return afterKey === `${EPOCH_START}${state.timeline.epoch ?? ''}` ? -1 : undefined;
+  if (afterKey.startsWith(SEQUENCE)) {
+    const at = afterKey.lastIndexOf(':');
+    if (afterKey.slice(SEQUENCE.length, at) !== (state.timeline.epoch ?? '')) return undefined;
+    const seq = Number(afterKey.slice(at + 1));
+    let position = -1;
+    state.timeline.entries.forEach((entry, index) => { if (entry.seqEnd <= seq) position = index; });
+    return position;
+  }
   const index = keys.indexOf(afterKey);
   return index < 0 ? undefined : index;
 }

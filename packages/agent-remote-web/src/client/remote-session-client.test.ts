@@ -1349,7 +1349,7 @@ it('starts a new attempt after the current cursor instead of reusing a consumed 
     await vi.waitFor(() => expect(f.replica.getState().outgoingMessages).toHaveLength(1));
     f.replica.updateMessage(prepared, 'unconfirmed', 'Unknown previous attempt', true);
     f.replica.retryMessage(prepared, 'new-operation');
-    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id: prepared, afterKey: expect.stringMatching(/:1:/), status: 'sending', submittedTextSha256: undefined }]);
+    expect(f.replica.getState().outgoingMessages).toMatchObject([{ id: prepared, afterKey: expect.stringMatching(/^epoch-seq:.*:1$/), status: 'sending', submittedTextSha256: undefined }]);
     f.echo(2, 'Continue');
     expect(f.replica.getState().outgoingMessages).toEqual([]);
   } finally { f.client.stop(); }

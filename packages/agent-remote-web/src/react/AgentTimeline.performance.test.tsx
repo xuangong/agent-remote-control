@@ -66,7 +66,7 @@ describe('incremental timeline rendering', () => {
     expect(renders.mock.calls.map(call => call[0])).toEqual(['test:codex:20:19']);
     expect(container.textContent).toContain('Reply 19 continued');
     expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(20);
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event #1 in Trace"]')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event in Trace"]')!.click());
     expect(latestInspect).toHaveBeenCalledWith('test:codex:1:0');
     expect(inspect).not.toHaveBeenCalled();
   });

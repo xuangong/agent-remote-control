@@ -1,4 +1,4 @@
-import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
+import { mergeBackgroundActivity, mergeRowIntoEntry } from '@orchardworks/agent-remote-protocol';
 import { reduceSessionState, withSessionInteractions } from '@orchardworks/agent-remote-protocol';
 import type {
   BackgroundActivity,
@@ -173,13 +173,13 @@ export function applyTimelineResourceBindingReplacement(
 }
 
 /**
- * Records that the timeline continues in another epoch. The held entries stay on screen: the tail of the new epoch is merged
+ * Records that the timeline continues in another epoch, or that the held one must be read again (a gap or a stale cursor names the
+ * epoch the replica holds): `pendingEpoch` may equal `epoch`, so one rule covers both. The held entries stay on screen: the tail of the new epoch is merged
  * into them by key when it is read (`absorbTail`). Before any content was read there is nothing to keep, so the replica
  * takes the epoch at once.
  */
 export function applyTimelineReplacement(state: AgentReplicaState, epoch: string): AgentReplicaState {
   const timeline = state.timeline;
-  if (timeline.epoch === epoch && timeline.pendingEpoch === undefined) return state;
   if (timeline.pendingEpoch === epoch) return state;
   const retired = (...epochs: Array<string | null | undefined>) => unique([...state.retiredEpochs, ...epochs.filter((value): value is string => !!value && value !== epoch)]);
   if (!timeline.initialized) {
@@ -227,15 +227,15 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
   }
   const epochChanged = timeline.epoch !== null && timeline.epoch !== payload.epoch;
   if (epochChanged && state.retiredEpochs.includes(payload.epoch)) return { status: 'stale_epoch', state };
+  if (timeline.pendingEpoch !== undefined) {
+    // While a replacement is pending only the tail of its epoch applies. A page of another epoch retargets it; the rest waits for the tail.
+    if (payload.direction === 'tail' && payload.epoch === timeline.pendingEpoch) return absorbTail(state, page);
+    if (payload.epoch !== timeline.pendingEpoch && payload.epoch !== timeline.epoch) return { status: 'replaced', state: applyTimelineReplacement(state, payload.epoch), epoch: payload.epoch };
+    return { status: 'duplicate', state };
+  }
   if (payload.direction === 'tail') return absorbTail(state, page);
   if (epochChanged) return { status: 'replaced', state: applyTimelineReplacement(state, payload.epoch), epoch: payload.epoch };
 
-  if (timeline.pendingEpoch !== undefined) {
-    // The tail of the pending epoch replaces what an `after` page would update; older rows of the held epoch may still be read.
-    if (payload.direction !== 'before') return { status: 'duplicate', state };
-    const older = applyBackgroundEntries(mergePage(timeline.epoch, timeline.entries, page, false), timeline.backgroundActivities);
-    return { status: 'applied', state: { ...state, timeline: { ...timeline, entries: older, hasOlder: payload.hasOlder } } };
-  }
   const base = timeline.initialized ? timeline.entries : [];
   const entries = mergePage(timeline.epoch, base, page, options?.preserveLive === true);
   const nextSeq = options?.preserveLive
@@ -301,6 +301,12 @@ function absorbEntry(held: ProjectedTimelineEntry | undefined, incoming: Project
   return { ...held, seqStart: incoming.seqStart, seqEnd: incoming.seqEnd, sourceSeqRanges: clone(incoming.sourceSeqRanges) };
 }
 
+/** A held row an `after` page updates: its content and last sequence change, its first sequence and so its place do not. */
+function updateInPlace(held: ProjectedTimelineEntry, incoming: ProjectedTimelineEntry): ProjectedTimelineEntry {
+  const moved = { ...incoming, seqStart: held.seqStart };
+  return absorbEntry(held, moved);
+}
+
 const contentOf = new WeakMap<ProjectedTimelineEntry, string>();
 /** Row equality is content: the item without its background outcome and client message id, and the ids of its resources. */
 function sameContent(left: ProjectedTimelineEntry, right: ProjectedTimelineEntry): boolean {
@@ -335,13 +341,20 @@ function mergePage(epoch: string | null, held: readonly ProjectedTimelineEntry[]
   const position = new Map(held.map((entry, index) => [timelineEntryKey(epoch, entry), index]));
   const next = held.slice();
   const inserted: ProjectedTimelineEntry[] = [];
+  const first = held[0]?.seqStart;
   for (const entry of keyed) {
     const index = position.get(timelineEntryKey(epoch, entry));
-    if (index === undefined) { inserted.push(clone(entry)); continue; }
+    if (index === undefined) {
+      // A row above the first held row is older history that a `before` page brings, in its place; adding it here would hide
+      // the rows between (the journal keeps an updated item's first sequence).
+      if (page.payload.direction === 'after' && held.length > 0 && entry.seqStart < (first as number)) continue;
+      inserted.push(clone(entry));
+      continue;
+    }
     if (page.payload.direction === 'before') continue;
     const current = next[index]!;
     if (preserveLive && current.seqEnd > entry.seqEnd) continue;
-    next[index] = absorbEntry(current, entry);
+    next[index] = updateInPlace(current, entry);
   }
   const accepted = preserveLive ? unkeyed.filter((candidate) => !held.some((existing) =>
     existing.seqEnd > candidate.seqEnd && rangesOverlap(existing.sourceSeqRanges, candidate.sourceSeqRanges))) : unkeyed;
@@ -481,39 +494,18 @@ function liveEntry(message: TimelineStreamMessage): ProjectedTimelineEntry {
   };
 }
 
-/** A live row of a keyed stream continues the one row that holds its key, in place; a new key is a new row. */
-function coalesceKeyed(entries: readonly ProjectedTimelineEntry[], incoming: ProjectedTimelineEntry): ProjectedTimelineEntry[] {
-  let index = -1;
-  for (let at = entries.length - 1; at >= 0; at -= 1) if (entries[at]!.itemKey === incoming.itemKey) { index = at; break; }
-  if (index < 0) return sortEntries([...entries, incoming]);
-  const held = entries[index]!;
-  const item = incoming.item;
-  const merged: ProjectedTimelineEntry = { ...held, collapsed: [...held.collapsed], item: held.item };
-  if (item.type === 'assistant_message' && held.item.type === 'assistant_message') {
-    merged.item = { ...held.item, text: held.item.text + item.text, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
-    extendEntry(merged, incoming, 'assistant_merge');
-  } else if (item.type === 'reasoning' && held.item.type === 'reasoning') {
-    merged.item = { ...held.item, text: held.item.text + item.text, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
-    extendEntry(merged, incoming, 'reasoning_merge');
-  } else if (item.type === 'tool_call' || item.type === 'todo') {
-    merged.item = { ...item, ...(item.background ? { background: mergeBackgroundActivity(held.item.background, item.background) } : {}) };
-    extendEntry(merged, incoming, item.type === 'tool_call' ? 'tool_lifecycle' : undefined);
-  } else if (item.type === 'compaction' && held.item.type === 'compaction') {
-    merged.item = { ...held.item, ...item };
-    extendEntry(merged, incoming);
-  } else {
-    extendEntry(merged, incoming);
-  }
-  const next = entries.slice();
-  next[index] = merged;
-  return next;
-}
-
 function coalesceEntry(
   entries: readonly ProjectedTimelineEntry[],
   incoming: ProjectedTimelineEntry,
 ): ProjectedTimelineEntry[] {
-  if (incoming.itemKey !== undefined) return coalesceKeyed(entries, incoming);
+  if (incoming.itemKey !== undefined) {
+    // A keyed row continues the one row that holds its key, in place, through the fold the journal and the pages use.
+    const index = entries.map((entry) => entry.itemKey).lastIndexOf(incoming.itemKey);
+    if (index < 0) return sortEntries([...entries, incoming]);
+    const merged = clone(entries[index]!);
+    mergeRowIntoEntry(merged, { seq: incoming.seqEnd, item: incoming.item, resources: incoming.resources });
+    return entries.map((entry, at) => at === index ? merged : entry);
+  }
   const next = entries.slice();
   const incomingItem = incoming.item;
   if (incomingItem.type === 'assistant_message') {

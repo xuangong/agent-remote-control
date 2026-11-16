@@ -18,7 +18,7 @@ test('edits a user prompt from the swipe timestamp on mobile and inline action o
   const button = user.getByRole('button', { name: 'Edit from this message' }).filter({ visible: true });
   await expect(button).toBeVisible();
   if (!isMobile) {
-    const inspect = user.getByRole('button', { name: 'Inspect event #1 in Trace' });
+    const inspect = user.getByRole('button', { name: 'Inspect event in Trace' });
     const editBox = (await button.boundingBox())!;
     const inspectBox = (await inspect.boundingBox())!;
     expect(editBox.x + editBox.width).toBeLessThanOrEqual(inspectBox.x - 4);

@@ -12,7 +12,6 @@ interface TimelineEntryProps {
   /** The entry the open session search revealed; a press on it does not dismiss the search. */
   readonly searchSelected?: boolean;
   readonly inspect?: () => void;
-  readonly sequence: number;
   readonly children: ReactNode;
   readonly selection?: 'available' | 'selected' | 'unselected';
   readonly selectionLabel?: string;
@@ -20,7 +19,7 @@ interface TimelineEntryProps {
 }
 const interactive = 'a, button, input, select, textarea, summary, label, [role="button"], [contenteditable="true"]';
 
-export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, searchSelected, inspect, sequence, children, selection, selectionLabel = 'Select', onSelect }: TimelineEntryProps) {
+export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, searchSelected, inspect, children, selection, selectionLabel = 'Select', onSelect }: TimelineEntryProps) {
   const selecting = !!onSelect && (selection === 'selected' || selection === 'unselected');
   const startSelection = onSelect && selection === 'available' ? <button type="button" className="agent-select-entry" aria-label={`${selectionLabel} this message`} title={`${selectionLabel}: select messages`}
     onClick={() => onSelect(false)}><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 6h5v5H6.5L4 14V6Zm7 0h5v5h-2.5L11 14V6Z" /></svg></button> : null;
@@ -62,11 +61,11 @@ export function TimelineEntry({ onEdit, entryKey, timestamp, sent, inspected, se
     }}
     style={{ '--agent-time-offset': `${reveal.offset}px`, '--agent-time-top': `${reveal.top}px` } as CSSProperties}>
     {selecting ? <button type="button" role="checkbox" className="agent-entry-checkbox" aria-checked={selection === 'selected'}
-      aria-label={`Select message #${sequence}`} onClick={event => { event.stopPropagation(); onSelect!(event.shiftKey); }} /> : null}
+      aria-label="Select message" onClick={event => { event.stopPropagation(); onSelect!(event.shiftKey); }} /> : null}
     {inspect || editButton || startSelection ? <span className="agent-entry-actions">
     {startSelection}
     {editButton ? <span className="agent-entry-edit-desktop">{editButton}</span> : null}
-    {inspect ? <button className="agent-inspect-entry" type="button" aria-label={`Inspect event #${sequence} in Trace`} title="Inspect in Trace" onClick={inspect}>
+    {inspect ? <button className="agent-inspect-entry" type="button" aria-label="Inspect event in Trace" title="Inspect in Trace" onClick={inspect}>
       <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 4h5m-5 6h5m-5 6h5M5 4v12m6-6h6m-3-3 3 3-3 3" /></svg>
     </button> : null}
     </span> : null}

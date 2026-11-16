@@ -7,6 +7,7 @@ export * from './messages.js';
 export * from './resources.js';
 export * from './snapshot.js';
 export * from './timeline.js';
+export * from './timeline-merge.js';
 export * from './version.js';
 export * from './uplink.js';
 export * from './remote-host-uplink.js';

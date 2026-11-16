@@ -94,7 +94,7 @@ one `JournalPartition` Durable Object per Host), in this order:
    `AGENT_REMOTE_JOURNALS=1`; a test keeps it identical to `wrangler.jsonc` apart from those two.
 3. Deploy the Relay with it: `wrangler deploy --config wrangler.journals-enabled.jsonc`.
 
-Always deploy the partitions Worker first. Calls between the Workers never change an existing method or field; new ones are
+Always deploy the partitions Worker first. Compaction items have a `failed` status: update the Relay and the web bundle before any Controller whose Copilot adapter ends a failed compaction as `failed`, because a Relay that does not know the status rejects the item. Calls between the Workers never change an existing method or field; new ones are
 optional or new, and the Relay asks each partition for its `capabilities` and grants nothing it does not report (an
 older partition without the method counts as the earliest version). With the variable set but no binding the Relay logs
 a configuration error and runs without journals.

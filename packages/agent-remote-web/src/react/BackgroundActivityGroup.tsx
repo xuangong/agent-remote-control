@@ -39,5 +39,5 @@ export function BackgroundActivityGroup({ entries, count, expanded, toggle, rend
     </button>
   </div>;
   return expanded ? <>{summary}{entries.map(renderEntry)}</> : <TimelineEntry entryKey={first.key} timestamp={first.entry.timestamp}
-    sequence={first.entry.seqStart} sent={false} inspected={false}>{summary}</TimelineEntry>;
+    sent={false} inspected={false}>{summary}</TimelineEntry>;
 }

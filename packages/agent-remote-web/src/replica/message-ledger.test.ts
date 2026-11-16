@@ -68,4 +68,19 @@ describe('the outgoing message ledger follows row keys', () => {
     replica.retryMessage('saved', 'operation-two');
     expect(replica.getState().outgoingMessages?.[0]).toMatchObject({ status: 'sending', afterKey: 'echo' });
   });
+
+  it('anchors a stream without item keys by position, so a row folded into an earlier one cannot make the message unconfirmed', () => {
+    const replica = new AgentReplica();
+    replica.applySnapshot(snapshot);
+    const unkeyed = (seq: number, text: string, end = seq): ProjectedTimelineEntry => { const { itemKey: _key, ...rest } = row('x', seq, text); return { ...rest, seqEnd: end, sourceSeqRanges: [{ startSeq: seq, endSeq: end }] }; };
+    replica.applyHistory(tail('epoch-one', [unkeyed(1, 'A'), unkeyed(2, 'B')]));
+    const id = replica.beginMessage('agent-one', 'Ship it', undefined, 'operation');
+    replica.acknowledgeMessage(id);
+    expect(replica.getState().outgoingMessages?.[0]?.afterKey).toBe('epoch-seq:epoch-one:2');
+    // The anchor row grows (a later page extends it): its position still holds.
+    replica.applyHistory(tail('epoch-one', [unkeyed(1, 'A'), unkeyed(2, 'B more', 3)]));
+    expect(status(replica)).toEqual(['awaiting_echo']);
+    replica.applyHistory(tail('epoch-one', [unkeyed(1, 'A'), unkeyed(2, 'B more', 3), { ...unkeyed(4, 'Ship it'), item: { type: 'user_message', text: 'Ship it' } }]));
+    expect(replica.getState().outgoingMessages).toEqual([]);
+  });
 });

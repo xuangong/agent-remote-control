@@ -6,7 +6,9 @@ import type {
   TimelineDirection,
   TimelineSeqRange,
 } from '@orchardworks/agent-remote-protocol';
-import { PROTOCOL_VERSION, mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, includeSequence, mergeBackgroundActivity, mergeRowIntoEntry } from '@orchardworks/agent-remote-protocol';
+
+export { includeResources, includeSequence, mergeRowIntoEntry } from '@orchardworks/agent-remote-protocol';
 
 import { TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
 
@@ -33,31 +35,6 @@ export function projectTimelineRows(rows: readonly CanonicalTimelineRow[]): Proj
     else mergeRowIntoEntry(entries[match] as ProjectedTimelineEntry, row);
   }
   return entries;
-}
-
-/** Folds one row into the entry it continues, exactly as pages project rows. */
-export function mergeRowIntoEntry(entry: ProjectedTimelineEntry, row: CanonicalTimelineRow): void {
-  const previousBackground = entry.item.background;
-  entry.seqEnd = row.seq;
-  entry.sourceSeqRanges = includeSequence(entry.sourceSeqRanges, row.seq);
-  includeResources(entry.resources, row.resources);
-  if (row.item.background) entry.item.background = structuredClone(mergeBackgroundActivity(entry.item.background, row.item.background));
-  if (row.item.type === 'assistant_message' && entry.item.type === 'assistant_message') {
-    entry.item.text += row.item.text;
-    includeCollapse(entry.collapsed, 'assistant_merge');
-  } else if (row.item.type === 'reasoning' && entry.item.type === 'reasoning') {
-    entry.item.text += row.item.text;
-    includeCollapse(entry.collapsed, 'reasoning_merge');
-  } else if (row.item.type === 'tool_call') {
-    entry.item = structuredClone(row.item);
-    if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
-    includeCollapse(entry.collapsed, 'tool_lifecycle');
-  } else if (row.item.type === 'compaction' && entry.item.type === 'compaction') {
-    entry.item = { ...entry.item, ...row.item };
-  } else if (row.item.type === 'todo') {
-    entry.item = structuredClone(row.item);
-    if (row.item.background) entry.item.background = mergeBackgroundActivity(previousBackground, row.item.background);
-  }
 }
 
 export function projectTimelinePage(store: TimelineStore, request: TimelinePageRequest): HistoryPage {
@@ -207,26 +184,3 @@ function sameContext(entry: ProjectedTimelineEntry, row: CanonicalTimelineRow): 
   return entry.providerId === row.providerId && entry.turnId === row.turnId && entry.item.background?.id === row.item.background?.id;
 }
 
-export function includeSequence(ranges: readonly TimelineSeqRange[], sequence: number): TimelineSeqRange[] {
-  const next: TimelineSeqRange[] = ranges.map((range) => ({ ...range }));
-  const last = next.at(-1);
-  if (last && last.endSeq + 1 === sequence) last.endSeq = sequence;
-  else next.push({ startSeq: sequence, endSeq: sequence });
-  return next;
-}
-
-function includeCollapse(collapsed: TimelineCollapse[], collapse: TimelineCollapse): void {
-  if (!collapsed.includes(collapse)) collapsed.push(collapse);
-}
-
-export function includeResources(
-  resources: ProjectedTimelineEntry['resources'],
-  additions: CanonicalTimelineRow['resources'],
-): void {
-  for (const addition of additions) {
-    if (resources.some(({ locator, resourceId }) => locator === addition.locator && resourceId === addition.resourceId)) {
-      continue;
-    }
-    resources.push(structuredClone(addition));
-  }
-}

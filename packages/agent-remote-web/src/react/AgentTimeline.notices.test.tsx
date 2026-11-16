@@ -186,7 +186,7 @@ describe('runtime notice groups', () => {
       expect(rendered.parentElement).toBe(list);
       expect(container.querySelectorAll(`[data-entry-key="${key}"]`)).toHaveLength(1);
       expect(rendered.querySelector('time')?.getAttribute('datetime')).toBe(item.timestamp);
-      const trace = rendered.querySelector<HTMLButtonElement>(`button[aria-label="Inspect event #${item.seqStart} in Trace"]`);
+      const trace = rendered.querySelector<HTMLButtonElement>('button[aria-label="Inspect event in Trace"]');
       expect(trace).not.toBeNull();
       await act(async () => trace!.click());
     }

@@ -3,7 +3,7 @@ import type { CompleteItemInput, JournalPublishEntry } from '@orchardworks/agent
 
 import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
 
-import { HOST_DELETIONS_AT_ONCE, type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
+import { type HostJournals, type JournalFilled, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalStatus } from './host-journals.js';
 import { JournalHeadIndex } from './journal-head-index.js';
 
 /** What a journal partition keeps in memory: a Durable Object has 128 MB, so only the journal in use stays. */
@@ -116,8 +116,7 @@ export interface PartitionJournalsOptions {
 /**
  * The `primary` side: a `HostJournals` that forwards each call to the Host's partition. It keeps the head index, so a
  * browser stream is gated without a call. Opens, publications, fills and deletions of one Host run in the order they were
- * made, so a deletion is never overtaken by a later call. Each partition holds one Host, so the cap of four deletions at
- * once across the Relay is held here, not in the partitions.
+ * made, so a deletion is never overtaken by a later call.
  */
 export function createPartitionJournals(options: PartitionJournalsOptions): HostJournals {
   const { partition } = options;
@@ -126,15 +125,6 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
   const heads = new JournalHeadIndex();
   const chains = new Map<string, Promise<void>>();
   const loading = new Map<string, Promise<void>>();
-  let deletionsRunning = 0;
-  const deletionWaiters: Array<() => void> = [];
-
-  async function withDeletionSlot<T>(operation: () => Promise<T>): Promise<T> {
-    while (deletionsRunning >= HOST_DELETIONS_AT_ONCE) await new Promise<void>(resolve => deletionWaiters.push(resolve));
-    deletionsRunning += 1;
-    try { return await operation(); } finally { deletionsRunning -= 1; deletionWaiters.shift()?.(); }
-  }
-
   /** Inside the Host's queue. An answer other than the Relay's version, or none, is not cached: the next open asks again. */
   async function ensureVersion(hostId: string): Promise<boolean> {
     if (verified.has(hostId)) return true;
@@ -215,9 +205,9 @@ export function createPartitionJournals(options: PartitionJournalsOptions): Host
 
     async loadAllServed() { /* A Host's sessions load when the first stream for it needs them. */ },
 
-    deleteHost: hostId => withDeletionSlot(() => serialized<void>(hostId, async () => {
+    deleteHost: hostId => serialized<void>(hostId, async () => {
       await partition(hostId).deleteHost(hostId);
       heads.clearHost(hostId);
-    })),
+    }),
   };
 }

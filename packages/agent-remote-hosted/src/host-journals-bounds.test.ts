@@ -645,20 +645,3 @@ describe('deletion', () => {
     expect(second.epoch).not.toBe(first.epoch);
   });
 });
-
-describe('deleting Hosts', () => {
-  it('deletes at most four Hosts from the store at once, however many are asked for', async () => {
-    const memory = new MemoryJournalStore();
-    let running = 0, peak = 0;
-    const store: JournalStore = { load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
-      catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => {
-        running += 1; peak = Math.max(peak, running);
-        await new Promise(resolve => setTimeout(resolve, 10));
-        await memory.catalog.deletePrefix(prefix);
-        running -= 1;
-      } } };
-    const journals = createHostJournals({ store, now: () => 1 });
-    await Promise.all(Array.from({ length: 12 }, (_, at) => journals.deleteHost(`gone-${at}`)));
-    expect(peak).toBe(4);
-  });
-});

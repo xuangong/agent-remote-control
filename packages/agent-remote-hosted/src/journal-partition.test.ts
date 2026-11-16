@@ -294,27 +294,6 @@ describe('the journals of primary over journal partitions', () => {
     expect(writer.served(HOST, SESSION)).toBe(false);
   });
 
-  it('deletes at most four Hosts at once across partitions, and later deletions wait for a slot', async () => {
-    let running = 0, peak = 0, started = 0;
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const partitions = new Map<string, JournalPartitionApi>();
-    const journals = createPartitionJournals({ partition: hostId => {
-      let api = partitions.get(hostId);
-      if (!api) {
-        const inner = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore(), now: () => 1_000 }));
-        api = { ...inner, deleteHost: async id => { started++; running++; peak = Math.max(peak, running); await gate; await inner.deleteHost(id); running--; } };
-        partitions.set(hostId, api);
-      }
-      return api;
-    } });
-    const deletions = Array.from({ length: 7 }, (_, n) => journals.deleteHost(`host-${n}`));
-    await new Promise(resolve => setTimeout(resolve, 20));
-    expect({ started, running }).toEqual({ started: 4, running: 4 });
-    release();
-    await Promise.all(deletions);
-    expect({ started, peak, running }).toEqual({ started: 7, peak: 4, running: 0 });
-  }, DEADLINE_MS);
 });
 
 describe('the partition contract across a rollout', () => {

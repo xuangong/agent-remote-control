@@ -41,7 +41,7 @@ it('hands a journal service built elsewhere to every account, and builds none of
   expect(hostJournals.createHostJournals).not.toHaveBeenCalled();
 });
 
-it('caps the store deletions of the whole Relay at four, not four per account', async () => {
+it('deletes the pending Hosts of every account through the one store, one at a time for each account', async () => {
   const memory = new MemoryJournalStore();
   let running = 0, peak = 0;
   const journals = { load: (key: string) => memory.load(key), apply: memory.apply.bind(memory), delete: (key: string) => memory.delete(key),
@@ -56,5 +56,5 @@ it('caps the store deletions of the whole Relay at four, not four per account', 
   closers.push(() => relay.close());
   await new Promise(resolve => setTimeout(resolve, 250));
   expect(await memory.catalog.list('')).toEqual([]);
-  expect(peak).toBe(4);
+  expect(peak).toBe(2);
 });

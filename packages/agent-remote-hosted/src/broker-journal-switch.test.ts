@@ -98,8 +98,8 @@ it('takes a session out of serving when a quota refuses a publication: its strea
 });
 
 /** A broker over a store whose first deletion by prefix fails. */
-function revocation(store: JournalStore, states: RemoteHostBrokerState[], initialState?: RemoteHostBrokerState) {
-  return createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: store, now: () => 10_000,
+function revocation(store: JournalStore, states: RemoteHostBrokerState[], initialState?: RemoteHostBrokerState, journalDeletionTimeoutMs?: number) {
+  return createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: store, now: () => 10_000, ...(journalDeletionTimeoutMs ? { journalDeletionTimeoutMs } : {}),
     onStateChange: async state => { states.push(structuredClone(state)); },
     initialState: initialState ?? {
       keys: [], creations: [],
@@ -398,12 +398,13 @@ it('registers a returning Host without journals after the deadline when the stor
   expect(saved.at(-1)?.journalDeletions ?? [HOST_ID]).toEqual([HOST_ID]);
 });
 
-it('deletes the journals of a pending Host once, however many asks share the run', async () => {
+it('deletes the journals of a pending Host and clears its id, whichever of the start and the returning Host asked first', async () => {
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const prefixes: string[] = [];
+  const saved: RemoteHostBrokerState[] = [];
   const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
-    broker: { journalDeletionWaitMs: 3000 },
+    broker: { journalDeletionWaitMs: 3000, onStateChange: async state => { saved.push(structuredClone(state)); } },
     journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
       catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => { prefixes.push(prefix); await gate; await memory.catalog.deletePrefix(prefix); } } }) });
   const connecting = r.connectController();
@@ -411,7 +412,9 @@ it('deletes the journals of a pending Host once, however many asks share the run
   release();
   await connecting;
   await sleep(50);
-  expect(prefixes).toEqual([`${HOST_ID}:`]);
+  expect(new Set(prefixes)).toEqual(new Set([`${HOST_ID}:`]));
+  expect(await r.store.catalog.list('')).toEqual([]);
+  expect(saved.at(-1)).not.toHaveProperty('journalDeletions');
 });
 
 it('does not hold a returning Host back for its pending deletion when its Controller asked for no journals', async () => {
@@ -439,39 +442,67 @@ function countingStore(memory: MemoryJournalStore, decide: (prefix: string, call
   return { store, calls, state };
 }
 
-it('deletes pending Hosts four at a time, and confirmations that wait for a commit share the next one', async () => {
-  const ids = Array.from({ length: 40 }, (_, at) => `gone-${at}`);
-  const { store, state } = countingStore(new MemoryJournalStore(), () => sleep(5));
-  const states: RemoteHostBrokerState[] = [];
-  const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: store, now: () => 10_000,
-    onStateChange: async next => { await sleep(20); states.push(structuredClone(next)); },
-    initialState: { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ids } });
-  try {
-    await sleep(900);
-    expect(state.peak).toBe(4);
-    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
-    expect(states.length).toBeLessThan(ids.length);
-  } finally { broker.close(); }
-});
-
-it('deletes the other pending Hosts and keeps the one whose store call never answers', async () => {
+it('deletes the other pending Hosts and keeps the one whose store call never answers, and the pass ends', async () => {
   const ids = Array.from({ length: 10 }, (_, at) => `gone-${at}`);
   const memory = new MemoryJournalStore();
-  for (const id of ids) await goneJournal(memory, id);
+  for (const id of [...ids, HOST_ID]) await (id === HOST_ID ? seedJournal(memory) : goneJournal(memory, id));
   const { store } = countingStore(memory, prefix => (prefix === 'gone-0:' ? new Promise<void>(() => undefined) : Promise.resolve()));
   const states: RemoteHostBrokerState[] = [];
-  const broker = revocation(store, states, { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ids });
+  const broker = revocation(store, states, { keys: [], creations: [], journalDeletions: ids,
+    hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+    bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] }, 50);
   try {
-    await sleep(100);
-    expect(await memory.catalog.list('')).toEqual([expect.objectContaining({ sessionKey: 'gone-0:codex:native-session' })]);
+    await sleep(200);
+    expect((await memory.catalog.list('')).map(({ sessionKey }) => sessionKey).sort()).toEqual(['gone-0:codex:native-session', `${HOST_ID}:${SESSION_KEY}`].sort());
+    expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
+    // The pass ended: a revoke after it starts the next pass, which deletes the Host while gone-0 stays pending.
+    expect((await revoke(broker))!.status).toBe(200);
+    await sleep(150);
+    expect(await memory.catalog.list(`${HOST_ID}:`)).toEqual([]);
     expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
   } finally { broker.close(); }
 });
 
-it('does not let a deletion that began before a re-revoke clear the new revoke', async () => {
+it('deletes 40 pending Hosts one after another in one pass, with one commit for each', async () => {
+  const ids = Array.from({ length: 40 }, (_, at) => `gone-${at}`);
+  const { store, calls, state } = countingStore(new MemoryJournalStore(), () => sleep(2));
+  const states: RemoteHostBrokerState[] = [];
+  const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journals: store, now: () => 10_000,
+    onStateChange: async next => { states.push(structuredClone(next)); },
+    initialState: { keys: [], creations: [], hosts: [], bindings: [], journalDeletions: ids } });
+  try {
+    await sleep(600);
+    expect(state.peak).toBe(1);
+    expect(calls).toEqual(ids.map(id => `${id}:`));
+    expect(states).toHaveLength(40);
+    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
+  } finally { broker.close(); }
+});
+
+it('deletes a Host revoked while the pass runs in the same pass, after the ids already pending', async () => {
+  const memory = new MemoryJournalStore();
+  await seedJournal(memory);
+  const { store, calls } = countingStore(memory, () => sleep(30));
+  const states: RemoteHostBrokerState[] = [];
+  const broker = revocation(store, states, { keys: [], creations: [], journalDeletions: ['gone-0', 'gone-1'],
+    hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
+    bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] });
+  try {
+    await sleep(10);
+    expect((await revoke(broker))!.status).toBe(200);
+    await sleep(200);
+    expect(calls).toEqual(['gone-0:', 'gone-1:', `${HOST_ID}:`]);
+    expect(await memory.catalog.list('')).toEqual([]);
+    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
+  } finally { broker.close(); }
+});
+
+it('ends a Host re-revoked during its deletion with no journal and no pending id', async () => {
   let release!: () => void;
   const first = new Promise<void>(resolve => { release = resolve; });
-  const { store, calls } = countingStore(new MemoryJournalStore(), (_prefix, call) => (call === 1 ? first : new Promise<void>(() => undefined)));
+  const memory = new MemoryJournalStore();
+  await seedJournal(memory);
+  const { store, calls } = countingStore(memory, (_prefix, call) => (call === 1 ? first : Promise.resolve()));
   const states: RemoteHostBrokerState[] = [];
   const broker = revocation(store, states, { keys: [], creations: [], journalDeletions: [HOST_ID],
     hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
@@ -480,71 +511,52 @@ it('does not let a deletion that began before a re-revoke clear the new revoke',
     await sleep(20);
     expect(calls).toHaveLength(1);
     expect((await revoke(broker))!.status).toBe(200);
+    expect(states.at(-1)!.journalDeletions).toEqual([HOST_ID]);
     release();
     await sleep(60);
-    expect(calls).toHaveLength(2);
-    expect(states.at(-1)!.journalDeletions).toEqual([HOST_ID]);
-  } finally { broker.close(); }
-});
-
-it('never runs more than four store deletions or deletes one Host twice at once, across overlapping revokes and registrations', async () => {
-  const ids = Array.from({ length: 12 }, (_, at) => `gone-${at}`);
-  const memory = new MemoryJournalStore();
-  const { store, state } = countingStore(memory, () => sleep(15));
-  const states: RemoteHostBrokerState[] = [];
-  const broker = revocation(store, states, { keys: [], creations: [], bindings: [], journalDeletions: [...ids, HOST_ID],
-    hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false },
-      { id: 'host-2', installationId: 'second-installation', name: 'Second Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }] });
-  try {
-    await sleep(10);
-    await revoke(broker);
-    await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host-2/revoke', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, body: '{}' }), {});
-    await sleep(400);
-    expect(state.peak).toBeLessThanOrEqual(4);
-    expect(state.duplicate).toBe(false);
+    expect(await memory.catalog.list('')).toEqual([]);
     expect(states.at(-1)).not.toHaveProperty('journalDeletions');
   } finally { broker.close(); }
 });
 
-it('deletes a Host revoked later while another Host\'s deletion still hangs', async () => {
+it('lets no call that outlived its deadline delete a journal created after the id was cleared', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const prefixes: string[] = [];
+  const r = await relay({ state: state => ({ ...state, journalDeletions: [HOST_ID] }), seed: store => seedJournal(store),
+    broker: { journalDeletionTimeoutMs: 50, journalDeletionWaitMs: 1000 },
+    journalStore: memory => ({ load: key => memory.load(key), apply: changes => memory.apply(changes), delete: key => memory.delete(key),
+      catalog: { list: prefix => memory.catalog.list(prefix), deletePrefix: async prefix => { if (prefixes.push(prefix) === 1) await gate; await memory.catalog.deletePrefix(prefix); } } }) });
+  // The first call hangs past its deadline, so the id stays pending and the returning Host registers without journals.
+  const hung = await r.connectController();
+  expect(registeredOf(hung)).not.toHaveProperty('journal');
+  hung.disconnect();
+  release();
+  await sleep(30);
+  // The abandoned call ended before the next one: this registration clears the id, then gets journals.
+  const returning = await r.connectController();
+  expect(registeredOf(returning)).toMatchObject({ journal: 1 });
+  await returning.open();
+  await returning.publish([{ op: 'append', row: row('m2', 'After') }, { op: 'complete', itemKey: 'm2', digest: DIGEST }]);
+  await sleep(80);
+  const stored = await r.store.load(STORE_KEY);
+  expect(stored?.items.map(item => item.itemKey)).toContain('m2');
+});
+
+
+it('deletes a Host revoked later while another Host\'s deletion hangs, and keeps the hung one pending', async () => {
   const memory = new MemoryJournalStore();
   await goneJournal(memory, 'gone-0');
   await seedJournal(memory);
   const states: RemoteHostBrokerState[] = [];
   const broker = revocation(storeDeleting(memory, prefix => (prefix === 'gone-0:' ? 'hang' : 'delete')), states, { keys: [], creations: [], journalDeletions: ['gone-0'],
     hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }],
-    bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] });
+    bindings: [{ hostId: HOST_ID, providerId: 'codex', nativeSessionId: 'native-session', agentId: PUBLIC_ID }] }, 50);
   try {
-    await sleep(30);
+    await sleep(20);
     expect((await revoke(broker))!.status).toBe(200);
-    await sleep(60);
+    await sleep(150);
     expect(await memory.catalog.list(`${HOST_ID}:`)).toEqual([]);
     expect(states.at(-1)!.journalDeletions).toEqual(['gone-0']);
-  } finally { broker.close(); }
-});
-
-it('asks the journal service for at most four deletions at once from one broker, however many revokes and registrations come', async () => {
-  const ids = Array.from({ length: 12 }, (_, at) => `gone-${at}`);
-  let running = 0, peak = 0;
-  const asked: string[] = [];
-  const journalService = { deleteHost: async (hostId: string) => {
-    asked.push(hostId); running += 1; peak = Math.max(peak, running);
-    await sleep(15);
-    running -= 1;
-  } } as unknown as NonNullable<Parameters<typeof createHostBroker>[0]['journalService']>;
-  const states: RemoteHostBrokerState[] = [];
-  const broker = createHostBroker({ origin: 'https://relay.example', accountBacked: true, journalService, now: () => 10_000,
-    onStateChange: async state => { states.push(structuredClone(state)); },
-    initialState: { keys: [], creations: [], bindings: [], journalDeletions: ids,
-      hosts: [{ id: HOST_ID, installationId: 'restored-installation', name: 'Restored Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false },
-        { id: 'host-2', installationId: 'second-installation', name: 'Second Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false }] } });
-  try {
-    await sleep(5);
-    await revoke(broker);
-    await broker.handleRequest(new Request('https://relay.example/v1/remote/hosts/host-2/revoke', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, body: '{}' }), {});
-    await sleep(300);
-    expect(peak).toBe(4);
-    expect(asked.sort()).toEqual([...ids, 'host-2', HOST_ID].sort());
-    expect(states.at(-1)).not.toHaveProperty('journalDeletions');
   } finally { broker.close(); }
 });

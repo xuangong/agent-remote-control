@@ -117,6 +117,8 @@ export interface HostBrokerOptions {
   journalRequestTimeoutMs?: number;
   /** How long a Host that returns with the id of a revoked Host waits for its journals' deletion before it is registered without journals. Default 5000. */
   journalDeletionWaitMs?: number;
+  /** How long one journal deletion call may take before the pass gives up on it and the id stays pending. */
+  journalDeletionTimeoutMs?: number;
   /** A journal service built elsewhere, such as one shared by every account or one that reaches journal partitions; used instead of `journals`. */
   journalService?: HostJournals;
   /** Internal opt-in; only a Gateway-authenticated tenant can supply this authority. */
@@ -886,7 +888,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         let resumed = false;
         const resume = () => { if (resumed) return; resumed = true; clearTimeout(timer); registered(); };
         const timer = setTimeout(resume, options.journalDeletionWaitMs ?? 5000);
-        void deleteJournals(ownId).then(resume);
+        void deleteOne(ownId).then(resume);
         return;
       }
       host.tunnelToken ??= randomBytes(32).toString('base64url');
@@ -900,7 +902,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (retired || host.socket !== socket) return;
       host.ready = true;
       journalSessions?.hostReturned(host.id);
-      if (journalDeletions.length > 0) retryJournalDeletions();
+      if (journalDeletions.length > 0) drainJournalDeletions();
       host.hostStatus = statusRequested ? true : undefined;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
       notifySessionStates();
@@ -2017,10 +2019,8 @@ export function createHostBroker(options: HostBrokerOptions) {
           previews.forget(host.id);
           if (journals) {
             journalDeletions = draft.journalDeletions ?? [];
-            revokeCounts.set(host.id, (revokeCounts.get(host.id) ?? 0) + 1);
-            triedDeletions.delete(host.id);
-            if (droppedDeletion !== undefined) { revokeCounts.delete(droppedDeletion); options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' }); }
-            startDeletionWorkers();
+            if (droppedDeletion !== undefined) options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' });
+            drainJournalDeletions();
           }
           if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
         } };
@@ -2297,87 +2297,48 @@ export function createHostBroker(options: HostBrokerOptions) {
     } };
   }
   /**
-   * Pending journal deletions. A revoke records a Host's id in the state; a round of deletions then clears the ids:
-   * - one pool of at most four workers runs per broker; a revoke or a registration while it runs hands the new work to an idle
-   *   slot, or to a worker that is between ids, and never starts a second pool;
-   * - workers take ids one by one, so a store call that never answers holds one worker, and a Host revoked later is still deleted
-   *   by the others; the journal service caps the store deletions of the whole Relay;
-   * - an id has one deletion in flight at a time, shared by every ask, kept until its confirmation is published;
-   * - each id is confirmed as soon as the store confirms it, and confirmations that wait for a running commit share the next one;
-   * - a re-revoke of an id bumps its revoke count, and a confirmation counts only for the count its deletion started under, so
-   *   an id revoked again while it was being deleted stays pending and is deleted again.
+   * Pending journal deletions. A revoke records a Host's id in the state; one sequential pass then clears the ids:
+   * - a Host's id receives no journal while it is pending (`registered` grants none), so a deletion that returns has nothing
+   *   left to delete for that id, a re-revoke during a deletion included, and the id is cleared when the call returns;
+   * - a call that does not answer within `journalDeletionTimeoutMs` is abandoned for this pass and the id stays pending: the
+   *   journal service runs the calls of one Host in order, so the abandoned one ends before any later deletion of that id;
+   * - a revoke or a registration while a pass runs is picked up by that pass or starts the next one; a start, a registration
+   *   and a revoke are the three triggers, and a failed id waits for the next of them.
    */
-  const JOURNAL_DELETION_CONCURRENCY = 4;
-  const revokeCounts = new Map<string, number>();
-  const deletionsInFlight = new Map<string, { revokeCount: number; run: Promise<boolean> }>();
-  const deletionConfirmations: Array<{ hostId: string; revokeCount: number; settle(confirmed: boolean): void }> = [];
-  let confirming = false;
-  /** Removes the confirmed ids that were not revoked again meanwhile from the pending list, one commit for everything queued. Never rejects. */
-  async function confirmQueuedDeletions(): Promise<void> {
-    if (confirming) return;
-    confirming = true;
-    try {
-      while (deletionConfirmations.length > 0) {
-        const batch = deletionConfirmations.splice(0);
-        let removed = new Set<string>();
-        try {
-          await commit(draft => {
-            const pending = draft.journalDeletions ?? [];
-            const current = new Set(batch.filter(item => (revokeCounts.get(item.hostId) ?? 0) === item.revokeCount && pending.includes(item.hostId)).map(item => item.hostId));
-            if (current.size === 0) return { value: undefined, unchanged: true, publish() {} };
-            const rest = pending.filter(id => !current.has(id));
-            if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-            return { value: undefined, publish() { journalDeletions = rest; removed = current; for (const id of current) revokeCounts.delete(id); } };
-          });
-        } catch { for (const item of batch) options.diagnostics?.record(item.hostId, { event: 'journal_store_failed' }); }
-        for (const item of batch) item.settle(removed.has(item.hostId));
-      }
-    } finally { confirming = false; }
-  }
-  /**
-   * Deletes one revoked Host's journals and removes its id from the state once the store confirms. Resolves true when the id is
-   * no longer pending, false when the store failed or the Host was revoked again meanwhile. Never rejects.
-   */
-  function deleteJournals(hostId: string): Promise<boolean> {
+  let draining = false;
+  /** Deletes one Host's journals and removes its id from the state if it is still there. Resolves false when the call failed or timed out, and leaves the id pending. Never rejects. */
+  async function deleteOne(hostId: string): Promise<boolean> {
     const service = journals;
-    if (!service) return Promise.resolve(false);
-    const revokeCount = revokeCounts.get(hostId) ?? 0;
-    const existing = deletionsInFlight.get(hostId);
-    // A deletion that started before the Host was revoked again cannot clear the new revoke: it is waited for, then run afresh.
-    if (existing) return existing.revokeCount === revokeCount ? existing.run : existing.run.then(() => deleteJournals(hostId));
-    const run = (async () => {
-      try { await service.deleteHost(hostId); }
-      catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
-      const confirmed = new Promise<boolean>(settle => deletionConfirmations.push({ hostId, revokeCount, settle }));
-      void confirmQueuedDeletions();
-      return confirmed;
-    })().finally(() => { deletionsInFlight.delete(hostId); });
-    deletionsInFlight.set(hostId, { revokeCount, run });
-    return run;
+    if (!service) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([service.deleteHost(hostId), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Journal deletion timed out')), options.journalDeletionTimeoutMs ?? 30_000); })]);
+    } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
+    finally { clearTimeout(timer); }
+    try {
+      await commit(draft => {
+        const pending = draft.journalDeletions ?? [];
+        if (!pending.includes(hostId)) return { value: undefined, unchanged: true, publish() {} };
+        const rest = pending.filter(id => id !== hostId);
+        if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
+        return { value: undefined, publish() { journalDeletions = rest; } };
+      });
+    } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
+    return true;
   }
-  /** The ids the workers have tried since the last request to retry failures; a failed id is not tried again until then. */
-  let triedDeletions = new Set<string>();
-  let deletionWorkers = 0;
-  /** Starts workers, up to four, for the pending ids no worker has tried. Never rejects. */
-  function startDeletionWorkers(): void {
-    while (deletionWorkers < JOURNAL_DELETION_CONCURRENCY && journalDeletions.some(id => !triedDeletions.has(id))) {
-      deletionWorkers += 1;
-      void (async () => {
-        try {
-          for (;;) {
-            const hostId = journalDeletions.find(id => !triedDeletions.has(id));
-            if (hostId === undefined) return;
-            triedDeletions.add(hostId);
-            await deleteJournals(hostId);
-          }
-        } finally { deletionWorkers -= 1; }
-      })();
-    }
-  }
-  /** Tries every pending id again, those that failed before included. */
-  function retryJournalDeletions(): void {
-    triedDeletions = new Set(deletionsInFlight.keys());
-    startDeletionWorkers();
+  /** Deletes the pending ids one after another, each at most once per pass; a revoke that arrives meanwhile joins the pass. Never rejects. */
+  function drainJournalDeletions(): void {
+    if (draining || !journals) return;
+    draining = true;
+    void (async () => {
+      const tried = new Set<string>();
+      for (;;) {
+        const hostId = journalDeletions.find(id => !tried.has(id));
+        if (hostId === undefined) { draining = false; return; }
+        tried.add(hostId);
+        await deleteOne(hostId);
+      }
+    })();
   }
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
@@ -2396,7 +2357,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     return { hostId: host.id, hostName: host.name, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'),
       current: () => !unavailable && keys.get(hash) === credential && credential.expires > now() && hosts.get(host.id) === host };
   }
-  if (journalDeletions.length > 0) retryJournalDeletions();
+  if (journalDeletions.length > 0) drainJournalDeletions();
   return {
     previews,
     authenticateDevice,

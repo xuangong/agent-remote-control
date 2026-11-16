@@ -103,7 +103,8 @@
               "messageId": "m1"
             },
             "resources": []
-          }
+          },
+          "itemSeqStart": 1
         },
         {
           "kind": "head",
@@ -616,7 +617,8 @@
                 "status": "pending"
               }
             ]
-          }
+          },
+          "itemSeqStart": 1
         },
         {
           "kind": "rebound",

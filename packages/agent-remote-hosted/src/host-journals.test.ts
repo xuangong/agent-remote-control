@@ -143,9 +143,9 @@ describe('createHostJournals', () => {
       { sequence: 3, op: 'head', head: { snapshot, observedAt: 5 } }, append(4, 'm2', 'World'),
     ]);
     expect(first.events).toEqual([
-      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', seq: 1 }) },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', seq: 1 }), itemSeqStart: 1 },
       { kind: 'head', head: { snapshot, observedAt: 5 } },
-      { kind: 'row', row: expect.objectContaining({ itemKey: 'm2', seq: 2 }) },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'm2', seq: 2 }), itemSeqStart: 2 },
     ]);
     const second = await journals.publish(HOST, SESSION, 1, [
       { sequence: 5, op: 'prepend', items: [{ row: row('m0', 'Earlier'), digest: 'digest-m0' }] },
@@ -164,9 +164,9 @@ describe('createHostJournals', () => {
     const epoch = result.cursor!.epoch;
     expect(epoch).not.toBe(first);
     expect(result.events).toEqual([
-      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', epoch: first }) },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'm1', epoch: first }), itemSeqStart: expect.any(Number) },
       { kind: 'replaced', epoch },
-      { kind: 'row', row: expect.objectContaining({ itemKey: 'x2', epoch }) },
+      { kind: 'row', row: expect.objectContaining({ itemKey: 'x2', epoch }), itemSeqStart: expect.any(Number) },
     ]);
     expect((await journals.publish(HOST, SESSION, 1, entries)).events).toEqual([]);
   });

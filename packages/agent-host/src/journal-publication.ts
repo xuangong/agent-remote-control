@@ -633,9 +633,9 @@ export class SessionPublication {
         }
       }
       if (!ended) {
-        // A binding that settled after the items were read arrived as a rebind before the journal held them, which passes it over.
+        // What settled after the items were read arrived as a rebind or an outcome before the journal held them, which passes them over.
         const restated = groupItems(accepted.flatMap(({ item }) => this.source.itemRows(item.row.itemKey)));
-        for (const chunk of chunkOps(rebindOps(restated))) await this.publish(token, chunk);
+        for (const chunk of chunkOps([...outcomeOps(restated), ...rebindOps(restated)])) await this.publish(token, chunk);
       }
       this.check(token);
       this.context.send({ uplinkVersion: REMOTE_HOST_UPLINK_VERSION, type: 'journal_older_done', requestId: request.requestId, sessionKey: this.options.sessionKey,

@@ -855,6 +855,21 @@ describe('older history and fills the Relay asks for', () => {
     expect(relay.refusedAt()).toHaveLength(1);
   });
 
+  it('says again what settled for the items it prepends: their outcomes as well as their bindings', async () => {
+    const relay = scriptedRelay();
+    const publisher = publisherFor(relay);
+    const background = { id: 'review-1', kind: 'review', status: 'visible' };
+    const older = item('history', 'm1', 'One');
+    const withOutcome = { ...older, event: { ...(older as Wire).event, item: { ...(older as Wire).event.item, background } } } as typeof older;
+    await attachSession(publisher, [item('history', 'm2', 'Two')], [{ observations: [withOutcome] }]);
+    await live(relay);
+    const before = relay.written.length;
+    relay.send({ uplinkVersion: 2, type: 'journal_older_request', requestId: 'older-1', sessionKey: 'fake:thread-1', beforeItemKey: 'm2', limit: 5 });
+    await until(() => relay.written.slice(before).some(message => message.type === 'journal_older_done'), 'the answer');
+    const ops = relay.written.slice(before).filter(message => message.type === 'journal_publish').flatMap(message => message.entries.map((value: Wire) => value.op));
+    expect(ops).toEqual(['prepend', 'outcome']);
+  });
+
   it('publishes a live row that arrives between two chunks of older history before the next chunk', async () => {
     const pending: Array<() => void> = [];
     let hold = false;

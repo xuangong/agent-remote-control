@@ -60,6 +60,10 @@ Copy this record once per root integration and once for materially different chi
 5. **Debugger:** check its actual command switch independently of headless-client support. Record missing entry points; do not claim CLI parity from shared types.
 6. **Evidence/docs:** update the baseline row cells, Provider audit, runbook and `compatibility.json` degradation reasons. Retain native/fixture/deployment distinctions.
 
+## Journal support
+
+A provider joins Relay journals only through its adapter: it declares `journal: { itemIdentity: 1 }` once every timeline observation carries an `itemIdentity` and continuity fixtures pass (see the Provider Contract in `docs/blueprint/agent-remote-observation.md`). The fixture records a live session and the same session opened again, and `expectContinuity` must find the same item keys and merged-content digests, add nothing to the journal, and call for a replacement only when native history really changed. Until then the provider's sessions stay on forwarding, which is always safe. The Controller asks for `journal=2` only when some provider declares the capability.
+
 ## Verification and release record
 
 Run existing relevant behavior tests with both per-test and outer deadlines. Root `pnpm test`, `pnpm test:e2e` and `pnpm test:conformance` enforce outer deadlines; custom invocations need their own bounded wrapper. Select pinned native executables explicitly. Build before native tests that import `dist`. Use free test ports and preserve running user Hosts.

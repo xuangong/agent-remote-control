@@ -487,6 +487,40 @@ Controllers to emit scoped usage, including the `runtime` scope. Older Controlle
 unscoped token and context measurements appear as unavailable. The independent
 Host uplink version is unchanged.
 
+## Session journals over the Host uplink
+
+A Controller asks for `journal=2` when it connects only if at least one of its providers declares `journal` in its adapter; no provider does yet, so today no Controller asks and every session stays on forwarding. It uses the journal messages only after the Relay acknowledges `registered.journal: 2`; a Relay that grants only 1 gets no journal publishing from it, because level 2 adds the `rebind` and `outcome` amendments, optional digests, `attentionItemKey`, `journal_unserve` and `journal_request_refused`. The publisher (`packages/agent-host/src/journal-publisher.ts`) follows each session of a capable provider while the Host holds it:
+
+- **Open.** `journal_open` claims a generation, fencing every older connection. The Controller reads the whole item index (`journal_opened`, then `journal_index_request` for each `indexAfter`, one page at a time) and compares it with a reread of its timeline before any live row is published: on first attach, a Controller restart, a wake after an idle release, a provider refresh, and every recovery. A journal whose index is over the Relay's bound (100,000 items) refuses the open with `index_too_large`; the Controller then opens with `reset: true`, which claims the journal with an empty index and accepts only a replacement that fits (and then the head) until one is stored.
+- **Reconcile.** The epoch continues unless native history was rewritten. Unknown items are appended and completed, a known item that is open or whose digest differs is corrected (`correct` names the revision it saw), items older than the journal are prepended, and an open item that history no longer holds is sealed. Live-only items are never counted as missing. A rewrite is a `replace` of the newest items that fit one message; older ones follow as a prepend.
+- **Live.** Rows are batched for 50 ms and consecutive rows of one item merge. `complete` carries the digest of the whole item. One publication per session is in flight until the Relay acknowledges it, and all sessions share a budget of 64 messages and 16 MiB in flight.
+- **Amendments.** `rebind` replaces a resource binding in place and `outcome` applies a background outcome in place. The Relay sends them to journal-served clients as `timeline_resource_binding_replaced` and as an `agent_stream` frame without an epoch. Other runtime events change the Snapshot, which the head carries, so they are not published.
+- **Head.** The head is the Snapshot taken when a batch is drained. `attentionItemKey` names the item the Controller's attention cursor points at. A head whose pending interactions changed is published at once.
+- **Requests of the Relay.** `journal_fill_request` is answered with `journal_fill`, reading older native history when the items are not in the timeline. `journal_older_request` is answered with a prepend and then `journal_older_done`. A request for a session the Controller does not follow, or has not opened yet, is answered at once with `journal_request_refused`.
+
+### Refusals and recovery
+
+The Relay refuses a publication with `journal_refused`, whose `reason` is one of `fenced`, `stale_revision`, `unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`, `quota_exceeded`, `incomplete` and `sequence_gap`. Sequences of one generation are contiguous: a refused entry never consumes its sequence. After a refusal about one item (`unknown_item`, `body_missing`, `type_changed`, `duplicate_item`, `invalid`) the publisher leaves that item out and sends the rest again, renumbered from the refused sequence, without opening. A refusal that names no item, and a `sequence_gap`, open the session again. A missing acknowledgement (30 seconds) or a lost connection also opens it again; the backoff starts over after a minute of publishing.
+
+- `quota_exceeded` replaces with the newest 2,000, then 200, then 20 items.
+- `incomplete` (a head sent while the journal is missing rows) replaces again with the same window and then sends the head.
+- A provider observation without `itemIdentity` stops the session (`journal_session_stopped`, reason `identity_missing`) and unserves it.
+- A row or item the wire refuses is dropped with a `journal_row_rejected` diagnostic; the session continues.
+- A session that cannot be kept current (its head cannot be published, the Relay keeps calling the journal incomplete, the narrowest quota window is refused, three replacements in a row) is stopped and `journal_unserve` tells the Relay to clear the head, so browsers read it through the Controller again. A refused open needs no unserve: the Relay takes the session out of serving itself, and the Controller stops publishing it until the next connection.
+
+A Controller advertises diagnostic delivery 4, which delivers the journal diagnostics of the Relay and of the publisher (`journal_session_stopped`, `journal_row_rejected`); `GET /remote/controller-update` reports it as `diagnosticDelivery: 4`.
+
+### Stable resource ids
+
+Resource ids of timeline rows are keyed hashes of agent, locator and content, so they stay the same across Controller restarts and a journal row's binding keeps naming a readable resource. Two files in the Controller state directory (`AGENT_HOST_STATE_DIR`, default `~/.agent-remote-control/agent-host`) back this:
+
+| File | Mode | Content |
+| --- | --- | --- |
+| `resource-id.key` | `0600` (directory `0700`) | The secret behind the ids. It is created once, written atomically, and tightened to `0600` if found readable by others. |
+| `resource-id-index.json` | `0600` | A bounded index (10,000 entries) from each resource id to where its bytes came from and their sha256, written after a short delay. |
+
+After a restart, a read of an id the Relay has no record of is answered `pending`, the bytes are read again through the session's resource reader, and they are served only when their sha256 is the remembered one; otherwise the answer is `unavailable` ("Resource content changed."). Never delete either file while sessions with images matter: removing `resource-id.key` changes every id, so journaled history loses its readable images and every client must reload; removing only the index makes old images `unavailable`. Both files are local secrets or derived from them and are never to be copied to another machine or shared.
+
 ## Generic resource input
 
 Public Remote protocol 1.8.0 adds generic resource messages and strict resource capability fields. All public participants must upgrade together; independent uplink envelope versions remain unchanged. Older public clients are rejected during negotiation rather than receiving unsupported snapshot fields.

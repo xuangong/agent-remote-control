@@ -96,6 +96,8 @@ interface AgentSession {
 
 The adapter begins native live observation before history hydration, emits historical observations, emits one boundary, and then drains buffered and subsequent live observations. The Relay rejects history after the boundary and does not declare the session ready before receiving it.
 
+An adapter may declare `journal: { itemIdentity: 1 }`. It then gives every timeline observation an `itemIdentity`: the native key of the finalized item the observation belongs to, whether the observation finishes the item (`completes`), and whether native history cannot rebuild it (`liveOnly`). The key of an item is the same when its deltas are observed live and when its record is read again after a reopen, and the merged content of its live rows equals the content of the record. History observations complete their item, except for a record the native runtime is still writing. An adapter declares the capability only after continuity fixtures prove this with `expectContinuity` (`packages/agent-host/src/test-utils/journal-continuity.ts`). The Controller publishes only the sessions of providers that declare it; every other provider keeps forwarding.
+
 Capabilities state which optional controls, interactions, history, and resource reads the concrete session supports. Generic clients enable Owner behavior from these capabilities only after authorization, not from a Provider name. Session disposal is idempotent resource release regardless of whether creation, attachment, or observation later fails.
 
 Direct Provider-session message submission, interaction response, steer, and cancel remain explicit control operations admitted by the local server and checked against Provider capabilities.

@@ -245,6 +245,21 @@ describe('LabWorkbench', () => {
     expect(container.textContent).not.toContain('Connecting');
   });
 
+  it.each(['connecting', 'catching_up'] as const)('says the last business label, not the opening words, while %s with rows held from the device or across a replacement', async status => {
+    for (const held of [{ restoredFromDevice: true as const }, { pendingEpoch: 'next-epoch' }]) {
+      const state = { ...replicaState, timeline: { ...replicaState.timeline, ...held } };
+      const container = await render(<LabWorkbench state={state} sessionStatus={status} actions={{}} />);
+      expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
+      expect(container.textContent).not.toMatch(/Opening session|Synchronizing|Checking access/);
+    }
+  });
+
+  it('still says Reconnecting for rows held from the device when the connection breaks', async () => {
+    const state = { ...replicaState, timeline: { ...replicaState.timeline, restoredFromDevice: true as const } };
+    const container = await render(<LabWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Reconnecting');
+  });
+
   it('alerts with a generic connection failure before readiness and preserves the diagnostic', async () => {
     const state = {
       ...replicaState,

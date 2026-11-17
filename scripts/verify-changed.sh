@@ -1,20 +1,30 @@
 #!/bin/sh
-# Checks what this branch changes against origin/main, on demand: the compatibility check, the full build and type
-# check, and the unit suites of the changed packages and of the packages that depend on them. Changes to workspace
-# files outside packages/ and docs/, such as scripts or the lockfile, run the full `pnpm verify`, as releases do.
-# Pushing does not run these checks; run this before a push or a merge when you want them.
-# Usage: pnpm verify:changed [base-commit]   (default: the merge base with origin/main)
+# Checks what a task changed, on demand: builds and type-checks the changed packages and their dependents, then runs
+# their unit suites. Files outside packages/ run nothing, except that scripts/**/*.test.mjs changed run alone and a change
+# to the root package.json, the lockfile or the workspace file runs the full `pnpm verify`, as releases do.
+# The compatibility digest is not checked here; `pnpm verify` and releases check it.
+# Usage: pnpm verify:changed [base-commit]
+# The base is, in order: the argument, $ARC_TASK_BASE, the commit `pnpm task:start` recorded, the merge base with origin/main.
 cd "$(git rev-parse --show-toplevel)" || exit 1
 # Tests that run git in temporary repositories must not inherit this repository's GIT_DIR (set in hooks and worktrees).
 unset $(git rev-parse --local-env-vars)
-base=${1:-$(git merge-base HEAD origin/main 2>/dev/null)}
-if [ -z "$base" ]; then echo 'verify:changed: no merge base with origin/main; running pnpm verify.' >&2; exec pnpm verify; fi
+recorded=$(cat "$(git rev-parse --git-path arc-task-base)" 2>/dev/null)
+base=${1:-${ARC_TASK_BASE:-${recorded:-$(git merge-base HEAD origin/main 2>/dev/null)}}}
+if [ -z "$base" ]; then echo 'verify:changed: no base commit and no merge base with origin/main; running pnpm verify.' >&2; exec pnpm verify; fi
+base=$(git rev-parse --verify --quiet "$base^{commit}") || { echo 'verify:changed: the base is not a commit.' >&2; exit 1; }
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo 'verify:changed: uncommitted changes are built, but only committed ones choose the packages to test.' >&2
 fi
-if git diff --name-only "$base" HEAD | grep -qvE '^(packages|docs)/'; then
-  echo "verify:changed: files outside packages/ and docs/ changed since $(git rev-parse --short "$base"); running pnpm verify." >&2
+changed=$(git diff --name-only "$base" HEAD)
+if printf '%s\n' "$changed" | grep -qE '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$'; then
+  echo "verify:changed: the root package.json, lockfile or workspace file changed since $(git rev-parse --short "$base"); running pnpm verify." >&2
   exec pnpm verify
 fi
 echo "verify:changed: testing the packages changed since $(git rev-parse --short "$base") and their dependents." >&2
-pnpm compatibility:check && pnpm -r run build && pnpm typecheck && exec node scripts/run-tests.mjs affected "$(git rev-parse "$base")"
+script_tests=$(printf '%s\n' "$changed" | grep -E '^scripts/.*\.test\.mjs$' | while read -r file; do [ -f "$file" ] && echo "$file"; done)
+node scripts/run-tests.mjs affected-build "$base" && node scripts/run-tests.mjs affected-typecheck "$base" && node scripts/run-tests.mjs affected "$base" || exit 1
+if [ -n "$script_tests" ]; then
+  echo "verify:changed: running the changed script tests." >&2
+  # shellcheck disable=SC2086
+  exec node --test --test-timeout=60000 $script_tests
+fi

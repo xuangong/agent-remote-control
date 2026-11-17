@@ -22,6 +22,7 @@ import type {
   TimelineReduction,
   TimelineStreamMessage,
 } from './types.js';
+import { absorbWindow, updateInPlace } from './absorb-window.js';
 import { timelineEntryKey } from './timeline-entry-key.js';
 
 function clone<T>(value: T): T {
@@ -288,14 +289,7 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
 function absorbTail(state: AgentReplicaState, page: HistoryPage): TimelineReduction {
   const payload = page.payload;
   const timeline = state.timeline;
-  const held = new Map(timeline.entries.map((entry) => [timelineEntryKey(timeline.epoch, entry), entry]));
-  const seen = new Set<string>();
-  const entries = payload.entries.flatMap((incoming) => {
-    const key = timelineEntryKey(payload.epoch, incoming);
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [absorbEntry(held.get(key), incoming)];
-  });
+  const entries = absorbWindow(timeline.entries, timeline.epoch, payload.epoch, payload.entries);
   const retiredEpochs = unique([...state.retiredEpochs, ...[timeline.epoch, timeline.pendingEpoch].filter((epoch): epoch is string => !!epoch && epoch !== payload.epoch)]);
   const prepared: AgentReplicaState = {
     ...state,
@@ -313,41 +307,6 @@ function absorbTail(state: AgentReplicaState, page: HistoryPage): TimelineReduct
     },
   };
   return drainPending(prepared);
-}
-
-/** The entry a page brings for a key the replica may hold: the held one when its content is equal, the page's otherwise. */
-function absorbEntry(held: ProjectedTimelineEntry | undefined, incoming: ProjectedTimelineEntry): ProjectedTimelineEntry {
-  if (!held || !sameContent(held, incoming)) return clone(incoming);
-  if (held.seqStart === incoming.seqStart && held.seqEnd === incoming.seqEnd && JSON.stringify(held.sourceSeqRanges) === JSON.stringify(incoming.sourceSeqRanges)) return held;
-  return { ...held, seqStart: incoming.seqStart, seqEnd: incoming.seqEnd, sourceSeqRanges: clone(incoming.sourceSeqRanges) };
-}
-
-/** A held row an `after` page updates: its content and last sequence change, its first sequence and so its place do not. */
-function updateInPlace(held: ProjectedTimelineEntry, incoming: ProjectedTimelineEntry): ProjectedTimelineEntry {
-  const moved = { ...incoming, seqStart: held.seqStart };
-  return absorbEntry(held, moved);
-}
-
-const contentOf = new WeakMap<ProjectedTimelineEntry, string>();
-/** Row equality is content: the item without its background outcome and client message id, and the ids of its resources. */
-function sameContent(left: ProjectedTimelineEntry, right: ProjectedTimelineEntry): boolean {
-  return entryContent(left) === entryContent(right);
-}
-function entryContent(entry: ProjectedTimelineEntry): string {
-  let content = contentOf.get(entry);
-  if (content === undefined) {
-    const { background: _background, clientMessageId: _clientMessageId, ...item } = entry.item as ProjectedTimelineEntry['item'] & { clientMessageId?: string };
-    content = canonicalJson({ item, resources: entry.resources.map((resource) => resource.resourceId) });
-    contentOf.set(entry, content);
-  }
-  return content;
-}
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const fields = Object.entries(value as Record<string, unknown>).filter(([, field]) => field !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${fields.map(([key, field]) => `${JSON.stringify(key)}:${canonicalJson(field)}`).join(',')}}`;
 }
 
 /**

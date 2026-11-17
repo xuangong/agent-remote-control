@@ -5,6 +5,8 @@ import { SessionJournal } from './session-journal.js';
 import type { JournalCatalog, JournalPublication, JournalRowInput } from './types.js';
 
 export { MemoryJournalStore };
+export { describeDecision, heldTail, vectorText, windowItems, windowVectors } from './window-vectors.js';
+export type { VectorDigest, VectorExpectation, VectorItem, WindowVector } from './window-vectors.js';
 
 /** A store that can list and delete journals by key prefix; every store of the Relay can. */
 export type CatalogedJournalStore = JournalStore & { catalog: JournalCatalog };

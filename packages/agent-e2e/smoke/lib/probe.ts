@@ -69,13 +69,14 @@ export class PageProbe {
     } catch { return false; }
   }
 
-  rows(): Promise<Array<{ key: string; kind: string; text: string }>> { return this.page.evaluate(() => (window as any).__smoke.rows()); }
+  /** The rendered rows; none while the page has not loaded far enough to have an observer. */
+  rows(): Promise<Array<{ key: string; kind: string; text: string }>> { return this.page.evaluate(() => (window as any).__smoke?.rows() ?? []); }
   /** Remembers the item keys the page renders now. */
   async snapshotKeys(): Promise<string[]> { const keys = (await this.rows()).map(row => row.key); this.rowKeys.push(keys); return keys; }
   setHidden(hidden: boolean): Promise<void> { return this.page.evaluate((value: boolean) => (window as any).__smoke.setHidden(value), hidden); }
 
   async report(extra: Partial<PageReport> = {}): Promise<PageReport> {
-    const raw: RawSample[] = await this.page.evaluate(() => (window as any).__smoke.log.slice());
+    const raw: RawSample[] = await this.page.evaluate(() => (window as any).__smoke?.log.slice() ?? []);
     const finalRows = toPageRows(await this.rows());
     return { samples: toPageSamples(raw, this.clockOrigin), paints: [...this.paints], rowKeys: [...this.rowKeys], finalRows, ...extra };
   }

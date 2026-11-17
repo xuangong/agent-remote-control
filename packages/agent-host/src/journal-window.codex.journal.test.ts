@@ -47,7 +47,8 @@ describe('a recorded Codex session that is opened again', () => {
 });
 
 describe('journals are off unless the Relay and the Host switch them on', () => {
-  it('does not declare journal support for Codex until its recordings and these tests pass', () => {
-    expect(supportsJournal(new CodexAppServerProvider())).toBe(false);
+  it('declares journal support for Codex and for no adapter that does not', () => {
+    expect(supportsJournal(new CodexAppServerProvider())).toBe(true);
+    expect(supportsJournal({})).toBe(false);
   });
 });

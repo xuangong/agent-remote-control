@@ -45,6 +45,8 @@ export interface CodexAppServerProviderOptions {
 }
 
 export class CodexAppServerProvider implements AgentProviderAdapter {
+  /** Every timeline observation carries an item identity equal live and in a reread (`src/journal-recording.local.test.ts` records it against the real CLI). */
+  readonly journal = { itemIdentity: 1 as const };
   /** Native thread/start creates a nonempty UUID. An injected producer has no declared bound. */
   get createdSessionIdMaxLength(): number | undefined { return this.options.spawn ? undefined : 36; }
   get nativePrefix(): AgentNativePrefixCapability | undefined {

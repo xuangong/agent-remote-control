@@ -31,8 +31,9 @@ it('projects real Write/Edit output as diffs and restores the transcript through
   resumed=await cold.resumeSession({...handle,opaque:'{}'});
   const history:any[]=[];
   for await(const item of resumed.observe()){if(item.type==='history_boundary')break;history.push(item);}
-  // The public catalog omits native structured tool output; do not reconstruct diffs from intent.
-  expect(JSON.stringify(history)).not.toContain('file_changes');
+  // The public catalog omits native structured tool output; the transcript holds it, so a reopened session keeps the diffs the live one showed.
+  const reopened=history.flatMap(item=>item.event?.type==='timeline'&&item.event.item.type==='tool_call' ? item.event.item.result?.content.filter((part:any)=>part.type==='json'&&part.value.format==='file_changes').flatMap((part:any)=>part.value.files)??[]:[]);
+  expect(reopened).toEqual(changes);
   expect(JSON.stringify(history)).toContain('NATIVE_DIFF_DONE');
   expect((await resumed.runtimeInfo()).cwd).toBe(f.cwd);
  } finally {await resumed?.dispose();await provider.dispose();await pump;await f.close();}

@@ -1,7 +1,7 @@
 import { renameSession, getSessionInfo, getSessionMessages, listSessions, listSubagents, getSubagentMessages } from '@anthropic-ai/claude-agent-sdk';
 import { ClaudeHistoryError, readClaudeHistoryPage } from './reference-history.js';
-import { withFoldedInput } from './folded-input.js';
-import { forkPromptEdit, inspectPromptEdit, promptTurns, readTranscript, verifyPromptEditBranch } from './prompt-edit.js';
+import { withTranscriptExtras } from './transcript-extras.js';
+import { forkPromptEdit, inspectPromptEdit, promptTurns, readSubagentTranscript, readTranscript, verifyPromptEditBranch } from './prompt-edit.js';
 
 const [operation, sessionId, argument] = process.argv.slice(2);
 try {
@@ -10,7 +10,7 @@ try {
     : operation === 'messages' && sessionId ? await getSessionMessages(sessionId)
     : operation === 'timeline-messages' && sessionId ? await timelineMessages(sessionId)
     : operation?.startsWith('prompt-edit-') && sessionId && argument ? await promptEdit(operation, sessionId, argument)
-    : operation === 'child-messages' && sessionId && argument ? await getSubagentMessages(sessionId, argument)
+    : operation === 'child-messages' && sessionId && argument ? await childMessages(sessionId, argument)
     : operation === 'children' && sessionId ? await readChildren(sessionId)
     : (() => { throw new Error('Unknown catalog operation.'); })();
   process.stdout.write(JSON.stringify(result ?? null));
@@ -21,17 +21,23 @@ try {
 
 async function readHistory(id: string, argument: string) {
   try {
-    return { page: await readClaudeHistoryPage({ info: getSessionInfo, messages: async (sessionId, options) => withFoldedInput(sessionId, await getSessionMessages(sessionId, options)) }, id, JSON.parse(argument)) };
+    return { page: await readClaudeHistoryPage({ info: getSessionInfo, messages: async (sessionId, options) => withTranscriptExtras(sessionId, await getSessionMessages(sessionId, options), await readTranscript(sessionId)) }, id, JSON.parse(argument)) };
   } catch (error) {
     return { error: error instanceof ClaudeHistoryError ? error.message : 'Claude source history is unavailable.' };
   }
 }
 
-/** Each message names the turn it belongs to, so a reopened Timeline offers the same prompt edits as a live one. */
+/** Each message names the turn it belongs to, so a reopened Timeline offers the same prompt edits as a live one. One read of the transcript serves the turns and what the public read leaves out. */
 async function timelineMessages(id: string) {
-  const messages = await withFoldedInput(id, await getSessionMessages(id));
-  const turns = promptTurns(await readTranscript(id) ?? []);
+  const rows = await readTranscript(id);
+  const messages = withTranscriptExtras(id, await getSessionMessages(id), rows);
+  const turns = promptTurns(rows ?? []);
   return messages.map(message => { const turnId = turns.get(message.uuid); return turnId ? { ...message, turnId } : message; });
+}
+
+/** A sub-agent's rows carry their tool results as the live frames of its view do. */
+async function childMessages(parentId: string, childId: string) {
+  return withTranscriptExtras(parentId, await getSubagentMessages(parentId, childId), await readSubagentTranscript(parentId, childId));
 }
 
 /** Validation failures are user-facing explanations; anything else stays a generic catalog failure. */
@@ -47,6 +53,6 @@ async function promptEdit(operation: string, id: string, argument: string) {
 
 async function readChildren(parentId: string) {
   const children = [];
-  for (const id of await listSubagents(parentId)) children.push({ id, messages: await getSubagentMessages(parentId, id) });
+  for (const id of await listSubagents(parentId)) children.push({ id, messages: await childMessages(parentId, id) });
   return children;
 }

@@ -1,17 +1,18 @@
-import { readFile, realpath } from 'node:fs/promises';
+import { access, readdir, readFile, realpath } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { forkSession } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
-import { transcriptFile } from './folded-input.js';
 import { record } from './projector.js';
 
 /** The native boundary of a prompt edit: the conversation entry the new branch ends with, or none for the first prompt. */
 export interface ClaudePromptEditBoundary { cwd: string; forkPoint: string | null }
 
-interface Row {
+export interface Row {
   /** Conversation entries carry a parent link; metadata entries such as titles do not. */
   linked: boolean; uuid: string; parentUuid: string | null; logicalParentUuid?: string; type?: unknown; subtype?: unknown; sessionId?: unknown;
   isSidechain?: unknown; isMeta?: unknown; isCompactSummary?: unknown; isVisibleInTranscriptOnly?: unknown;
-  cwd?: unknown; message?: unknown; attachment?: unknown;
+  cwd?: unknown; message?: unknown; attachment?: unknown; toolUseResult?: unknown; origin?: unknown;
 }
 
 const nativeRecord = /^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|task-notification)>/;
@@ -19,7 +20,19 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function readTranscript(sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<Row[] | undefined> {
   const file = await transcriptFile(sessionId, env);
-  if (!file) return undefined;
+  return file ? readRows(file) : undefined;
+}
+
+/** The transcript of a sub-agent of a session, written beside it. */
+export async function readSubagentTranscript(sessionId: string, agentId: string, env: NodeJS.ProcessEnv = process.env): Promise<Row[] | undefined> {
+  const file = await transcriptFile(sessionId, env);
+  if (!file || !/^[\w-]+$/.test(agentId)) return undefined;
+  const child = join(file.slice(0, -'.jsonl'.length), 'subagents', `agent-${agentId}.jsonl`);
+  try { await access(child); } catch { return undefined; }
+  return readRows(child);
+}
+
+async function readRows(file: string): Promise<Row[]> {
   const rows: Row[] = [];
   for (const line of (await readFile(file, 'utf8')).split('\n')) {
     if (!line) continue;
@@ -30,6 +43,18 @@ export async function readTranscript(sessionId: string, env: NodeJS.ProcessEnv =
       ...(typeof value.logicalParentUuid === 'string' ? { logicalParentUuid: value.logicalParentUuid } : {}) });
   }
   return rows;
+}
+
+export async function transcriptFile(sessionId: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) return undefined;
+  const projects = join(env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? homedir(), '.claude'), 'projects');
+  let directories: string[];
+  try { directories = await readdir(projects); } catch { return undefined; }
+  for (const directory of directories) {
+    const candidate = join(projects, directory, `${sessionId}.jsonl`);
+    try { await access(candidate); return candidate; } catch { /* Not in this project. */ }
+  }
+  return undefined;
 }
 
 /** The conversation the native runtime resumes: the newest main-thread entry and its ancestors, across compaction. */

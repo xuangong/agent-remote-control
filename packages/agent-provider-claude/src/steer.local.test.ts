@@ -4,7 +4,8 @@ import { expect, it } from 'vitest';
 import type { AgentInputAcceptance } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentSession } from './session.js';
 import { ClaudeAgentProvider } from './provider.js';
-import { withFoldedInput } from './folded-input.js';
+import { withTranscriptExtras } from './transcript-extras.js';
+import { readTranscript } from './prompt-edit.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 it.each(['while a tool runs', 'after the reply is written'] as const)('delivers a message sent %s without rejecting it', async when => {
@@ -74,7 +75,7 @@ it('restores a message folded into a running turn when the session is reopened',
   // Public session reads resolve the native profile from the process environment.
   process.env.CLAUDE_CONFIG_DIR = env.CLAUDE_CONFIG_DIR;
   const catalog = { list: () => listSessions(), info: (id: string) => getSessionInfo(id), messages: (id: string) => getSessionMessages(id),
-    timelineMessages: async (id: string) => withFoldedInput(id, await getSessionMessages(id), env), children: async () => [] };
+    timelineMessages: async (id: string) => withTranscriptExtras(id, await getSessionMessages(id), await readTranscript(id, env)), children: async () => [] };
   const provider = new ClaudeAgentProvider({ ...fixture.options, catalog });
   try {
     const session = await provider.createSession({ cwd: fixture.cwd, model: 'claude-sonnet-4-5-20250929' });

@@ -51,3 +51,23 @@ Client: `agent-remote-web/src/client/lease-view.ts`, one table from the replica'
 **Exceptions.** None lowered; the Relay core exceptions are owned by M11.
 
 **Smoke (seed 33512, build 39bb5c0f1aac).** M2 and M7 passed, every invariant as at the baseline; M1 failed on first paint from the device store as at the baseline (3.3 s Claude, 3.9 s Codex), owned by M8.
+
+## M7 Send-state machine (X8)
+
+**Module.** `agent-remote-web/src/replica/send-state.ts`: `transition(state, event)` over `sending`, `awaiting_echo`, `unconfirmed` and `failed` with the events `acknowledged`, `send_failed`, `echoed`, `history_changed`, `restored` and `retry`; `describe(state, delivery)` for the words; `canSettle`, `awaitsEcho` and `retriesSameOperation`. The spec's names `idle`, `pending`, `queued`, `delivered`, `uncertain` map onto what the code has: no message before send, `sending` and `awaiting_echo` (words "Sending…", "Sent — waiting" and, for a next-turn delivery, "Queued — waiting"), a message leaving the list as `delivered`, and `unconfirmed` for uncertain. Contract: written in the module and in `seams.md` (S6, "Send state"). `message-outbox.ts` is renamed `pending-messages.ts` (class `PendingMessages`; `resource-message-outbox.test.ts` follows).
+
+**Code moved.** The scattered status rules went into the table and its callers read it: the acknowledgement, restore and retry rules of the replica store, the echo and history-rewrite rules of the pending-message reconciliation, the failure words and the retry, delete and same-operation guards of the session client, the delivery words of `OutgoingMessageItem`, and the list of stored states in the Workbench's `message-recovery.ts`. `recovery-writes.ts` is storage scheduling, not send state, and stays; the composer's pending-send queue (`usePendingSend`, phases waiting to error) is a separate machine for messages that wait for a connection, and also stays. The moved logic is about 80 lines, not the 400 the spec estimated.
+
+**Tests added.** 26 table rows, the who-may-retry, same-operation and word tables: 42 tests, each under 20 ms.
+
+**Mutation check** (12 mutations: an acknowledgement lifts `unconfirmed`, an acknowledgement changes `failed`, an echo settles `failed`, a history rewrite resets `unconfirmed` or touches `failed`, a reload turns `failed` into `unconfirmed`, any state may be retried, uncertain counts as failed, a retry ignores the place, the next-turn label, a handled command stays, the order of the failure words): each failed the new table (1 to 3 tests). Old tests failed under only three of them: uncertain counted as failed (6 behaviour tests of the session client and the composer transport), a retry ignoring the place (1), and a handled command kept (1); the Workbench tests filtered to messages and recovery (214) passed under every mutation. So the rules were largely unpinned before; the table adds coverage and removes none.
+
+**Deleted.** None. The 25 tests the spec expected in web, lab and four e2e specs are not duplicates of these rules: the old tests that failed are behaviour tests (a real channel reconnect, a late echo after a generic failure, the same operation identity on retry), which stay. `pending-send.spec.ts` is one test per target about the composer's send-later queue, not about this table, so it stays.
+
+**Scope.** A change to a send-state rule selected the client package (1,008 tests) and its dependents, the Workbench included. It selects now the table (42 tests) and the view test `OutgoingMessageItem.test.tsx`, which is the S6 pending-send view test until the client split gives S6 its own suite.
+
+**Exceptions.** None lowered.
+
+**Time.** The table runs in 0.12 s, the view test in 0.7 s (jsdom start-up).
+
+**Smoke (seed 7284, build 001505084eef).** M2 and M7 passed with every invariant as at the baseline (messages settle once 4 in M2 and 2 in M1); M1 failed on first paint from the device store as at the baseline (3.9 s Claude, 3.7 s Codex), owned by M8.

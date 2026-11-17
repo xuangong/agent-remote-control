@@ -122,6 +122,12 @@ flowchart LR
 - `packages/agent-remote-relay/src/transport/remote-host-uplink-client.ts:14-145`
 - `packages/agent-remote-relay/src/transport/uplink-writer.ts:12-78`
 
+## Journals of terminal-driven sessions
+
+A session a terminal CLI writes while the Controller holds no runtime of it would leave its Relay journal behind. The Controller keeps one map, `journalWindowAt`: for each session it published and released, the native update time the Relay's journal already covers. Every read of a provider's directory (the page's revision check, a listing, the Controller's own state confirmation) passes through one place, and a summary newer than the entry attaches that session once, like a browser's open, so its window arrives `appended` or `replaced`, and releases it at once (`packages/agent-host/src/host.ts`, `listed`). A directory whose listing is read only on request (Codex) does not move when a terminal writes, so the sessions this process published are read one by one. A session that is held (a manager follows it, or a browser reads it) follows itself and is not attached; one a terminal still owns refuses the attach and waits for the next listing; a failed attach waits for the next change of the update time. No timer, message, flag or diagnostic is added.
+
+Limits. A provider whose directory never releases idle sessions (Claude Code and Copilot, whose stdio directory has no `canReleaseSession`) keeps a published session resident, so it is held and is not refreshed: a raw terminal turn on a session the Controller still holds shows at the next reopen that goes through a fresh attach, not at the next listing. A terminal that stays open and owns the session cannot be refreshed. After a Controller restart the map is empty, so a turn written while the Controller was stopped shows at the next open through the Controller (`journal-terminal-refresh.journal.test.ts` names each case).
+
 ## Interaction response boundaries
 
 Before invoking a Provider, the manager validates each response against the pending request and claims that request for a single responder. Native failure releases the claim for deliberate retry. Native resolutions and hydrated completed interaction rows pass through request-aware redaction before reaching public events or history, including records supplied by a Provider that did not redact its own receipt (`packages/agent-remote-relay/src/agent-manager.ts`, `packages/agent-provider-sdk/src/interactions.ts`).

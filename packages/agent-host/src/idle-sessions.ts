@@ -87,6 +87,8 @@ export function createIdleSessions(options: { graceMs?: number; reconcileMs?: nu
     },
     hasDemand(id: string) { return (entries.get(id)?.users ?? 0) > 0; },
     touch(id: string) { const entry = entries.get(id); if (entry) reset(entry); },
+    /** A session nobody holds ends its idle grace now: the next sweep releases it when it is safe to. */
+    expire(id: string) { const entry = entries.get(id); if (entry && !entry.users) entry.idleSince = Number.NEGATIVE_INFINITY; },
     async wait(id: string) { await entries.get(id)?.releasing; },
     setConnected(value: boolean) {
       if (connected === value) return;

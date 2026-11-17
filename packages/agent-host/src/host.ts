@@ -413,11 +413,27 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const registrations = new Map<string, AgentHostProviderRegistration>();
   const prepared = new Map<string, AgentSession>();
   const nativeAttachments = new WeakMap<SessionWireAgent, { session: AgentSession; nativeCreation?: string; nativePrefix?: string }>();
+  /** The native update time that the journal of each session this process published already covers; a listing newer than it says something else wrote the session. */
+  const journalWindowAt = new Map<string, number>();
+  let journalRefreshing = false;
+  /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
+  const observeListing = (registration: AgentHostProviderRegistration): AgentHostProviderRegistration => ({ ...registration, directory: new Proxy(registration.directory, {
+    get(target, key) {
+      if (key === 'list') return async () => {
+        const summaries = await target.list();
+        // A refresh never fails the listing it rides on.
+        try { listed(target.providerId, summaries); } catch { /* The next listing tries again. */ }
+        return summaries;
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) });
   for (const registration of options.registrations) {
     const id = registration.adapter.descriptor.providerId;
     if (registration.directory.providerId !== id) throw new Error(`Directory provider identity does not match ${id}.`);
     if (registrations.has(id)) throw new Error(`Duplicate Agent Host provider: ${id}.`);
-    registrations.set(id, registration);
+    registrations.set(id, observeListing(registration));
   }
   /** Only providers whose adapters declare journal support are published; every other provider keeps today's forwarding. */
   const journals = createJournalPublisher({
@@ -573,7 +589,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
-  const catalogs = new Map(options.registrations.map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
+  const catalogs = new Map([...registrations.values()].map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
   const bindings = new SessionBindings();
   const liveSessionStates = () => [...bindings.values()].flatMap(binding => {
     const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
@@ -868,6 +884,54 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
+  /** Publishes what the session still holds and stops following it; when the journal served it, the Relay holds everything up to this moment. */
+  async function releaseJournal(binding: Binding): Promise<void> {
+    const startedAt = Date.now();
+    if (!await journals.release(binding.agentId)) return;
+    const key = `${binding.providerId}:${binding.nativeSessionId}`;
+    // Never earlier than what a listing already told: a clock behind the native one must not make the same write look new again.
+    journalWindowAt.set(key, Math.max(journalWindowAt.get(key) ?? 0, startedAt));
+  }
+  /**
+   * A summary newer than the window the journal covers says a session was written by something else (a terminal CLI that has exited). The
+   * session is attached once, like a browser's open, so the Relay's journal reads the native history, and released at once. A session that is
+   * held (a manager follows it, or a browser reads it) follows itself; one a terminal still owns waits for the next listing. A directory
+   * whose listing is read only on request does not move when a terminal writes, so the sessions this process published are read one by one.
+   */
+  function listed(providerId: string, summaries: readonly RemoteSessionSummary[]): void {
+    if (journalRefreshing || closed || draining || !journals.granted()) return;
+    journalRefreshing = true;
+    void refreshOutdated(providerId, summaries).catch(() => undefined).finally(() => { journalRefreshing = false; });
+  }
+  async function refreshOutdated(providerId: string, listedSummaries: readonly RemoteSessionSummary[]): Promise<void> {
+    const directory = registrations.get(providerId)?.directory;
+    if (!directory) return;
+    const unheld = [...journalWindowAt.keys()].flatMap(key => {
+      const binding = key.startsWith(`${providerId}:`) ? bindings.getByNative(providerId, key.slice(providerId.length + 1)) : undefined;
+      return binding && !liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) ? [binding] : [];
+    });
+    if (!unheld.length) return;
+    const summaries = directory.listing && directory.sessionSummary
+      ? (await Promise.all(unheld.map(binding => directory.sessionSummary!(binding.nativeSessionId).catch(() => undefined)))).flatMap(summary => summary ? [summary] : [])
+      : listedSummaries;
+    const due = summaries.flatMap(summary => {
+      const updatedAt = Date.parse(summary.updatedAt), key = `${providerId}:${summary.nativeSessionId}`, known = journalWindowAt.get(key);
+      const binding = unheld.find(candidate => candidate.nativeSessionId === summary.nativeSessionId);
+      return known !== undefined && binding && Number.isFinite(updatedAt) && updatedAt > known ? [{ binding, key, known, updatedAt }] : [];
+    }).sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const { binding, key, known, updatedAt } of due) {
+      if (closed || draining) return;
+      // Taken before the attach: a failed attach waits for the next change, and a session written meanwhile is newer again.
+      journalWindowAt.set(key, updatedAt);
+      try {
+        const lease = await acquireSession(binding.agentId);
+        lease?.release();
+        idle.expire(binding.agentId);
+      } catch (error) {
+        if (error instanceof NativeSessionOwnerError || error instanceof AgentSessionInUseError) journalWindowAt.set(key, known);
+      }
+    }
+  }
   function watch(binding: Binding) {
     idle.watch(binding.agentId, () => {
       if (closed || uncertainAgents.has(binding.agentId) || bindings.isPending(binding.providerId, binding.nativeSessionId)) return false;
@@ -880,7 +944,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       return true;
     }, async () => {
-      await journals.release(binding.agentId);
+      await releaseJournal(binding);
       await relay.closeAgent(binding.agentId);
       await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
       lifecycle('session_idle_released', binding);
@@ -1428,12 +1492,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       async createSession(config) { const session = prepared.get(config.sessionId); if (!session) throw new Error('Agent Host projection session is unavailable.'); prepared.delete(config.sessionId); return session; },
       resumeSession: value.adapter.resumeSession.bind(value.adapter),
     });
-    registrations.set(id, registration);
-    catalogs.set(id, new RemoteHostCatalog({ roots: registration.directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
-    bindHandoff(registration.directory);
-    bindSourceReader(registration.directory);
-    bindSourceReferenceAncestry(registration.directory);
-    bindHostAccess(registration);
+    const observed = observeListing(registration);
+    registrations.set(id, observed);
+    catalogs.set(id, new RemoteHostCatalog({ roots: observed.directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
+    bindHandoff(observed.directory);
+    bindSourceReader(observed.directory);
+    bindSourceReferenceAncestry(observed.directory);
+    bindHostAccess(observed);
   }
   const sessionCatalog: SessionCallerCatalog = {
     providers: () => [...registrations.keys()].filter(id => options.providerEnabled?.(id) !== false),
@@ -1524,7 +1589,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && liveAgent(binding.agentId);
       if (!binding || !agent) return true;
       if (idle.hasDemand(binding.agentId) || !registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
-      await journals.release(binding.agentId);
+      await releaseJournal(binding);
       await relay.closeAgent(binding.agentId);
       await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
       return true;

@@ -124,3 +124,48 @@ it('lists native sessions only after the explicit button and retains partial res
   expect(container.querySelector('.lab-session-row')?.textContent).toContain('saved');
   expect(button(container, 'List native sessions').disabled).toBe(false);
 });
+
+/** What reaches the Host's directory while the page shows it: the evidence for how soon a terminal's turn can be noticed. */
+describe('the requests a mounted session directory makes', () => {
+  async function counted(run: (state: { requests: string[]; clock: typeof vi }) => Promise<void>) {
+    const requests: string[] = [];
+    const fetcher = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname.replace(/^\/v1\/remote\//, '');
+      requests.push(path);
+      return new Response(JSON.stringify(path === 'catalog/revision' ? { revision: '1' } : { items: [summary('one')], hasMore: false, revision: '1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const directory = new SessionDirectoryClient('http://localhost', fetcher);
+    vi.useFakeTimers();
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    try {
+      await render(<SessionDirectory directory={directory} providerId="recorded" opened={[]} busy={false} revision={0} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await run({ requests, clock: vi });
+    } finally { visibility.mockRestore(); vi.useRealTimers(); }
+  }
+  const revisions = (requests: string[]) => requests.filter(path => path === 'catalog/revision').length;
+
+  it('checks the revision once every five seconds while it is mounted and visible, and lists once on mount', async () => {
+    await counted(async ({ requests }) => {
+      expect(requests.filter(path => path === 'catalog')).toHaveLength(1);
+      const before = revisions(requests);
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+      expect(revisions(requests) - before).toBe(6);
+      expect(requests.filter(path => path === 'catalog')).toHaveLength(1);
+    });
+  });
+
+  it('asks nothing when the page is hidden, and nothing more than the next five-second check when it is shown again', async () => {
+    await counted(async ({ requests }) => {
+      const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(60_000); });
+      const hidden = requests.length;
+      visibility.mockReturnValue('visible');
+      await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(0); });
+      expect(requests.length).toBe(hidden);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(requests.slice(hidden).filter(path => path === 'catalog/revision')).toHaveLength(1);
+      expect(requests.slice(hidden).filter(path => path === 'catalog')).toHaveLength(0);
+    });
+  });
+});

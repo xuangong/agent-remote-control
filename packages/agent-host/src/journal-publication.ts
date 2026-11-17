@@ -185,13 +185,15 @@ export class SessionPublication {
     this.options.onFinished();
   }
 
-  /** Publishes what is queued, giving up after `timeoutMs`. */
+  /** Publishes what is queued, giving up after `timeoutMs`. A session still opening publishes its window first, so that is waited for. */
   async drain(timeoutMs: number): Promise<void> {
+    const deadline = this.context.now() + timeoutMs;
+    while (this.phase === 'opening' && this.context.now() < deadline) await new Promise<void>(resolve => { this.context.schedule(resolve, 10); });
     if (this.phase !== 'live') return;
     const token = this.cycle;
     this.urgent = true;
     let timer: unknown;
-    const expired = new Promise<void>(resolve => { timer = this.context.schedule(resolve, timeoutMs); });
+    const expired = new Promise<void>(resolve => { timer = this.context.schedule(resolve, Math.max(1, deadline - this.context.now())); });
     const flushed = new Promise<void>(resolve => this.enqueue(() => this.flush(token).finally(resolve)));
     await Promise.race([flushed, expired]);
     this.context.cancel(timer);

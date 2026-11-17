@@ -39,8 +39,10 @@ export interface JournalPublisher {
   receive(message: JournalRelayMessage): void;
   /** Starts publishing a session; false for a provider that does not declare journal support. */
   attach(session: PublishedSession): boolean;
-  /** Publishes what the session still holds, then stops following it. */
-  release(agentId: string): Promise<void>;
+  /** Publishes what the session still holds, then stops following it. True when its journal was serving the session, so the Relay holds what it held. */
+  release(agentId: string): Promise<boolean>;
+  /** Whether the connection holds the Relay's grant, so sessions publish rather than wait. */
+  granted(): boolean;
   /** Waits until every session has published what it holds, for at most `timeoutMs` each. */
   drain(timeoutMs: number): Promise<void>;
   close(): void;
@@ -163,10 +165,14 @@ export function createJournalPublisher(options: JournalPublisherOptions): Journa
 
     async release(agentId) {
       const publication = sessions.get(agentId);
-      if (!publication) return;
+      if (!publication) return false;
       await publication.drain(5000);
+      const serving = publication.requestable;
       publication.stop();
+      return serving;
     },
+
+    granted() { return writer !== undefined; },
 
     async drain(timeoutMs) {
       await Promise.all([...sessions.values()].map(session => session.drain(timeoutMs)));

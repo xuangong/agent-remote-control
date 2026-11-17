@@ -10,7 +10,7 @@ it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping a
   const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
   const source = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
-    import {HostPreviewGroups} from './components/HostPreviewGroups.tsx';
+    import {HostPreviewGroups} from './components/HostPreviewGroups.tsx'; import {notifyFeedReopened} from '@orchardworks/agent-remote-web';
     const pinned = new Set(); let inactive = false;
     const client = {
       async snapshot(host) {return {routing:'subdomain', pinnedNames: inactive && pinned.has(host) ? [{nameId:'preview-'+host,target:'http://localhost:5173',tunnelOrigin:'https://rose-seal-233f1df48bea.agents.example.test'}] : [], registrations:inactive ? [] : [{
@@ -24,7 +24,7 @@ it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping a
     };
     createRoot(document.getElementById('root')).render(<><section className='lab-host-pairing'>You own this Host</section><section className='lab-host-vscode'><h2>VS Code</h2></section><HostPreviewGroups client={client}
       hosts={[{id:'work',name:'Work Mac',online:true},{id:'home',name:'Home Mac',online:true}]}
-      polling onOpen={()=>{}} onOpenSource={(session,item,host)=>document.body.dataset.sourceHost=host}/><button id='release' onClick={()=>{inactive=true;document.dispatchEvent(new Event('visibilitychange'));}}>Release previews</button></>);
+      polling onOpen={()=>{}} onOpenSource={(session,item,host)=>document.body.dataset.sourceHost=host}/><button id='release' onClick={()=>{inactive=true;notifyFeedReopened();}}>Release previews</button></>);
   `;
   const script = (await build({ stdin: { contents: source, loader: 'tsx', resolveDir: fileURLToPath(new URL('../src/', import.meta.url)) },
     bundle: true, write: false, format: 'iife', platform: 'browser', define: { 'process.env.NODE_ENV': '"production"' } })).outputFiles[0]!.text;

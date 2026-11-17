@@ -105,3 +105,11 @@ it('does not restore into a replica that already read the session', async () => 
   session.replica.restoreFromDevice(stored([text('old', 1, 'Old')], 'epoch-old'));
   expect(session.replica.getState().timeline.entries.map(entry => entry.itemKey)).toEqual(['k0', 'k1']);
 });
+
+it('reads older history over HTTP when the client never connected, since the session wire needs a subscription', async () => {
+  const served = Array.from({ length: 6 }, (_, index) => text(`k${index}`, index + 1, `Reply ${index}`));
+  const session = await reopen({ served, record: { ...stored(served.slice(3), 'epoch-one', true), nextSeq: 7 } });
+  await session.client.loadOlder();
+  expect(session.relay.requests).toMatchObject([{ direction: 'before', via: 'http' }]);
+  expect(session.replica.getState().timeline.entries.map(entry => entry.itemKey)).toEqual(['k0', 'k1', 'k2', 'k3', 'k4', 'k5']);
+});

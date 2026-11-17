@@ -199,18 +199,9 @@
       "from": [
         "packages/agent-relay-core/**"
       ],
-      "max": 10,
+      "max": 8,
       "owner": "M11",
       "reason": "Relay tests reach the client and the Cloudflare package by path; they move to the S2, S3 and S4 seam suites in M11."
-    },
-    {
-      "rule": "cross-package-relative",
-      "from": [
-        "packages/agent-relay-cloudflare/**"
-      ],
-      "max": 22,
-      "owner": "M3",
-      "reason": "Cloudflare tests build the Relay by file path; M3 slims the package and runs the store contracts through relay-core/testing."
     },
     {
       "rule": "cross-package-relative",

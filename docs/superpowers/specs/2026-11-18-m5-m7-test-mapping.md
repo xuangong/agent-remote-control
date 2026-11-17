@@ -10,16 +10,16 @@ Companion of `2026-11-18-target-architecture-and-tests.md`, steps M5, M6 and M7.
 
 **Deleted (22).** 21 tests of `journal-sync.test.ts` (the decision restated through `sync`: digest, missing, moved, new-inside, open versus complete, incomplete, empty window, further back, long window, item before the first shared key, leading live-only, no shared key, live-only skip and append, equal board, new live-only key, live-only content that cannot be rewritten, open content, open without a body, extension fits, extension does not fit, and the four reason tests) and the absorption half of one reducer test (`reducer.test.ts`, the epoch and retirement half stays).
 
-| Mutation (window-decision.ts) | New tests failing | Old tests failing (all packages checked) |
+| Mutation (window-decision.ts) | New tests failing (journal and Controller consumers) | Old tests failing (all packages checked) |
 |---|---:|---|
-| no check before the first shared key | 3 | 1 journal, 1 Controller |
-| digest ignored | 3 | 5 journal, 5 Relay, 3 Controller |
-| an extension becomes a replacement | 36 | 7 journal, 3 Relay, 12 Controller |
-| tool call only is rewritten in place | 5 | 2 journal, 1 Controller |
-| live-only items join the native comparison | 27 | 9 journal, 40 Controller |
+| no check before the first shared key | 3 | 1 journal |
+| digest ignored | 3 | 4 journal, 4 Relay, 2 Controller |
+| an extension becomes a replacement | 36 | 7 journal, 3 Relay, 10 Controller |
+| tool call only is rewritten in place | 5 | 3 journal, 1 Controller |
+| live-only items join the native comparison | 27 | 9 journal, 44 Controller |
 | incomplete journal ignored | 6 | 2 journal, 2 Relay |
 | room ignored | 3 | 1 journal |
-| open content ignored | 6 | 2 journal, 1 Controller |
+| open content ignored | 6 | 2 journal |
 | open versus complete, empty window, no shared key, further back, held key in an extension, open live-only item, in-place for any content | 2 to 10 each | 1 to 3 journal each |
 | replica: always take the window row, keep the held sequence | 38 and 39 | 1 web reducer test (now trimmed), 2 React and 1 transport test that check DOM identity and stay |
 | replica: ignore resource ids, count the background | 1 each | none: no old test caught them; two new unit tests cover them |

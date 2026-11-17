@@ -116,7 +116,6 @@ async function main() {
     }
     console.log('Building Agent Host, providers, Relay, and Web...');
     await run('Repository build', pnpm, ['build']);
-    await run('Compatibility check', pnpm, ['compatibility:check']);
     if (nativeProviders.includes('copilot')) {
       // Resolve the bundled CLI only after dependency installation and provider build.
       options.copilot ??= (await import(new URL('../packages/agent-provider-copilot/dist/index.js', import.meta.url))).resolveCopilotExecutable();

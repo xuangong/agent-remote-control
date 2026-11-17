@@ -10,7 +10,7 @@
     "dev": "node scripts/dev.mjs",
     "local": "node scripts/local/command.mjs",
     "debug:dsh": "node scripts/dsh-debug.mjs",
-    "build": "pnpm compatibility:update && pnpm -r run build",
+    "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "node scripts/run-tests.mjs unit",
     "test:local": "node scripts/run-tests.mjs local",

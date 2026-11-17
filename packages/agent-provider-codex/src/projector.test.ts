@@ -252,6 +252,8 @@ describe('CodexEventProjector', () => {
     ['serverRequest/resolved', { threadId: 'thread-1', requestId: 7 }],
     ['account/rateLimits/updated', { rateLimits: { limitId: 'codex' } }],
     ['warning', { threadId: 'thread-1', message: 'Model metadata is unavailable.' }],
+    ['configWarning', { summary: 'Codex is ignoring unrecognized configuration settings.', details: null }],
+    ['deprecationNotice', { summary: 'A deprecated call.', details: null }],
   ])('does not misclassify the known %s notification as an Agent error', (method, params) => {
     const projector = new CodexEventProjector('thread-1');
 

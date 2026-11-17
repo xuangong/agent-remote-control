@@ -54,6 +54,9 @@ const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
   'warning',
   // The thread's read position moves after every turn.
   'thread/readState/changed',
+  // Notices about the native installation, not the conversation.
+  'configWarning',
+  'deprecationNotice',
   // Superseded by the `contextCompaction` item, which carries the compaction and its end.
   'thread/compacted',
 ]);

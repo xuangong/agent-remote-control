@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-const packageRoot = process.cwd();
+const packageRoot = join(import.meta.dirname, '../..');
 const launcher = join(packageRoot, 'scripts/run-live-dsh.sh');
 
 describe('live DSH launcher', () => {

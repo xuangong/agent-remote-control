@@ -18,7 +18,7 @@ describe('installable DSH Lab plugin', () => {
   it('packs an independently verifiable profile bundle with native host peers', async () => {
     const root = await mkdtemp(join(tmpdir(), 'borgee-dsh-package-'));
     roots.push(root);
-    const manifest = JSON.parse(await readFile(join(process.cwd(), 'compatibility.json'), 'utf8'));
+    const manifest = JSON.parse(await readFile(join(import.meta.dirname, '../../compatibility.json'), 'utf8'));
     manifest.borgee.implementation = {
       algorithm: 'sha256', root: '.', scope: ['implementation.txt'],
       digest: 'sha256:d8fdc7cc1b3b4a412e46aaacede0afa478eee509c99e48f2d684e2ede8ee5a15',

@@ -1,7 +1,8 @@
 // A fault-injecting proxy in front of a local instance, for measuring and stressing the browser under a bad network.
 // It emulates, per direction: a round trip (every HTTP exchange and every WebSocket byte is delayed by half a round trip, so
 // a request answered at once still takes one round trip), jitter, TCP-style loss (a lost chunk is retransmitted after a
-// timeout that doubles, and holds back everything behind it), a bandwidth cap, half-open sockets (a socket that stays open
+// timeout that doubles, and holds back everything behind it; loss is drawn per chunk read from a socket, up to 64 KiB, not per
+// packet, so a given rate is harsher than the same packet loss rate), a bandwidth cap, half-open sockets (a socket that stays open
 // and silently swallows its bytes), and going offline. It rewrites the browser's origin to the target's so the instance
 // accepts the requests, can close every open WebSocket to force the page to reconnect, and tees every WebSocket text message
 // to `tap` so a run keeps a transcript of the wire. Conditions are seeded and can change while it runs (`setConditions`).

@@ -12,7 +12,7 @@ const label = (condition: Condition) => `${condition.provider} ${condition.rttMs
 
 /**
  * M1: the page opens a session twice (so the second open has a device store to paint from) and sends a real message while the
- * proxy delays, jitters and drops traffic. The first rows of the revisit must come from the device store, and the message must
+ * proxy delays, jitters and drops traffic. `--condition claude:1500:0.1` (repeatable) replaces the default conditions. The first rows of the revisit must come from the device store, and the message must
  * settle exactly once.
  */
 export const badNetwork: Scenario = {
@@ -20,7 +20,8 @@ export const badNetwork: Scenario = {
   title: 'Bad network: latency, jitter and loss',
   quick: true,
   async run(context) {
-    const conditions: Condition[] = context.quick
+    const chosen = process.argv.flatMap((arg, at) => arg === '--condition' ? [process.argv[at + 1] ?? ''] : []);
+    const conditions: Condition[] = chosen.length > 0 ? chosen.map(text => { const [provider, rttMs, lossRate] = text.split(':'); return { provider: provider as Provider, rttMs: Number(rttMs), lossRate: Number(lossRate) }; }) : context.quick
       ? [{ provider: 'claude', rttMs: 300, lossRate: 0.02 }, { provider: 'codex', rttMs: 300, lossRate: 0.02 }]
       : [...[50, 300, 1500].flatMap(rttMs => [0.02, 0.1].map(lossRate => ({ provider: 'claude' as const, rttMs, lossRate }))), { provider: 'codex', rttMs: 300, lossRate: 0.02 }];
     const schedule: ScheduleStep[] = [];
@@ -45,7 +46,11 @@ export const badNetwork: Scenario = {
           const probe = await PageProbe.create(browserContext, recorder.origin);
           const revisit = firstOpen.timedOut ? firstOpen : await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
           const ready = !revisit.timedOut && await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 }).then(() => true, () => false);
-          if (!ready) { const page = await probe.report(); await probe.close(); return { revisit, replied: false, page }; }
+          if (!ready) {
+            const page = await probe.report();
+            await probe.close();
+            return { revisit, replied: false, page: { ...page, paints: [...page.paints, ...(revisit.timedOut ? [revisit] : [])] } };
+          }
           recorder.mark('turn-sent', { condition: name, word });
           schedule.push({ t: recorder.clock(), action: 'send', detail: { word } });
           await probe.send(`Reply with the single word ${word} and nothing else.`);

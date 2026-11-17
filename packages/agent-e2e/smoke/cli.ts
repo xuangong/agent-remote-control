@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const option = (name: string) => { const at = args.indexOf(name); return at === -1 ? undefined : args[at + 1]; };
 const quick = args.includes('--quick');
 const seed = Number(option('--seed') ?? Date.now() % 100_000);
-const named = args.filter((arg, at) => !arg.startsWith('--') && !['--seed', '--out', '--rounds'].includes(args[at - 1] ?? ''));
+const named = args.filter((arg, at) => !arg.startsWith('--') && !['--seed', '--out', '--rounds', '--condition'].includes(args[at - 1] ?? ''));
 const checkout = resolve(process.cwd());
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const runDirectory = resolve(option('--out') ?? join(checkout, '.arc-local/smoke', stamp));

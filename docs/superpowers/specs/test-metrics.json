@@ -1,0 +1,627 @@
+{
+ "version": 1,
+ "measuredAt": "2026-11-17",
+ "commit": "f5f1a11c",
+ "node": "22.23.2",
+ "note": "Mock-data tiers are the Vitest tests outside the process, native and browser tiers. over300ms and over1s count those tests only.",
+ "vitest": {
+  "totals": {
+   "tests": 9447,
+   "over300ms": 544,
+   "over1s": 119
+  },
+  "tiers": {
+   "process": {
+    "tests": 141,
+    "over300ms": 94,
+    "over1s": 25
+   },
+   "unit": {
+    "tests": 9447,
+    "over300ms": 544,
+    "over1s": 119
+   }
+  },
+  "packages": {
+   "agent-host": {
+    "tests": 1644,
+    "over300ms": 142,
+    "over1s": 26,
+    "tiers": {
+     "process": {
+      "tests": 141,
+      "over300ms": 94,
+      "over1s": 25
+     },
+     "unit": {
+      "tests": 1644,
+      "over300ms": 142,
+      "over1s": 26
+     }
+    }
+   },
+   "agent-platform": {
+    "tests": 11,
+    "over300ms": 0,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 11,
+      "over300ms": 0,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-provider-claude": {
+    "tests": 247,
+    "over300ms": 3,
+    "over1s": 2,
+    "tiers": {
+     "unit": {
+      "tests": 247,
+      "over300ms": 3,
+      "over1s": 2
+     }
+    }
+   },
+   "agent-provider-codex": {
+    "tests": 506,
+    "over300ms": 2,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 506,
+      "over300ms": 2,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-provider-copilot": {
+    "tests": 169,
+    "over300ms": 30,
+    "over1s": 5,
+    "tiers": {
+     "unit": {
+      "tests": 169,
+      "over300ms": 30,
+      "over1s": 5
+     }
+    }
+   },
+   "agent-provider-dsh": {
+    "tests": 191,
+    "over300ms": 0,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 191,
+      "over300ms": 0,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-provider-opencode": {
+    "tests": 190,
+    "over300ms": 5,
+    "over1s": 3,
+    "tiers": {
+     "unit": {
+      "tests": 190,
+      "over300ms": 5,
+      "over1s": 3
+     }
+    }
+   },
+   "agent-provider-sdk": {
+    "tests": 97,
+    "over300ms": 0,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 97,
+      "over300ms": 0,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-remote-cloudflare": {
+    "tests": 239,
+    "over300ms": 127,
+    "over1s": 32,
+    "tiers": {
+     "unit": {
+      "tests": 239,
+      "over300ms": 127,
+      "over1s": 32
+     }
+    }
+   },
+   "agent-remote-debugger": {
+    "tests": 141,
+    "over300ms": 11,
+    "over1s": 3,
+    "tiers": {
+     "unit": {
+      "tests": 141,
+      "over300ms": 11,
+      "over1s": 3
+     }
+    }
+   },
+   "agent-remote-dsh": {
+    "tests": 82,
+    "over300ms": 1,
+    "over1s": 1,
+    "tiers": {
+     "unit": {
+      "tests": 82,
+      "over300ms": 1,
+      "over1s": 1
+     }
+    }
+   },
+   "agent-remote-hosted": {
+    "tests": 981,
+    "over300ms": 26,
+    "over1s": 3,
+    "tiers": {
+     "unit": {
+      "tests": 981,
+      "over300ms": 26,
+      "over1s": 3
+     }
+    }
+   },
+   "agent-remote-journal": {
+    "tests": 199,
+    "over300ms": 2,
+    "over1s": 2,
+    "tiers": {
+     "unit": {
+      "tests": 199,
+      "over300ms": 2,
+      "over1s": 2
+     }
+    }
+   },
+   "agent-remote-journal-sqlite": {
+    "tests": 30,
+    "over300ms": 0,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 30,
+      "over300ms": 0,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-remote-lab": {
+    "tests": 2841,
+    "over300ms": 163,
+    "over1s": 38,
+    "tiers": {
+     "unit": {
+      "tests": 2841,
+      "over300ms": 163,
+      "over1s": 38
+     }
+    }
+   },
+   "agent-remote-protocol": {
+    "tests": 422,
+    "over300ms": 0,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 422,
+      "over300ms": 0,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-remote-relay": {
+    "tests": 445,
+    "over300ms": 16,
+    "over1s": 2,
+    "tiers": {
+     "unit": {
+      "tests": 445,
+      "over300ms": 16,
+      "over1s": 2
+     }
+    }
+   },
+   "agent-remote-tunnel": {
+    "tests": 39,
+    "over300ms": 1,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 39,
+      "over300ms": 1,
+      "over1s": 0
+     }
+    }
+   },
+   "agent-remote-web": {
+    "tests": 956,
+    "over300ms": 14,
+    "over1s": 2,
+    "tiers": {
+     "unit": {
+      "tests": 956,
+      "over300ms": 14,
+      "over1s": 2
+     }
+    }
+   },
+   "codex-daemon-client": {
+    "tests": 17,
+    "over300ms": 1,
+    "over1s": 0,
+    "tiers": {
+     "unit": {
+      "tests": 17,
+      "over300ms": 1,
+      "over1s": 0
+     }
+    }
+   }
+  }
+ },
+ "testFiles": {
+  "vitestUnit": 920,
+  "vitestProcess": 0,
+  "vitestNative": 51,
+  "playwrightSpec": 100,
+  "browserInventory": 20,
+  "nodeTestScript": 28
+ },
+ "playwright": {
+  "runs": 1330,
+  "distinctTests": 498
+ },
+ "slowTestFiles": {
+  "packages/agent-remote-cloudflare/test/storage-operating-envelope.test.ts": 22,
+  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx": 16,
+  "packages/agent-host/src/session-succession-capacity.test.ts": 14,
+  "packages/agent-host/src/session-succession-runtime.test.ts": 12,
+  "packages/agent-provider-copilot/tests/native.test.ts": 11,
+  "packages/agent-remote-cloudflare/test/journal-partition.test.ts": 11,
+  "packages/agent-remote-lab/src/App.succession.windows-and-teams.test.tsx": 11,
+  "packages/agent-remote-web/src/client/session-channel-transport.test.ts": 11,
+  "packages/agent-remote-cloudflare/test/preview-runtime.test.ts": 10,
+  "packages/agent-remote-hosted/src/succession-replay.test.ts": 10,
+  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx": 10,
+  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx": 10,
+  "packages/agent-host/src/call-for-support-workspaces.test.ts": 9,
+  "packages/agent-host/src/native-prefix-role-runtime.test.ts": 9,
+  "packages/agent-remote-cloudflare/test/authority-renewal.test.ts": 9,
+  "packages/agent-remote-cloudflare/test/succession-accounting-worker.test.ts": 9,
+  "packages/agent-remote-debugger/src/cli-process.test.ts": 9,
+  "packages/agent-host/src/call-for-support-runtime.test.ts": 8,
+  "packages/agent-host/src/host.test.ts": 8,
+  "packages/agent-provider-copilot/tests/journal-recording.test.ts": 8,
+  "packages/agent-remote-cloudflare/test/runtime.test.ts": 8,
+  "packages/agent-remote-lab/src/server/hosted-runtime.test.ts": 8,
+  "packages/agent-host/src/claude.test.ts": 7,
+  "packages/agent-host/src/tpm.test.ts": 7,
+  "packages/agent-remote-lab/src/App.bot-succession.test.tsx": 7,
+  "packages/agent-remote-lab/src/server/connection-diagnostics.test.ts": 7,
+  "packages/agent-host/src/codex-command.test.ts": 6,
+  "packages/agent-host/src/native-prefix-source-runtime.test.ts": 6,
+  "packages/agent-remote-cloudflare/test/security.test.ts": 6,
+  "packages/agent-remote-lab/src/operation-settlement.transport.test.ts": 6,
+  "packages/agent-remote-lab/src/server/live-launcher.test.ts": 6,
+  "packages/agent-remote-lab/src/server/preview-tunnel.test.ts": 6,
+  "packages/agent-remote-relay/src/transport/http-server.test.ts": 6,
+  "packages/agent-host/src/session-source-witness.test.ts": 5,
+  "packages/agent-host/src/session-succession-providers.test.ts": 5,
+  "packages/agent-host/src/tpm-host.test.ts": 5,
+  "packages/agent-remote-cloudflare/test/session-rename.test.ts": 5,
+  "packages/agent-remote-lab/src/App.children.test.tsx": 5,
+  "packages/agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx": 5,
+  "packages/agent-host/src/controller-launcher.test.ts": 4,
+  "packages/agent-host/src/controller-shutdown.test.ts": 4,
+  "packages/agent-host/src/journal-window.journal.test.ts": 4,
+  "packages/agent-host/src/native-prefix-opencode-recovery.test.ts": 4,
+  "packages/agent-remote-cloudflare/test/session-relations-unlink.test.ts": 4,
+  "packages/agent-remote-cloudflare/test/storage-codec-worker.test.ts": 4,
+  "packages/agent-remote-lab/src/App.command-palette.test.tsx": 4,
+  "packages/agent-remote-lab/src/server/gateway-lifecycle.test.ts": 4,
+  "packages/agent-remote-lab/src/session-control-transport.test.ts": 4,
+  "packages/agent-remote-relay/src/transport/activity-content.test.ts": 4,
+  "packages/agent-host/src/journal-continuity.recordings.test.ts": 3,
+  "packages/agent-host/src/journal-terminal-refresh.journal.test.ts": 3,
+  "packages/agent-host/src/native-prefix-source.test.ts": 3,
+  "packages/agent-host/src/session-succession-boundary.test.ts": 3,
+  "packages/agent-host/src/team-codex-delivery.test.ts": 3,
+  "packages/agent-provider-copilot/tests/native-evidence.test.ts": 3,
+  "packages/agent-provider-opencode/src/settings.test.ts": 3,
+  "packages/agent-remote-cloudflare/test/connection-diagnostics.test.ts": 3,
+  "packages/agent-remote-cloudflare/test/controller-updates.test.ts": 3,
+  "packages/agent-remote-cloudflare/test/storage-incremental.test.ts": 3,
+  "packages/agent-remote-hosted/src/broker-journal-switch.test.ts": 3,
+  "packages/agent-remote-hosted/src/journal-session-stream.test.ts": 3,
+  "packages/agent-remote-lab/src/App.render-budget.test.tsx": 3,
+  "packages/agent-remote-lab/src/conversation-connections.test.ts": 3,
+  "packages/agent-remote-lab/src/server/codex.test.ts": 3,
+  "packages/agent-remote-lab/src/server/devbox.test.ts": 3,
+  "packages/agent-remote-lab/src/server/gateway-host-bootstrap.test.ts": 3,
+  "packages/agent-host/src/session-setting-mutation.test.ts": 2,
+  "packages/agent-provider-codex/src/shared-recovery.test.ts": 2,
+  "packages/agent-provider-copilot/src/provider.test.ts": 2,
+  "packages/agent-provider-copilot/tests/usage-native.test.ts": 2,
+  "packages/agent-provider-opencode/src/provider.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/diagnostic-storage.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/favorites.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/google-runtime.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/mainsite-runtime.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-channels.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-drafts.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-migrations.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-outbox.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-relations.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/session-states.test.ts": 2,
+  "packages/agent-remote-cloudflare/test/succession-entry-worker.test.ts": 2,
+  "packages/agent-remote-hosted/src/call-for-support-capacity.test.ts": 2,
+  "packages/agent-remote-hosted/src/succession-capacity.test.ts": 2,
+  "packages/agent-remote-hosted/src/team-negotiation.test.ts": 2,
+  "packages/agent-remote-lab/src/App.bot-mode.test.tsx": 2,
+  "packages/agent-remote-lab/src/App.compact-sleep.test.tsx": 2,
+  "packages/agent-remote-lab/src/App.outbox.test.tsx": 2,
+  "packages/agent-remote-lab/src/App.side-migration.test.tsx": 2,
+  "packages/agent-remote-lab/src/App.tracking.test.tsx": 2,
+  "packages/agent-remote-lab/src/App.window-toolbar.test.tsx": 2,
+  "packages/agent-remote-lab/src/server/gateway-relay.test.ts": 2,
+  "packages/agent-remote-relay/src/operation-review.test.ts": 2,
+  "packages/agent-remote-relay/src/transport/image-input.test.ts": 2,
+  "packages/agent-host/src/controller-update.test.ts": 1,
+  "packages/agent-host/src/copilot.test.ts": 1,
+  "packages/agent-host/src/environment.test.ts": 1,
+  "packages/agent-host/src/native-session-owner.test.ts": 1,
+  "packages/agent-host/src/session-relation-change.test.ts": 1,
+  "packages/agent-host/src/session-source-create.test.ts": 1,
+  "packages/agent-host/src/team-host.test.ts": 1,
+  "packages/agent-host/src/tpm-review.test.ts": 1,
+  "packages/agent-provider-claude/src/catalog-history.native.test.ts": 1,
+  "packages/agent-provider-claude/src/catalog.native.test.ts": 1,
+  "packages/agent-provider-claude/src/transcript-extras.test.ts": 1,
+  "packages/agent-provider-copilot/tests/handoff-capabilities.test.ts": 1,
+  "packages/agent-provider-copilot/tests/reference-history.test.ts": 1,
+  "packages/agent-provider-copilot/tests/session-rename.test.ts": 1,
+  "packages/agent-provider-copilot/tests/worker-tools.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/codex-daemon.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/heartbeat.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/session-reads.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/stars.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/team-resource-storage.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/team-resource-transfer.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/team.test.ts": 1,
+  "packages/agent-remote-cloudflare/test/tpm.test.ts": 1,
+  "packages/agent-remote-debugger/src/commands.test.ts": 1,
+  "packages/agent-remote-debugger/src/server-succession.test.ts": 1,
+  "packages/agent-remote-dsh/src/agent-remote.test.ts": 1,
+  "packages/agent-remote-hosted/src/authority.test.ts": 1,
+  "packages/agent-remote-hosted/src/broker-journal-sessions.test.ts": 1,
+  "packages/agent-remote-hosted/src/session-drafts.test.ts": 1,
+  "packages/agent-remote-hosted/src/teams.test.ts": 1,
+  "packages/agent-remote-journal/src/journal-pages.test.ts": 1,
+  "packages/agent-remote-journal/src/session-journal.test.ts": 1,
+  "packages/agent-remote-lab/src/App.attach-budget.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.attributions.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.bot-attention.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.host-providers.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.hosts-page.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.performance.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.shared-drafts.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.sides.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.unlink.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.window-fold.test.tsx": 1,
+  "packages/agent-remote-lab/src/App.window-retention.test.tsx": 1,
+  "packages/agent-remote-lab/src/components/SessionDirectory.test.tsx": 1,
+  "packages/agent-remote-lab/src/components/WindowWorkspaces.test.tsx": 1,
+  "packages/agent-remote-lab/src/GatewayController.background.test.tsx": 1,
+  "packages/agent-remote-lab/src/hooks/useRemoteHosts.test.tsx": 1,
+  "packages/agent-remote-lab/src/journal-served-reconnect.test.ts": 1,
+  "packages/agent-remote-lab/src/latency-proxy.test.ts": 1,
+  "packages/agent-remote-lab/src/layout-diagnostics.test.ts": 1,
+  "packages/agent-remote-lab/src/server/devbox-preview.test.ts": 1,
+  "packages/agent-remote-lab/src/server/dsh-host-broker.test.ts": 1,
+  "packages/agent-remote-lab/src/server/dsh-plugin-package.test.ts": 1,
+  "packages/agent-remote-lab/src/server/gateway-state.test.ts": 1,
+  "packages/agent-remote-lab/src/server/local-succession-replay.test.ts": 1,
+  "packages/agent-remote-lab/src/server/remote-host-broker.test.ts": 1,
+  "packages/agent-remote-lab/src/server/vscode-tunnel.test.ts": 1,
+  "packages/agent-remote-relay/src/transport/remote-host-uplink-client.test.ts": 1,
+  "packages/agent-remote-relay/src/transport/resource-input.test.ts": 1,
+  "packages/agent-remote-tunnel/src/node/peer-backpressure.test.ts": 1,
+  "packages/agent-remote-web/src/client/image-upload.test.ts": 1,
+  "packages/agent-remote-web/src/react/MarkdownContent.test.tsx": 1,
+  "packages/agent-remote-web/src/react/useImageDraft.test.tsx": 1,
+  "packages/codex-daemon-client/src/client.test.ts": 1
+ },
+ "sources": {
+  "packages": {
+   "agent-host": {
+    "files": 127,
+    "lines": 18057
+   },
+   "agent-platform": {
+    "files": 5,
+    "lines": 66
+   },
+   "agent-provider-claude": {
+    "files": 23,
+    "lines": 2756
+   },
+   "agent-provider-codex": {
+    "files": 35,
+    "lines": 5632
+   },
+   "agent-provider-copilot": {
+    "files": 16,
+    "lines": 1911
+   },
+   "agent-provider-dsh": {
+    "files": 23,
+    "lines": 3950
+   },
+   "agent-provider-opencode": {
+    "files": 23,
+    "lines": 2225
+   },
+   "agent-provider-sdk": {
+    "files": 17,
+    "lines": 1367
+   },
+   "agent-remote-cloudflare": {
+    "files": 12,
+    "lines": 621
+   },
+   "agent-remote-debugger": {
+    "files": 26,
+    "lines": 2752
+   },
+   "agent-remote-dsh": {
+    "files": 9,
+    "lines": 962
+   },
+   "agent-remote-hosted": {
+    "files": 74,
+    "lines": 12784
+   },
+   "agent-remote-journal": {
+    "files": 11,
+    "lines": 1173
+   },
+   "agent-remote-journal-sqlite": {
+    "files": 3,
+    "lines": 205
+   },
+   "agent-remote-lab": {
+    "files": 277,
+    "lines": 30390
+   },
+   "agent-remote-protocol": {
+    "files": 56,
+    "lines": 4289
+   },
+   "agent-remote-relay": {
+    "files": 34,
+    "lines": 6848
+   },
+   "agent-remote-tunnel": {
+    "files": 11,
+    "lines": 1011
+   },
+   "agent-remote-web": {
+    "files": 136,
+    "lines": 13788
+   },
+   "codex-daemon-client": {
+    "files": 13,
+    "lines": 1233
+   }
+  },
+  "largest": [
+   {
+    "file": "packages/agent-remote-lab/src/App.tsx",
+    "lines": 3765
+   },
+   {
+    "file": "packages/agent-remote-hosted/src/broker.ts",
+    "lines": 2737
+   },
+   {
+    "file": "packages/agent-provider-codex/src/session.ts",
+    "lines": 1874
+   },
+   {
+    "file": "packages/agent-host/src/host.ts",
+    "lines": 1807
+   },
+   {
+    "file": "packages/agent-remote-hosted/src/gateway.ts",
+    "lines": 1222
+   },
+   {
+    "file": "packages/agent-remote-lab/src/hooks/useSessionSuccession.ts",
+    "lines": 1152
+   },
+   {
+    "file": "packages/agent-remote-relay/src/agent-manager.ts",
+    "lines": 1124
+   },
+   {
+    "file": "packages/agent-remote-web/src/client/remote-session-client.ts",
+    "lines": 1068
+   },
+   {
+    "file": "packages/agent-provider-dsh/src/runtime.ts",
+    "lines": 841
+   },
+   {
+    "file": "packages/agent-host/src/tpm.ts",
+    "lines": 836
+   },
+   {
+    "file": "packages/agent-remote-relay/src/session-wire.ts",
+    "lines": 817
+   },
+   {
+    "file": "packages/agent-host/src/session-succession-store.ts",
+    "lines": 813
+   },
+   {
+    "file": "packages/agent-remote-debugger/src/commands.ts",
+    "lines": 757
+   },
+   {
+    "file": "packages/agent-remote-web/src/replica/reducer.ts",
+    "lines": 725
+   },
+   {
+    "file": "packages/agent-provider-claude/src/session.ts",
+    "lines": 722
+   }
+  ],
+  "over800": 12
+ },
+ "measuredBy": "pnpm test:inventory, one serial run of every package unit suite (7 min 47 s wall) on Node 22, 10 cores; the process, native and browser tiers are not counted against the speed rule",
+ "architecture": {
+  "files": 2100,
+  "unassigned": 3,
+  "overlapping": 0,
+  "violations": {
+   "layer": 86,
+   "cross-package-relative": 225,
+   "dist-import": 36,
+   "adapter-imports-adapter": 13
+  },
+  "inlineWireMessagesInTests": {
+   "files": 419,
+   "occurrences": 3877,
+   "byPackage": {
+    "agent-host": 265,
+    "agent-provider-claude": 258,
+    "agent-provider-codex": 285,
+    "agent-provider-copilot": 49,
+    "agent-provider-dsh": 151,
+    "agent-provider-opencode": 87,
+    "agent-provider-sdk": 48,
+    "agent-remote-cloudflare": 157,
+    "agent-remote-debugger": 85,
+    "agent-remote-dsh": 16,
+    "agent-remote-hosted": 386,
+    "agent-remote-journal-sqlite": 1,
+    "agent-remote-journal": 67,
+    "agent-remote-lab": 667,
+    "agent-remote-relay": 569,
+    "agent-remote-tunnel": 1,
+    "agent-remote-web": 785
+   }
+  }
+ }
+}

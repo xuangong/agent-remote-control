@@ -224,7 +224,9 @@ describe('what the native Claude Code 2.1.319 runtime does, which the journal ke
     expect(rawOf(run, message => message.type === 'system' && message.subtype === 'compact_boundary')).toHaveLength(1);
     // FL6: the typed command is the live row; the transcript row is its expansion, with the same uuid.
     const typed = userRows(run).find(item => item.text === '/compact')!;
-    expect(rereadUsers(run).find(item => item.messageId === typed.messageId)!.text).toContain('<command-name>/compact</command-name>');
+    // The transcript row is the envelope; the adapter reads it as typed.
+    expect(JSON.stringify(run.timeline.find((message: any) => message.uuid === typed.messageId)!.message)).toContain('<command-name>/compact</command-name>');
+    expect(rereadUsers(run).find(item => item.messageId === typed.messageId)!.text).toBe('/compact');
   }, 90_000);
 
   it('slash commands', async () => {
@@ -236,9 +238,9 @@ describe('what the native Claude Code 2.1.319 runtime does, which the journal ke
       await mkdir(join(home, 'commands'), { recursive: true });
       await writeFile(join(home, 'commands', 'hello.md'), '---\ndescription: Say hello\n---\nCUSTOM_COMMAND_BODY $ARGUMENTS\n');
     });
-    const hello = rereadUsers(run).find(item => item.text.includes('<command-name>/hello</command-name>'))!;
-    expect(hello.messageId).toBe(userRows(run).find(item => item.text === '/hello world')!.messageId);
-    expect(hello.text).toContain('<command-args>world</command-args>');
+    const typed = userRows(run).find(item => item.text === '/hello world')!;
+    expect(JSON.stringify(run.timeline.find((message: any) => message.uuid === typed.messageId)!.message)).toContain('<command-args>world</command-args>');
+    expect(rereadUsers(run).find(item => item.messageId === typed.messageId)!.text).toBe('/hello world');
     // The expansion the model saw is a meta row, which neither the live stream nor the SDK read holds; the output of a local command is a system row the SDK read omits.
     expect(main(run).some(row => row.isMeta === true && JSON.stringify(row.message.content).includes('CUSTOM_COMMAND_BODY'))).toBe(true);
     expect(JSON.stringify(run.sdkMessages)).not.toContain('CUSTOM_COMMAND_BODY');
@@ -282,7 +284,9 @@ describe('what the native Claude Code 2.1.319 runtime does, which the journal ke
     const wake = main(run).find(row => row.type === 'user' && row.origin?.kind === 'task-notification');
     expect(wake).toBeDefined();
     expect(rawOf(run, message => message.uuid === wake.uuid)).toEqual([]);
-    expect(rereadUsers(run).some(item => item.messageId === wake.uuid)).toBe(true);
+    // The SDK read holds it; the adapter's pass drops it, as the stream never shows it.
+    expect(JSON.stringify(run.sdkMessages)).toContain(wake.uuid);
+    expect(rereadUsers(run).some(item => item.messageId === wake.uuid)).toBe(false);
     expect(Object.keys(run.transcripts).some(file => file.includes('/subagents/'))).toBe(true);
   }, 90_000);
 

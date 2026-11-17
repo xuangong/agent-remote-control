@@ -1,0 +1,14 @@
+{
+ "kind": "recording-rows",
+ "producedBy": "transcripts:record",
+ "provider": "copilot",
+ "recording": "interrupted",
+ "live": [
+  {"key":"user:ccc26395-c2f7-4042-b476-543f1bbe9a8b","completes":true,"liveOnly":false,"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","row":{"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","nativeRevision":1,"occurredAt":1794829321413,"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","item":{"type":"user_message","text":"Stream for long","messageId":"ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"epoch":"epoch-rows","seq":1,"timestamp":"2026-11-16T11:42:01.413Z","resources":[]}},
+  {"key":"assistant:f1482c3f-988f-4a0a-8812-37025d2bc621","completes":false,"liveOnly":false,"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","row":{"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","nativeRevision":4,"occurredAt":1794829321423,"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","item":{"type":"assistant_message","text":"PARTIAL TEXT","messageId":"f1482c3f-988f-4a0a-8812-37025d2bc621"},"epoch":"epoch-rows","seq":2,"timestamp":"2026-11-16T11:42:01.423Z","resources":[]}},
+  {"key":"assistant:f1482c3f-988f-4a0a-8812-37025d2bc621","completes":true,"liveOnly":true,"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","row":{"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:message:f1482c3f-988f-4a0a-8812-37025d2bc621","nativeRevision":5,"occurredAt":1794829321429,"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","item":{"type":"assistant_message","text":"","messageId":"f1482c3f-988f-4a0a-8812-37025d2bc621"},"epoch":"epoch-rows","seq":3,"timestamp":"2026-11-16T11:42:01.429Z","resources":[]}}
+ ],
+ "reread": [
+  {"key":"user:ccc26395-c2f7-4042-b476-543f1bbe9a8b","completes":true,"liveOnly":false,"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","row":{"providerId":"copilot","sourceKey":"copilot:8a597c84-5ece-4513-8fba-22436a167ef6:ccc26395-c2f7-4042-b476-543f1bbe9a8b","nativeRevision":1,"occurredAt":1794829321413,"turnId":"turn:ccc26395-c2f7-4042-b476-543f1bbe9a8b","item":{"type":"user_message","text":"Stream for long","messageId":"ccc26395-c2f7-4042-b476-543f1bbe9a8b"},"epoch":"epoch-rows","seq":1,"timestamp":"2026-11-16T11:42:01.413Z","resources":[]}}
+ ]
+}

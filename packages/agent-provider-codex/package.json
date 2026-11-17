@@ -12,11 +12,16 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./recordings": {
+      "types": "./dist/recordings.d.ts",
+      "import": "./dist/recordings.js"
     }
   },
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
+    "!dist/recordings.*",
     "README.md",
     "LICENSE",
     "NOTICE"

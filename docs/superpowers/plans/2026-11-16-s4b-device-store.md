@@ -91,4 +91,4 @@ Client budgets: one disk cap and one preload budget, each cited to a measurement
 
 ## 9. Results
 
-Recorded in [2026-11-16-s4b-results.md](2026-11-16-s4b-results.md): return budget met with live sockets at 1x and 4x CPU (2 requests against 13 to 14), T1 and the 100 ms round trip return and T2 p50 missed; departures listed there.
+Recorded in [2026-11-16-s4b-results.md](2026-11-16-s4b-results.md): section 4 of the results (after review): T1 met (0 opening-label, 0 row-less states), the return budget met in every condition (2 requests against 13 to 14), T2 p50 of 500 ms missed at 100 ms round trip in both arms; departures listed there. The lease gate shows stored rows on the cached lease until its own expiry.

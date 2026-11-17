@@ -3,6 +3,9 @@ import {
   decodeClientMessage, isSessionMutation, PROTOCOL_VERSION,
   type ClientMessage, type NativeSessionOwner, type ServerMessage,
 } from '@orchardworks/agent-remote-protocol';
+import {
+  initialSessionControl, transition, viewOf, type SessionControlEvent,
+} from './domain/session-control/session-control.js';
 
 export interface StreamControlOptions {
   agentId: string;
@@ -27,55 +30,48 @@ export interface StreamControl {
 }
 
 /**
- * What one browser stream may do to its session. A new stream is read-only, `acquire` grants control, and a refusal that a
- * terminal holds the session revokes it and shows the owner. The owner is a fact about this stream only, cleared by its next
- * `acquire`: no one reports a terminal's exit, so nothing here outlives the stream.
+ * What one browser stream may do to its session: the shell of the lease table in `domain/session-control`. It decodes
+ * browser frames, mints ids, asks the Controller who holds the session, and sends what the table replies.
  */
 export function createStreamControl(options: StreamControlOptions): StreamControl {
   const { agentId, send } = options;
-  let revision = randomUUID();
-  let token: string | undefined;
-  let owner: NativeSessionOwner | undefined;
-  let announced = false;
+  let state = initialSessionControl(randomUUID());
 
   const sendState = (requestId?: string): void => {
-    const holding = token !== undefined && owner === undefined;
-    send({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: {
-      agentId, revision, available: owner === undefined, access: holding ? 'control' : 'read_only',
-      ...(owner ? { nativeOwner: { ...owner } } : {}), ...(holding ? { token } : {}), ...(requestId === undefined ? {} : { requestId }),
-    } });
+    send({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, ...viewOf(state), ...(requestId === undefined ? {} : { requestId }) } });
   };
   const refuse = (requestId: string | undefined, code: string, message: string): void => send({
     protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: { ...(requestId === undefined ? {} : { requestId }), code, message, recoverable: true },
   });
-  const announce = (): void => { announced = true; sendState(); };
+  /** Applies an event; true when the table answered the message itself, so it goes no further. */
+  const apply = (event: SessionControlEvent): boolean => {
+    const next = transition(state, event);
+    state = next.state;
+    const { reply } = next;
+    switch (reply.kind) {
+      case 'state': sendState(reply.requestId); return true;
+      case 'refuse': refuse(reply.requestId, reply.code, reply.message); return true;
+      case 'ask_holder': {
+        void control.holder().catch(() => undefined).then(found => { apply({ type: 'holder', revision: reply.revision, ...(found ? { owner: found } : {}) }); });
+        return false;
+      }
+      case 'pass': return false;
+      case 'none': return false;
+    }
+  };
 
   const control: StreamControl = {
-    announce,
+    announce: () => { apply({ type: 'announce' }); },
     admit(message) {
       if (message.type === 'session_control_request') {
-        const { requestId } = message.payload;
-        if (message.payload.revision !== revision) refuse(requestId, 'session_control_changed', 'Session access changed. Review its current state and retry.');
-        else { owner = undefined; token ??= randomUUID(); sendState(requestId); }
-        return true;
+        return apply({ type: 'acquire', requestId: message.payload.requestId, revision: message.payload.revision, fresh: randomUUID() });
       }
-      if (!isSessionMutation(message) || (token !== undefined && message.controlToken === token)) return false;
-      refuse(requestIdOf(message), 'session_read_only', 'This connection is read-only. Reconnect before operating this session.');
-      return true;
+      if (!isSessionMutation(message)) return false;
+      const requestId = requestIdOf(message);
+      return apply({ type: 'mutation', ...(requestId === undefined ? {} : { requestId }), ...(message.controlToken === undefined ? {} : { token: message.controlToken }) });
     },
     controllerRefused(code, nativeOwner) {
-      if (code !== 'native_session_owned') return;
-      token = undefined;
-      revision = randomUUID();
-      owner = nativeOwner && { ...nativeOwner };
-      if (nativeOwner) { sendState(); return; }
-      // A refusal at delivery names no owner; asking the Controller to open the session again does.
-      const current = revision;
-      void control.holder().catch(() => undefined).then(found => {
-        if (revision !== current) return;
-        owner = found && { ...found };
-        sendState();
-      });
+      apply({ type: 'refused', code, ...(nativeOwner ? { owner: nativeOwner } : {}), fresh: randomUUID() });
     },
     admitRaw(raw) {
       let frame: { type?: unknown; payload?: { requestId?: unknown } };
@@ -94,7 +90,7 @@ export function createStreamControl(options: StreamControlOptions): StreamContro
       if (!raw.includes('"agent_snapshot"') && !raw.includes('"native_session_owned"')) return;
       let frame: { type?: unknown; payload?: { code?: unknown } };
       try { frame = JSON.parse(raw); } catch { return; }
-      if (frame.type === 'agent_snapshot' && !announced) announce();
+      if (frame.type === 'agent_snapshot') apply({ type: 'snapshot' });
       if (frame.type === 'protocol_error' && typeof frame.payload?.code === 'string') control.controllerRefused(frame.payload.code);
     },
   };

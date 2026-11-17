@@ -283,6 +283,23 @@
       ]
     },
     {
+      "name": "relay-session-control",
+      "layer": 1,
+      "paths": [
+        "packages/agent-relay-core/src/domain/session-control/**"
+      ],
+      "seams": [
+        "S3"
+      ],
+      "flows": [
+        "E2",
+        "E4"
+      ],
+      "invariants": [
+        "lease-follows-native-owner"
+      ]
+    },
+    {
       "name": "relay-core",
       "layer": 2,
       "paths": [
@@ -777,7 +794,8 @@
       "rule": 3,
       "modules": [
         "timeline",
-        "journal"
+        "journal",
+        "relay-session-control"
       ],
       "imports": [
         "node:*"

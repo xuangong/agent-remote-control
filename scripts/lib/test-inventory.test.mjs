@@ -21,6 +21,8 @@ test('a test file belongs to the tier its name and Vitest project give', () => {
   assert.equal(tierOf('packages/a/src/x.local.test.ts', 'unit'), 'native');
   assert.equal(tierOf('packages/a/src/cli-x.test.ts', 'process'), 'process');
   assert.equal(tierOf('packages/a/e2e/x.browser.ts'), 'browser');
+  assert.equal(tierOf('packages/a/tests/S1/x.integration.test.ts', 'integration'), 'integration');
+  assert.equal(tierOf('packages/a/src/x.contract.test.ts'), 'contract');
 });
 
 test('tests are counted per tier with those over 300 ms and over 1 s', () => {
@@ -42,7 +44,7 @@ test('test files are counted by kind and source lines by package without tests',
   });
   try {
     const files = listFiles(root);
-    assert.deepEqual(countTestFiles(files), { vitestUnit: 1, vitestProcess: 0, vitestNative: 1, playwrightSpec: 1, browserInventory: 0, nodeTestScript: 0 });
+    assert.deepEqual(countTestFiles(files), { vitestUnit: 1, vitestContract: 0, vitestIntegration: 0, vitestTransport: 0, vitestProcess: 0, vitestWorkers: 0, vitestNative: 1, playwrightSpec: 1, browserInventory: 0, nodeTestScript: 0 });
     const sources = measureSources(root);
     assert.deepEqual(sources.packages, { a: { files: 1, lines: 3 }, b: { files: 1, lines: 900 } });
     assert.deepEqual(sources.largest.map(entry => entry.file), ['packages/b/src/big.ts', 'packages/a/src/one.ts']);

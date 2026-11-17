@@ -20,6 +20,8 @@
     "test:unit": "node scripts/run-tests.mjs unit-package",
     "test:inventory": "node scripts/test-inventory.mjs",
     "arch:report": "node scripts/arch-check.mjs",
+    "fixtures:check": "node scripts/fixtures-check.mjs",
+    "transcripts:record": "pnpm --filter @orchardworks/agent-remote-fixtures run transcripts:record",
     "test:e2e": "node scripts/run-tests.mjs e2e",
     "test:conformance": "node scripts/run-tests.mjs conformance",
     "test:setup": "node scripts/run-tests.mjs setup",

@@ -23,10 +23,14 @@ const isSourceFile = file => /\.(ts|tsx|mjs)$/.test(file) && !file.endsWith('.d.
 
 /** Test files per kind, by name: Vitest unit, process and native files, Playwright specs, and Node `node:test` scripts. */
 export function countTestFiles(files) {
-  const kinds = { vitestUnit: 0, vitestProcess: 0, vitestNative: 0, playwrightSpec: 0, browserInventory: 0, nodeTestScript: 0 };
+  const kinds = { vitestUnit: 0, vitestContract: 0, vitestIntegration: 0, vitestTransport: 0, vitestProcess: 0, vitestWorkers: 0, vitestNative: 0, playwrightSpec: 0, browserInventory: 0, nodeTestScript: 0 };
   for (const file of files) {
     if (/\.local\.test\.tsx?$/.test(file)) kinds.vitestNative += 1;
     else if (/\.process\.test\.tsx?$/.test(file)) kinds.vitestProcess += 1;
+    else if (/\.contract\.test\.tsx?$/.test(file)) kinds.vitestContract += 1;
+    else if (/\.integration\.test\.tsx?$/.test(file)) kinds.vitestIntegration += 1;
+    else if (/\.transport\.test\.tsx?$/.test(file)) kinds.vitestTransport += 1;
+    else if (/\.workers\.test\.tsx?$/.test(file)) kinds.vitestWorkers += 1;
     else if (/\.test\.tsx?$/.test(file)) kinds.vitestUnit += 1;
     else if (/\.spec\.ts$/.test(file) && /(^|\/)e2e\//.test(file)) kinds.playwrightSpec += 1;
     else if (/\.browser\.ts$/.test(file)) kinds.browserInventory += 1;

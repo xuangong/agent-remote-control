@@ -1,63 +1,661 @@
 {
   "version": 1,
   "description": "Draft module map for pnpm arch:report. Each source and test file under packages belongs to the module whose most specific path matches it. Modules are named by their target role (docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md, section 3) and placed where the code lives today. Layers: 0 contracts, 1 domain, 2 application, 3 adapters, 4 apps, 5 test support (may import any layer).",
-  "scan": ["packages/*/src/**", "packages/*/test/**", "packages/*/e2e/**"],
-  "wireModules": ["protocol"],
-  "wireTestExempt": ["protocol", "protocol-fixtures", "e2e"],
+  "scan": [
+    "packages/*/src/**",
+    "packages/*/test/**",
+    "packages/*/e2e/**",
+    "packages/agent-remote-seams/tests/**",
+    "packages/agent-remote-fixtures/record/**"
+  ],
+  "wireModules": [
+    "protocol"
+  ],
+  "wireTestExempt": [
+    "fixtures",
+    "seams",
+    "protocol",
+    "protocol-fixtures",
+    "e2e"
+  ],
   "packages": {
-    "@orchardworks/agent-remote-protocol": { "dir": "packages/agent-remote-protocol", "entry": "src/index.ts" },
-    "@orchardworks/agent-provider-sdk": { "dir": "packages/agent-provider-sdk", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-journal": { "dir": "packages/agent-remote-journal", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-journal-sqlite": { "dir": "packages/agent-remote-journal-sqlite", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-relay": { "dir": "packages/agent-remote-relay", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-hosted": { "dir": "packages/agent-remote-hosted", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-controller": { "dir": "packages/agent-host", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-web": { "dir": "packages/agent-remote-web", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-lab": { "dir": "packages/agent-remote-lab", "entry": "src/main.tsx" },
-    "@orchardworks/agent-remote-cloudflare": { "dir": "packages/agent-remote-cloudflare", "entry": "src/worker.ts" },
-    "@orchardworks/agent-provider-claude": { "dir": "packages/agent-provider-claude", "entry": "src/index.ts" },
-    "@orchardworks/agent-provider-codex": { "dir": "packages/agent-provider-codex", "entry": "src/index.ts" },
-    "@orchardworks/agent-provider-copilot": { "dir": "packages/agent-provider-copilot", "entry": "src/index.ts" },
-    "@orchardworks/agent-provider-opencode": { "dir": "packages/agent-provider-opencode", "entry": "src/index.ts" },
-    "@orchardworks/agent-provider-dsh": { "dir": "packages/agent-provider-dsh", "entry": "src/index.ts" },
-    "@orchardworks/codex-daemon-client": { "dir": "packages/codex-daemon-client", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-tunnel": { "dir": "packages/agent-remote-tunnel", "entry": "src/index.ts" },
-    "@orchardworks/agent-platform": { "dir": "packages/agent-platform", "entry": "src/index.ts" },
-    "@orchardworks/agent-remote-debugger": { "dir": "packages/agent-remote-debugger", "entry": "src/index.ts" },
-    "@orchardworks/dsh": { "dir": "packages/agent-remote-dsh", "entry": "src/index.ts" }
+    "@orchardworks/agent-remote-protocol": {
+      "dir": "packages/agent-remote-protocol",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-provider-sdk": {
+      "dir": "packages/agent-provider-sdk",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-journal": {
+      "dir": "packages/agent-remote-journal",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-journal-sqlite": {
+      "dir": "packages/agent-remote-journal-sqlite",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-relay": {
+      "dir": "packages/agent-remote-relay",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-hosted": {
+      "dir": "packages/agent-remote-hosted",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-controller": {
+      "dir": "packages/agent-host",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-web": {
+      "dir": "packages/agent-remote-web",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-lab": {
+      "dir": "packages/agent-remote-lab",
+      "entry": "src/main.tsx"
+    },
+    "@orchardworks/agent-remote-cloudflare": {
+      "dir": "packages/agent-remote-cloudflare",
+      "entry": "src/worker.ts"
+    },
+    "@orchardworks/agent-provider-claude": {
+      "dir": "packages/agent-provider-claude",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-provider-codex": {
+      "dir": "packages/agent-provider-codex",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-provider-copilot": {
+      "dir": "packages/agent-provider-copilot",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-provider-opencode": {
+      "dir": "packages/agent-provider-opencode",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-provider-dsh": {
+      "dir": "packages/agent-provider-dsh",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/codex-daemon-client": {
+      "dir": "packages/codex-daemon-client",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-tunnel": {
+      "dir": "packages/agent-remote-tunnel",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-platform": {
+      "dir": "packages/agent-platform",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-debugger": {
+      "dir": "packages/agent-remote-debugger",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/dsh": {
+      "dir": "packages/agent-remote-dsh",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-fixtures": {
+      "dir": "packages/agent-remote-fixtures",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-remote-seams": {
+      "dir": "packages/agent-remote-seams",
+      "entry": "tests/index.ts"
+    }
   },
   "modules": [
-    { "name": "protocol", "layer": 0, "paths": ["packages/agent-remote-protocol/src/**"], "seams": ["S2", "S3"], "flows": ["E1", "E2", "E3"], "invariants": ["wire-compatibility"] },
-    { "name": "protocol-fixtures", "layer": 5, "paths": ["packages/agent-remote-protocol/test/**"], "seams": ["S2", "S3"], "flows": [], "invariants": ["wire-compatibility"] },
-    { "name": "provider-sdk", "layer": 0, "paths": ["packages/agent-provider-sdk/src/**"], "seams": ["S1"], "flows": [], "invariants": ["item-key-stability"] },
-    { "name": "timeline", "layer": 1, "paths": ["packages/agent-remote-relay/src/timeline-projector*.ts", "packages/agent-remote-relay/src/timeline-store*.ts"], "seams": ["S1", "S6"], "flows": ["E1"], "invariants": ["item-key-stability"] },
-    { "name": "journal", "layer": 1, "paths": ["packages/agent-remote-journal/src/**"], "seams": ["S2", "S4"], "flows": ["E3"], "invariants": ["contiguous-sequence", "generation-fencing"] },
-    { "name": "journal-sqlite", "layer": 3, "paths": ["packages/agent-remote-journal-sqlite/src/**"], "seams": ["S4"], "flows": [], "invariants": ["durable-before-ack"] },
-    { "name": "session-runtime", "layer": 2, "paths": ["packages/agent-remote-relay/src/**"], "seams": ["S1"], "flows": ["E2"], "invariants": ["operation-settlement"] },
-    { "name": "relay-core", "layer": 2, "paths": ["packages/agent-remote-hosted/src/**"], "seams": ["S2", "S3", "S4", "S5"], "flows": ["E1", "E2", "E3", "E4", "E7"], "invariants": ["lease-single-owner", "outbox-ordering"] },
-    { "name": "relay-core-edge", "layer": 3, "paths": ["packages/agent-remote-hosted/src/gateway*.ts", "packages/agent-remote-hosted/src/auth*.ts", "packages/agent-remote-hosted/src/access-page.ts", "packages/agent-remote-hosted/src/google-auth.ts", "packages/agent-remote-hosted/src/hosted-auth.ts", "packages/agent-remote-hosted/src/request.ts", "packages/agent-remote-hosted/src/*-routes.ts"], "seams": ["S3"], "flows": ["E1"], "invariants": ["lease-single-owner"] },
-    { "name": "relay-core-test-support", "layer": 5, "paths": ["packages/agent-remote-hosted/src/test-utils/**"], "seams": [], "flows": [], "invariants": [] },
-    { "name": "controller", "layer": 2, "paths": ["packages/agent-host/src/**"], "seams": ["S1", "S2"], "flows": ["E1", "E2", "E4", "E5"], "invariants": ["journal-reopen-recovery", "native-owner"] },
-    { "name": "controller-process", "layer": 4, "paths": ["packages/agent-host/src/cli*.ts", "packages/agent-host/src/systemd*.ts", "packages/agent-host/src/windows*.ts", "packages/agent-host/src/vscode-tunnel*.ts", "packages/agent-host/src/controller-update*.ts", "packages/agent-host/src/controller-launcher*.ts", "packages/agent-host/src/codex-daemon-runner*.ts", "packages/agent-host/src/platform/**", "packages/agent-host/src/update-command*.ts"], "seams": [], "flows": ["E8"], "invariants": [] },
-    { "name": "controller-test-support", "layer": 5, "paths": ["packages/agent-host/src/test-utils/**"], "seams": ["S1"], "flows": [], "invariants": [] },
-    { "name": "client", "layer": 2, "paths": ["packages/agent-remote-web/src/client/**", "packages/agent-remote-web/src/replica/**", "packages/agent-remote-web/src/headless.ts", "packages/agent-remote-web/src/index.ts", "packages/agent-remote-web/src/device-store*.ts", "packages/agent-remote-web/src/session-*.ts"], "seams": ["S3", "S6", "S7"], "flows": ["E2", "E3"], "invariants": ["replica-absorb-by-key", "device-store-never-authoritative"] },
-    { "name": "client-web", "layer": 3, "paths": ["packages/agent-remote-web/src/**"], "seams": ["S6", "S7"], "flows": ["E1", "E2", "E3"], "invariants": ["replica-absorb-by-key"] },
-    { "name": "client-test-support", "layer": 5, "paths": ["packages/agent-remote-web/src/test/**"], "seams": ["S6"], "flows": [], "invariants": [] },
-    { "name": "provider-claude", "layer": 3, "paths": ["packages/agent-provider-claude/src/**"], "seams": ["S1"], "flows": ["E4"], "invariants": ["item-key-stability"] },
-    { "name": "provider-codex", "layer": 3, "paths": ["packages/agent-provider-codex/src/**"], "seams": ["S1"], "flows": ["E3"], "invariants": ["item-key-stability"] },
-    { "name": "provider-copilot", "layer": 3, "paths": ["packages/agent-provider-copilot/src/**"], "seams": ["S1"], "flows": [], "invariants": ["item-key-stability"] },
-    { "name": "provider-opencode", "layer": 3, "paths": ["packages/agent-provider-opencode/src/**"], "seams": ["S1"], "flows": [], "invariants": ["item-key-stability"] },
-    { "name": "provider-dsh", "layer": 3, "paths": ["packages/agent-provider-dsh/src/**"], "seams": ["S1"], "flows": [], "invariants": ["item-key-stability"] },
-    { "name": "codex-daemon-client", "layer": 3, "paths": ["packages/codex-daemon-client/src/**"], "seams": [], "flows": [], "invariants": [] },
-    { "name": "relay-cloudflare", "layer": 4, "paths": ["packages/agent-remote-cloudflare/src/**"], "seams": ["S4", "S5"], "flows": [], "invariants": ["durable-before-ack"] },
-    { "name": "relay-cloudflare-tests", "layer": 5, "paths": ["packages/agent-remote-cloudflare/test/**"], "seams": ["S5"], "flows": [], "invariants": [] },
-    { "name": "workbench", "layer": 4, "paths": ["packages/agent-remote-lab/src/**"], "seams": ["S6"], "flows": ["E1", "E2", "E3", "E5", "E6", "E7"], "invariants": ["draft-ownership", "recovery-notice"] },
-    { "name": "relay-node", "layer": 4, "paths": ["packages/agent-remote-lab/src/server/**"], "seams": ["S3"], "flows": ["E1"], "invariants": [] },
-    { "name": "workbench-test-support", "layer": 5, "paths": ["packages/agent-remote-lab/src/test/**"], "seams": ["S6"], "flows": [], "invariants": [] },
-    { "name": "e2e", "layer": 5, "paths": ["packages/agent-remote-lab/e2e/**", "packages/agent-remote-debugger/e2e/**"], "seams": [], "flows": ["E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8"], "invariants": [] },
-    { "name": "tunnel", "layer": 3, "paths": ["packages/agent-remote-tunnel/src/**"], "seams": [], "flows": [], "invariants": [] },
-    { "name": "platform", "layer": 3, "paths": ["packages/agent-platform/src/**"], "seams": [], "flows": [], "invariants": [] },
-    { "name": "debugger", "layer": 4, "paths": ["packages/agent-remote-debugger/src/**"], "seams": [], "flows": [], "invariants": [] },
-    { "name": "dsh-plugin", "layer": 3, "paths": ["packages/agent-remote-dsh/src/**"], "seams": [], "flows": [], "invariants": [] }
+    {
+      "name": "protocol",
+      "layer": 0,
+      "paths": [
+        "packages/agent-remote-protocol/src/**"
+      ],
+      "seams": [
+        "S2",
+        "S3"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      "invariants": [
+        "wire-compatibility"
+      ]
+    },
+    {
+      "name": "protocol-fixtures",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-protocol/test/**"
+      ],
+      "seams": [
+        "S2",
+        "S3"
+      ],
+      "flows": [],
+      "invariants": [
+        "wire-compatibility"
+      ]
+    },
+    {
+      "name": "fixtures",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-fixtures/**"
+      ],
+      "seams": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "flows": [],
+      "invariants": [
+        "wire-compatibility"
+      ]
+    },
+    {
+      "name": "seams",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-seams/**"
+      ],
+      "seams": [
+        "S1",
+        "S2",
+        "S3",
+        "S4",
+        "S5",
+        "S6",
+        "S7"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "provider-recordings",
+      "layer": 5,
+      "paths": [
+        "packages/agent-provider-claude/src/recordings.ts",
+        "packages/agent-provider-codex/src/recordings.ts",
+        "packages/agent-provider-copilot/src/recordings.ts"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-sdk",
+      "layer": 0,
+      "paths": [
+        "packages/agent-provider-sdk/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "timeline",
+      "layer": 1,
+      "paths": [
+        "packages/agent-remote-relay/src/timeline-projector*.ts",
+        "packages/agent-remote-relay/src/timeline-store*.ts"
+      ],
+      "seams": [
+        "S1",
+        "S6"
+      ],
+      "flows": [
+        "E1"
+      ],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "journal",
+      "layer": 1,
+      "paths": [
+        "packages/agent-remote-journal/src/**"
+      ],
+      "seams": [
+        "S2",
+        "S4"
+      ],
+      "flows": [
+        "E3"
+      ],
+      "invariants": [
+        "contiguous-sequence",
+        "generation-fencing"
+      ]
+    },
+    {
+      "name": "journal-sqlite",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-journal-sqlite/src/**"
+      ],
+      "seams": [
+        "S4"
+      ],
+      "flows": [],
+      "invariants": [
+        "durable-before-ack"
+      ]
+    },
+    {
+      "name": "session-runtime",
+      "layer": 2,
+      "paths": [
+        "packages/agent-remote-relay/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [
+        "E2"
+      ],
+      "invariants": [
+        "operation-settlement"
+      ]
+    },
+    {
+      "name": "relay-core",
+      "layer": 2,
+      "paths": [
+        "packages/agent-remote-hosted/src/**"
+      ],
+      "seams": [
+        "S2",
+        "S3",
+        "S4",
+        "S5"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E7"
+      ],
+      "invariants": [
+        "lease-single-owner",
+        "outbox-ordering"
+      ]
+    },
+    {
+      "name": "relay-core-edge",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-hosted/src/gateway*.ts",
+        "packages/agent-remote-hosted/src/auth*.ts",
+        "packages/agent-remote-hosted/src/access-page.ts",
+        "packages/agent-remote-hosted/src/google-auth.ts",
+        "packages/agent-remote-hosted/src/hosted-auth.ts",
+        "packages/agent-remote-hosted/src/request.ts",
+        "packages/agent-remote-hosted/src/*-routes.ts"
+      ],
+      "seams": [
+        "S3"
+      ],
+      "flows": [
+        "E1"
+      ],
+      "invariants": [
+        "lease-single-owner"
+      ]
+    },
+    {
+      "name": "relay-core-test-support",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-hosted/src/test-utils/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "controller",
+      "layer": 2,
+      "paths": [
+        "packages/agent-host/src/**"
+      ],
+      "seams": [
+        "S1",
+        "S2"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E4",
+        "E5"
+      ],
+      "invariants": [
+        "journal-reopen-recovery",
+        "native-owner"
+      ]
+    },
+    {
+      "name": "controller-process",
+      "layer": 4,
+      "paths": [
+        "packages/agent-host/src/cli*.ts",
+        "packages/agent-host/src/systemd*.ts",
+        "packages/agent-host/src/windows*.ts",
+        "packages/agent-host/src/vscode-tunnel*.ts",
+        "packages/agent-host/src/controller-update*.ts",
+        "packages/agent-host/src/controller-launcher*.ts",
+        "packages/agent-host/src/codex-daemon-runner*.ts",
+        "packages/agent-host/src/platform/**",
+        "packages/agent-host/src/update-command*.ts"
+      ],
+      "seams": [],
+      "flows": [
+        "E8"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "controller-test-support",
+      "layer": 5,
+      "paths": [
+        "packages/agent-host/src/test-utils/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "client",
+      "layer": 2,
+      "paths": [
+        "packages/agent-remote-web/src/client/**",
+        "packages/agent-remote-web/src/replica/**",
+        "packages/agent-remote-web/src/headless.ts",
+        "packages/agent-remote-web/src/index.ts",
+        "packages/agent-remote-web/src/device-store*.ts",
+        "packages/agent-remote-web/src/session-*.ts"
+      ],
+      "seams": [
+        "S3",
+        "S6",
+        "S7"
+      ],
+      "flows": [
+        "E2",
+        "E3"
+      ],
+      "invariants": [
+        "replica-absorb-by-key",
+        "device-store-never-authoritative"
+      ]
+    },
+    {
+      "name": "client-web",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-web/src/**"
+      ],
+      "seams": [
+        "S6",
+        "S7"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3"
+      ],
+      "invariants": [
+        "replica-absorb-by-key"
+      ]
+    },
+    {
+      "name": "client-test-support",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-web/src/test/**"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "provider-claude",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-claude/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [
+        "E4"
+      ],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-codex",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-codex/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [
+        "E3"
+      ],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-copilot",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-copilot/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-opencode",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-opencode/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "provider-dsh",
+      "layer": 3,
+      "paths": [
+        "packages/agent-provider-dsh/src/**"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [],
+      "invariants": [
+        "item-key-stability"
+      ]
+    },
+    {
+      "name": "codex-daemon-client",
+      "layer": 3,
+      "paths": [
+        "packages/codex-daemon-client/src/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "relay-cloudflare",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-cloudflare/src/**"
+      ],
+      "seams": [
+        "S4",
+        "S5"
+      ],
+      "flows": [],
+      "invariants": [
+        "durable-before-ack"
+      ]
+    },
+    {
+      "name": "relay-cloudflare-tests",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-cloudflare/test/**"
+      ],
+      "seams": [
+        "S5"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "workbench",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/**"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E3",
+        "E5",
+        "E6",
+        "E7"
+      ],
+      "invariants": [
+        "draft-ownership",
+        "recovery-notice"
+      ]
+    },
+    {
+      "name": "relay-node",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-lab/src/server/**"
+      ],
+      "seams": [
+        "S3"
+      ],
+      "flows": [
+        "E1"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "workbench-test-support",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-lab/src/test/**"
+      ],
+      "seams": [
+        "S6"
+      ],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "e2e",
+      "layer": 5,
+      "paths": [
+        "packages/agent-remote-lab/e2e/**",
+        "packages/agent-remote-debugger/e2e/**"
+      ],
+      "seams": [],
+      "flows": [
+        "E1",
+        "E2",
+        "E3",
+        "E4",
+        "E5",
+        "E6",
+        "E7",
+        "E8"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "tunnel",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-tunnel/src/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "platform",
+      "layer": 3,
+      "paths": [
+        "packages/agent-platform/src/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "debugger",
+      "layer": 4,
+      "paths": [
+        "packages/agent-remote-debugger/src/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "dsh-plugin",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-dsh/src/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    }
   ]
 }

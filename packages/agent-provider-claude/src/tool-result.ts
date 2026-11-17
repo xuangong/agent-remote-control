@@ -29,3 +29,26 @@ export function claudeFileChanges(name: string, value: unknown): AgentToolResult
  const diff = `--- ${kind === 'added' ? '/dev/null' : quote('a/'+gitPath)}\n+++ ${quote('b/'+gitPath)}\n${hunks}`;
  return {format:'file_changes',version:1,files:[{path,kind,diff}]};
 }
+
+/** The strings a result keeps whole; a longer one is native output the tool row carries as its text part already. */
+const KEPT_STRING = 2048;
+
+/**
+ * What the projector uses of a tool's structured result: the type, the file path, the patch hunks, image metadata and small scalars.
+ * The raw result carries whole files (`originalFile`, the contents a Read returned, base64 images), which a journal row never needs.
+ * The live frame and the transcript row both pass through this one function, so the two projections cannot differ.
+ */
+export function slimToolUseResult(value: unknown): unknown {
+  if (typeof value === 'string') return value.length > KEPT_STRING ? value.slice(0, KEPT_STRING) : value;
+  if (!object(value)) return value;
+  const kept: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === 'structuredPatch' || key === 'content' && value.type === 'create' && typeof entry === 'string') kept[key] = entry;
+    else if (key === 'file' && object(entry)) {
+      const file: Record<string, unknown> = {};
+      for (const [name, field] of Object.entries(entry)) if (name !== 'base64' && name !== 'content' && (typeof field === 'number' || typeof field === 'boolean' || typeof field === 'string' && field.length <= KEPT_STRING || object(field) && Object.values(field).every(inner => typeof inner === 'number'))) file[name] = field;
+      kept[key] = file;
+    } else if (typeof entry === 'number' || typeof entry === 'boolean' || entry === null || typeof entry === 'string' && entry.length <= KEPT_STRING) kept[key] = entry;
+  }
+  return kept;
+}

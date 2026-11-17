@@ -21,7 +21,7 @@ try {
 
 async function readHistory(id: string, argument: string) {
   try {
-    return { page: await readClaudeHistoryPage({ info: getSessionInfo, messages: async (sessionId, options) => withTranscriptExtras(sessionId, await getSessionMessages(sessionId, options), await readTranscript(sessionId)) }, id, JSON.parse(argument)) };
+    return { page: await readClaudeHistoryPage({ info: getSessionInfo, messages: async (sessionId, options) => withTranscriptExtras(sessionId, await getSessionMessages(sessionId, options), await readTranscript(sessionId, process.env, true)) }, id, JSON.parse(argument)) };
   } catch (error) {
     return { error: error instanceof ClaudeHistoryError ? error.message : 'Claude source history is unavailable.' };
   }
@@ -29,7 +29,7 @@ async function readHistory(id: string, argument: string) {
 
 /** Each message names the turn it belongs to, so a reopened Timeline offers the same prompt edits as a live one. One read of the transcript serves the turns and what the public read leaves out. */
 async function timelineMessages(id: string) {
-  const rows = await readTranscript(id);
+  const rows = await readTranscript(id, process.env, true);
   const messages = withTranscriptExtras(id, await getSessionMessages(id), rows);
   const turns = promptTurns(rows ?? []);
   return messages.map(message => { const turnId = turns.get(message.uuid); return turnId ? { ...message, turnId } : message; });

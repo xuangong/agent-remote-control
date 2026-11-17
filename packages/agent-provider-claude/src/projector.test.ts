@@ -96,10 +96,10 @@ it('keeps native structured tool output bounded, correlated, and deduplicated al
     { type: 'text', text: 'hello' }, { type: 'json', value: { stdout: 'hello', exitCode: 0, nativeFlag: true } },
   ] } } });
   expect(projector.project(frame)).toEqual([]);
-  const large = projector.project({ ...frame, uuid: 'large-result', tool_use_result: { data: 'x'.repeat(70000) } })[0]?.event;
-  expect(large).toMatchObject({ type: 'timeline', item: { result: { truncated: true } } });
+  // A whole file in a structured result is not carried: the readable text part already holds the tool's output.
+  const large = projector.project({ ...frame, uuid: 'large-result', tool_use_result: { stdout: 'ok', originalFile: 'x'.repeat(70000), nested: { data: 'y'.repeat(70000) } } })[0]?.event;
   if (large?.type !== 'timeline' || large.item.type !== 'tool_call') throw new Error('Missing tool result');
-  expect(large.item.result!.content.reduce((sum, content) => sum + (content.type === 'text' ? content.text.length : JSON.stringify(content.value).length), 0)).toBeLessThanOrEqual(65536);
+  expect(large.item.result!.content.find(content => content.type === 'json')).toEqual({ type: 'json', value: { stdout: 'ok' } });
 });
 
 it('does not assign an uncorrelated structured payload to multiple tool results', () => {

@@ -1,5 +1,5 @@
 import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
-import {claudeFileChanges} from './tool-result.js';
+import {claudeFileChanges, slimToolUseResult} from './tool-result.js';
 import { boundToolResult, type AgentUserMessagePart, type ProviderItemIdentity, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 
@@ -89,12 +89,13 @@ export class ClaudeEventProjector {
       if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid,
         ...(parts.some(part=>part.type!=='text') ? { content: parts } : {}) }, identity(`user:${value.uuid ?? key}`, true)), ...(imageIndex ? { resourceReferences } : {}) });
       const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
-      const structured = toolResults.length === 1 ? toolResultJson(imageMetadata(value.tool_use_result, toolResults[0].content)) : undefined;
+      const nativeResult = slimToolUseResult(value.tool_use_result);
+      const structured = toolResults.length === 1 ? toolResultJson(nativeResult) : undefined;
       for (const block of toolResults) {
         const tool = this.tools.get(block.tool_use_id) ?? { name: 'Tool', detail: { type: 'other', description: 'Native tool result' } as const };
         const output = typeof block.content === 'string' ? block.content : Array.isArray(block.content)
           ? block.content.filter((part: unknown) => record(part) && part.type === 'text').map((part: any) => part.text).join('\n') : '';
-        const fileChanges = !block.is_error && toolResults.length === 1 ? claudeFileChanges(tool.name, value.tool_use_result) : undefined;
+        const fileChanges = !block.is_error && toolResults.length === 1 ? claudeFileChanges(tool.name, nativeResult) : undefined;
         const metadata = fileChanges ?? structured;
         const result = boundToolResult({ content: [{ type: 'text', text: output },
           ...(metadata === undefined ? [] : [{ type: 'json' as const, value: metadata }])] });
@@ -209,17 +210,6 @@ export class ClaudeEventProjector {
   private observation(sourceKey: string, event: AgentStreamEvent): ProviderObservation {
     return { type: 'observation', sourceKey: `claude:${this.sessionId}:${sourceKey}`, occurredAt: Date.now(), delivery: this.delivery, event };
   }
-}
-
-function imageMetadata(value: unknown, content: unknown): unknown {
-  if (!record(value) || value.type !== 'image' || !record(value.file) || typeof value.file.base64 !== 'string' || !Array.isArray(content)) return value;
-  const file = value.file;
-  const correlated = content.some((part: unknown) => record(part) && part.type === 'image' && record(part.source)
-    && part.source.type === 'base64' && part.source.data === file.base64 && part.source.media_type === file.type);
-  if (!correlated) return value;
-  // Native Read repeats its image bytes in structured output; only the resource reader carries them.
-  const { base64: _bytes, ...metadata } = file;
-  return { ...value, file: metadata };
 }
 
 function toolResultJson(value: unknown): AgentToolResultJson | undefined {

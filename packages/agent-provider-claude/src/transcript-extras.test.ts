@@ -110,3 +110,34 @@ it('reads a sub-agent transcript beside the session, for the tool rows of a chil
   expect(await readSubagentTranscript(sessionId, '../escape', env)).toBeUndefined();
   expect(await readSubagentTranscript(sessionId, 'missing', env)).toBeUndefined();
 });
+
+it('restores a long transcript with big Edit and Read results far under the catalog cap, without holding the file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'claude-large-')); roots.push(root);
+  const project = join(root, 'projects', '-workspace');
+  await mkdir(project, { recursive: true });
+  const file = join(project, `${sessionId}.jsonl`);
+  const big = 'x'.repeat(400_000);
+  const messages: SessionMessage[] = [];
+  const { createWriteStream } = await import('node:fs');
+  const out = createWriteStream(file);
+  const write = (value: object) => new Promise<void>(resolve => { if (out.write(`${JSON.stringify(value)}\n`)) resolve(); else out.once('drain', () => resolve()); });
+  let parent: string | null = null;
+  for (let at = 0; at < 150; at += 1) {
+    const edit = at % 2 === 0;
+    const use = { type: 'assistant', uuid: `a${at}`, parentUuid: parent, message: { id: `m${at}`, role: 'assistant', content: [{ type: 'tool_use', id: `t${at}`, name: edit ? 'Edit' : 'Read', input: { file_path: '/w/a.txt' } }] } };
+    const result = { type: 'user', uuid: `r${at}`, parentUuid: use.uuid, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${at}`, content: 'ok' }] },
+      toolUseResult: edit ? { filePath: '/w/a.txt', originalFile: big, oldString: 'a', newString: 'b', structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-a', '+b'] }] }
+        : { type: 'image', file: { base64: big, type: 'image/png', originalSize: 400000 } } };
+    await write(use); await write(result);
+    parent = result.uuid;
+    messages.push(row(use.uuid, 'assistant', use.message.content), row(result.uuid, 'user', result.message.content));
+  }
+  await new Promise<void>(resolve => out.end(() => resolve()));
+  const before = process.memoryUsage().heapUsed;
+  const restored = withTranscriptExtras(sessionId, messages, await readTranscript(sessionId, { CLAUDE_CONFIG_DIR: root }, true));
+  const grown = process.memoryUsage().heapUsed - before;
+  expect(Buffer.byteLength(JSON.stringify(restored))).toBeLessThan(2 * 1024 * 1024);
+  expect(grown).toBeLessThan(80 * 1024 * 1024);
+  expect(JSON.stringify(restored)).toContain('structuredPatch');
+  expect(JSON.stringify(restored)).not.toContain(big.slice(0, 1000));
+}, 60_000);

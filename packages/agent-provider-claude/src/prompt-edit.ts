@@ -1,9 +1,12 @@
+import { createReadStream } from 'node:fs';
 import { access, readdir, readFile, realpath } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { forkSession } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
 import { record } from './projector.js';
+import { slimToolUseResult } from './tool-result.js';
 
 /** The native boundary of a prompt edit: the conversation entry the new branch ends with, or none for the first prompt. */
 export interface ClaudePromptEditBoundary { cwd: string; forkPoint: string | null }
@@ -18,9 +21,9 @@ export interface Row {
 const nativeRecord = /^<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-input|bash-stdout|bash-stderr|task-notification)>/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function readTranscript(sessionId: string, env: NodeJS.ProcessEnv = process.env): Promise<Row[] | undefined> {
+export async function readTranscript(sessionId: string, env: NodeJS.ProcessEnv = process.env, slim = false): Promise<Row[] | undefined> {
   const file = await transcriptFile(sessionId, env);
-  return file ? readRows(file) : undefined;
+  return file ? (slim ? readSlimRows(file) : readRows(file)) : undefined;
 }
 
 /** The transcript of a sub-agent of a session, written beside it. */
@@ -29,7 +32,39 @@ export async function readSubagentTranscript(sessionId: string, agentId: string,
   if (!file || !/^[\w-]+$/.test(agentId)) return undefined;
   const child = join(file.slice(0, -'.jsonl'.length), 'subagents', `agent-${agentId}.jsonl`);
   try { await access(child); } catch { return undefined; }
-  return readRows(child);
+  return readSlimRows(child);
+}
+
+/**
+ * The transcript read line by line, keeping of each row only what the Timeline needs: its links and kind, a prompt's first characters,
+ * the fields of a folded input, and the slimmed structured result of a tool. A line is parsed and let go, so the memory held is the
+ * kept fields of every row and never the whole file.
+ */
+async function readSlimRows(file: string): Promise<Row[]> {
+  const rows: Row[] = [];
+  for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
+    if (!line) continue;
+    let value: unknown;
+    try { value = JSON.parse(line); } catch { continue; }
+    if (!record(value) || typeof value.uuid !== 'string') continue;
+    const { message, attachment, toolUseResult, origin } = value;
+    const content = record(message) ? message.content : undefined;
+    rows.push({ linked: 'parentUuid' in value, uuid: value.uuid, parentUuid: typeof value.parentUuid === 'string' ? value.parentUuid : null,
+      ...(typeof value.logicalParentUuid === 'string' ? { logicalParentUuid: value.logicalParentUuid } : {}),
+      type: value.type, subtype: value.subtype, isSidechain: value.isSidechain, isMeta: value.isMeta, isCompactSummary: value.isCompactSummary, isVisibleInTranscriptOnly: value.isVisibleInTranscriptOnly,
+      ...(value.type === 'user' && content !== undefined ? { message: { content: slimContent(content) } } : {}),
+      ...(record(attachment) && attachment.type === 'queued_command' ? { attachment: { type: attachment.type, prompt: attachment.prompt, source_uuid: attachment.source_uuid, commandMode: attachment.commandMode } } : record(attachment) ? { attachment: { type: attachment.type } } : {}),
+      ...(toolUseResult !== undefined ? { toolUseResult: slimToolUseResult(toolUseResult) } : {}),
+      ...(record(origin) ? { origin: { kind: origin.kind } } : {}) });
+  }
+  return rows;
+}
+
+/** A user row's content as the classification and the Timeline read it: block kinds, and a text's first characters. */
+function slimContent(content: unknown): unknown {
+  if (typeof content === 'string') return content.slice(0, 512);
+  if (!Array.isArray(content)) return content;
+  return content.map(block => record(block) ? { type: block.type, ...(typeof block.text === 'string' ? { text: block.text.slice(0, 512) } : {}), ...(block.type === 'tool_result' ? { tool_use_id: block.tool_use_id } : {}) } : block);
 }
 
 async function readRows(file: string): Promise<Row[]> {

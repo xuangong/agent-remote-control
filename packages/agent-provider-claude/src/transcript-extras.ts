@@ -12,7 +12,7 @@ export type ClaudeTranscriptMessage = SessionMessage & { tool_use_result?: unkno
  *   tool row equals the live one and keeps its file diffs;
  * - input folded into a running turn, a `queued_command` attachment, as a user row after the conversation entry it followed, with the
  *   uuid the Controller gave the input (`source_uuid`), which is the uuid its live row has;
- * and drops what the stream never shows: the user row a finished sub-agent wakes the session with.
+ * and drops what the stream never shows: the user row a finished sub-agent wakes the session with, and the summary row a compaction writes.
  * Returns `messages` itself when nothing changes.
  */
 export function withTranscriptExtras(sessionId: string, messages: SessionMessage[], rows: readonly Row[] | undefined): SessionMessage[] {
@@ -38,7 +38,8 @@ export function withTranscriptExtras(sessionId: string, messages: SessionMessage
   let changed = after.size > 0;
   const result = messages.flatMap((message): SessionMessage[] => {
     const row = byUuid.get(message.uuid);
-    if (row && record(row.origin) && row.origin.kind === 'task-notification') { changed = true; return []; }
+    // What the stream never shows is dropped; input folded after it stays, attached where it was.
+    if (row && (row.isCompactSummary === true || record(row.origin) && row.origin.kind === 'task-notification')) { changed = true; return after.get(message.uuid) ?? []; }
     const withResult = message.type === 'user' && row?.toolUseResult !== undefined ? { ...message, tool_use_result: row.toolUseResult } as ClaudeTranscriptMessage : message;
     if (withResult !== message) changed = true;
     return [withResult, ...(after.get(message.uuid) ?? [])];

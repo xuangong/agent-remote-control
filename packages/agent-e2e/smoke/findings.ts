@@ -24,6 +24,7 @@ const owners: Record<string, { seam: string; module: string }> = {
   'take-over-works': { seam: 'S3', module: 'relay-core (session-control)' },
   'terminal-rows-appear': { seam: 'S1', module: 'the provider adapter that reads the native history' },
   'catch-up-costs-one-tail-request': { seam: 'S3', module: 'client (session-client)' },
+  'half-open-socket-recovers': { seam: 'S3', module: 'client (connection)' },
   'draft-and-position-kept': { seam: 'S6', module: 'workbench (draft ownership)' },
 };
 

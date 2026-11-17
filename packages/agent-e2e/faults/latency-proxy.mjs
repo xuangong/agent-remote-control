@@ -5,7 +5,7 @@
 // packet, so a given rate is harsher than the same packet loss rate), a bandwidth cap, half-open sockets (a socket that stays open
 // and silently swallows its bytes), and going offline. It rewrites the browser's origin to the target's so the instance
 // accepts the requests, can close every open WebSocket to force the page to reconnect, and tees every WebSocket text message
-// to `tap` so a run keeps a transcript of the wire. Conditions are seeded and can change while it runs (`setConditions`).
+// to `tap` as the receiving side gets it, so a run keeps a transcript of the wire. Conditions are seeded and can change while it runs (`setConditions`).
 import http from 'node:http';
 import net from 'node:net';
 import { createFrameDecoder } from './ws-frames.mjs';
@@ -135,13 +135,14 @@ export async function startLatencyProxy({ target, rttMs = 0, port = 0, jitterMs 
     const emit = direction => text => { counts.messagesTapped += 1; tap?.({ t: Date.now(), connection, direction, text }); };
     const fromBrowser = createFrameDecoder({ onText: emit('browser->relay') });
     const fromTarget = createFrameDecoder({ onText: emit('relay->browser'), skipHttpHead: true });
-    const toUpstream = pipe(chunk => { if (!targetSocket.destroyed) targetSocket.write(chunk); });
-    const toClient = pipe(chunk => { if (!browserSocket.destroyed) browserSocket.write(chunk); });
+    // The tap sees each message when the side that receives it does, so bytes the proxy swallows never appear in the transcript.
+    const toUpstream = pipe(chunk => { fromBrowser.push(chunk); if (!targetSocket.destroyed) targetSocket.write(chunk); });
+    const toClient = pipe(chunk => { fromTarget.push(chunk); if (!browserSocket.destroyed) browserSocket.write(chunk); });
     const pair = { connection, pipes: [toUpstream, toClient], toUpstream, toClient };
     pairs.add(pair);
     onSocket?.({ t: Date.now(), connection, event: 'open' });
-    const relayBrowser = chunk => { fromBrowser.push(chunk); toUpstream.push(chunk); };
-    const relayTarget = chunk => { fromTarget.push(chunk); toClient.push(chunk); };
+    const relayBrowser = chunk => toUpstream.push(chunk);
+    const relayTarget = chunk => toClient.push(chunk);
     targetSocket.on('connect', () => {
       targetSocket.write(lines.join('\r\n') + '\r\n\r\n');
       if (head.length) relayBrowser(head);

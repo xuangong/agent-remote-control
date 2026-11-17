@@ -132,7 +132,7 @@ describe('the network conditions of the proxy', () => {
     expect(await echo(fresh, 'again')).toBe('echo:again');
   });
 
-  it('tees each WebSocket text message with its direction and reports sockets opening and closing', async () => {
+  it('tees each WebSocket text message as the receiving side gets it, not what the proxy swallowed, and reports sockets opening and closing', async () => {
     const taps: Array<{ connection: number; direction: string; text: string }> = [];
     const events: string[] = [];
     const { upstream, proxy } = await conditioned({ tap: message => taps.push(message), onSocket: ({ event }) => events.push(event) });
@@ -142,6 +142,11 @@ describe('the network conditions of the proxy', () => {
     await new Promise(resolve => socket.once('close', resolve));
     expect(taps).toEqual([{ t: expect.any(Number), connection: 1, direction: 'browser->relay', text: 'hello' }, { t: expect.any(Number), connection: 1, direction: 'relay->browser', text: 'echo:hello' }]);
     expect(events).toEqual(['open', 'close']);
+    const before = taps.length;
+    const second = await connect(proxy);
+    proxy.halfOpenWebSockets();
+    await echo(second, 'lost', 200);
+    expect(taps.slice(before)).toEqual([]);
     expect(upstream.seenOrigins.length).toBeGreaterThan(0);
   });
 

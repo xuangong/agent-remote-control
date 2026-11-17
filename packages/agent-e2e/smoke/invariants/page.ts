@@ -80,3 +80,18 @@ export function draftAndPositionKept(page: PageReport): InvariantResult {
   }
   return result('draft-and-position-kept', checked, violations);
 }
+
+/**
+ * M7: a socket that went half-open (open, but swallowing traffic) is noticed and replaced: a new socket opens within `withinMs`
+ * of the fault marker whose detail says `kind: 'half-open'`.
+ */
+export function halfOpenSocketRecovers(transcript: Transcript, withinMs = 60_000): InvariantResult {
+  const faults = markers(transcript, 'fault').filter(marker => marker.detail?.kind === 'half-open');
+  const violations: Violation[] = [];
+  for (const fault of faults) {
+    const reopened = markers(transcript, 'socket-open').find(open => open.t > fault.t);
+    if (!reopened) violations.push({ message: 'the page never replaced the half-open socket', at: fault.t });
+    else if (reopened.t - fault.t > withinMs) violations.push({ message: `the page took ${reopened.t - fault.t} ms to replace the half-open socket`, at: fault.t });
+  }
+  return result('half-open-socket-recovers', faults.length, violations);
+}

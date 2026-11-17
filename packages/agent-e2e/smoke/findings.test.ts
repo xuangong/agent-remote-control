@@ -16,7 +16,7 @@ describe('findings from failed invariants', () => {
     const reported = [
       invariants.firstPaintFromDeviceStore(empty), invariants.messagesSettleOnce([]), invariants.noDuplicateItemKey([], empty),
       invariants.journalSequencesContiguous([]), invariants.oneReplacementPerRestart([]), invariants.turnRowsCompleteAfterReturn(empty, []),
-      invariants.noBlankFrame(empty), invariants.noStaleLabel([], empty), invariants.trimReported([]), invariants.liveOnlyItemsSurvive(empty, []),
+      invariants.noBlankFrame(empty), invariants.noStaleLabel([], empty), invariants.halfOpenSocketRecovers([]), invariants.trimReported([]), invariants.liveOnlyItemsSurvive(empty, []),
       invariants.noRefusedRowHole([]), invariants.subscriptionsWithinBudget([], 1), invariants.unchangedRowsNotRerendered(empty),
       invariants.memoryFlat(empty), invariants.rowCountsStable(empty), invariants.socketCountsStable(empty),
       invariants.leaseFollowsNativeOwner([]), invariants.noLostOrDoubledMessage(empty, []), invariants.takeOverWorks([]),

@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { catchUpCostsOneTailRequest, draftAndPositionKept, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
+import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import { mergeInvariantResults, type ScheduleStep } from '../report.js';
 import type { Scenario } from '../scenario.js';
@@ -62,6 +62,24 @@ export const hiddenAndDrops: Scenario = {
           await probe.page.locator('[data-testid="prompt-input"]').click();
           await probe.page.keyboard.press('Meta+a').catch(() => {});
           await probe.page.keyboard.press('Backspace');
+        }
+        // A half-open socket: nothing closes, nothing arrives. The page must notice by itself and reconnect.
+        {
+          const word = `HALFOPEN${context.random.int(100, 999)}`;
+          const first = recorder.transcript().at(-1)?.n ?? 0;
+          const affected = proxy.halfOpenWebSockets();
+          recorder.mark('fault', { kind: 'half-open', sockets: affected });
+          schedule.push({ t: recorder.clock(), action: 'half-open', detail: { sockets: affected } });
+          await context.pool.send(address, `Reply with the single word ${word} and nothing else.`);
+          const caughtUp = await probe.waitForReplyContaining(word, 120_000);
+          await probe.page.waitForTimeout(3000);
+          await probe.snapshotKeys();
+          const page = await probe.report();
+          const wire = recorder.transcript().filter(entry => entry.n > first);
+          conditions.push({ label: 'half-open sockets', results: [halfOpenSocketRecovers(wire, 90_000), noStaleLabel(wire, page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
+          const faultAt = wire.find(entry => 'marker' in entry && entry.marker === 'fault')?.t;
+          const replacedAt = wire.find(entry => 'marker' in entry && entry.marker === 'socket-open')?.t;
+          (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, replacedAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });
         }
         await probe.close();
       });

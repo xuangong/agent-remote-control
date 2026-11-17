@@ -146,6 +146,8 @@ export function protectHostDirectory(directory: AgentHostDirectory, policy: Host
     async validatePromptEdit(target) { await checkSource(target.nativeSessionId); await directory.validatePromptEdit?.(target); },
     reconcileIdleSession: directory.reconcileIdleSession?.bind(directory),
     canReleaseSession: directory.canReleaseSession?.bind(directory),
+    divergedAt: directory.divergedAt?.bind(directory),
+    checkDivergence: directory.checkDivergence?.bind(directory),
     sessionReleased: directory.sessionReleased?.bind(directory),
     setSessionHandoffHandler: directory.setSessionHandoffHandler?.bind(directory),
     setSessionHandoffAdmission: directory.setSessionHandoffAdmission?.bind(directory),

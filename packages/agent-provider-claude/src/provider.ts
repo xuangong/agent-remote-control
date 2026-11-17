@@ -83,6 +83,15 @@ export class ClaudeAgentProvider implements AgentProviderAdapter {
     return name;
   }
 
+  /** Whether a loaded session is quiet, and when this process last wrote to it. */
+  sessionState(sessionId: string): { quiet: boolean; writtenAt: number } | undefined { return this.sessions.get(sessionId)?.nativeState(); }
+
+  /** The native update time of a session's transcript. */
+  async sessionNativeUpdatedAt(sessionId: string): Promise<number | undefined> {
+    const info = await this.catalog.info(sessionId).catch(() => undefined);
+    return typeof info?.lastModified === 'number' ? info.lastModified : undefined;
+  }
+
   async listSessions(): Promise<ClaudeSessionSummary[]> {
     // Persisted SDK metadata does not describe an external query's current activity.
     return (await this.catalog.list()).map((entry) => ({ nativeSessionId: entry.sessionId, providerId: 'claude',

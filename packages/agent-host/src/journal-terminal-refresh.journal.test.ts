@@ -13,11 +13,11 @@ import { closeHosts, startRelayHost } from './test-utils/relay-host-harness.js';
  */
 afterEach(async () => { vi.useRealTimers(); await closeHosts(); });
 
-async function start(options: { capable?: boolean; idleGraceMs?: number; onRequestListing?: boolean } = {}) {
+async function start(options: { capable?: boolean; idleGraceMs?: number; onRequestListing?: boolean; divergent?: boolean } = {}) {
   /** What the native runtime holds, which a terminal appends to without any session. */
   const native = { rows: [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')] as ProviderObservation[], updatedAt: Date.now() - 120_000 };
   const listedAt = native.updatedAt;
-  const behavior: { open?: () => Error | undefined; refused: number } = { refused: 0 };
+  const behavior: { open?: () => Error | undefined; refused: number; diverged: boolean } = { refused: 0, diverged: false };
   const opened: ScriptedSession[] = [];
   const adapter: AgentProviderAdapter = {
     descriptor: { providerId: 'fake', displayName: 'Fake' },
@@ -34,6 +34,7 @@ async function start(options: { capable?: boolean; idleGraceMs?: number; onReque
       listing: { status: () => ({ refreshing: false, complete: true, version: 1 }), refresh: async () => undefined },
       sessionSummary: async () => summary(native.updatedAt),
     } : {}),
+    ...(options.divergent ? { divergedAt: () => behavior.diverged ? 1 : undefined, checkDivergence: async () => behavior.diverged } : {}),
     async open(nativeSessionId) {
       const failure = behavior.open?.();
       if (failure) { behavior.refused += 1; throw failure; }
@@ -63,7 +64,7 @@ async function start(options: { capable?: boolean; idleGraceMs?: number; onReque
   /** A terminal that wrote only seconds ago, and may write again. */
   const terminalWritesJustNow = (...rows: ProviderObservation[]) => { vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 120_000 }); native.rows.push(...rows); native.updatedAt = Date.now() - 5_000; };
   const clockMovesOn = (ms: number) => { vi.setSystemTime(Date.now() + ms); };
-  return { terminalWritesJustNow, clockMovesOn, store: relay.store, attach, listing, journal, keys, windows: relay.windows, released: relay.released, published, terminalWrites, native, behavior, opened, lifecycle: relay.lifecycle, restart: relay.restart };
+  return { acquire: () => relay.acquire('fake', 'thread-1'), terminalWritesJustNow, clockMovesOn, store: relay.store, attach, listing, journal, keys, windows: relay.windows, released: relay.released, published, terminalWrites, native, behavior, opened, lifecycle: relay.lifecycle, restart: relay.restart };
 }
 
 const GRACE = 60;
@@ -138,6 +139,18 @@ describe('a session a terminal wrote while the Controller held no runtime of it'
     run.clockMovesOn(40_000);
     await run.listing();
     await until(async () => (await run.keys()).includes('a2'), 'the turn once the terminal was quiet');
+  });
+
+  it('releases a held session whose transcript something else wrote to before a send continues from it, and reads it again', async () => {
+    const run = await start({ divergent: true });
+    await run.attach();
+    await until(async () => (await run.keys()).length === 2, 'the rows');
+    expect(run.opened).toHaveLength(1);
+    run.terminalWrites(...turn());
+    run.behavior.diverged = true;
+    await run.acquire();
+    await until(() => run.opened.length === 2, 'the session read again');
+    await until(async () => (await run.keys()).includes('a2'), 'the turn in the journal');
   });
 
   it('reads the sessions it published one by one when the directory\'s listing is read only on request, since that listing does not move', async () => {

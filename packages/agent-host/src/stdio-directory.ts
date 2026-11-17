@@ -16,6 +16,9 @@ export type ManagedStdioProvider = Pick<AgentProviderAdapter, 'createSession' | 
      * at most this many UTF-16 units. Covers every selected create mode, not resume/fork or history. */
     readonly createdSessionIdMaxLength?: number;
     listSessions(): Promise<RemoteSessionSummary[]>;
+    /** A loaded session of a runtime that keeps the conversation in memory: whether nothing runs for it, and when this process last wrote to it. */
+    sessionState?(id: string): { quiet: boolean; writtenAt: number } | undefined;
+    sessionNativeUpdatedAt?(id: string): Promise<number | undefined>;
     readSessionTitle?(id: string): Promise<string | undefined>;
     renameSession?(id: string, title: string): Promise<string>;
     validateSessionTitle?(title: string): void;
@@ -46,6 +49,8 @@ export function createManagedStdioDirectory(
   const unconfirmedStarts = new Set<string>();
   const rejectedStarts = new Map<string, { session: AgentSession; owner?: NativeSessionLease }>();
   const controllerTools = new Set<string>();
+  /** The native update time each listing last saw, to tell a transcript something else wrote from one this process did. */
+  const listedAt = new Map<string, number>();
   let sourceAccessCheck: ((id: string) => Promise<void>) | undefined;
   let sourceBindingReader: SourceBindingReader | undefined;
   let sourceReferenceAncestors: ((id: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>) | undefined;
@@ -122,6 +127,7 @@ export function createManagedStdioDirectory(
   let closing: Promise<void> | undefined;
   async function discover(): Promise<RemoteSessionSummary[]> {
     const summaries = new Map((await provider.listSessions()).map((summary) => [summary.nativeSessionId, summary]));
+    for (const summary of summaries.values()) { const at = Date.parse(summary.updatedAt); if (Number.isFinite(at)) listedAt.set(summary.nativeSessionId, at); }
     for (const [nativeSessionId, entry] of opened) {
       const info = await entry.session.runtimeInfo();
       const previous = summaries.get(nativeSessionId);
@@ -251,6 +257,18 @@ export function createManagedStdioDirectory(
     async sourceReference(id) { return sourceReferenceState(await lookupSourceGrant(id)); },
     async setSourceReferenceRemoved(id, removed) { return setSourceReferenceRemoved(references, await lookupSourceGrant(id), removed); },
     requiresController: id => controllerTools.has(id),
+    // A runtime that keeps the conversation in memory continues from its own last message, so a transcript another process wrote to is
+    // not seen by it: such a session, once nothing runs for it, is released and read again.
+    ...(provider.sessionState ? {
+      divergedAt: (id: string) => { const state = provider.sessionState!(id), native = listedAt.get(id); return state && native !== undefined && native > state.writtenAt + 2000 ? state.writtenAt : undefined; },
+      canReleaseSession: (id: string) => { const state = provider.sessionState!(id), native = listedAt.get(id); return !!state?.quiet && native !== undefined && native > state.writtenAt + 2000 && Date.now() - native >= 30_000; },
+      async checkDivergence(id: string) {
+        const native = await provider.sessionNativeUpdatedAt?.(id);
+        if (native !== undefined) listedAt.set(id, native);
+        const state = provider.sessionState!(id);
+        return !!state?.quiet && native !== undefined && native > state.writtenAt + 2000;
+      },
+    } : {}),
     list() { if (closed) throw new Error(`${displayName} directory is closed.`); return discovery ??= discover().finally(() => { discovery = undefined; }); },
     workspaces: () => [...workspaces],
     ...(provider.readSessionTitle ? {sessionTitle: provider.readSessionTitle.bind(provider)} : {}),

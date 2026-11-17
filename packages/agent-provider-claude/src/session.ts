@@ -95,6 +95,9 @@ export class ClaudeAgentSession implements AgentSession {
   private readonly resultIds = new Set<string>();
   private readonly timeout: number;
   private sequence = 0;
+  /** When this process last wrote to the native session; a transcript newer than that was written by something else. */
+  private lastWriteAt = Date.now();
+  private backgroundTasks = 0;
   private status: AgentRuntimeInfo['status'] = 'starting';
   private turnId: ReturnType<typeof randomUUID> | undefined;
   private cancelRequested = false;
@@ -282,6 +285,7 @@ export class ClaudeAgentSession implements AgentSession {
   }
 
   private dispatchMessage(content: SDKUserMessage['message']['content'], turnId = randomUUID(), options: AgentMessageOptions = {}): void {
+    this.lastWriteAt = Date.now();
     const message = { type: 'user' as const, uuid: turnId, session_id: this.config.sessionId,
       parent_tool_use_id: null, message: { role: 'user' as const, content } };
     this.input.push(message);
@@ -567,6 +571,13 @@ export class ClaudeAgentSession implements AgentSession {
     return settings;
   }
 
+  /** Whether nothing runs for this session, and when this process last wrote to it: what a release because the transcript moved on must know. */
+  nativeState(): { quiet: boolean; writtenAt: number } {
+    const quiet = !this.disposed && !this.failure && this.status === 'idle' && !this.turnId && this.steering.size === 0 && this.interactions.size === 0 && this.backgroundTasks === 0
+      && !this.changingSetting && !this.preparingMessage && !this.children.descriptors().some(child => child.status === 'running' || child.status === 'waiting');
+    return { quiet, writtenAt: this.lastWriteAt };
+  }
+
   async runtimeInfo(options?: { refreshSettings?: boolean }): Promise<AgentRuntimeInfo> {
     if (options?.refreshSettings && !this.disposed && !this.failure && this.native.getSettings) await this.readNativeSettings(true);
     return this.info();
@@ -651,6 +662,8 @@ export class ClaudeAgentSession implements AgentSession {
     try {
       for await (const message of this.native) {
         if (this.disposed) break;
+        this.lastWriteAt = Date.now();
+        if (message.type === 'system' && message.subtype === 'background_tasks_changed') this.backgroundTasks = (message as { tasks?: Array<{ ambient?: unknown }> }).tasks?.filter(task => !task.ambient).length ?? 0;
         if (message.session_id && message.session_id !== this.config.sessionId) throw new Error('Claude returned a different native session identity.');
         const lifecycle = message as { type: string; command_uuid?: unknown; state?: unknown };
         if (lifecycle.type === 'command_lifecycle') {

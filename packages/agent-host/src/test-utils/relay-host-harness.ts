@@ -51,8 +51,14 @@ export async function startRelayHost(options: { registrations: AgentHostProvider
   });
   const { hostId } = await state.host.ready;
   const request = async (path: string, init?: RequestInit) => broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/${path}`, init));
+  const agentIdOf = async (providerId: string, nativeSessionId: string): Promise<string> => {
+    const response = await request('attach', { method: 'POST', body: JSON.stringify({ providerId, nativeSessionId }) });
+    return String((await response!.json() as { agentId?: string }).agentId);
+  };
   return {
     store, lifecycle,
+    /** An operation on the attached session, as a page's send makes it: the Controller acquires the session for it. */
+    acquire: async (providerId: string, nativeSessionId: string) => { await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${encodeURIComponent(await agentIdOf(providerId, nativeSessionId))}/snapshot`)); },
     attach: async (providerId: string, nativeSessionId: string) => { expect((await request('attach', { method: 'POST', body: JSON.stringify({ providerId, nativeSessionId }) }))?.status).toBe(200); },
     /** What the page's directory does: a listing, or the revision check it repeats every five seconds. */
     listing: async (providerId: string, revision = false) => { expect((await request(`${revision ? 'catalog/revision' : 'catalog'}?providerId=${providerId}`))?.status).toBe(200); },

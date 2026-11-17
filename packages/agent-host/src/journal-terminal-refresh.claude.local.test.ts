@@ -32,7 +32,7 @@ function terminal(fixture: Awaited<ReturnType<typeof nativeFixture>>, args: stri
   });
 }
 
-it('does not refresh a Claude session the Controller still holds when a raw terminal runs a turn: Claude sessions are never idle-released, so the journal stays as it was', async () => {
+it('releases a Claude session a raw terminal turn moved on, reads it again at the next listing, and the journal shows the turn without a send', async () => {
   const fixture = await nativeFixture((body, response) => nativeReply(response, [{ type: 'text', text: JSON.stringify(body.messages).includes('SECOND_PROMPT') ? 'TERMINAL_SECOND_REPLY' : 'TERMINAL_FIRST_REPLY' }]));
   try {
     const provider = new ClaudeAgentProvider({ ...fixture.options, catalog: createClaudeCatalog(fixture.options.env, 15000) });
@@ -43,15 +43,18 @@ it('does not refresh a Claude session the Controller still holds when a raw term
     await relay.attach('claude', id);
     const texts = async () => (await relay.journal('claude', id))?.state().items.flatMap(entry => (entry.body?.item as { text?: string } | undefined)?.text ?? []) ?? [];
     await until(async () => (await texts()).includes('TERMINAL_FIRST_REPLY'), 'the first turn in the journal', 30000);
-    // The idle release that the refresh relies on does not exist for Claude: the directory offers no `canReleaseSession`.
+    // Nothing diverged: the session stays held.
+    await relay.listing('claude');
     await new Promise<void>(resolve => { setTimeout(resolve, 1500); });
     expect(relay.released()).toBe(0);
 
     expect(await terminal(fixture, ['--resume', id, 'SECOND_PROMPT'])).toContain('TERMINAL_SECOND_REPLY');
+    // The terminal is left alone until it has been quiet for a while.
+    await new Promise<void>(resolve => { setTimeout(resolve, 32_000); });
     await relay.listing('claude');
-    await new Promise<void>(resolve => { setTimeout(resolve, 3000); });
-    expect(await texts()).not.toContain('TERMINAL_SECOND_REPLY');
-    expect(relay.released()).toBe(0);
-    expect(relay.windows()).toEqual(['new']);
+    await until(() => relay.released() === 1, 'the session released because the transcript moved on', 30000);
+    // Closing the runtime touches the transcript, so the reread waits for another quiet period.
+    await until(async () => { await relay.listing('claude'); return (await texts()).includes('TERMINAL_SECOND_REPLY'); }, 'the terminal turn in the journal', 90000);
+    expect(await texts()).toEqual(expect.arrayContaining(['First prompt', 'TERMINAL_FIRST_REPLY', 'SECOND_PROMPT', 'TERMINAL_SECOND_REPLY']));
   } finally { await fixture.close(); }
-}, 180000);
+}, 240000);

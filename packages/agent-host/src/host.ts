@@ -79,6 +79,10 @@ export interface AgentHostDirectory {
   requiresController?(nativeSessionId: string): boolean;
   /** Must guarantee disposal only detaches this client's idle runtime connection. */
   canReleaseSession?(nativeSessionId: string): boolean;
+  /** When this process last wrote to a session whose transcript something else has written to since; none when it did not diverge. */
+  divergedAt?(nativeSessionId: string): number | undefined;
+  /** Reads the transcript's update time now: true when something else wrote to a session that is otherwise quiet. */
+  checkDivergence?(nativeSessionId: string): Promise<boolean>;
   reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
   sessionReleased?(nativeSessionId: string): Promise<void> | void;
   sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
@@ -891,10 +895,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   /** Publishes what the session still holds and stops following it; when the journal served it, the Relay holds everything up to this moment. */
   async function releaseJournal(binding: Binding): Promise<void> {
     const startedAt = Date.now();
+    // A session released because something else wrote to its transcript is behind it: its journal covers only what this process wrote.
+    const diverged = registration(binding.providerId).directory.divergedAt?.(binding.nativeSessionId);
     if (!await journals.release(binding.agentId)) return;
     const key = `${binding.providerId}:${binding.nativeSessionId}`;
     // Never earlier than what a listing already told: a clock behind the native one must not make the same write look new again.
-    const covered = Math.max(journalWindowAt.get(key) ?? 0, startedAt);
+    const covered = diverged ?? Math.max(journalWindowAt.get(key) ?? 0, startedAt);
     // Re-inserted so the map keeps the sessions released most recently, and no more of them than a refresh may read.
     journalWindowAt.delete(key);
     journalWindowAt.set(key, covered);
@@ -907,13 +913,18 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
    * whose listing is read only on request does not move when a terminal writes, so the sessions this process published are read one by one.
    */
   function listed(providerId: string, summaries: readonly RemoteSessionSummary[]): void {
-    if (journalRefreshing || closed || draining || !journals.granted()) return;
+    if (journalRefreshing || closed || draining) return;
     journalRefreshing = true;
     void refreshOutdated(providerId, summaries).catch(() => undefined).finally(() => { journalRefreshing = false; });
   }
   async function refreshOutdated(providerId: string, listedSummaries: readonly RemoteSessionSummary[]): Promise<void> {
     const directory = registrations.get(providerId)?.directory;
     if (!directory) return;
+    // A resident session whose transcript something else wrote to is released, and the attach below reads it again.
+    for (const binding of bindings.values()) {
+      if (binding.providerId === providerId && !binding.parentNativeSessionId && liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) && directory.canReleaseSession?.(binding.nativeSessionId) && directory.divergedAt?.(binding.nativeSessionId) !== undefined) idle.expire(binding.agentId);
+    }
+    if (!journals.granted()) return;
     const unheld = [...journalWindowAt.keys()].flatMap(key => {
       const binding = key.startsWith(`${providerId}:`) ? bindings.getByNative(providerId, key.slice(providerId.length + 1)) : undefined;
       return binding && !liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) ? [binding] : [];
@@ -983,6 +994,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return true;
     });
   }
+  async function releaseIfDiverged(binding: Binding): Promise<void> {
+    const directory = registration(binding.providerId).directory;
+    if (!directory.checkDivergence || binding.parentNativeSessionId || !liveAgent(binding.agentId) || !await directory.checkDivergence(binding.nativeSessionId)) return;
+    const agent = liveAgent(binding.agentId);
+    if (!agent?.canReleaseIdle()) return;
+    await releaseJournal(binding);
+    await relay.closeAgent(binding.agentId);
+    await directory.sessionReleased?.(binding.nativeSessionId);
+  }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
     const binding = bindings.getByAgent(agentId);
     if (closed || !binding) return undefined;
@@ -997,6 +1017,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         }
       }
       await idle.wait(agentId);
+      // A send must not continue from a conversation a terminal has moved on: a diverged, quiet session is released and read again first.
+      await releaseIfDiverged(binding);
       await tracked(project(binding.providerId, agentId, binding.nativeSessionId, binding.parentNativeSessionId));
       const agent = closed ? undefined : liveAgent(agentId);
       if (!agent) { release(); parent?.release(); return undefined; }

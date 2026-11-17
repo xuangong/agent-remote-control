@@ -28,3 +28,5 @@ Test what a change touches. Unit and integration tests use mock data; only e2e a
 | Local/native | Real CLIs, models and terminals on this machine | By hand or nightly: `pnpm test:local`, `pnpm test:claude`, `pnpm test:opencode:native` |
 
 Run `pnpm task:start` at the start of a task so `pnpm verify:changed` compares with that commit. Run the full `pnpm verify` at the end of a step and before a merge or release.
+
+Speed rule for unit and integration tests, which use mock data: a test over 1 s is wrong, and a test over 300 ms needs a look. Use fake timers, injected clocks and mock ports instead of real waits, processes or full stacks. `scripts/lib/slow-test-reporter.mjs` lists tests over 300 ms and fails a run on a test over 1 s that `scripts/slow-test-allowlist.json` does not name; the allowlist only shrinks. Local/native, browser, e2e and process-project tests are exempt.

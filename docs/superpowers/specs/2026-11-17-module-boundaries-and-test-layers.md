@@ -534,3 +534,81 @@ Q1 to Q4 and Q6 to Q9 do not touch product code. Q5 changes Vitest configs only;
 - Per-test times beyond Vitest's per-file totals; the Playwright and browser suites were not run; the build and typecheck times were not measured; `agent-remote-debugger` and the remaining small packages were not timed. One `agent-remote-cloudflare` test failed in my run under load and was not investigated.
 - The tier shares and the move counts are estimates from imports and file names; they need a per-file pass before any deletion.
 - The digest claim in 4.4 is from reading the tests; I did not run them after a source edit because I was not to change code.
+
+## 11. Slow-test report (mock-data tests over 300 ms and 1 s)
+
+Owner rule, 2026-11-18: a mock-data test over 1 s is wrong, and one over 300 ms needs a look. Measured with `scripts/lib/slow-test-reporter.mjs` over one full `pnpm test` (Node 22, 10 cores); the `process` project, `*.local.*` and browser tests are exempt. Raw data: `.tmp/slow-tests-baseline.json` (before) and `.tmp/slow-tests-after.json` (after the first fixes). Of 9,435 measured tests, 552 took over 300 ms and 123 over 1 s before; after the first fixes 559 and 121 (the web package fell from 10 to 2 over 1 s; run-to-run load noise moves other counts by a few).
+
+| Package | over 300 ms (before to after) | over 1 s (before to after) |
+|---|---:|---:|
+| agent-host|142 to 147|23 to 24|
+| agent-platform|0 to 0|0 to 0|
+| agent-provider-claude|3 to 3|2 to 2|
+| agent-provider-codex|2 to 2|0 to 0|
+| agent-provider-copilot|30 to 30|5 to 8|
+| agent-provider-dsh|0 to 0|0 to 0|
+| agent-provider-opencode|6 to 6|3 to 3|
+| agent-provider-sdk|0 to 0|0 to 0|
+| agent-remote-cloudflare|125 to 131|31 to 32|
+| agent-remote-debugger|11 to 11|3 to 4|
+| agent-remote-dsh|1 to 1|1 to 1|
+| agent-remote-hosted|26 to 27|3 to 3|
+| agent-remote-journal|2 to 2|2 to 2|
+| agent-remote-lab|164 to 167|38 to 38|
+| agent-remote-protocol|0 to 0|0 to 0|
+| agent-remote-relay|16 to 16|2 to 2|
+| agent-remote-tunnel|1 to 1|0 to 0|
+| agent-remote-web|22 to 14|10 to 2|
+| codex-daemon-client|1 to 1|0 to 0|
+
+Causes of the 123 tests over 1 s (grouped by path; a heuristic, to be confirmed per file):
+
+| Cause | Tests | Fix |
+|---|---:|---|
+| Real sockets, servers or tunnels on loopback (lab `src/server`, `*.transport.test`, session channel) | 36 | Fake clock for deadlines (done for 10 tests in `session-channel-transport` and `message-echo-sync`); a fake `RelaySocket` pair for the rest (I3 to I5 seams) |
+| Real workerd runtime and real alarms (`agent-remote-cloudflare`) | 31 | Not mock-data tests; they need injectable heartbeat and deadline settings in the Worker, or a move to a runtime project that the rule exempts |
+| Controller stores with real files and large envelopes (`session-succession-*`, `session-source-witness`) | 23 | The store limit (`SUCCESSION_STORE_BYTES`) must be injectable, and the store a module with an in-memory port (X-modules 5 and 6) |
+| Whole-app or component mount in jsdom | 12 | X1 client succession model and the Workbench reducer, so a rule is not tested through `App` |
+| Large fixtures or real files (journal 200,000 items, catalog, settings) | 12 | Smaller sizes where the boundary is parameterised; otherwise a dedicated scale project |
+| Real process or provider runtime (Copilot native, OpenCode, debugger CLI) | 7 | Move to the `process` project or a scripted provider |
+| Other | 2 | Per file |
+| Real timers or sleeps | included above | Fake timers: done for the web transport tests and the authority deadline (`queryGatewayAuthority` takes an optional deadline) |
+
+Per-file setup cost (jsdom, 22 s of 35 s in web) was cut by the node environment default for 29 of 94 web files.
+
+The 30 slowest tests before the fixes:
+
+| ms | File | Test |
+|---:|---|---|
+|40433|agent-remote-cloudflare/test/heartbeat.test.ts|keeps an acknowledged Host online while expiring an unacknowledged app|
+|10509|agent-provider-copilot/tests/native.test.ts|native MCP form roundtrip uses the normalized interaction contract|
+|10280|agent-remote-cloudflare/test/runtime.test.ts|enforces the native registration deadline without incoming frames|
+|10255|agent-remote-lab/src/server/devbox-preview.test.ts|opens Devbox through a root preview and retains its browser identity, |
+|10137|agent-remote-web/src/client/session-channel-transport.test.ts|session channel transport > falls back for an unanswered ready handsha|
+|10057|agent-remote-web/src/client/message-echo-sync.transport.test.ts|recovers an omitted live echo through HTTP without reconnecting or res|
+|10052|agent-remote-web/src/client/message-echo-sync.transport.test.ts|recovers an omitted live echo through HTTP without reconnecting or res|
+|8252|agent-remote-lab/src/server/hosted-runtime.test.ts|refuses a near-ceiling handoff before the native effect while keeping |
+|6815|agent-host/src/team-host.test.ts|registers two real Host uplinks, injects scoped tools, delivers both w|
+|6207|agent-remote-cloudflare/test/preview-runtime.test.ts|renews Miniflare previews from websocket traffic without browser keepa|
+|6181|agent-remote-cloudflare/test/preview-runtime.test.ts|renews Miniflare previews from http traffic without browser keepalives|
+|6064|agent-host/src/copilot.test.ts|Copilot registration executable preflight > allows the native CLI to f|
+|5287|agent-remote-lab/src/server/hosted-runtime.test.ts|protects an admitted near-ceiling reserve from ordinary writes and com|
+|5282|agent-remote-cloudflare/test/authority-renewal.test.ts|keeps a Host connected through an authority outage until the grace aft|
+|5177|agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx|does not restore the confirmed locator after a refresh timeout|
+|5144|agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx|reconciles metadata on page resume without retrying an HTTP attachment|
+|5131|agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx|retains an authorized desired B after its replay endpoint becomes unav|
+|5003|agent-remote-hosted/src/authority.test.ts|distinguishes an authority deadline from HTTP errors without changing |
+|4934|agent-remote-cloudflare/test/authority-renewal.test.ts|retries a failed owner renewal before expiry while preserving the same|
+|4890|agent-remote-cloudflare/test/connection-diagnostics.test.ts|delivers Worker close metadata and distinguishes object startup from c|
+|4602|agent-remote-cloudflare/test/authority-renewal.test.ts|renews authority before the lease expires without browser requests or |
+|4227|agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx|edits a real App managed Team window into its retained origin owner an|
+|4167|agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx|refreshes successor context after Composer delivery without waiting fo|
+|4081|agent-remote-web/src/client/session-channel-transport.test.ts|session channel transport > retires an unresponsive resumed channel pr|
+|4047|agent-host/src/session-source-witness.test.ts|several pending witnesses survive restart and completion order [2,1,0]|
+|3973|agent-host/src/session-source-witness.test.ts|several pending witnesses survive restart and completion order [1,0,2]|
+|3951|agent-host/src/session-source-witness.test.ts|several pending witnesses survive restart and completion order [0,1,2]|
+|3612|agent-host/src/session-succession-capacity.test.ts|concurrent unrelated role writes preserve actual participant, terminal|
+|3606|agent-remote-web/src/client/session-channel-transport.test.ts|session channel transport > keeps multiplexing when the first channel |
+|3596|agent-remote-cloudflare/test/storage-operating-envelope.test.ts|operating O hold|
+
+Tests still over 1 s are named in `scripts/slow-test-allowlist.json` (313 entries: every test seen over 500 ms in either measured run, because tests between 500 ms and 1 s cross the limit under load). The reporter fails a run on any other test over 1 s; the allowlist only shrinks.

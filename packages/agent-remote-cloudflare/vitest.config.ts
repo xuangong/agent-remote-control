@@ -1,3 +1,4 @@
 import { defineConfig } from 'vitest/config';
 import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
-export default defineConfig({ plugins: [workspaceSource()], test: { hookTimeout: 30_000 } });
+import { SlowTestReporter } from '../../scripts/lib/slow-test-reporter.mjs';
+export default defineConfig({ plugins: [workspaceSource()], test: { reporters: ['default', new SlowTestReporter()], hookTimeout: 30_000 } });

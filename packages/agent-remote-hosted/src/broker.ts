@@ -65,6 +65,8 @@ type Host = {
   smartReading?: string[];
   /** The Controller publishes session journals on this connection; set when the Relay acknowledges it, never persisted. */
   journal?: JournalConnection;
+  /** The Controller offered session control and the Relay acknowledged it: the Relay owns the leases of this Host's streams. Set on registration, never persisted. */
+  control?: true;
   teamManagement?: true;
   teamRecipients?: 1;
   /** Team recipients follow a generic succession of their session on this Host, including to another provider. */
@@ -823,7 +825,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     diagnostic(host, {event:'host_disconnected',reason,closeCode,heartbeatAgeMs,wasClean,pendingRequests:[...host.pending.values()].filter(p=>!p.diagnostic).length,streams:host.streams.size});
     previews.disconnect(host.id); host.tunnelToken = undefined;
     host.socket = undefined; host.ready = false; host.sessionStates = undefined;
-    host.journal?.close(); host.journal = undefined;
+    host.journal?.close(); host.journal = undefined; host.control = undefined;
     notifySessionStates();
     for (const [requestId, pending] of host.pending) {
       clearTimeout(pending.timer);
@@ -840,7 +842,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     host.streams.clear();
   }
-  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested: 0 | typeof JOURNAL_VERSION = 0) {
+  function register(socket: RelaySocket, credential: DeviceCredential, context: BrokerRequestContext, credentialHash: string, enrollmentRequested?: 1 | 2 | 3, teamRequested = false, resourcesRequested = false, recipientsRequested = false, inboxRequested = false, statesRequested: false | 1 | 2 = false, successionRequested = false, callForSupportRequested: false | string[] = false, statusRequested = false, outboxRequested = false, journalRequested: 0 | typeof JOURNAL_VERSION = 0, controlRequested = false) {
     let host: Host | undefined;
     let pendingCredential: {hash: string; value: DeviceCredential} | undefined;
     let issuing: Promise<void> | undefined;
@@ -896,9 +898,10 @@ export function createHostBroker(options: HostBrokerOptions) {
           send: message => send(journalHost, message), diagnostic: (event, details) => diagnostic(journalHost, { event, ...details }),
           published: (sessionKey, result) => journalSessions?.published(journalHost.id, sessionKey, result) })
         : undefined;
-      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
+      send(host, { uplinkVersion: 2, type: 'registered', ...(statesRequested ? { sessionStates: statesRequested } : {}), ...(host.outbox === 1 ? { outbox: 1 as const } : {}), ...(controlRequested ? { control: 1 as const } : {}), ...(host.journal ? { journal: JOURNAL_VERSION } : {}), ...(host.teamRecipients === 1 && inboxRequested ? { teamInbox: 1 } : {}), ...(host.teamRecipients === 1 ? { teamRecipients: 1 } : {}), ...(host.teamSuccession === 1 ? { teamSuccession: 1 } : {}), ...(host.callForSupport === 1 ? { callForSupport: 1 } : {}), ...(host.teamManagement && resourcesRequested && options.teamResources ? {teamResources:true} : {}), ...(host.teamManagement ? {teamManagement: true} : {}), hostId: host.id, ...(host.successionEnrollmentVersion && options.successionEnrollment ? { successionEnrollment: options.successionEnrollment, ...(host.successionEnrollmentVersion !== 1 ? { successionEnrollmentVersion: host.successionEnrollmentVersion } : {}) } : {}), pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'), heartbeat, tunnelToken: host.tunnelToken });
       if (retired || host.socket !== socket) return;
       host.ready = true;
+      host.control = controlRequested ? true : undefined;
       journalSessions?.hostReturned(host.id);
       if (journalDeletions.length > 0) drainJournalDeletions();
       host.hostStatus = statusRequested ? true : undefined;
@@ -2241,7 +2244,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { accept(client: RelaySocket) {
         if (unavailable || keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
         track(client);
-        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0);
+        register(client, key, context, hash!, url.searchParams.get('successionEnrollment') === '3' ? 3 : url.searchParams.get('successionEnrollment') === '2' ? 2 : url.searchParams.get('successionEnrollment') === '1' ? 1 : undefined, url.searchParams.get('team') === '1', url.searchParams.get('teamResources') === '1', url.searchParams.get('teamRecipients') === '1', url.searchParams.get('teamInbox') === '1', url.searchParams.get('sessionStates') !== '1' ? false : url.searchParams.get('sessionReplyFacts') === '1' ? 2 : 1, url.searchParams.get('teamSuccession') === '1', url.searchParams.get('callForSupport') === '1' && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), url.searchParams.get('hostStatus') === '1', url.searchParams.get('outbox') === '1', url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, url.searchParams.get('control') === '1');
       } };
     }
     const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);

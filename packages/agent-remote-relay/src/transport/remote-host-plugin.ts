@@ -28,6 +28,8 @@ export interface RemoteHostSessionLease {
 }
 
 export interface RemoteHostPluginHostOptions {
+  /** False while the Relay has not acknowledged session control; streams are then refused. */
+  sessionsAvailable?(): boolean;
   acquireSession?(sessionId: string): Promise<RemoteHostSessionLease | undefined>;
   resolveSession(sessionId: string): SessionWireAgent | undefined;
   control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult> | AgentRemoteHttpResult;
@@ -103,6 +105,7 @@ export function createRemoteHostPluginHost(
 
   function openStream(streamId: string, sessionId: string): void {
     if (streams.has(streamId)) { fail(new Error('Duplicate Remote Host stream identity.')); return; }
+    if (options.sessionsAvailable && !options.sessionsAvailable()) { closeStream(streamId, 1008, 'Update the Relay to open sessions.'); return; }
     if (streams.size >= maxStreams) { closeStream(streamId, 1013, 'Remote Host stream capacity exceeded.'); return; }
     const stream: VirtualStream = { receiving: Promise.resolve(), pending: 0, bytes: 0 };
     streams.set(streamId, stream);

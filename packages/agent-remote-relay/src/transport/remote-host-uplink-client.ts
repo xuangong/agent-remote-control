@@ -182,6 +182,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     if (options.sessionStates) { endpoint.searchParams.set('sessionStates', '1'); endpoint.searchParams.set('sessionReplyFacts', '1'); }
     if (options.hostStatus) endpoint.searchParams.set('hostStatus', '1');
     if (options.outbox) endpoint.searchParams.set('outbox', '1');
+    endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
     const socket = new WebSocket(endpoint, {
@@ -193,6 +194,8 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     });
     let registered = false;
     let registeredHostId: string | undefined;
+    /** The Relay acknowledged that it owns session control on this connection; without it no session opens. */
+    let sessionControl = false;
     let registeredEnrollmentIdentity: string | undefined;
     let retired = false;
     let registrationDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -216,6 +219,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       maxMessages: maxQueuedMessages, maxBytes: maxQueuedBytes, writeTimeoutMs: writeTimeout, onFailure: error => retire({ reason: 'write_failure', errorCode: safeErrorCode(error) }),
     });
     const host = createRemoteHostPluginHost(options.relay, {
+      sessionsAvailable: () => sessionControl,
       resolveSession: options.resolveSession,
       acquireSession: options.acquireSession,
       imageScope: () => { if (!operationScope) throw new Error('Image scope is unavailable before Host registration.'); return operationScope; },
@@ -312,7 +316,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
       }
       if (registered && decoded.value.type === 'registered') {
         if ((decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion])) !== registeredEnrollmentIdentity || decoded.value.hostId !== registeredHostId
-          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (!!options.journal && decoded.value.journal === JOURNAL_VERSION) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
+          || (!!options.outbox && decoded.value.outbox === 1) !== !!sendOutbox || (decoded.value.control === 1) !== sessionControl || (!!options.journal && decoded.value.journal === JOURNAL_VERSION) !== !!journalWriter || (decoded.value.teamInbox === 1) !== teamInbox || !!decoded.value.teamManagement !== !!sendTeam || !!decoded.value.teamResources !== teamResources || (decoded.value.teamRecipients === 1) !== teamRecipients || (decoded.value.teamSuccession === 1) !== teamSuccession || (decoded.value.callForSupport === 1) !== callForSupport
           || decoded.value.heartbeat?.intervalMs !== cloudHeartbeat?.intervalMs
           || decoded.value.heartbeat?.timeoutMs !== cloudHeartbeat?.timeoutMs) retire({ reason: 'protocol_error' });
         return;
@@ -329,6 +333,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
         callForSupport = teamSuccession && options.callForSupport === true && decoded.value.callForSupport === 1;
         sendTeam = decoded.value.teamManagement ? json => { writer.send(json); } : undefined;
         registeredHostId = decoded.value.hostId;
+        sessionControl = decoded.value.control === 1;
         registeredEnrollmentIdentity = decoded.value.successionEnrollment && JSON.stringify([successionAuthorityKey(decoded.value.successionEnrollment), decoded.value.successionEnrollmentVersion]);
         operationScope = JSON.stringify([new URL(options.url).origin, registeredHostId, options.installationId]);
         if (options.successionEnrollment && decoded.value.successionEnrollment && (decoded.value.successionEnrollmentVersion === 2 || decoded.value.successionEnrollmentVersion === 3)) {

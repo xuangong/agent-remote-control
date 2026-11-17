@@ -948,7 +948,7 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
       if (message.type === 'register') { providers = message.providers; registrationCount += 1; }
       if (message.type === 'heartbeat_ack') heartbeatAcknowledgementCount += 1;
       if (message.type === 'register' && autoRegister) {
-        connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat }));
+        connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat, control: 1 }));
         let nonce = 0;
         heartbeatTimer = setInterval(() => {
           if (connection !== pausedSocket && connection.readyState === 1)
@@ -969,7 +969,7 @@ async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { i
     heartbeatAcknowledgements: () => heartbeatAcknowledgementCount,
     pauseHeartbeat() { if (!socket) throw new Error('Broker has no Host connection.'); pausedSocket = socket; return socket; },
     issueCredential(credential: string) { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential })); },
-    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat })); },
+    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat, control: 1 })); },
     openStream(streamId: string, sessionId: string) {
       socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_open', streamId, sessionId }));
     },

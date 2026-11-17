@@ -54,7 +54,7 @@ async function uplink() {
     socket = connection;
     connection.on('message', data => {
       const request = JSON.parse(data.toString());
-      if (request.type === 'register') connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'isolated-tpm-host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
+      if (request.type === 'register') connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', control: 1, hostId: 'isolated-tpm-host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } }));
     });
   });
   return {

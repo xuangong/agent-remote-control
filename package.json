@@ -17,6 +17,7 @@
     "verify": "pnpm compatibility:check && pnpm -r run build && pnpm typecheck && pnpm test",
     "verify:changed": "sh scripts/verify-changed.sh",
     "task:start": "sh scripts/task-start.sh",
+    "test:unit": "node scripts/run-tests.mjs unit-package",
     "test:e2e": "node scripts/run-tests.mjs e2e",
     "test:conformance": "node scripts/run-tests.mjs conformance",
     "test:setup": "node scripts/run-tests.mjs setup",

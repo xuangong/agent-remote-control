@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { packageManager } from './lib/package-manager.mjs';
 import { verifyNativeTestVersions } from './lib/native-test-versions.mjs';
@@ -39,6 +39,18 @@ if (changedSinceModes.includes(mode) && !affected.length) {
   console.log('No workspace package changed, so nothing runs.');
   process.exit(0);
 }
+/** The package named by a directory name (`agent-remote-web`) or a full package name, for the one-package unit run. */
+function workspacePackageName(selector) {
+  if (!selector) throw new Error('Name the package to test, for example: pnpm test:unit agent-remote-web [vitest arguments].');
+  for (const directory of readdirSync('packages')) {
+    const manifest = join('packages', directory, 'package.json');
+    if (!existsSync(manifest)) continue;
+    const name = JSON.parse(readFileSync(manifest, 'utf8')).name;
+    if (selector === directory || selector === name) return name;
+  }
+  throw new Error(`No workspace package matches ${selector}.`);
+}
+const unitPackage = mode === 'unit-package' ? workspacePackageName(process.argv[3]) : undefined;
 const commands = {
   'live-cache-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=e2e/session-live-cache.playwright.config.ts'],
   devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
@@ -72,6 +84,8 @@ const commands = {
   affected: ['-r', '--workspace-concurrency=1', ...affected, 'run', 'test'],
   'affected-build': ['-r', ...affected, 'run', 'build'],
   'affected-typecheck': ['-r', ...affected, 'run', 'typecheck'],
+  // One package's unit suite with its own timeouts and exclusions; extra arguments go to Vitest (a file, --changed, -t).
+  'unit-package': ['--filter', unitPackage ?? '', 'run', 'test', ...process.argv.slice(4)],
   // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],

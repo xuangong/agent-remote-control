@@ -11,7 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { startLatencyProxy } from './latency-proxy.mjs';
+import { startLatencyProxy } from '@orchardworks/agent-e2e/faults/latency-proxy.mjs';
 
 const root = process.cwd();
 const options = {};

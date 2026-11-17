@@ -34,6 +34,7 @@
     "jsqr": "1.4.0"
   },
   "devDependencies": {
+    "@orchardworks/agent-e2e": "workspace:*",
     "@orchardworks/agent-remote-controller": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",

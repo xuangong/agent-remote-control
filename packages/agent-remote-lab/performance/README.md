@@ -249,7 +249,7 @@ The pure parts (statistics, diagnostics into counts, the open's side, the hole c
 
 ## Measurements under latency (S4)
 
-`--rtt MS` puts a delaying proxy (`latency-proxy.mjs`) between the headless browser and the instance. It delays every HTTP exchange and every WebSocket byte by half a round trip in each direction, rewrites the browser's origin to the instance's, and counts the WebSocket upgrades that crossed it; a run in which none crossed is marked `invalid`. The command line (`session`, `diagnostics`) talks to the instance directly. `--throttle 4` is the 4x CPU slowdown; the four conditions of the S4 plans are no emulation, `--throttle 4`, `--rtt 100` and both.
+`--rtt MS` puts a delaying proxy (`agent-e2e/faults/latency-proxy.mjs`) between the headless browser and the instance. It delays every HTTP exchange and every WebSocket byte by half a round trip in each direction, rewrites the browser's origin to the instance's, and counts the WebSocket upgrades that crossed it; a run in which none crossed is marked `invalid`. The command line (`session`, `diagnostics`) talks to the instance directly. `--throttle 4` is the 4x CPU slowdown; the four conditions of the S4 plans are no emulation, `--throttle 4`, `--rtt 100` and both.
 
 ```sh
 export ARC_LOCAL_JOURNALS=1   # the runner restarts the instance with `pnpm local up --no-build`; without it journals turn off
@@ -266,4 +266,4 @@ node packages/agent-remote-lab/performance/summarize-p1d.mjs .tmp/s4
 - **Counted T1 fields** of every open (`open-known`, `open-fresh`): `contentSinceMountMs`, `contentSinceAttachMs` (from the page's first session control request), `openingLabelFrames` and `rowlessFramesSinceMount`.
 - **Sample counts.** A percentile is stated from 20 samples (10 for the conditions that restart the instance for each sample); with fewer the summary prints the maximum and the count.
 
-`summarize-p1d.mjs` is tested by `src/summarize-p1d.test.ts`; the proxy by `src/latency-proxy.test.ts` over real HTTP and WebSocket.
+`summarize-p1d.mjs` is tested by `src/summarize-p1d.test.ts`; the proxy (`packages/agent-e2e/faults/latency-proxy.mjs`) by its transport test over real HTTP and WebSocket.

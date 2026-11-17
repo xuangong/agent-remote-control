@@ -43,7 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { answeredBy, composerUnchanged, controllerJournalEvents, holeCheck, journalServed, mixThresholds, parseJournalMeta, rowlessStates, stats, windowCounts } from './journal-measurement.mjs';
-import { startLatencyProxy } from './latency-proxy.mjs';
+import { startLatencyProxy } from '@orchardworks/agent-e2e/faults/latency-proxy.mjs';
 
 const execFileAsync = promisify(execFile);
 const root = process.cwd();

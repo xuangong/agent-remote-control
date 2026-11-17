@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
-import { startLatencyProxy, type LatencyProxy } from '../performance/latency-proxy.mjs';
+import { startLatencyProxy, type LatencyProxy } from './latency-proxy.mjs';
 
 interface Upstream { origin: string; seenOrigins: string[]; seenHosts: string[]; close(): Promise<void> }
 

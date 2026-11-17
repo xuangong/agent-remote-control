@@ -6,7 +6,9 @@
     "packages/*/test/**",
     "packages/*/e2e/**",
     "packages/agent-remote-seams/tests/**",
-    "packages/agent-remote-fixtures/record/**"
+    "packages/agent-remote-fixtures/record/**",
+    "packages/agent-e2e/faults/**",
+    "packages/agent-e2e/smoke/**"
   ],
   "wireModules": [
     "protocol"
@@ -110,6 +112,10 @@
     "@orchardworks/agent-timeline": {
       "dir": "packages/agent-timeline",
       "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-e2e": {
+      "dir": "packages/agent-e2e",
+      "entry": "faults/latency-proxy.mjs"
     }
   },
   "modules": [
@@ -596,7 +602,8 @@
       "layer": 5,
       "paths": [
         "packages/agent-remote-lab/e2e/**",
-        "packages/agent-remote-debugger/e2e/**"
+        "packages/agent-remote-debugger/e2e/**",
+        "packages/agent-e2e/**"
       ],
       "seams": [],
       "flows": [

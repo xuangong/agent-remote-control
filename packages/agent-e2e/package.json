@@ -1,0 +1,24 @@
+{
+  "name": "@orchardworks/agent-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Test support for the real stack: fault injection (the latency proxy, process faults, quota and many-session profiles) and the smoke harness that runs real Claude Code and Codex sessions on a `pnpm local` instance under those faults.",
+  "exports": {
+    "./faults/*": "./faults/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=2000 --hookTimeout=5000",
+    "smoke": "tsx smoke/cli.ts",
+    "smoke:quick": "tsx smoke/cli.ts --quick"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11",
+    "ws": "^8.21.0"
+  }
+}

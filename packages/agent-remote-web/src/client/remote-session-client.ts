@@ -31,7 +31,8 @@ import {
 import { uploadResource, downloadResource, checkResourceAborted, type ResourceTransferOptions, type ResourceUploadRequest } from './resource-upload.js';
 import { uploadImage, checkUploadAborted, type ImageUploadOptions, type ImageUploadRequest } from './image-upload.js';
 import { watchMessageEchoes } from './message-echo-sync.js';
-import { anchorPosition } from '../replica/message-outbox.js';
+import { anchorPosition } from '../replica/pending-messages.js';
+import { canSettle, retriesSameOperation, transition, type SendState } from '../replica/send-state.js';
 import type { AgentReplica } from '../replica/store.js';
 import type { TimelineReduction } from '../replica/types.js';
 import {
@@ -476,10 +477,10 @@ export class RemoteSessionClient {
   retryMessage(id: string): Promise<CommandAcknowledgementMessage> {
     const state = this.replica.getState();
     const message = state.outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
-    if (!message || !['failed', 'unconfirmed'].includes(message.status)) return Promise.reject(new Error('This message is not available to retry.'));
+    if (!message || !canSettle(message.status)) return Promise.reject(new Error('This message is not available to retry.'));
     if (!this.connectionOpen) return Promise.reject(new RemoteOperationError('connection_not_ready', 'Wait for the session to reconnect, then retry.', true));
-    const operationId = message.status === 'unconfirmed' && !message.retryRequiresNewOperation && message.afterKey !== undefined
-      && anchorPosition(state, message.afterKey) !== undefined && message.operationId
+    const operationId = message.operationId && retriesSameOperation({ state: message.status, ...(message.retryRequiresNewOperation === undefined ? {} : { retryRequiresNewOperation: message.retryRequiresNewOperation }),
+      placeHeld: message.afterKey !== undefined && anchorPosition(state, message.afterKey) !== undefined, hasOperation: true })
       ? message.operationId : this.createOperationId();
     this.replica.retryMessage(id, operationId);
     return this.sendOutgoingMessage(id, operationId, message.text, { delivery: message.delivery }, message.content);
@@ -487,7 +488,7 @@ export class RemoteSessionClient {
 
   deleteMessage(id: string): void {
     const message = this.replica.getState().outgoingMessages?.find(item => item.id === id && item.agentId === this.agentId);
-    if (message && ['failed', 'unconfirmed'].includes(message.status)) this.replica.deleteMessage(id);
+    if (message && canSettle(message.status)) this.replica.deleteMessage(id);
   }
 
   private sendOutgoingMessage(outgoingId: string, operationId: string, text: string, options?: AgentMessageOptions, content?: readonly MessagePart[]): Promise<CommandAcknowledgementMessage> {
@@ -508,12 +509,9 @@ export class RemoteSessionClient {
       this.replica.acknowledgeMessage(outgoingId, acknowledgement.payload.inputAcceptance, acknowledgement.payload.submittedTextSha256);
     }, error => {
       if (!isCurrentAttempt()) return;
-      const uncertain = isUncertainSend(error);
-      const retryRequiresNewOperation = error instanceof RemoteOperationError && NEW_ATTEMPT_SEND_CODES.includes(error.code);
-      this.replica.updateMessage(outgoingId, uncertain ? 'unconfirmed' : 'failed',
-        retryRequiresNewOperation ? 'This message may not have arrived. If it is not in the conversation, Retry sends it again.'
-          : uncertain ? 'Delivery is not confirmed. Check the conversation before sending again.'
-          : error instanceof Error ? error.message : 'The message could not be sent.', retryRequiresNewOperation);
+      const step = transition('sending', { type: 'send_failed', uncertain: isUncertainSend(error), newAttempt: error instanceof RemoteOperationError && NEW_ATTEMPT_SEND_CODES.includes(error.code),
+        reason: error instanceof Error ? error.message : 'The message could not be sent.' });
+      this.replica.updateMessage(outgoingId, step.state as SendState, step.error ?? undefined, step.retryRequiresNewOperation);
     });
     return operation;
   }

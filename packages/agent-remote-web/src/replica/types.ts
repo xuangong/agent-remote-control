@@ -1,3 +1,4 @@
+import type { SendState } from './send-state.js';
 import type {
   MessagePart,
   AgentInteractionRequest,
@@ -56,7 +57,7 @@ export interface OutgoingMessage {
   /** Row keys of echoes already assigned to another local send. Retained across reload. */
   readonly consumedEchoKeys?: readonly string[];
   readonly delivery?: 'immediate' | 'next_turn';
-  readonly status: 'sending' | 'awaiting_echo' | 'unconfirmed' | 'failed';
+  readonly status: SendState;
   readonly error?: string;
   /** The row key of the newest row when the message was sent (`epoch-start:<epoch>` when there was none); its echo is a later row. Absent when it was sent before the conversation was read, and in a ledger written before keys. */
   readonly afterKey?: string;

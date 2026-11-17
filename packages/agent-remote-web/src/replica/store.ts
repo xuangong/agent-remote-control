@@ -1,3 +1,4 @@
+import { transition, type SendState } from './send-state.js';
 import type {
   AgentSnapshot,
   AgentStreamMessage,
@@ -27,13 +28,13 @@ import {
   restoreFromDevice,
 } from './reducer.js';
 import type { AgentReplicaState, OutgoingMessage, SnapshotApplicationOptions, TimelineReduction } from './types.js';
-import { anchorNow, MessageOutbox } from './message-outbox.js';
+import { anchorNow, PendingMessages } from './pending-messages.js';
 
 export class AgentReplica {
   private state = createReplicaState();
   private readonly listeners = new Set<() => void>();
   private readonly historyListeners = new Set<(epoch: string, direction: HistoryPage['payload']['direction']) => void>();
-  private readonly outbox = new MessageOutbox(() => this.replace(this.outbox.reconcile(this.state)));
+  private readonly outbox = new PendingMessages(() => this.replace(this.outbox.reconcile(this.state)));
 
   setSessionControl(control: AgentReplicaState['sessionControl']): void {
     this.replace({ ...this.state, sessionControl: control });
@@ -65,15 +66,13 @@ export class AgentReplica {
     if (this.state.outgoingMessages?.length) return;
     this.replace({ ...this.state, outgoingMessages: messages.map(message => {
       const { epoch: _epoch, afterSeq: _afterSeq, consumedEchoSeqs: _consumed, ...kept } = message as OutgoingMessage & { epoch?: unknown; afterSeq?: unknown; consumedEchoSeqs?: unknown };
-      return { ...kept,
-        status: message.status === 'failed' ? 'failed' : 'unconfirmed',
-        error: message.error ?? 'Delivery was not confirmed before this page closed. Check the conversation before retrying.',
-      };
+      const step = transition(message.status, { type: 'restored', ...(message.error === undefined ? {} : { error: message.error }) });
+      return { ...kept, status: step.state as SendState, error: step.error ?? undefined };
     }) });
   }
 
   retryMessage(id: string, operationId: string): void {
-    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id && transition(message.status, { type: 'retry' }).state === 'sending'
       ? { ...message, operationId, retryRequiresNewOperation: false, status: 'sending', error: undefined,
           submittedTextSha256: message.operationId === operationId ? message.submittedTextSha256 : undefined,
           consumedEchoKeys: message.operationId === operationId ? message.consumedEchoKeys : undefined,
@@ -88,11 +87,13 @@ export class AgentReplica {
 
   acknowledgeMessage(id: string, acceptance?: AgentInputAcceptance, submittedTextSha256?: string): void {
     if (acceptance?.disposition === 'handled') { this.deleteMessage(id); return; }
-    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => message.id === id && message.status !== 'failed'
-      ? { ...message, submittedTextSha256: submittedTextSha256 ?? message.submittedTextSha256,
-          status: message.status === 'unconfirmed' ? 'unconfirmed' : 'awaiting_echo',
-          error: message.status === 'unconfirmed' ? message.error : undefined }
-      : message) });
+    this.replace({ ...this.state, outgoingMessages: this.state.outgoingMessages?.map(message => {
+      if (message.id !== id) return message;
+      const step = transition(message.status, { type: 'acknowledged', handled: false });
+      if (step.state === 'delivered' || message.status === 'failed') return message;
+      return { ...message, submittedTextSha256: submittedTextSha256 ?? message.submittedTextSha256,
+        status: step.state, error: step.error === undefined ? message.error : step.error ?? undefined };
+    }) });
   }
 
   updateMessage(id: string, status: OutgoingMessage['status'], error?: string, retryRequiresNewOperation?: boolean): void {

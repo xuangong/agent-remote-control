@@ -1,9 +1,10 @@
 import { withoutSessionReferenceNote, type ProjectedTimelineEntry, type UserMessagePart } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, OutgoingMessage } from './types.js';
+import { transition } from './send-state.js';
 import { timelineEntryKey } from './timeline-entry-key.js';
 
 /** A native echo can arrive before acknowledgement or later through history recovery. */
-export class MessageOutbox {
+export class PendingMessages {
   private readonly digests = new WeakMap<object, { text: string; pending: boolean; value?: string }>();
   constructor(private readonly onDigest: () => void = () => {}) {}
 
@@ -36,8 +37,9 @@ export class MessageOutbox {
       if (after === undefined) {
         // The row the message was sent after is gone (a replacement rewrote it), or it was sent before the conversation was read
         // (or written before row keys): its echo cannot be told from older history.
-        if (state.timeline.initialized && message.status !== 'unconfirmed') {
-          remaining.push({ ...message, status: 'unconfirmed', error: 'Conversation history changed before delivery could be confirmed.' });
+        const step = transition(message.status, { type: 'history_changed' });
+        if (state.timeline.initialized && step.state !== message.status && step.state !== 'delivered') {
+          remaining.push({ ...message, status: step.state, error: step.error ?? undefined });
           changed = true;
         } else remaining.push(message);
         continue;
@@ -46,7 +48,7 @@ export class MessageOutbox {
       const at = entries.findIndex((entry, index) => index > after
         && !consumed.has(keys[index]!) && !message.consumedEchoKeys?.includes(keys[index]!)
         && this.matches(message, entry));
-      if (at >= 0) {
+      if (at >= 0 && transition(message.status, { type: 'echoed' }).state === 'delivered') {
         consumed.add(keys[at]!);
         changed = true;
       } else remaining.push(message);

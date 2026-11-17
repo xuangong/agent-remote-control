@@ -1,5 +1,5 @@
 import { conversationLocalStorage } from './conversation-storage.js';
-import type { AgentReplica, OutgoingMessage } from '@orchardworks/agent-remote-web';
+import { sendState, type AgentReplica, type OutgoingMessage } from '@orchardworks/agent-remote-web';
 
 export function recoverMessages(replica: AgentReplica, relay: string, session: string, agentId: string): () => void {
   const key = `agent-remote:recovery:${relay}:outbox:${session}`;
@@ -24,7 +24,7 @@ function validMessage(value: unknown): value is OutgoingMessage {
   const message = value as OutgoingMessage;
   return typeof message.id === 'string' && typeof message.text === 'string'
     && ledgerAnchored(message)
-    && ['sending', 'awaiting_echo', 'unconfirmed', 'failed'].includes(message.status)
+    && sendState.SEND_STATES.includes(message.status)
     && (message.retryRequiresNewOperation === undefined || typeof message.retryRequiresNewOperation === 'boolean')
     && (message.operationId === undefined || typeof message.operationId === 'string')
     && (message.submittedTextSha256 === undefined || typeof message.submittedTextSha256 === 'string' && /^[a-f0-9]{64}$/.test(message.submittedTextSha256))

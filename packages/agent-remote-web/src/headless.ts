@@ -7,6 +7,8 @@ export * from './client/session-drafts.js';
 export * from './client/session-outbox.js';
 export * from './replica/window-absorption.js';
 export * from './replica/reducer.js';
+export * as sendState from './replica/send-state.js';
+export type { SendState } from './replica/send-state.js';
 export * from './replica/selectors.js';
 export * from './replica/store.js';
 export * from './replica/types.js';

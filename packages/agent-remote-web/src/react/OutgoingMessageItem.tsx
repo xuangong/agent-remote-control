@@ -2,6 +2,7 @@ import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useState } from 'react';
 import type { OutgoingMessage } from '../replica/types.js';
 import { isUncertainSend } from '../client/transport.js';
+import { describe } from '../replica/send-state.js';
 import { UserMessageItem } from './items/MessageItem.js';
 
 export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContext }: {
@@ -13,11 +14,7 @@ export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContex
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState(false);
   const [error, setError] = useState<string>();
-  const settled = message.status === 'failed' || message.status === 'unconfirmed';
-  const label = message.status === 'failed' ? 'Send failed'
-    : message.status === 'unconfirmed' ? 'Delivery not confirmed'
-    : message.status === 'sending' ? 'Sending…'
-    : message.delivery === 'next_turn' ? 'Queued — waiting for conversation…' : 'Sent — waiting for conversation…';
+  const { label, settled, deliveryState } = describe(message.status, message.delivery);
   async function retry(): Promise<void> {
     if (!onRetry || busy) return;
     setBusy(true); setError(undefined);
@@ -30,7 +27,7 @@ export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContex
     finally { setBusy(false); }
   }
   return <div className="agent-timeline-entry agent-outgoing-message" data-entry-key={message.id}
-    data-delivery-state={settled ? message.status : 'pending'} aria-busy={!settled}>
+    data-delivery-state={deliveryState} aria-busy={!settled}>
     <UserMessageItem item={{ type: 'user_message', text: message.text, ...(message.content ? { content: message.content.map(part => part.type === 'text' ? part : part.type === 'resource' ? { type: 'text' as const, text: `[${part.label}]` } : { type: 'image' as const, locator: `input-image:${part.attachmentId}`, label: part.label }) } : {}) }} resourceContext={resourceContext} />
     <div className="agent-message-delivery" role={settled ? 'alert' : 'status'}>
       {settled ? <button type="button" className="agent-delivery-error-toggle" aria-label="Delivery error" aria-expanded={details} title={error || message.error || label} onClick={() => setDetails(value => !value)}><svg aria-hidden="true" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="10" cy="10" r="8" /><path d="M10 5v6m0 3v1" /></svg></button>

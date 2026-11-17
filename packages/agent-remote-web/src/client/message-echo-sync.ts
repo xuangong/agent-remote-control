@@ -1,7 +1,8 @@
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplica } from '../replica/store.js';
 import type { AgentReplicaState } from '../replica/types.js';
-import { anchorPosition } from '../replica/message-outbox.js';
+import { anchorPosition } from '../replica/pending-messages.js';
+import { awaitsEcho } from '../replica/send-state.js';
 import type { RemoteAgentTransport } from './transport.js';
 
 /** Read-only repair for accepted input whose live Timeline echo has not arrived. */
@@ -14,7 +15,7 @@ export function watchMessageEchoes(agentId: string, transport: RemoteAgentTransp
   const waiting = () => {
     const state = replica.getState();
     return (state.outgoingMessages ?? []).filter(message => message.agentId === agentId
-      && message.status === 'awaiting_echo' && anchorSeq(state, message.afterKey) !== undefined);
+      && awaitsEcho(message.status) && anchorSeq(state, message.afterKey) !== undefined);
   };
   const update = () => {
     if (stopped) return;

@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
 import { appendSessionExcerpts, createSessionExcerpt, withSessionReferenceNote } from '@orchardworks/agent-remote-protocol';
-import { MessageOutbox } from './message-outbox.js';
+import { PendingMessages } from './pending-messages.js';
 import { createReplicaState } from './reducer.js';
 import type { AgentReplicaState } from './types.js';
 it('matches resource echoes by stable identity instead of display labels or text', () => {
-  const outbox = new MessageOutbox();
+  const outbox = new PendingMessages();
   const initial = createReplicaState();
   const state = { ...initial, agent: { id: 'agent' } as AgentReplicaState['agent'], timeline: { ...initial.timeline, initialized: true, epoch: 'epoch', nextSeq: 1 } };
   const message = outbox.create(state, 'agent', 'resource #1', undefined, 'operation', { content: [{ type: 'resource', resourceId: 'expected', label: 'resource #1' }] });
@@ -14,7 +14,7 @@ it('matches resource echoes by stable identity instead of display labels or text
 });
 
 it('matches an echo that carries the reference note its Host added, before the excerpts the page attached', () => {
-  const outbox = new MessageOutbox();
+  const outbox = new PendingMessages();
   const initial = createReplicaState();
   const state = { ...initial, agent: { id: 'agent' } as AgentReplicaState['agent'], timeline: { ...initial.timeline, initialized: true, epoch: 'epoch', nextSeq: 1 } };
   const excerpt = createSessionExcerpt({ id: 'quote', source: { providerId: 'claude', nativeSessionId: 'source', title: 'Source' }, capturedAt: 'now',

@@ -48,12 +48,15 @@ export const observerSource = `(() => {
     })),
     mark: () => { window.__smokeMarks = [...document.querySelectorAll('.agent-timeline-entry')]; return window.__smokeMarks.length; },
     survivors: () => ({ total: window.__smokeMarks?.length ?? 0, alive: (window.__smokeMarks ?? []).filter(node => node.isConnected).length }),
+    scrollerSize: () => { const target = scroller(); return { scrollHeight: target.scrollHeight, clientHeight: target.clientHeight, scrollTop: target.scrollTop, rows: document.querySelectorAll('.agent-timeline-entry').length, className: target.className }; },
     scrollToMiddle: () => {
       const target = scroller();
       target.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
-      target.scrollTop = Math.max(0, (target.scrollHeight - target.clientHeight) / 2);
+      // The timeline is anchored at its bottom with a reversed column, where scrollTop is zero at the newest row and negative above it.
+      const middle = Math.max(0, (target.scrollHeight - target.clientHeight) / 2);
+      target.scrollTop = getComputedStyle(target).flexDirection === 'column-reverse' ? -middle : middle;
       target.dispatchEvent(new Event('scroll'));
-      return target.scrollTop;
+      return Math.abs(target.scrollTop);
     },
     anchor: () => {
       const target = scroller(), top = target === document.scrollingElement ? 0 : target.getBoundingClientRect().top;

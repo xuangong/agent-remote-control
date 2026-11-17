@@ -31,7 +31,14 @@ export const hiddenAndDrops: Scenario = {
         for (const seconds of offlineSeconds) {
           const word = `MERIDIAN${context.random.int(100, 999)}`;
           const first = recorder.transcript().at(-1)?.n ?? 0;
-          const scrolledTo = await probe.page.evaluate(() => (window as any).__smoke.scrollToMiddle());
+          // The reader must really be in the middle of a long timeline, or the position check would pass without meaning anything.
+          let scrolledTo = 0;
+          for (let attempt = 0; attempt < 5 && scrolledTo === 0; attempt += 1) {
+            await probe.page.waitForTimeout(1000);
+            scrolledTo = await probe.page.evaluate(() => (window as any).__smoke.scrollToMiddle());
+          }
+          if (scrolledTo === 0) throw new Error(`The timeline did not scroll: ${JSON.stringify(await probe.page.evaluate(() => (window as any).__smoke.scrollerSize()))}`);
+          await probe.page.waitForTimeout(500);
           await probe.page.locator('[data-testid="prompt-input"]').click();
           await probe.page.keyboard.type(`draft kept ${seconds}`);
           const before = await probe.page.evaluate(() => ({ composer: (window as any).__smoke.composer(), anchor: (window as any).__smoke.anchor() }));

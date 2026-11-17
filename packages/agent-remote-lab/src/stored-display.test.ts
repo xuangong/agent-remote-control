@@ -7,7 +7,7 @@ import { conversationLocalStorage } from './conversation-storage.js';
 import { removeLegacyDisplayCache, startDeviceStore } from './device-store-start.js';
 import { forgetStoredSession, loadStoredDisplay, readStoredDisplay, restoreReplicaFromDevice, saveStoredDisplay } from './stored-display.js';
 import { replicaState } from './test/fixtures.js';
-import { confirmWorkspaceAccess, retireWorkspace, setWorkspaceReady, storedRowsScope } from './workspace-access.js';
+import { confirmWorkspaceAccess, readStoredLease, rememberWorkspaceAccess, retireWorkspace, revokeStoredRows, setWorkspaceReady, storedRowsScope, subscribeStoredRows } from './workspace-access.js';
 
 const hash = (letter: string) => letter.repeat(64);
 const base = (letter: string) => new URL(`/u/${hash(letter)}/`, window.location.origin).href;
@@ -155,4 +155,47 @@ it('keeps memory copies only while Clear cache on close is on, and removes the d
     await deviceStore.flush();
     expect(await onDisk()).toBe(0);
   } finally { await setClearCacheOnClose(false); }
+});
+
+it('shows stored rows before the Relay answers only while the lease the last status reported has not ended', () => {
+  const scope = base('5');
+  setWorkspaceReady(scope, true, 'alice');
+  saveStoredDisplay(scope, target, replicaState);
+  // A new page load: the cached lease runs for another minute.
+  setWorkspaceReady(scope, false, 'alice', Date.now() + 60_000);
+  expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
+  // The same lease, ended: nothing shows until the Relay confirms.
+  setWorkspaceReady(scope, false, 'alice', Date.now() - 1);
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  setWorkspaceReady(scope, true, 'alice');
+  expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
+});
+
+it('clears the rows shown on a cached lease at once when the Relay refuses it, and tells every reader', () => {
+  const scope = base('6');
+  setWorkspaceReady(scope, true, 'alice');
+  saveStoredDisplay(scope, target, replicaState);
+  setWorkspaceReady(scope, false, 'alice', Date.now() + 60_000);
+  const heard = vi.fn();
+  const stop = subscribeStoredRows(scope, heard);
+  expect(readStoredDisplay(scope, target)).toBeDefined();
+  revokeStoredRows(scope);
+  expect(heard).toHaveBeenCalled();
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  stop();
+});
+
+it('keeps a cached lease from showing another principal rows, and stores the lease with the principal it was granted to', () => {
+  const scope = base('7');
+  setWorkspaceReady(scope, true, 'alice');
+  saveStoredDisplay(scope, target, replicaState);
+  rememberWorkspaceAccess({ basePath: new URL(scope).pathname, user: { id: 'alice' }, expiresAt: Date.now() + 60_000 });
+  expect(readStoredLease()).toMatchObject({ principalId: 'alice' });
+  // The page starts for bob on a lease cached for alice: GatewayController gives the gate no optimistic window.
+  setWorkspaceReady(scope, false, 'bob', undefined);
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  setWorkspaceReady(scope, true, 'bob');
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  localStorage.removeItem('agent-remote:workspace-access');
+  expect(readStoredLease()).toBeUndefined();
 });

@@ -833,6 +833,8 @@ async function hiddenScenario(hiddenMs, freeze, closeSockets = false) {
       // Whether the session is read from the Relay's journal is known from this open: a return opens no new stream.
       const opened = await handle.capture(Date.now());
       const served = journalServed({ signal: journalSignal, itemKeysEchoed: opened.itemKeysEchoed, pageEpochs: opened.pageEpochs, metaBefore, metaAfter: journalMeta(session) });
+      // The page finishes its own start (attach, lists) a few round trips after it is ready; hiding earlier leaves that work to run on return.
+      await delay(1500 + 12 * rttMs);
       const before = (await handle.page.evaluate(() => window.__baseline.read())).assistant;
       await handle.page.evaluate(() => window.__baseline.setHidden(true));
       if (closeSockets) proxy.closeWebSockets();

@@ -335,3 +335,23 @@ it('removes local content when another tab signs out', async () => {
   await act(async () => { forgetWorkspaceAccess(); window.dispatchEvent(new StorageEvent('storage', { key: 'agent-remote:signed-out', newValue: '1' })); });
   expect(view.textContent).not.toContain('Private content');
 });
+
+it('shows stored rows on a cached unexpired lease before the status answers, and removes them and the records when the Relay answers 401', async () => {
+  const { deviceStore } = await import('@orchardworks/agent-remote-web/device-store');
+  const { saveStoredDisplay, readStoredDisplay } = await import('./stored-display.js');
+  const { replicaState } = await import('./test/fixtures.js');
+  const basePath = '/u/' + 'b'.repeat(64) + '/', scope = window.location.origin + basePath;
+  const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
+  const { setWorkspaceReady } = await import('./workspace-access.js');
+  setWorkspaceReady(basePath, true, 'alice');
+  saveStoredDisplay(scope, target, replicaState);
+  rememberWorkspaceAccess({ basePath, user: { id: 'alice' }, expiresAt: Date.now() + 60_000 });
+  let answer!: (response: Response) => void;
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { answer = resolve; })));
+  await render(<GatewayController>{() => <p>Private controller</p>}</GatewayController>);
+  // The status has not answered: the cached lease still runs, so the stored rows show.
+  expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
+  await act(async () => answer(Response.json({ error: 'Sign in' }, { status: 401 })));
+  expect(readStoredDisplay(scope, target)).toBeUndefined();
+  await vi.waitFor(async () => expect(await deviceStore.load({ relayUrl: scope, principalId: 'alice' }, ['host', 'recorded', 'recorded-session'])).toBeUndefined());
+});

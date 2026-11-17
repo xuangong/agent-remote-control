@@ -9,7 +9,7 @@ import { AccessPage } from './components/AccessPage.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { useRecoveryNotice } from './hooks/useRecoveryNotice.js';
-import { WorkspaceReady, scopeFor, confirmWorkspaceAccess, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
+import { WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
 
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
@@ -21,7 +21,11 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
 }) {
   const [access, setAccess] = useState<WorkspaceAccess | null | undefined>(() => {
     const cached = readWorkspaceAccess();
-    if (cached) setWorkspaceReady(cached.basePath, false, cached.user?.id);
+    if (cached) {
+      const lease = readStoredLease();
+      // The cached lease counts only for the principal it was granted to.
+      setWorkspaceReady(cached.basePath, false, cached.user?.id, lease && lease.principalId === cached.user?.id ? lease.expiresAt : undefined);
+    }
     return cached;
   });
   const display = useRef(access); display.current = access;
@@ -83,6 +87,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
         if (response.status === 401 || response.status === 403) {
           // The Relay does not confirm this person: the conversations this device stored for them are not shown again and are removed.
           void deviceStore.purge(display.current ? scopeFor(display.current.basePath) : undefined).catch(() => { /* Storage may be unavailable. */ });
+          if (display.current) revokeStoredRows(display.current.basePath);
           stopRequests(); setSecurityOpen(false);
           if (response.status === 401 && claimAutomaticSignIn()) {
             let target = '/';
@@ -109,6 +114,11 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
         if (previousPath && previousPath !== value.basePath) {
           retireWorkspace(previousPath);
           clearConversationRecovery(new URL(previousPath, window.location.origin).href);
+        }
+        // Another principal than the one whose rows were shown on the cached lease: what was stored for them goes.
+        if (display.current?.user?.id !== undefined && value.user?.id !== undefined && display.current.user.id !== value.user.id) {
+          void deviceStore.purge(scopeFor(value.basePath)).catch(() => { /* Storage may be unavailable. */ });
+          revokeStoredRows(value.basePath);
         }
         current = value; retries = 0;
         rememberWorkspaceAccess(value);

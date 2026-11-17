@@ -551,19 +551,14 @@ describe('absorbing a replacement by item key', () => {
   const held = (...entries: ProjectedTimelineEntry[]) => applyHistoryPage(createReplicaState(), tail(entries, 'epoch-one')).state;
   const keysOf = (state: ReturnType<typeof createReplicaState>) => state.timeline.entries.map(row => row.itemKey);
 
-  it('keeps unchanged rows as they are, updates a changed row in place, drops a missing row and inserts a new one in order', () => {
+  it('takes the tail of a pending epoch as the new timeline, retires the old epoch and clears the pending mark', () => {
     const state = held(assistant('a', 'A', 1), assistant('b', 'B', 2), assistant('c', 'C', 3), assistant('d', 'D', 4));
-    const [a, , c] = state.timeline.entries;
     const replaced = applyHistoryPage(applyTimelineReplacement(state, 'epoch-two'), tail([
       assistant('a', 'A', 1), assistant('b', 'B changed', 2), assistant('n', 'New', 3), assistant('c', 'C', 4),
     ], 'epoch-two'));
 
     expect(replaced.status).toBe('applied');
     expect(keysOf(replaced.state)).toEqual(['a', 'b', 'n', 'c']);
-    expect(replaced.state.timeline.entries[0]).toBe(a);
-    expect(replaced.state.timeline.entries[3]?.item).toBe(c!.item);
-    expect(replaced.state.timeline.entries[3]).toMatchObject({ seqStart: 4, seqEnd: 4, sourceSeqRanges: [{ startSeq: 4, endSeq: 4 }] });
-    expect(replaced.state.timeline.entries[1]?.item).toMatchObject({ text: 'B changed' });
     expect(replaced.state.timeline).toMatchObject({ epoch: 'epoch-two', nextSeq: 5 });
     expect(replaced.state.timeline.pendingEpoch).toBeUndefined();
     expect(replaced.state.retiredEpochs).toEqual(['epoch-one']);

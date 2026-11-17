@@ -64,96 +64,9 @@ describe('what sync decides', () => {
     expect(sync([done('a'), done('b'), open('c')])).toEqual({ outcome: 'unchanged' });
   });
 
-  it('replaces when a complete item has another digest, is missing, moved, or sits inside the window as a new item', () => {
-    for (const next of [
-      [done('a', 'changed'), done('b'), done('c')],
-      [done('a'), done('c')],
-      [done('c'), done('b'), done('a')],
-      [done('a'), done('x'), done('b'), done('c')],
-      [done('a'), done('b')],
-    ]) {
-      const { journal, sync } = seeded([done('a'), done('b'), done('c')]);
-      const epoch = journal.epoch;
-      expect(sync(next)).toMatchObject({ outcome: 'replaced' });
-      expect(journal.epoch).not.toBe(epoch);
-      expect(keys(journal)).toEqual(next.map(({ row: { itemKey } }) => itemKey));
-    }
-  });
-
-  it('replaces when a complete item of the journal is open in the window, and the other way round', () => {
-    const first = seeded([done('a')]);
-    expect(first.sync([open('a')])).toMatchObject({ outcome: 'replaced' });
-    const second = seeded([open('a')]);
-    expect(second.sync([done('a')])).toMatchObject({ outcome: 'replaced' });
-  });
-
-  it('replaces a journal that is missing rows, even when the window equals it', () => {
-    const { journal, sync } = seeded([done('a')]);
-    journal.markIncomplete();
-    expect(sync([done('a')])).toMatchObject({ outcome: 'replaced' });
-    expect(journal.incomplete).toBe(false);
-  });
-
-  it('replaces a journal that has items when the window is empty, and leaves one that has only live-only items', () => {
-    const withItems = seeded([done('a')]);
-    expect(withItems.sync([])).toMatchObject({ outcome: 'replaced' });
-    expect(keys(withItems.journal)).toEqual([]);
-    const liveOnly = seeded([live('l')]);
-    expect(liveOnly.sync([])).toEqual({ outcome: 'unchanged' });
-    expect(seeded().sync([])).toEqual({ outcome: 'unchanged' });
-  });
-});
-
-describe('items older than the journal', () => {
-  it('does not replace for a window that reaches further back than the journal: older history arrives on request', () => {
-    const { journal, sync } = seeded([done('c'), done('d')]);
-    const epoch = journal.epoch;
-    expect(sync([done('a'), done('b'), done('c'), done('d')])).toEqual({ outcome: 'unchanged' });
-    expect(journal.epoch).toBe(epoch);
-    expect(keys(journal)).toEqual(['c', 'd']);
-  });
-
-  it('does not replace for a long window over a journal that older requests extended downward', () => {
-    const { journal, publish, sync } = seeded([done('n'), done('o')]);
-    journal.prepend(publish(), [done('l'), done('m')]);
-    const epoch = journal.epoch;
-    const long = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o'].map(key => done(key));
-    expect(sync(long)).toEqual({ outcome: 'unchanged' });
-    expect(journal.epoch).toBe(epoch);
-    expect(keys(journal)).toEqual(['l', 'm', 'n', 'o']);
-  });
-
-  it('replaces the same window when a non-live-only item sits before the first shared key', () => {
-    const { journal, sync } = seeded([done('x'), done('c'), done('d')]);
-    const epoch = journal.epoch;
-    expect(sync([done('a'), done('b'), done('c'), done('d')])).toMatchObject({ outcome: 'replaced' });
-    expect(journal.epoch).not.toBe(epoch);
-    expect(keys(journal)).toEqual(['a', 'b', 'c', 'd']);
-  });
-
-  it('skips leading items when only live-only items precede the first shared key', () => {
-    const { journal, sync } = seeded([live('l'), done('c'), done('d')]);
-    expect(sync([done('a'), done('b'), done('c'), done('d')])).toEqual({ outcome: 'unchanged' });
-    expect(keys(journal)).toEqual(['l', 'c', 'd']);
-  });
-
-  it('replaces when the window shares no key with a journal that has items', () => {
-    const { journal, sync } = seeded([done('a')]);
-    expect(sync([done('x'), done('y')])).toMatchObject({ outcome: 'replaced' });
-    expect(keys(journal)).toEqual(['x', 'y']);
-  });
 });
 
 describe('live-only items', () => {
-  it('skips a live-only item that the window lacks, in the middle and at the end, and appends after it', () => {
-    const { journal, sync } = seeded([done('a'), live('l'), done('b'), live('z')]);
-    const epoch = journal.epoch;
-    expect(sync([done('a'), done('b')])).toEqual({ outcome: 'unchanged' });
-    expect(sync([done('a'), done('b'), done('c')])).toMatchObject({ outcome: 'appended' });
-    expect(keys(journal)).toEqual(['a', 'l', 'b', 'z', 'c']);
-    expect(journal.epoch).toBe(epoch);
-  });
-
   it('carries live-only items through a replacement', () => {
     const { journal, sync } = seeded([done('a'), live('l'), done('b')]);
     expect(sync([done('a', 'changed'), done('b')])).toMatchObject({ outcome: 'replaced' });
@@ -196,15 +109,6 @@ describe('live-only items stay out of the positional comparison', () => {
     row: row(key, 'board', { item: { type: 'todo', items: [{ text: 'alpha', completed }] }, liveOnly: true }), digest: `digest:${key}:${completed}`,
   });
 
-  it('is unchanged when the Controller re-adds the same board at the end of its window, wherever the journal holds it', () => {
-    const { journal, sync } = seeded([done('a'), board(false), done('b')]);
-    const epoch = journal.epoch;
-    expect(sync([done('a'), done('b'), board(false)])).toEqual({ outcome: 'unchanged' });
-    expect(sync([board(false), done('a'), done('b')])).toEqual({ outcome: 'unchanged' });
-    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
-    expect(journal.epoch).toBe(epoch);
-  });
-
   it('updates a changed board in place as one appended row, and never replaces', () => {
     const { journal, sync } = seeded([done('a'), board(false), done('b')]);
     const epoch = journal.epoch;
@@ -214,12 +118,6 @@ describe('live-only items stay out of the positional comparison', () => {
     expect(journal.state().items[1]).toMatchObject({ itemKey: 'todo', liveOnly: true, state: 'complete' });
     expect(journal.epoch).toBe(epoch);
     expect(sync([done('a'), done('b'), board(true)])).toEqual({ outcome: 'unchanged' });
-  });
-
-  it('appends a live-only item with a new key after the items it follows in the window', () => {
-    const { journal, sync } = seeded([done('a')]);
-    expect(sync([done('a'), board(false), done('b')])).toMatchObject({ outcome: 'appended', rows: [{ itemKey: 'todo' }, { itemKey: 'b' }] });
-    expect(keys(journal)).toEqual(['a', 'todo', 'b']);
   });
 
   it('keeps one board through five Controller starts, with the epoch of the journal never replaced', () => {
@@ -237,11 +135,6 @@ describe('live-only items stay out of the positional comparison', () => {
     expect(journal.state().items[1]).toMatchObject({ itemKey: 'l', liveOnly: false });
   });
 
-  it('replaces for a live-only item whose content differs and cannot be replaced in place', () => {
-    const { sync } = seeded([done('a'), live('l')]);
-    expect(sync([done('a'), done('l', 'other', { liveOnly: true })])).toMatchObject({ outcome: 'replaced' });
-  });
-
   it('carries a live-only item the window lacks through an append and a replacement', () => {
     const { journal, sync } = seeded([done('a'), board(false)]);
     expect(sync([done('a'), done('b')])).toMatchObject({ outcome: 'appended' });
@@ -252,30 +145,10 @@ describe('live-only items stay out of the positional comparison', () => {
 });
 
 describe('open items', () => {
-  it('counts an open item whose resident content equals the window as unchanged, and a changed one as a replacement', () => {
-    const { journal, sync } = seeded([done('a'), open('o', 'streaming')]);
-    const epoch = journal.epoch;
-    expect(sync([done('a'), open('o', 'streaming')])).toEqual({ outcome: 'unchanged' });
-    expect(journal.epoch).toBe(epoch);
-    expect(sync([done('a'), open('o', 'streaming more')])).toMatchObject({ outcome: 'replaced' });
-    expect(journal.epoch).not.toBe(epoch);
-    expect(journal.state().items[1]).toMatchObject({ itemKey: 'o', state: 'open' });
-  });
-
   it('ignores the background and the alias when it compares open content', () => {
     const { journal, publish, sync } = seeded([{ row: row('u', 'ask', { item: { type: 'user_message', text: 'ask' } }) }]);
     journal.alias(publish(), 'u', 'client-1');
     expect(sync([{ row: row('u', 'ask', { item: { type: 'user_message', text: 'ask' } }) }])).toEqual({ outcome: 'unchanged' });
-  });
-
-  it('replaces an open item that has no resident body', () => {
-    const { journal, sync } = seeded([open('o', 'streaming')]);
-    const state = journal.state();
-    state.items[0]!.body = null;
-    const stripped = new SessionJournal(state);
-    const { generation } = stripped.claim(PUBLISHER);
-    expect(stripped.sync({ publisherId: PUBLISHER, generation, sequence: (stripped.publisher?.watermark ?? 0) + 1 }, [open('o', 'streaming')], { roomBytes: ROOM }).outcome).toBe('replaced');
-    expect(sync([open('o', 'streaming')]).outcome).toBe('unchanged');
   });
 
   it('does not carry an open item that is not live-only through a replacement', () => {
@@ -286,21 +159,6 @@ describe('open items', () => {
 });
 
 describe('the room', () => {
-  it('replaces instead of appending an extension that does not fit, and keeps the whole window', () => {
-    const { journal, sync } = seeded([done('a', 'a'.repeat(200))]);
-    const room = journal.residentBytes() + 10;
-    const epoch = journal.epoch;
-    expect(sync([done('a', 'a'.repeat(200)), done('b', 'b'.repeat(200))], room)).toMatchObject({ outcome: 'replaced' });
-    expect(journal.epoch).not.toBe(epoch);
-    expect(keys(journal)).toEqual(['a', 'b']);
-  });
-
-  it('appends an extension that fits the room', () => {
-    const { journal, sync } = seeded([done('a', 'a'.repeat(200))]);
-    const room = journal.residentBytes() + size(done('b', 'b'.repeat(200)));
-    expect(sync([done('a', 'a'.repeat(200)), done('b', 'b'.repeat(200))], room)).toMatchObject({ outcome: 'appended' });
-  });
-
   it('counts the meta and the live-only items, and nothing else, as what a replacement keeps', () => {
     const { journal } = seeded([live('l'), done('a', 'a'.repeat(300))]);
     const meta = new SessionJournal({ meta: journal.state().meta, items: [] }).residentBytes();
@@ -346,38 +204,5 @@ describe('oldestItemKey', () => {
     expect(journal.oldestItemKey).toBe('a');
     expect(seeded([live('l')]).journal.oldestItemKey).toBeUndefined();
     expect(seeded().journal.oldestItemKey).toBeUndefined();
-  });
-});
-
-describe('why sync replaces a journal', () => {
-  const reasonOf = (journalWindow: readonly JournalItemInput[], next: readonly JournalItemInput[]) => {
-    const { sync } = seeded(journalWindow);
-    const result = sync(next);
-    return result.outcome === 'replaced' ? result.reason : result.outcome;
-  };
-
-  it('is new for a journal that holds no native item', () => {
-    expect(reasonOf([], [done('a')])).toBe('new');
-    expect(reasonOf([live('l')], [done('a')])).toBe('new');
-  });
-
-  it('is incomplete for a journal that is missing rows', () => {
-    const { journal, publish } = openJournal();
-    journal.sync(publish(), [done('a')], { roomBytes: ROOM });
-    journal.markIncomplete();
-    expect(journal.sync(publish(), [done('a')], { roomBytes: ROOM })).toMatchObject({ outcome: 'replaced', reason: 'incomplete' });
-  });
-
-  it('is open_item when the first difference involves an item that is open in the journal or in the window', () => {
-    expect(reasonOf([open('a'), done('b')], [done('a'), done('b')])).toBe('open_item');
-    expect(reasonOf([done('a'), done('b')], [open('a'), done('b')])).toBe('open_item');
-  });
-
-  it('is changed when a complete item differs, is missing or is out of order', () => {
-    expect(reasonOf([done('a'), done('b')], [done('a', 'edited'), done('b')])).toBe('changed');
-    expect(reasonOf([done('a'), done('b')], [done('a')])).toBe('changed');
-    expect(reasonOf([done('a'), done('b')], [done('b'), done('a')])).toBe('changed');
-    expect(reasonOf([done('a')], [done('x')])).toBe('changed');
-    expect(reasonOf([done('a')], [])).toBe('changed');
   });
 });

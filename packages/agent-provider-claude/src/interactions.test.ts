@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ClaudeInteractions } from './interactions.js';
-import type { AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
+import type { AgentStreamEvent, ProviderItemIdentity } from '@orchardworks/agent-provider-sdk';
 
 describe('Claude native permissions', () => {
   it('waits for a validated one-time approval and rejects broader scopes', async () => {
@@ -25,6 +25,18 @@ describe('Claude native permissions', () => {
     if (event?.type !== 'interaction_requested' || event.request.kind !== 'question') throw new Error('Missing question');
     interactions.respond(event.request.requestId, { kind: 'question', answers: [{ questionId: event.request.questions[0]!.questionId, selectedValues: ['Red'] }] });
     await expect(result).resolves.toMatchObject({ behavior: 'allow', updatedInput: { answers: { 'Choose a color': 'Red' } } });
+  });
+
+  it('resolves every kind of request as a live-only item keyed by its request, including the ones canceled with the turn', async () => {
+    const resolved: Array<{ requestId: string; identity: ProviderItemIdentity | undefined }> = [];
+    const interactions = new ClaudeInteractions((event, identity) => { if (event.type === 'interaction_resolved') resolved.push({ requestId: event.requestId, identity }); });
+    const signal = new AbortController().signal;
+    void interactions.request('Bash', { command: 'pwd' }, { signal, toolUseID: 'tool-1' });
+    void interactions.request('AskUserQuestion', { questions: [{ header: 'C', question: 'Pick', multiSelect: false, options: [{ label: 'A', description: 'a' }] }] }, { signal, toolUseID: 'ask-1' });
+    interactions.cancelAll();
+    expect(resolved).toHaveLength(2);
+    for (const { requestId, identity } of resolved) expect(identity).toEqual({ key: `interaction:${requestId}`, completes: true, liveOnly: true });
+    expect(new Set(resolved.map(({ identity }) => identity?.key)).size).toBe(2);
   });
 
   it('settles aborted permission requests and rejects stale responses', async () => {

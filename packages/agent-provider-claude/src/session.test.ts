@@ -92,6 +92,41 @@ describe('Claude persistent session', () => {
     await session.dispose();
   });
 
+  it('ends the streamed text of an interrupted turn with an empty body before the turn is announced canceled, and keys its input', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const observations: any[] = [];
+    void (async () => { for await (const item of session.observe()) if (item.type === 'observation') observations.push(item); })().catch(() => {});
+    await session.sendMessage('Wait');
+    const input = (await native.nextInput()).value;
+    native.push({ type: 'stream_event', session_id: 'native', event: { type: 'message_start', message: { id: 'msg-1' } } });
+    native.push({ type: 'stream_event', session_id: 'native', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } });
+    native.push({ type: 'stream_event', session_id: 'native', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Half' } } });
+    await expect.poll(() => observations.some(({ itemIdentity }) => itemIdentity?.key === 'assistant:msg-1:0')).toBe(true);
+    await session.cancel();
+    await expect.poll(() => observations.some(({ event }) => event.type === 'turn_canceled')).toBe(true);
+    const rows = observations.filter(({ event }) => event.type === 'timeline').map(({ event, itemIdentity }) => [itemIdentity.key, event.item.text, itemIdentity.completes === true]);
+    expect(rows).toEqual([[`user:${input.uuid}`, 'Wait', true], ['assistant:msg-1:0', 'Half', false], ['assistant:msg-1:0', '', true]]);
+    expect(observations.findIndex(({ event }) => event.type === 'timeline' && event.item.text === '' )).toBeLessThan(observations.findIndex(({ event }) => event.type === 'turn_canceled'));
+    await session.dispose();
+  });
+
+  it('resolves a permission request as a live-only item keyed by its request id', async () => {
+    const native = runtime();
+    const session = await ClaudeAgentSession.open({ sessionId: 'native' }, { query: native.factory });
+    const observations: any[] = [];
+    void (async () => { for await (const item of session.observe()) if (item.type === 'observation') observations.push(item); })().catch(() => {});
+    await session.sendMessage('Run it');
+    void native.options.canUseTool!('Bash', { command: 'pwd' }, { signal: new AbortController().signal, toolUseID: 'tool-1' } as any);
+    await expect.poll(() => observations.some(({ event }) => event.type === 'interaction_requested')).toBe(true);
+    const request = observations.find(({ event }) => event.type === 'interaction_requested').event.request;
+    await session.respondToInteraction(request.requestId, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
+    await expect.poll(() => observations.some(({ event }) => event.type === 'interaction_resolved')).toBe(true);
+    const resolved = observations.find(({ event }) => event.type === 'interaction_resolved');
+    expect(resolved.itemIdentity).toEqual({ key: `interaction:${request.requestId}`, completes: true, liveOnly: true });
+    await session.dispose();
+  });
+
   it('emits saved history before the boundary and preserves resume identity', async () => {
     const native = runtime();
     const session = await ClaudeAgentSession.open({ sessionId: 'native', cwd: '/workspace' }, { query: native.factory,
@@ -226,6 +261,7 @@ describe('Claude input during an active turn', () => {
       await expect.poll(() => events.some(event => event.type === 'turn_canceled')).toBe(true);
       await expect.poll(() => withdrawnItems(events).length).toBe(1);
       expect(withdrawnItems(events)[0].item).toMatchObject({ text: 'Queued', withdrawn: { reason: 'stopped' } });
+      expect(withdrawnItems(events)).toHaveLength(1);
       expect(withdrawals).toEqual(['stopped']);
       expect(events.filter(event => event.type === 'turn_started').map(event => event.turnId)).toEqual([first.uuid]);
       expect((await session.runtimeInfo()).status).toBe('idle');

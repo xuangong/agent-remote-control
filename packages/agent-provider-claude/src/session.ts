@@ -5,7 +5,7 @@ import { claudeMessageContent } from './message-content.js';
 import { randomUUID } from 'node:crypto';
 import { query, type Options, type ModelInfo, type PermissionMode, type Query, type SDKMessage, type SDKUserMessage, type SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentCapabilities, AgentInputAcceptance, AgentInputPart, AgentInteractionResponse, AgentMessageOptions, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
-  AgentSessionHostAccess, AgentSessionToolNamespace, AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+  AgentSessionHostAccess, AgentSessionToolNamespace, AgentStreamEvent, AgentNativeValidityToken, AgentPromptEditEvidence, ProviderItemIdentity, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { IMAGE_INPUT_CAPABILITIES, validateSessionSetting, type AgentSessionSetting } from '@orchardworks/agent-provider-sdk';
 import { Channel, deadline, DeadlineError } from './channel.js';
 import { ClaudeInteractions } from './interactions.js';
@@ -162,8 +162,8 @@ export class ClaudeAgentSession implements AgentSession {
         this.dispatchMessage(text, inputId);
       },
     });
-    this.interactions = new ClaudeInteractions((event) => {
-      this.emit(event);
+    this.interactions = new ClaudeInteractions((event, itemIdentity) => {
+      this.emit(event, itemIdentity);
       this.status = this.interactions.size ? 'waiting' : this.turnId ? 'running' : 'idle';
       this.runtimeUpdated();
     }, async () => {
@@ -620,9 +620,14 @@ export class ClaudeAgentSession implements AgentSession {
       persistence: this.options.emptyDescriptor && !this.inputDispatched ? claudeEmptyHandle({ ...this.config, planning: this.planning, permissionMode: this.resumePermissionMode }, this.options) : { providerId: 'claude', sessionId: this.config.sessionId, opaque: JSON.stringify({ ...persistedConfig(this.config), planning: this.planning, permissionMode: this.resumePermissionMode }) } };
   }
   private runtimeUpdated(): void { this.nativeEvidence.invalidate(); this.emit({ type: 'runtime_updated', provider: 'claude', runtimeInfo: this.info(), activeTurnId: this.turnId ?? null }); }
-  private emit(event: AgentStreamEvent): void {
+  private emit(event: AgentStreamEvent, itemIdentity?: ProviderItemIdentity): void {
     this.output.push({ type: 'observation', sourceKey: `claude:${this.sourceId}:${++this.sequence}`, occurredAt: Date.now(), delivery: 'live',
-      event: this.withTurn(event) });
+      event: this.withTurn(event), ...(itemIdentity ? { itemIdentity } : {}) });
+  }
+
+  /** What the turn left open ends with it, before the turn's own end is announced. */
+  private finishOpenItems(): void {
+    for (const observation of this.projector.finishOpenItems()) this.output.push({ ...observation, event: this.withTurn(observation.event) });
   }
   private withTurn(event: AgentStreamEvent): AgentStreamEvent {
     return this.turnId && event.type !== 'runtime_updated' && event.type !== 'thread_started' ? { ...event, turnId: this.turnId } : event;
@@ -632,7 +637,7 @@ export class ClaudeAgentSession implements AgentSession {
     this.failure = new Error(error instanceof Error ? error.message : String(error));
     this.images.stop();
     this.interactions.cancelAll();
-    if (this.turnId) this.emit({ type: 'turn_failed', provider: 'claude', error: this.failure.message });
+    if (this.turnId) { this.finishOpenItems(); this.emit({ type: 'turn_failed', provider: 'claude', error: this.failure.message }); }
     this.turnId = undefined;
     this.status = 'failed';
     void this.children.close();
@@ -686,6 +691,7 @@ export class ClaudeAgentSession implements AgentSession {
         if (this.cancelRequested || message.is_error || message.subtype !== 'success') {
           if (Object.keys(usage).length) this.emit({ type: 'usage_updated', provider: 'claude', usage });
         }
+        this.finishOpenItems();
         if (this.cancelRequested) this.emit({ type: 'turn_canceled', provider: 'claude', reason: 'Interrupted by the user.' });
         else if (message.is_error || message.subtype !== 'success') this.emit({ type: 'turn_failed', provider: 'claude',
           error: 'errors' in message ? message.errors.join('\n') : 'Claude turn failed.' });

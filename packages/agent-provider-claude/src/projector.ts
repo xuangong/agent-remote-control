@@ -1,6 +1,6 @@
 import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
 import {claudeFileChanges} from './tool-result.js';
-import { boundToolResult, type AgentUserMessagePart, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
+import { boundToolResult, type AgentUserMessagePart, type ProviderItemIdentity, type ProviderResourceReference, type AgentToolResultJson, type AgentStreamEvent, type AgentTimelineItem, type AgentToolDetail, type ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { ClaudeImageRegistry } from './images.js';
 
 export function record(value: unknown): value is Record<string, any> {
@@ -20,12 +20,24 @@ export function toolDetail(name: string, input: Record<string, unknown>): AgentT
 
 interface Block { index: number; type: string; text: string; finalized: boolean }
 
+/** One item of a journal: its key, whether this observation finishes it, and whether native history cannot rebuild it. */
+const identity = (key: string, completes = false, liveOnly = false): ProviderItemIdentity =>
+  ({ key, ...(completes ? { completes: true as const } : {}), ...(liveOnly ? { liveOnly: true as const } : {}) });
+
+/** The envelope the transcript writes for a slash command the user typed, which the live row holds as typed. */
+const COMMAND_ENVELOPE = /^\s*(?:<command-message>[^<]*<\/command-message>\s*)?<command-name>(\/[^<\s]*)<\/command-name>\s*(?:<command-message>[^<]*<\/command-message>\s*)?(?:<command-args>([^<]*)<\/command-args>)?\s*$/;
+const typedCommand = (text: string): string => {
+  const match = COMMAND_ENVELOPE.exec(text);
+  return match ? `${match[1]}${match[2]?.trim() ? ` ${match[2].trim()}` : ''}` : text;
+};
+
 /** Converts native transcript and streaming frames to append-only normalized observations. */
 export class ClaudeEventProjector {
   private readonly seen = new Set<string>();
   private readonly blocks = new Map<string, Block[]>();
   private readonly tools = new Map<string, { name: string; detail: AgentToolDetail }>();
   private activeMessage = '';
+  private pendingCompaction: string | undefined;
   private sequence = 0;
 
   constructor(private readonly sessionId: string, private readonly delivery: 'history' | 'live' = 'live', private readonly images = new ClaudeImageRegistry(sessionId)) {}
@@ -46,11 +58,15 @@ export class ClaudeEventProjector {
     }
     const key = `message:${value.uuid ?? ++this.sequence}`;
     if (value.type === 'system' && value.subtype === 'status' && value.status === 'compacting') {
-      return [this.item(key, {type:'compaction',status:'loading'})];
+      this.pendingCompaction = String(value.uuid ?? key);
+      return [this.item(key, {type:'compaction',status:'loading'}, identity(`compaction:${this.pendingCompaction}`))];
     }
     if (value.type === 'system' && value.subtype === 'compact_boundary') {
+      // The boundary ends the compaction the status row opened; one without a status row is a compaction of its own.
+      const compaction = this.pendingCompaction ?? String(value.uuid ?? key);
+      this.pendingCompaction = undefined;
       return [this.item(key, { type: 'compaction', status: 'completed',
-        ...(record(value.compact_metadata) ? { trigger: value.compact_metadata.trigger, preTokens: value.compact_metadata.pre_tokens } : {}) })];
+        ...(record(value.compact_metadata) ? { trigger: value.compact_metadata.trigger, preTokens: value.compact_metadata.pre_tokens } : {}) }, identity(`compaction:${compaction}`, true))];
     }
     if (!record(value.message)) return [];
     const content = typeof value.message.content === 'string' ? [{ type: 'text', text: value.message.content }]
@@ -69,9 +85,9 @@ export class ClaudeEventProjector {
           resourceReferences.push(...image.resourceReferences);
         }
       }
-      const text = parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(imageIndex ? '' : '\n');
+      const text = typedCommand(parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join(imageIndex ? '' : '\n'));
       if (text && !value.isSynthetic) events.push({ ...this.item(key, { type: 'user_message', text, messageId: value.uuid,
-        ...(parts.some(part=>part.type!=='text') ? { content: parts } : {}) }), ...(imageIndex ? { resourceReferences } : {}) });
+        ...(parts.some(part=>part.type!=='text') ? { content: parts } : {}) }, identity(`user:${value.uuid ?? key}`, true)), ...(imageIndex ? { resourceReferences } : {}) });
       const toolResults = content.filter((block: unknown) => record(block) && block.type === 'tool_result');
       const structured = toolResults.length === 1 ? toolResultJson(imageMetadata(value.tool_use_result, toolResults[0].content)) : undefined;
       for (const block of toolResults) {
@@ -83,11 +99,11 @@ export class ClaudeEventProjector {
         const result = boundToolResult({ content: [{ type: 'text', text: output },
           ...(metadata === undefined ? [] : [{ type: 'json' as const, value: metadata }])] });
         events.push(this.item(`${key}:tool:${block.tool_use_id}`, { type: 'tool_call', callId: block.tool_use_id, ...tool, result,
-          ...(block.is_error ? { status: 'failed' as const, error: output.slice(0, 1024) || 'Tool failed' } : { status: 'completed' as const, error: null }) }));
+          ...(block.is_error ? { status: 'failed' as const, error: output.slice(0, 1024) || 'Tool failed' } : { status: 'completed' as const, error: null }) }, identity(`tool:${block.tool_use_id}`, true)));
         if (typeof block.tool_use_id === 'string' && Array.isArray(block.content)) {
           for (const [index, part] of block.content.entries()) {
             const image = this.images?.project(block.tool_use_id, index, part);
-            if (image) events.push({ ...this.item(`${key}:tool:${block.tool_use_id}:image:${index}`, image.item), resourceReferences: image.resourceReferences });
+            if (image) events.push({ ...this.item(`${key}:tool:${block.tool_use_id}:image:${index}`, image.item, identity(`tool:${block.tool_use_id}:image:${index}`, true)), resourceReferences: image.resourceReferences });
           }
         }
       }
@@ -108,18 +124,26 @@ export class ClaudeEventProjector {
       if (block.type === 'text' || block.type === 'thinking') {
         const text = block.type === 'text' ? block.text : block.thinking;
         if (typeof text !== 'string') continue;
-        const suffix = text.startsWith(current.text) ? text.slice(current.text.length) : text;
+        const streamed = current.text;
         current.text = text;
-        if (suffix) events.push(this.item(blockKey, block.type === 'thinking' ? { type: 'reasoning', text: suffix }
-          : { type: 'assistant_message', messageId: `${messageId}:${current.index}`, text: suffix }));
+        const reasoning = block.type === 'thinking';
+        const itemKey = `${reasoning ? 'reasoning' : 'assistant'}:${messageId}:${current.index}`;
+        const body = (value: string): AgentTimelineItem => reasoning ? { type: 'reasoning', text: value } : { type: 'assistant_message', messageId: `${messageId}:${current.index}`, text: value };
+        // A text the stream never showed is a local command's own output when the record is synthetic; history cannot rebuild it.
+        const liveOnly = this.delivery === 'live' && value.message.model === '<synthetic>';
+        // The record finishes the item with what the stream lacks, nothing when it was whole.
+        if (text.startsWith(streamed)) { if (streamed || text) events.push(this.item(blockKey, body(text.slice(streamed.length)), identity(itemKey, true, liveOnly))); continue; }
+        // A final that does not continue the stream cannot rewrite it: the item ends as streamed, and the corrected text stands beside it.
+        events.push(this.item(blockKey, body(''), identity(itemKey, true)));
+        if (!reasoning && text) events.push(this.item(`${blockKey}:correction`, body(text), identity(`${itemKey}:correction`, true)));
       } else if (block.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
         const input = record(block.input) ? block.input : {};
         const tool = { name: block.name, detail: toolDetail(block.name, input) };
         this.tools.set(block.id, tool);
-        events.push(this.item(blockKey, { type: 'tool_call', callId: block.id, ...tool, status: 'running', error: null }));
+        events.push(this.item(blockKey, { type: 'tool_call', callId: block.id, ...tool, status: 'running', error: null }, identity(`tool:${block.id}`)));
         if (block.name === 'TodoWrite' && Array.isArray(input.todos)) events.push(this.item(`${blockKey}:todo`, { type: 'todo',
           items: input.todos.filter((todo: unknown) => record(todo) && typeof todo.content === 'string').map((todo: any) => ({ text: todo.content,
-            completed: todo.status === 'completed', ...( ['pending', 'in_progress', 'completed'].includes(todo.status) ? { status: todo.status } : {}) })) }));
+            completed: todo.status === 'completed', ...( ['pending', 'in_progress', 'completed'].includes(todo.status) ? { status: todo.status } : {}) })) }, identity(`todo:${block.id}`, true)));
       }
     }
     return events;
@@ -152,11 +176,34 @@ export class ClaudeEventProjector {
     if (typeof text !== 'string' || !text) return [];
     block.text += text;
     return [this.item(`stream:${this.activeMessage}:${block.index}:${block.text.length}`, block.type === 'thinking'
-      ? { type: 'reasoning', text } : { type: 'assistant_message', messageId: `${this.activeMessage}:${block.index}`, text })];
+      ? { type: 'reasoning', text } : { type: 'assistant_message', messageId: `${this.activeMessage}:${block.index}`, text },
+      identity(`${block.type === 'thinking' ? 'reasoning' : 'assistant'}:${this.activeMessage}:${block.index}`))];
   }
 
-  private item(key: string, item: AgentTimelineItem): ProviderObservation {
-    return this.observation(key, { type: 'timeline', provider: 'claude', item });
+  /**
+   * The turn ended with these items open: a text or thinking block that streamed and never received its record ends with an empty body,
+   * and a compaction that never reached its boundary is failed. Native history keeps none of them, so the next replacement may drop them.
+   */
+  finishOpenItems(): ProviderObservation[] {
+    const finished: ProviderObservation[] = [];
+    for (const [messageId, blocks] of this.blocks) {
+      for (const block of blocks) {
+        if (block.finalized || !block.text || (block.type !== 'text' && block.type !== 'thinking')) continue;
+        block.finalized = true;
+        const reasoning = block.type === 'thinking';
+        finished.push(this.item(`abandoned:${messageId}:${block.index}`, reasoning ? { type: 'reasoning', text: '' } : { type: 'assistant_message', messageId: `${messageId}:${block.index}`, text: '' },
+          identity(`${reasoning ? 'reasoning' : 'assistant'}:${messageId}:${block.index}`, true)));
+      }
+    }
+    if (this.pendingCompaction) {
+      finished.push(this.item(`abandoned:compaction:${this.pendingCompaction}`, { type: 'compaction', status: 'failed' }, identity(`compaction:${this.pendingCompaction}`, true)));
+      this.pendingCompaction = undefined;
+    }
+    return finished;
+  }
+
+  private item(key: string, item: AgentTimelineItem, itemIdentity: ProviderItemIdentity): ProviderObservation {
+    return { ...this.observation(key, { type: 'timeline', provider: 'claude', item }), itemIdentity };
   }
 
   private observation(sourceKey: string, event: AgentStreamEvent): ProviderObservation {

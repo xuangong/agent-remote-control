@@ -37,6 +37,26 @@ Successful `Edit`, `MultiEdit` and `Write` structured output becomes the existin
 
 **Cold-history limit:** the public native history API omits `tool_use_result.structuredPatch`. Live Relay reconnection and ARDB JSONL preserve observed diffs, but a fresh provider restoring native history has result text without that diff. The adapter does not reconstruct a supposedly completed patch from requested tool input.
 
+## Item identity
+
+Every timeline observation carries the identity of its item (`itemIdentity`), equal in the live stream and in a reread of the SDK's session read widened with the transcript, so a journal recognizes the item (`packages/agent-provider-claude/src/projector.ts`, `transcript-extras.ts`). The adapter owns keys, completion and live-only marks. The recordings against the real CLI are `src/journal-recording.local.test.ts` and `src/journal-fixtures`.
+
+| Item | Key | Notes |
+| --- | --- | --- |
+| user input, queued input run as the next turn, interrupt notice | `user:<uuid>` | the uuid the Controller gave the input is the transcript's |
+| input folded into a running turn | `user:<source_uuid>` | the `queued_command` attachment names the uuid the Controller gave it; history restores the row under that uuid |
+| input withdrawn before it ran | `user:<steer uuid>` | never in the transcript, so the next replacement drops it |
+| typed slash command | `user:<uuid>` | the transcript's `<command-name>` envelope is read as the command was typed |
+| assistant text, thinking | `assistant:<message id>:<block index>`, `reasoning:<message id>:<block index>` | stream deltas and the record share it; the record finishes the item with the text the stream lacks, an empty body when it was whole. A final that does not continue the stream finishes the item as streamed and adds a complete `...:correction` item |
+| local command output (a synthetic assistant message) | `assistant:<message id>:0`, live-only | the SDK read omits it |
+| tool | `tool:<tool_use_id>` | the `tool_use` block is the open row; the result record repeats the whole row. History carries the raw `toolUseResult` of the result row, as the live frame does |
+| tool image | `tool:<tool_use_id>:image:<index>` | |
+| TodoWrite | `todo:<tool_use_id>` | rebuilt from the tool call, not live-only |
+| compaction | `compaction:<status uuid>` | the loading status opens it, the boundary completes it; a turn that ends first fails it. The SDK read restarts at the boundary, so a compaction is one replacement at the next reopen |
+| permission prompt, question, plan approval | `interaction:<request id>`, live-only | the transcript holds no record beyond the tool rows |
+
+At a turn's end, a block that streamed and never got its record ends with an empty body. A user row a finished sub-agent wakes the session with is not shown, as in the stream.
+
 ## Interactions and controls
 
 | Public interaction kind | Support |

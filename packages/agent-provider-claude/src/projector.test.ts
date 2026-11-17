@@ -17,7 +17,8 @@ describe('Claude event projection', () => {
       assistant('a1', [{ type: 'text', text: 'Hello' }]), assistant('a1', [{ type: 'text', text: 'Hello' }])];
     const events = frames.flatMap((frame) => projector.project(frame));
     const texts = events.flatMap(({ event }) => event.type === 'timeline' && event.item.type === 'assistant_message' ? [event.item.text] : []);
-    expect(texts).toEqual(['Hel', 'lo']);
+    // The record finishes the item once with nothing more to say, and its replay adds nothing.
+    expect(texts).toEqual(['Hel', 'lo', '']);
     expect(new Set(events.map(({ sourceKey }) => sourceKey)).size).toBe(events.length);
   });
 

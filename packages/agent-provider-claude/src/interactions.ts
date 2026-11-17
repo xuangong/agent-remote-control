@@ -2,7 +2,7 @@ import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import {claudeSessionGrant, claudeGrantDescription} from './permissions.js';
 import { randomUUID } from 'node:crypto';
 import type { CanUseTool, PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
-import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
+import { validateInteractionResponse, type AgentInteractionRequest, type AgentInteractionResponse, type AgentStreamEvent, type ProviderItemIdentity } from '@orchardworks/agent-provider-sdk';
 import { record, toolDetail } from './projector.js';
 
 interface Pending { grant?: PermissionUpdate[]; responding?: boolean; request: AgentInteractionRequest; input: Record<string, unknown>; resolve(result: PermissionResult): void; cleanup(): void }
@@ -10,7 +10,7 @@ interface Pending { grant?: PermissionUpdate[]; responding?: boolean; request: A
 export class ClaudeInteractions {
   private readonly pending = new Map<string, Pending>();
   private closed = false;
-  constructor(private readonly emit: (event: AgentStreamEvent) => void, private readonly approvePlan?: () => Promise<void>) {}
+  constructor(private readonly emit: (event: AgentStreamEvent, itemIdentity?: ProviderItemIdentity) => void, private readonly approvePlan?: () => Promise<void>) {}
   get size(): number { return this.pending.size; }
 
   readonly request: CanUseTool = async (name, input, options) => {
@@ -89,7 +89,8 @@ export class ClaudeInteractions {
     const pending = this.pending.get(id)!;
     this.pending.delete(id);
     pending.cleanup();
-    this.emit({ type: 'interaction_resolved', provider: 'claude', requestId: id, response });
+    // The transcript holds no prompt, question or plan review beyond the tool rows, so the journal keeps the only copy; the request id is unique to the request.
+    this.emit({ type: 'interaction_resolved', provider: 'claude', requestId: id, response }, { key: `interaction:${id}`, completes: true, liveOnly: true });
     pending.resolve(result);
   }
 }

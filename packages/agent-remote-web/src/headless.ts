@@ -15,6 +15,7 @@ export * from './browser.js';
 export * from './client/remote-activity-client.js';
 
 export * from './client/session-state.js';
+export * from './client/lease-view.js';
 
 export * from './client/session-control-extension.js';
 

@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
-import { holdsUnconfirmedRows, isUncertainSend, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
+import { holdsUnconfirmedRows, isUncertainSend, leaseActivityLabel, leaseView, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -126,7 +126,8 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const activity = session.activity;
   // Rows held from the device or across a replacement stand in for the opening words with the session's last business label.
   const rowsHeld = session.holdingRows || holdsUnconfirmedRows(state);
-  const activityLabel = state?.sessionControl?.nativeOwner ? (state.sessionControl.nativeOwner.kind === 'native_cli' ? 'Native CLI has control' : 'Native control transferred')
+  const nativeLabel = leaseActivityLabel(leaseView(state?.sessionControl).state);
+  const activityLabel = nativeLabel ? nativeLabel
     : agentFailure ? 'Agent failed'
     : sessionStatus === 'unavailable' ? 'Unavailable'
     : connectionFailure ? 'Connection failed'

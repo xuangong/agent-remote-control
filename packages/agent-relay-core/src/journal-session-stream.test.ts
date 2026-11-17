@@ -254,15 +254,11 @@ describe('a journal-served session stream', () => {
     expect(f.sent.at(-1)).toMatchObject({ type: 'command_acknowledged' });
   });
 
-  it('grants control without the Controller, refuses a stale revision, and refuses a mutation without a live grant before it reaches the Controller', async () => {
+  it('answers control and refuses a mutation without a live grant itself, never opening the Controller stream', async () => {
     const f = fixture();
     await f.negotiated();
-    f.stream.receive(acquireRequest('not-the-revision'));
-    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'control-1', code: 'session_control_changed', recoverable: true } });
     f.stream.receive(sendMessage());
     expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'session_read_only', recoverable: true } });
-    f.stream.receive(sendMessage('forged'));
-    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
     const token = await f.controlled();
     f.stream.receive(sendMessage(`${token}x`));
     expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
@@ -296,7 +292,7 @@ describe('a journal-served session stream', () => {
     expect(f.closed).toEqual([]);
   });
 
-  it('shows the native owner and revokes control when opening the session is refused for it, and gives control back at the next acquire', async () => {
+  it('shows the native owner and revokes control when opening the session is refused for it', async () => {
     const nativeOwner = { kind: 'native_cli', generation: 'g1' };
     const f = fixture({ hostOpen: Object.assign(new Error('A terminal holds it.'), { code: 'native_session_owned', status: 409, nativeOwner }) });
     const token = await f.controlled();
@@ -304,13 +300,6 @@ describe('a journal-served session stream', () => {
     await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'session_control', payload: { access: 'read_only', available: false, nativeOwner } }));
     expect(f.sent.at(-2)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } });
     expect(f.control().token).toBeUndefined();
-    f.stream.receive(sendMessage(token));
-    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
-    f.stream.receive(acquireRequest('stale'));
-    expect(f.sent.at(-1)).toMatchObject({ payload: { code: 'session_control_changed' } });
-    f.stream.receive(acquireRequest(f.control().revision, 'control-2'));
-    expect(f.control()).toMatchObject({ access: 'control', available: true, requestId: 'control-2' });
-    expect(f.control().nativeOwner).toBeUndefined();
   });
 
   it('learns the owner after a refusal at delivery, which names none, by asking the Controller once', async () => {

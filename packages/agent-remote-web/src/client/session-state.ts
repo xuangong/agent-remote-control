@@ -1,6 +1,7 @@
 import type { SessionHandoffState } from './session-control-extension.js';
 import { sessionOperationAvailability, type AgentStatus, type AgentRuntimeInfo, type SessionOperationAvailability, type SessionOperationKind } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState } from '../replica/types.js';
+import { leaseView } from './lease-view.js';
 import type { RemoteSessionStatus } from './remote-session-client.js';
 
 export interface RemoteSessionState {
@@ -35,8 +36,7 @@ export function remoteSessionState(replica: AgentReplicaState | undefined, conne
   const activity = replica?.agent?.status;
   const runtime = replica?.agent ? replica.agent.runtimeInfo.connection ?? { state: 'connected' as const } : undefined;
   const control = replica?.sessionControl;
-  const controlChecking = control?.access === 'checking';
-  const readOnly = control !== undefined && !controlChecking && control.access !== 'control';
+  const { checking: controlChecking, readOnly } = leaseView(control);
   const holdingRows = holdsUnconfirmedRows(replica);
   return {
     connection, synchronized, holdingRows, activity,

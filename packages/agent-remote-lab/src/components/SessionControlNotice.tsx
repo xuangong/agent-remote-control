@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import type { AgentReplicaState, SessionHandoffState } from '@orchardworks/agent-remote-web';
+import { leaseNoticeLabel, leaseView, type AgentReplicaState, type SessionHandoffState } from '@orchardworks/agent-remote-web';
 
 import type { SessionTakeControlOptions } from '@orchardworks/agent-remote-web/react';
 export type TakeControlOptions = SessionTakeControlOptions;
@@ -17,8 +17,9 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   const currentFailure = handoff?.message ? handoff : failure?.identity === identity ? failure : undefined;
   const unknown = handoff?.phase === 'unknown';
   const phase = handoff && ['taking', 'checking', 'restoring'].includes(handoff.phase) ? handoff.phase : pending ? 'taking' : undefined;
-  const native = !!control.nativeOwner;
-  if (control.access === 'control') return null;
+  const lease = leaseView(control);
+  const native = lease.native;
+  if (lease.state === 'control') return null;
   const takeControl = async () => {
     if (phase || !connected || !onTakeControl) return;
     setPending(true); setFailure(undefined);
@@ -29,10 +30,7 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   };
   const label = phase === 'restoring' ? 'Restoring session…' : phase === 'checking' ? 'Checking session…'
     : phase === 'taking' ? 'Taking control…'
-    : control.access === 'checking' ? 'Checking access…'
-    : control.nativeOwner?.kind === 'native_cli' ? 'Native CLI has control'
-    : control.nativeOwner ? 'Another Controller has control'
-    : 'Ready to take control';
+    : leaseNoticeLabel(lease.state);
   const description = phase === 'restoring' ? 'Control will be available after synchronization.'
     : !phase && native ? 'Taking over interrupts its running work.'
     : !phase && !connected ? 'Reconnect to take control.' : undefined;

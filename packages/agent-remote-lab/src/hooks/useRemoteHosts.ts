@@ -1,4 +1,4 @@
-import { watchFeedReopen } from '@orchardworks/agent-remote-web';
+import { watchFeedRefresh } from '@orchardworks/agent-remote-web';
 import { useCallback, useEffect, useState } from 'react';
 import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
 
@@ -38,7 +38,7 @@ export function useRemoteHosts(service: HostPairingService, enabled: boolean, di
       timer = setTimeout(() => void load(), discovery || offline ? 5000 : 30000);
     };
     document.addEventListener('visibilitychange', visible);
-    const unwatch = watchFeedReopen(() => void load());
+    const unwatch = watchFeedRefresh(() => void load());
     void load();
     return () => { retired = true; unwatch(); document.removeEventListener('visibilitychange', visible); clearTimeout(timer); };
   }, [service, enabled, generation, discovery, activeHostId]);

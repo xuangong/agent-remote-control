@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react';
-import { watchFeedReopen } from '@orchardworks/agent-remote-web';
+import { watchFeedRefresh } from '@orchardworks/agent-remote-web';
 import { nativeSessionRefKey, type NativeSessionRef, type SuccessionContextStatus } from '@orchardworks/agent-remote-protocol';
 import type { SessionDirectoryClient } from '../directory-client.js';
 
@@ -52,7 +52,7 @@ export function useSuccessionContext({ directory, operationId, target, enabled =
   useEffect(() => {
     runtime.active = enabled;
     void read();
-    const unwatch = watchFeedReopen(() => { if (document.visibilityState !== 'hidden') refresh(); });
+    const unwatch = watchFeedRefresh(() => refresh());
     return () => {
       runtime.active = false; clearTimeout(runtime.timer); runtime.request?.abort(); runtime.request = undefined; runtime.refreshRequested = false;
       unwatch();

@@ -4,7 +4,7 @@ import { applyConversationLayout, type ConversationLayout } from '../conversatio
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, resolveNativePrefix, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { remoteSessionState, watchFeedReopen, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-remote-web';
+import { remoteSessionState, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-remote-web';
 import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
@@ -986,7 +986,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const resumeRecipients = watchPageResume(() => { if (live()) { runtime.binding?.resumeRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.update(); } }, () => {
       runtime.binding?.retireRecipient(); for (const supplier of runtime.askRecipients.values()) supplier.retire();
     });
-    const feedReopened = watchFeedReopen(() => { if (live()) void discover(); });
+    const feedReopened = watchFeedRefresh(() => { if (live()) void discover(); });
     const resume = () => { resumeRecipients(); feedReopened(); };
     return () => {
       runtime.mounted = false; runtime.sequence++; clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.navigation?.abort(); runtime.metadata?.abort(); runtime.attachment?.abort(); runtime.binding?.stop();

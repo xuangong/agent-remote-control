@@ -65,10 +65,22 @@ it('refetches every list once when the feed socket reopens, and lists still refr
   expect(now().hosts).toBeGreaterThan(reopened.hosts);
 });
 
-it('does not refetch for a feed that reopens while the page is hidden', async () => {
-  const { requests } = await mountLoaders();
+it('marks lists due when the feed reopens while the page is hidden, and refreshes each once when the page is shown', async () => {
+  const { requests, now } = await mountLoaders();
+  const mounted = now();
   setVisibility('hidden');
   const before = requests.length;
   await act(async () => { notifyFeedReopened(); await vi.advanceTimersByTimeAsync(0); });
   expect(requests).toHaveLength(before);
+  setVisibility('visible');
+  await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+  const shown = now();
+  expect(shown.hosts).toBe(mounted.hosts + 1);
+  expect(shown.favorites).toBe(mounted.favorites + 1);
+  expect(shown.relations).toBeGreaterThan(mounted.relations);
+  // Hiding and showing again with the feed alive refreshes nothing more.
+  const after = requests.length;
+  setVisibility('hidden'); setVisibility('visible');
+  await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+  expect(requests).toHaveLength(after);
 });

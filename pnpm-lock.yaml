@@ -698,6 +698,9 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
+      '@orchardworks/agent-remote-web':
+        specifier: workspace:*
+        version: link:../agent-remote-web
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
@@ -784,9 +787,6 @@ importers:
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@orchardworks/agent-remote-journal':
-        specifier: workspace:*
-        version: link:../agent-remote-journal
       '@orchardworks/agent-timeline':
         specifier: workspace:*
         version: link:../agent-timeline

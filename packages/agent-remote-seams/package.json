@@ -19,6 +19,7 @@
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-web": "workspace:*",
     "@types/node": "^24.3.0",
     "typescript": "^5.7.0",
     "vitest": "4.1.11"

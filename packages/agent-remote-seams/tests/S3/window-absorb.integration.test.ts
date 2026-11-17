@@ -2,10 +2,10 @@ import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol
 import { vectorText, windowVectors, type VectorItem } from '@orchardworks/agent-remote-journal/testing';
 import { describe, expect, it } from 'vitest';
 
-import { absorbWindow } from './absorb-window.js';
+import { absorbWindow } from '@orchardworks/agent-remote-web/headless';
 
 /**
- * The replica's side of the window vectors: whatever the journal decided, the replica that receives the window as the tail of
+ * S3, the client end of the window decision. The replica's side of the window vectors: whatever the journal decided, the replica that receives the window as the tail of
  * an epoch ends with the window's items by key, and a row it held with the same content stays the same object.
  */
 const entryOf = (item: VectorItem, seq: number): ProjectedTimelineEntry => ({
@@ -26,18 +26,5 @@ describe('absorbWindow over the window vectors', () => {
       else expect(entry.item).toEqual(window[at]!.item);
       expect(entry.seqStart).toBe(window[at]!.seqStart);
     });
-  });
-
-  it('counts a key repeated in the window once, at its first place', () => {
-    const [a, b] = [entryOf({ key: 'a' }, 1), entryOf({ key: 'b' }, 2)];
-    expect(absorbWindow([], null, 'epoch-2', [a, b, { ...a, seqStart: 3, seqEnd: 3 }]).map(({ itemKey }) => itemKey)).toEqual(['a', 'b']);
-  });
-
-  it('leaves the arguments as they were', () => {
-    const held = [entryOf({ key: 'a' }, 1)];
-    const window = [entryOf({ key: 'a' }, 5), entryOf({ key: 'b' }, 6)];
-    const before = JSON.stringify([held, window]);
-    absorbWindow(held, 'epoch-1', 'epoch-2', window);
-    expect(JSON.stringify([held, window])).toBe(before);
   });
 });

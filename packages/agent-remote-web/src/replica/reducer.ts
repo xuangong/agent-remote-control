@@ -22,7 +22,7 @@ import type {
   TimelineReduction,
   TimelineStreamMessage,
 } from './types.js';
-import { absorbWindow, updateInPlace } from './absorb-window.js';
+import { absorbWindow, updateInPlace } from './window-absorption.js';
 import { timelineEntryKey } from './timeline-entry-key.js';
 
 function clone<T>(value: T): T {

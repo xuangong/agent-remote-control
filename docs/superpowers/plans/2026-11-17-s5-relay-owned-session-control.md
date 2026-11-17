@@ -109,7 +109,7 @@ Today no web or lab code handles `native_session_owned`, and when the Host fact 
 - The text stays in the composer, with its focus and content (T4's rule), when a send is refused for `native_session_owned`, `session_read_only`, `host_offline` or `session_control_changed`.
 - `native_session_owned`: the composer is read-only with the existing notice and offers "Take over" (the existing take-over action, then `acquire`).
 - `host_offline`: the page treats the Host as offline for this session and offers "Send when back" with the same text where the Host's Controller supports the outbox; where it does not, it shows the existing "Update the Controller" hint.
-Budget: about 80 lines and one flag per composer send; tests in Task 6.
+Budget: about 80 lines and one flag per composer send; tests in Task 5.
 
 ### 3.6 Revocation and queued `next_turn` sends
 

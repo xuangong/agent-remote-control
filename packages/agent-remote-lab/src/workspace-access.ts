@@ -1,5 +1,4 @@
 import { createContext } from 'react';
-import type { DeviceScope } from '@orchardworks/agent-remote-web/device-store';
 
 export type WorkspaceAccess = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
 export const workspaceDisplayLifetime = 24 * 60 * 60 * 1000;
@@ -35,19 +34,17 @@ export function readWorkspaceAccess(): WorkspaceAccess | undefined {
 export function rememberWorkspaceAccess(access: WorkspaceAccess): void {
   try {
     // Store display identity, never credentials or authorization expiry.
-    // The lease's own expiry rides with the principal it was granted to: until it passes, the stored rows of that principal may show before the Relay answers.
-    localStorage.setItem(accessKey, JSON.stringify({ confirmedAt: Date.now(), access: { basePath: access.basePath, user: access.user, expiresAt: 0 }, lease: { principalId: access.user?.id ?? null, expiresAt: access.expiresAt } }));
+    // The lease's own expiry rides with the Relay URL it was granted for (`basePath` holds the person): until it passes, the stored rows may show before the Relay answers.
+    localStorage.setItem(accessKey, JSON.stringify({ confirmedAt: Date.now(), access: { basePath: access.basePath, user: access.user, expiresAt: 0 }, lease: { expiresAt: access.expiresAt } }));
     localStorage.removeItem(logoutKey);
   } catch { /* Private browsing remains usable without persistence. */ }
 }
-/** The lease the last `GET /auth/status` reported: whose it was and when it ends. Absent or malformed means none. */
-export function readStoredLease(): { principalId?: string; expiresAt: number } | undefined {
+/** The end of the lease the last `GET /auth/status` reported, for the Relay URL the cached access names. Absent or malformed means none. */
+export function readStoredLease(): number | undefined {
   try {
     if (localStorage.getItem(logoutKey)) return;
-    const saved = JSON.parse(localStorage.getItem(accessKey) ?? 'null');
-    const lease = saved?.lease;
-    if (!lease || !Number.isFinite(lease.expiresAt) || (lease.principalId !== null && typeof lease.principalId !== 'string')) return;
-    return { ...(lease.principalId ? { principalId: lease.principalId } : {}), expiresAt: lease.expiresAt };
+    const expiresAt = JSON.parse(localStorage.getItem(accessKey) ?? 'null')?.lease?.expiresAt;
+    return Number.isFinite(expiresAt) ? expiresAt : undefined;
   } catch { return; }
 }
 export function forgetWorkspaceAccess(): void {
@@ -71,19 +68,18 @@ export function claimAutomaticSignIn(): boolean {
  * ready: access is confirmed. confirming: the local copy of the lease ran out and the Relay is being asked; live
  * sockets stay open but hold what they send, and requests wait, until the answer.
  */
-type Gate = { optimisticUntil?: number; ready: boolean; confirming?: boolean; retired?: boolean; principalId?: string; listeners: Set<() => void> };
+type Gate = { optimisticUntil?: number; ready: boolean; confirming?: boolean; retired?: boolean; listeners: Set<() => void> };
 const gates = new Map<string, Gate>();
 export function scopeFor(input: string): string {
   const url = new URL(input, globalThis.location?.origin ?? 'http://localhost');
   url.protocol = url.protocol === 'wss:' ? 'https:' : url.protocol === 'ws:' ? 'http:' : url.protocol;
   return url.origin + (url.pathname.match(/^\/u\/[a-f0-9]{64}\//)?.[0] ?? '/');
 }
-export function setWorkspaceReady(basePath: string, ready: boolean, principalId?: string, optimisticUntil?: number): void {
+export function setWorkspaceReady(basePath: string, ready: boolean, optimisticUntil?: number): void {
   const scope = scopeFor(basePath);
   const gate = gates.get(scope) ?? { ready: false, listeners: new Set() };
   gates.set(scope, gate);
   gate.ready = ready; gate.confirming = false;
-  if (principalId !== undefined) gate.principalId = principalId;
   // A confirmed lease needs no optimistic window; a cached one opens it until its own expiry.
   gate.optimisticUntil = ready ? undefined : optimisticUntil ?? gate.optimisticUntil;
   if (ready) gate.retired = false;
@@ -181,40 +177,30 @@ export function workspaceSocket(url: string) {
   return wrapper;
 }
 
-/** The principal of a workspace that has no accounts: the local fixture and the dedicated local Devbox. */
-const WORKSPACE_PRINCIPAL = 'workspace';
 /**
- * Where this device's stored conversations of a workspace live, and the only way to reach them: the Relay and the principal, while the Relay has
- * confirmed the access lease. Before it confirms, while it is being confirmed again, and after the workspace was retired, there is no scope and so
- * no stored row to read, show or write. A workspace with no gate has no accounts.
+ * The Relay URL whose stored conversations may be read, and the only way to reach them: while the Relay has confirmed the access lease, or the lease the last
+ * status reported has not ended and the Relay has not yet answered. Not after a refusal, while an expired lease is being confirmed again, or after the
+ * workspace was retired. A workspace with no gate has no accounts.
  */
-export function storedRowsScope(baseUrl: string): DeviceScope | undefined {
+export function storedRowsRelay(baseUrl: string): string | undefined {
   const relayUrl = scopeFor(baseUrl);
   const gate = gates.get(relayUrl);
-  if (!gate) return { relayUrl, principalId: WORKSPACE_PRINCIPAL };
-  const principal = { relayUrl, principalId: gate.principalId ?? WORKSPACE_PRINCIPAL };
+  if (!gate) return relayUrl;
   if (gate.retired) return undefined;
-  if (gate.ready) return gate.confirming ? undefined : principal;
-  // Not yet confirmed this page load: the lease the last status reported decides, for the principal it was granted to, until the Relay answers.
-  return gate.optimisticUntil !== undefined && Date.now() < gate.optimisticUntil ? principal : undefined;
+  if (gate.ready) return gate.confirming ? undefined : relayUrl;
+  return gate.optimisticUntil !== undefined && Date.now() < gate.optimisticUntil ? relayUrl : undefined;
 }
-/** The Relay refused the lease (401 or 403) or named another principal: nothing stored shows until a confirmation, and every subscriber learns at once. */
+/** The Relay refused the lease (401 or 403): nothing stored shows until a confirmation, and every subscriber learns at once. */
 export function revokeStoredRows(basePath: string): void {
   const gate = gates.get(scopeFor(basePath));
   if (!gate) return;
   gate.optimisticUntil = undefined;
   if (!gate.ready) for (const listener of [...gate.listeners]) listener();
 }
-/** The scope's change signal: true while stored rows may be shown. */
+/** The scope change signal of `storedRowsRelay`. */
 export function subscribeStoredRows(baseUrl: string, listener: () => void): () => void {
   const gate = gates.get(scopeFor(baseUrl));
   if (!gate) return () => {};
   gate.listeners.add(listener);
   return () => { gate.listeners.delete(listener); };
-}
-
-/** The scope the cached access names, whether or not the lease is confirmed. It only says whose records to look for; it never allows reading their rows. */
-export function cachedRowsScope(baseUrl: string): DeviceScope {
-  const relayUrl = scopeFor(baseUrl);
-  return { relayUrl, principalId: gates.get(relayUrl)?.principalId ?? WORKSPACE_PRINCIPAL };
 }

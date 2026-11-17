@@ -56,14 +56,23 @@ it.each(['pagehide', 'hidden', 'close'] as const)('flushes working content on %s
   expect(display.sessionControl).toBeUndefined();
 });
 
-it('coalesces continuous updates on a fixed deadline rather than waiting for the turn to finish', async () => {
+it('keeps content at a confirmed page and at the end of a turn, and nothing in between', async () => {
   const { replica } = setup();
+  const put = vi.spyOn(deviceStore, 'put');
   for (let seq = 2; seq <= 5; seq++) {
     update(replica, `Working content ${seq}`, seq);
-    expect(cachedText()).toBe('Previous turn');
-    await vi.advanceTimersByTimeAsync(500);
+    // update() applies a snapshot with a running turn and then a page: the page is confirmed, so it is kept.
   }
-  expect(cachedText()).toContain('Working content 5');
+  expect(put.mock.calls.length).toBe(4);
+  put.mockClear();
+  // Live frames alone are not kept.
+  replica.applyStream({ protocolVersion: '1.8.0', type: 'agent_stream', payload: { agentId: 'agent-1', epoch: 'epoch', seq: 6, timestamp: '2026-10-17T00:00:00Z',
+    event: { type: 'timeline', providerId: 'recorded', item: { type: 'assistant_message', text: 'Streaming' }, resources: [] } } } as never);
+  expect(put).not.toHaveBeenCalled();
+  // The turn ends.
+  replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, status: 'idle', activeTurn: null } });
+  expect(put).toHaveBeenCalledTimes(1);
+  expect(cachedText()).toContain('Streaming');
 });
 
 it('keeps caching a retained session after its last view closes and shares one writer across views', async () => {

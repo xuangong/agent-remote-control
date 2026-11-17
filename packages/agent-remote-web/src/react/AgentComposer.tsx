@@ -34,8 +34,6 @@ export interface AgentComposerProps {
   readOnly?: boolean;
   /** Keep local storage editing available while native attachment is unavailable. */
   draftOnly?: boolean;
-  /** No connection word in the status while the page waits for stored rows. */
-  quietStatus?: boolean;
   /** Preserve draft editing while a handoff reserves native mutations. */
   mutationBlocked?: boolean;
   readOnlyLabel?: string;
@@ -102,7 +100,7 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, quietStatus = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
@@ -588,7 +586,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
           <AgentActionToolbar actions={toolbarActions} overflowOpen={currentDraft.view === 'actions'}
             onOverflow={open => { currentDraft.view = open ? 'actions' : undefined; refresh(value => value + 1); }} />
         </div>}
-      <AgentActivityStatus quiet={quietStatus} sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
+      <AgentActivityStatus quiet={draftOnly} sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}

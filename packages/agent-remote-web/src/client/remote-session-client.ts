@@ -839,12 +839,9 @@ export class RemoteSessionClient {
     return direction === 'tail' ? Math.min(TAIL_LIMIT_MAX, Math.max(this.historyPageSize, this.replica.getState().timeline.entries.length)) : this.historyPageSize;
   }
 
-  /**
-   * A page of the timeline: over the session wire when the transport recovers over it and this client has a subscription, so a journal-served session reads
-   * without its Controller; HTTP otherwise (a client that never connected, or a transport without session channels).
-   */
+  /** A page of the timeline: over the session wire for a transport that recovers over it, so a journal-served session reads without its Controller; HTTP otherwise. */
   private readTimeline(direction: TimelineDirection, cursor: TimelineCursor | undefined, signal: AbortSignal): Promise<HistoryPage> {
-    return this.timelineRecovery === 'websocket' && this.subscriptionRequestId !== undefined
+    return this.timelineRecovery === 'websocket'
       ? this.fetchSocketTimeline(direction, cursor, signal)
       : this.transport.fetchTimeline(this.agentId, direction, cursor, this.pageLimit(direction), { signal });
   }

@@ -232,16 +232,9 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('[data-testid="agent-activity"]')?.closest('[hidden]')).not.toBeNull();
   });
 
-  it('names the Agent being attached instead of presenting a session-start empty state', async () => {
+  it('does not present a session-start empty state for the Agent being attached', async () => {
     const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} />);
-
-    expect(container.textContent).toContain('Opening session remembered-agent');
     expect(container.textContent).not.toContain('Start with a Provider');
-  });
-
-  it('shows content loading after negotiation before the first snapshot', async () => {
-    const container = await render(<LabWorkbench sessionStatus="catching_up" attachingAgentId="remembered-agent" actions={{}} />);
-    expect(container.textContent).toContain('Loading conversation remembered-agent');
     expect(container.textContent).not.toContain('Connecting');
   });
 
@@ -260,11 +253,11 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Reconnecting');
   });
 
-  it('shows a quiet shell, with no opening word or placeholder, while stored rows wait for the lease', async () => {
-    const { QuietShell } = await import('./SessionWorkbench.js');
-    const container = await render(<QuietShell.Provider value><LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} /></QuietShell.Provider>);
+  it('says nothing while a conversation is still opening and has no rows', async () => {
+    const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} draftOnly />);
     expect(container.textContent).not.toMatch(/Opening session|Awaiting Agent|Start with a Provider|Loading conversation/);
     expect(container.querySelector('.lab-empty-state')).toBeNull();
+    expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('');
   });
 
   it('alerts with a generic connection failure before readiness and preserves the diagnostic', async () => {

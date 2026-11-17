@@ -4,7 +4,7 @@ import type { AgentReplicaState } from '../replica/types.js';
 
 export interface AgentActivityStatusProps {
   state?: AgentReplicaState;
-  /** Says no connection word at all: the page waits for stored rows it may not show yet. */
+  /** Says nothing: a conversation that is still opening has no rows to speak for yet. */
   quiet?: boolean;
   sessionState?: RemoteSessionState;
   visible?: boolean;

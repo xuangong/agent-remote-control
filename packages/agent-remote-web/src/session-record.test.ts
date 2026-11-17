@@ -1,9 +1,9 @@
 import { expect, it } from 'vitest';
 import type { AgentSnapshotPayload, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { createStoredRecord, decodeStoredRecord, displaySnapshot, windowForStorage } from './session-record.js';
-import { deviceKey, type DeviceScope, type SessionIdentity } from './device-store.js';
+import { deviceKey, type SessionIdentity } from './device-store.js';
 
-const scope: DeviceScope = { relayUrl: 'https://relay/u/a/', principalId: 'alice' };
+const scope = 'https://relay/u/a/';
 const identity: SessionIdentity = ['h', 'codex', 'native-1'];
 const snapshot = (): AgentSnapshotPayload => ({
   id: 'agent-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'running',
@@ -42,14 +42,13 @@ it('does not claim what was live: no active turn, interactions or runtime connec
   expect(display.runtimeInfo.connection).toBeUndefined();
 });
 
-it('keys a record by Relay, principal and identity and decodes only for that scope', () => {
+it('keys a record by Relay URL and identity and decodes only for that Relay and session', () => {
   const record = createStoredRecord(scope, identity, { agentId: 'agent-1', epoch: 'e1', nextSeq: 6, hasOlder: false, entries: [1, 2, 3, 4, 5].map(seq => entry(seq)), snapshot: snapshot() }, limits, 1234)!;
   expect(record.key).toBe(deviceKey(scope, identity));
   expect(record).toMatchObject({ epoch: 'e1', nextSeq: 6, hasOlder: true, updatedAt: 1234 });
   const decoded = decodeStoredRecord(structuredClone(record), scope, identity)!;
   expect(decoded.entries.map(item => item.itemKey)).toEqual(['key-3', 'key-4', 'key-5']);
-  expect(decodeStoredRecord(structuredClone(record), { ...scope, principalId: 'bob' }, identity)).toBeUndefined();
-  expect(decodeStoredRecord(structuredClone(record), { ...scope, relayUrl: 'https://other/' }, identity)).toBeUndefined();
+  expect(decodeStoredRecord(structuredClone(record), 'https://other/', identity)).toBeUndefined();
   expect(decodeStoredRecord(structuredClone(record), scope, ['h', 'codex', 'native-2'])).toBeUndefined();
 });
 

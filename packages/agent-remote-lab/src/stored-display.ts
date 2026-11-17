@@ -1,7 +1,7 @@
 import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-remote-web';
-import { deviceStore, type DeviceScope, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-remote-web/device-store';
+import { deviceStore, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-remote-web/device-store';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
-import { cachedRowsScope, storedRowsScope } from './workspace-access.js';
+import { storedRowsRelay } from './workspace-access.js';
 
 /** What the device store calls a conversation: where it runs, with which Provider, and its native id. */
 export function sessionIdentity(target: Pick<ControllerLocation, 'hostId' | 'providerId' | 'nativeSessionId'>): SessionIdentity | undefined {
@@ -24,11 +24,11 @@ export function workspaceDisplayState(state: AgentReplicaState): AgentReplicaSta
 const decoded = new WeakMap<StoredRecord, StoredSession | undefined>();
 const displays = new WeakMap<StoredSession, AgentReplicaState>();
 
-function recordOf(scope: DeviceScope, target: ControllerLocation): { session: StoredSession; record: StoredRecord } | undefined {
+function recordOf(relayUrl: string, target: ControllerLocation): { session: StoredSession; record: StoredRecord } | undefined {
   const identity = sessionIdentity(target);
-  const record = identity && deviceStore.read(scope, identity);
+  const record = identity && deviceStore.read(relayUrl, identity);
   if (!record) return undefined;
-  if (!decoded.has(record)) decoded.set(record, decodeStoredRecord(record, scope, identity!));
+  if (!decoded.has(record)) decoded.set(record, decodeStoredRecord(record, relayUrl, identity!));
   const session = decoded.get(record);
   const agent = session?.snapshot;
   // The record must be this exact native session: the key says so, and so does what is inside.
@@ -37,8 +37,8 @@ function recordOf(scope: DeviceScope, target: ControllerLocation): { session: St
 
 /** The stored rows of a conversation as a display, from memory, and only while the Relay has confirmed this person's lease. */
 export function readStoredDisplay(baseUrl: string, target?: ControllerLocation): AgentReplicaState | undefined {
-  const scope = storedRowsScope(baseUrl);
-  const found = scope && target && recordOf(scope, target);
+  const relay = storedRowsRelay(baseUrl);
+  const found = relay && target && recordOf(relay, target);
   if (!found) return undefined;
   let display = displays.get(found.session);
   if (!display) {
@@ -52,8 +52,8 @@ export function readStoredDisplay(baseUrl: string, target?: ControllerLocation):
 
 /** Brings a conversation's record into memory when the preload did not, so `readStoredDisplay` can answer. */
 export async function loadStoredDisplay(baseUrl: string, target: ControllerLocation): Promise<void> {
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  if (scope && identity) await deviceStore.load(scope, identity);
+  const relay = storedRowsRelay(baseUrl), identity = sessionIdentity(target);
+  if (relay && identity) await deviceStore.load(relay, identity);
 }
 
 /**
@@ -62,12 +62,12 @@ export async function loadStoredDisplay(baseUrl: string, target: ControllerLocat
  */
 export function restoreReplicaFromDevice(baseUrl: string, target: ControllerLocation, replica: AgentReplica): void {
   const apply = () => {
-    const scope = storedRowsScope(baseUrl), found = scope && recordOf(scope, target);
+    const relay = storedRowsRelay(baseUrl), found = relay && recordOf(relay, target);
     if (found) replica.restoreFromDevice(found.session);
   };
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  if (!scope || !identity) return;
-  if (deviceStore.read(scope, identity)) apply(); else void deviceStore.load(scope, identity).then(apply);
+  const relay = storedRowsRelay(baseUrl), identity = sessionIdentity(target);
+  if (!relay || !identity) return;
+  if (deviceStore.read(relay, identity)) apply(); else void deviceStore.load(relay, identity).then(apply);
 }
 
 /** A state that may become a record: read from the Relay by this connection, for exactly this session, and not itself waiting on a replacement. */
@@ -80,36 +80,21 @@ export function isStoredSource(target: ControllerLocation, state: AgentReplicaSt
 }
 
 export function saveStoredDisplay(baseUrl: string, target: ControllerLocation, state: AgentReplicaState): void {
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  if (!scope || !identity || !isStoredSource(target, state)) return;
-  const record = createStoredRecord(scope, identity, { agentId: state.agent.id, epoch: state.timeline.epoch!, nextSeq: state.timeline.nextSeq,
+  const relay = storedRowsRelay(baseUrl), identity = sessionIdentity(target);
+  if (!relay || !identity || !isStoredSource(target, state)) return;
+  const record = createStoredRecord(relay, identity, { agentId: state.agent.id, epoch: state.timeline.epoch!, nextSeq: state.timeline.nextSeq,
     hasOlder: state.timeline.hasOlder, entries: state.timeline.entries, snapshot: state.agent }, DEFAULT_WINDOW_LIMITS, Date.now());
   if (record) deviceStore.put(record);
 }
 
 /** Forgets what this device kept of a conversation, for a person who lost access to it. */
 export function forgetStoredSession(baseUrl: string, target: ControllerLocation): void {
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  if (scope && identity) deviceStore.forget(scope, identity);
+  const relay = storedRowsRelay(baseUrl), identity = sessionIdentity(target);
+  if (relay && identity) deviceStore.forget(relay, identity);
 }
 
 /** Pins a mounted conversation's record: it is never evicted from disk while it is mounted. */
 export function pinStoredSession(baseUrl: string, target: ControllerLocation): () => void {
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  return scope && identity ? deviceStore.pin(scope, identity) : () => {};
-}
-
-/**
- * Whether this device holds rows for the conversation that stay hidden only until the Relay confirms the lease. While that is so the page shows a quiet shell,
- * with no opening word and no placeholder, instead of words that the rows are about to replace.
- */
-export function storedRowsPending(baseUrl: string, target?: ControllerLocation): boolean {
-  const identity = target && sessionIdentity(target);
-  return !!identity && !storedRowsScope(baseUrl) && !!deviceStore.read(cachedRowsScope(baseUrl), identity);
-}
-
-/** Whether this device already keeps a record of the conversation (memory only). */
-export function hasStoredRecord(baseUrl: string, target: ControllerLocation): boolean {
-  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
-  return !!scope && !!identity && !!deviceStore.read(scope, identity);
+  const relay = storedRowsRelay(baseUrl), identity = sessionIdentity(target);
+  return relay && identity ? deviceStore.pin(relay, identity) : () => {};
 }

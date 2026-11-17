@@ -264,7 +264,7 @@ it('explains a stream capacity refusal instead of only reporting a reconnect', a
 it('shows what follows the conversation even before it has loaded, so messages waiting for an offline Host are visible', async () => {
   const container = await render(<SessionWorkbench state={undefined} sessionStatus="connecting" attachingAgentId="agent" actions={{}}
     timelineEnd={<div className="waiting-message">Waiting for Mac mini</div>} />);
-  expect(container.querySelector('.lab-empty-state')).not.toBeNull();
+  expect(container.querySelector('.lab-empty-state')).toBeNull();
   expect(container.querySelector('.waiting-message')?.textContent).toBe('Waiting for Mac mini');
 });
 

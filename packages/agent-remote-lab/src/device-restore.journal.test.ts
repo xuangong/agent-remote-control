@@ -3,14 +3,14 @@ import 'fake-indexeddb/auto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { AgentReplica, createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web';
-import { deviceStore, type DeviceScope, type SessionIdentity } from '@orchardworks/agent-remote-web/device-store';
+import { deviceStore, type SessionIdentity } from '@orchardworks/agent-remote-web/device-store';
 import { journalOf, servedJournal } from './test/served-journal.js';
 
 /**
  * A stored cursor is safe because a wrong one cannot produce a hole or a wrong row: the Relay's journal answers it with a replacement (an epoch it no
  * longer holds, a sequence beyond its head) and the client merges the tail by key. Real `SessionJournal`, real HTTP and WebSocket, real client, real store.
  */
-const scope: DeviceScope = { relayUrl: 'https://relay.example/u/alice/', principalId: 'alice' };
+const scope = 'https://relay.example/u/alice/';
 const identity: SessionIdentity = ['host', 'copilot', 'one'];
 const closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); await deviceStore.purge(); });

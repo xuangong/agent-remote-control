@@ -109,13 +109,13 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
       ['P0', '4x CPU', cell(p0Switch?.throttled4x?.cold?.shownMs), cell(p0Switch?.throttled4x?.warm?.shownMs), 'n/a', 'n/a', 'n/a', 'n/a'],
       ...switches.map(({ entry, own }) => [entry.arm, entry.name, own.cold.shownMs, own.warm.shownMs, `${cell(own.cold.httpApi)} / ${cell(own.warm.httpApi)}`, `${cell(own.cold.openingStates)} / ${cell(own.warm.openingStates)}`, `${cell(own.cold.rowlessStates)} / ${cell(own.warm.rowlessStates)}`, verdictOf(own.warm.shownMs <= own.cold.shownMs)])]);
 
-  const opens = valid.map(entry => ({ entry, used: used(entry, 'open-known') })).filter(item => item.used);
+  const opens = valid.flatMap(entry => ['open-known', 'open-known-expired'].map(name => ({ entry, name, used: used(entry, name) }))).filter(item => item.used);
   const p0Known = condition => p0(condition === '4x' ? 'p0-local-4x.json' : 'p0-local-1x-a.json')?.scenarios?.['open-known']?.reload;
   if (opens.length) {
     table('T1: a conversation opened before (reloads; criterion 0 opening-label states, 0 row-less states, content within 100 ms p95 at 4x CPU)', ['Arm', 'Condition', 'Samples used', 'Content since mount, ms', 'Content since navigation, ms', 'Opening-label states (max)', 'Opening-word states (max)', 'Row-less states since mount (max)'],
       [['P0', 'no emulation', cell(p0Known('1x')?.contentMs?.n), 'n/a', figure([], 1).replace(/max .*/, `${cell(p0Known('1x')?.contentMs?.p50)} / ${cell(p0Known('1x')?.contentMs?.p95)}`), 'n/a', 'n/a', 'n/a'],
         ['P0', '4x CPU', cell(p0Known('4x')?.contentMs?.n), 'n/a', `${cell(p0Known('4x')?.contentMs?.p50)} / ${cell(p0Known('4x')?.contentMs?.p95)}`, 'n/a', 'n/a', 'n/a'],
-        ...opens.map(({ entry, used: own }) => [entry.arm, entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentSinceMountMs), 10), figure(own.kept.map(sample => sample.contentMs), 10),
+        ...opens.map(({ entry, name: scenarioName, used: own }) => [entry.arm + (scenarioName === 'open-known-expired' ? ' (cached lease ended)' : ''), entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentSinceMountMs), 10), figure(own.kept.map(sample => sample.contentMs), 10),
           Math.max(0, ...own.kept.map(sample => sample.openingLabelFrames ?? 0)), Math.max(0, ...own.kept.map(sample => sample.openingWordFrames ?? 0)), Math.max(0, ...own.kept.map(sample => sample.rowlessFramesSinceMount ?? 0))])]);
   }
 

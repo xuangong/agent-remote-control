@@ -17,6 +17,5 @@ export function startDeviceStore(gatewayMode: boolean): Promise<void> {
   removeLegacyDisplayCache();
   const access = gatewayMode ? readWorkspaceAccess() : undefined;
   if (gatewayMode && !access) return Promise.resolve();
-  const scope = { relayUrl: scopeFor(access?.basePath ?? window.location.origin), principalId: access?.user?.id ?? 'workspace' };
-  return deviceStore.preload(scope).catch(() => { /* The conversation opens without stored rows. */ });
+  return deviceStore.preload(scopeFor(access?.basePath ?? window.location.origin)).catch(() => { /* The conversation opens without stored rows. */ });
 }

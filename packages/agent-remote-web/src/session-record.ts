@@ -1,5 +1,5 @@
 import { decodeAgentSnapshot, decodeHistoryPage, PROTOCOL_VERSION, type AgentSnapshotPayload, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { deviceKey, type DeviceScope, type SessionIdentity, type StoredRecord } from './device-store.js';
+import { deviceKey, type SessionIdentity, type StoredRecord } from './device-store.js';
 
 export const STORED_SESSION_VERSION = 1;
 
@@ -41,22 +41,22 @@ export function displaySnapshot(snapshot: AgentSnapshotPayload): AgentSnapshotPa
   return { ...snapshot, activeTurn: null, pendingInteractions: [], runtimeInfo };
 }
 
-export function createStoredRecord(scope: DeviceScope, identity: SessionIdentity, session: SessionToStore, limits: StoredWindowLimits, now: number): StoredRecord | undefined {
+export function createStoredRecord(relayUrl: string, identity: SessionIdentity, session: SessionToStore, limits: StoredWindowLimits, now: number): StoredRecord | undefined {
   const window = windowForStorage(session.entries, limits);
   if (!window) return undefined;
   const snapshot = displaySnapshot(session.snapshot);
   return {
-    key: deviceKey(scope, identity), relayUrl: scope.relayUrl, principalId: scope.principalId, version: STORED_SESSION_VERSION,
+    key: deviceKey(relayUrl, identity), relayUrl, version: STORED_SESSION_VERSION,
     agentId: session.agentId, epoch: session.epoch, nextSeq: session.nextSeq, hasOlder: session.hasOlder || window.trimmed,
     entries: window.entries, snapshot, updatedAt: now, bytes: window.bytes + JSON.stringify(snapshot).length + 256,
   };
 }
 
-/** The record's content when it belongs to `scope` and `identity`, has the current version and passes the protocol's own validation; undefined otherwise. */
-export function decodeStoredRecord(value: unknown, scope: DeviceScope, identity: SessionIdentity): StoredSession | undefined {
+/** The record's content when it belongs to `relayUrl` and `identity`, has the current version and passes the protocol's own validation; undefined otherwise. */
+export function decodeStoredRecord(value: unknown, relayUrl: string, identity: SessionIdentity): StoredSession | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Partial<StoredRecord>;
-  if (record.key !== deviceKey(scope, identity) || record.relayUrl !== scope.relayUrl || record.principalId !== scope.principalId) return undefined;
+  if (record.key !== deviceKey(relayUrl, identity) || record.relayUrl !== relayUrl) return undefined;
   if (record.version !== STORED_SESSION_VERSION || typeof record.agentId !== 'string' || !record.agentId || typeof record.epoch !== 'string' || !record.epoch
     || !Number.isSafeInteger(record.nextSeq) || record.nextSeq! < 1 || typeof record.hasOlder !== 'boolean' || !Array.isArray(record.entries)
     || !Number.isSafeInteger(record.updatedAt) || !record.snapshot || typeof record.snapshot !== 'object') return undefined;

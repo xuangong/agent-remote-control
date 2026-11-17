@@ -22,7 +22,7 @@ import { isAskAttached, askParticipantKey, type useAskConversations } from './us
 import type { SessionStars } from './useSessionStars.js';
 import { canonicalJson } from '../session-composition.js';
 import { readStoredDisplay, workspaceDisplayState } from '../stored-display.js';
-import { storedRowsScope } from '../workspace-access.js';
+import { storedRowsRelay } from '../workspace-access.js';
 
 type Selection = Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId' | 'title'> & Partial<Pick<OpenedSession, 'agentId' | 'parentAgentId' | 'parentNativeSessionId' | 'createdAt'>> & { viewId?: string };
 interface NativeBinding {
@@ -1029,7 +1029,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.display = { key, state: initialDisplay && workspaceDisplayState(initialDisplay), diskRead: false };
     }
     // Stored rows are read once the Relay has confirmed the lease; until then this asks again at each render.
-    if (!runtime.display.diskRead && live() && storedRowsScope(options.scope)) {
+    if (!runtime.display.diskRead && live() && storedRowsRelay(options.scope)) {
       runtime.display.state ??= readStoredDisplay(options.scope, selected);
       runtime.display.diskRead = true;
     }

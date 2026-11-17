@@ -58,6 +58,7 @@ const releaseWaitMs = Number(options['release-wait'] ?? 1500);
 const hiddenShortMs = Number(options['hidden-short'] ?? 30_000);
 const hiddenLongMs = Number(options['hidden-long'] ?? 300_000);
 const outFile = resolve(options.out ?? '.tmp/local-baselines.json');
+const label = options.label;
 const wanted = (options.scenarios ?? 'open-known,open-fresh,open-released,hidden-short,send-resident,send-released,release-continuity,provider-latency,switch').split(',');
 const directOrigin = options.origin ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
 const rttMs = Number(options.rtt ?? 0);
@@ -205,14 +206,15 @@ async function instrument(context) {
   const page = await context.newPage();
   page.setDefaultTimeout(actionMs);
   await page.addInitScript(observerSource);
-  const http = [], sockets = [], frames = [], consoleErrors = [];
+  const http = [], sockets = [], frames = [], consoleErrors = [], consoleAll = [];
   // What says the stream was served from the Relay's journal: the item-key flag the stream echoed, and the epochs of its pages.
   const served = { itemKeysEchoed: false, pageEpochs: [] };
   const pending = new Map();
   page.on('request', request => pending.set(request, { t: Date.now(), method: request.method(), path: normalizePath(request.url()), type: request.resourceType() }));
   page.on('requestfinished', request => { const entry = pending.get(request); if (entry) { entry.ms = Date.now() - entry.t; http.push(entry); pending.delete(request); } });
   page.on('requestfailed', request => { const entry = pending.get(request); if (entry) { entry.ms = Date.now() - entry.t; entry.failed = true; http.push(entry); pending.delete(request); } });
-  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 200)); });
+  page.on('console', message => { consoleAll.push(`${message.type()}: ${message.text().slice(0, 300)}`); if (message.type() === 'error') consoleErrors.push(message.text().slice(0, 200)); });
+  page.on('pageerror', error => consoleAll.push(`pageerror: ${String(error.message).slice(0, 300)}`));
   const cdp = await context.newCDPSession(page);
   await cdp.send('Network.enable');
   await cdp.send('Performance.enable');
@@ -248,6 +250,8 @@ async function instrument(context) {
       };
     },
     clearLog: () => page.evaluate(() => { window.__baseline.log.length = 0; }),
+    /** What a stalled open has seen: requests still pending and finished, WebSocket events and frames, and the console. */
+    dump: () => ({ pending: [...pending.values()].map(entry => ({ ...entry, ageMs: Date.now() - entry.t })), http: http.slice(-40), sockets: sockets.slice(-20), frames: frames.slice(-40), console: consoleAll.slice(-40) }),
   };
 }
 
@@ -371,6 +375,8 @@ const openSummary = (capture, start) => {
 };
 
 const clearDeviceStorage = async handle => {
+  // Clear while no page of the origin is open: a live page keeps its IndexedDB connection and rewrites what was cleared.
+  await handle.page.goto('about:blank');
   await handle.cdp.send('Storage.clearDataForOrigin', { origin, storageTypes: 'local_storage,indexeddb,cache_storage,service_workers' });
 };
 
@@ -403,7 +409,12 @@ async function openSample(handle, session, how) {
   const start = Date.now();
   if (how === 'reload') await handle.page.reload({ waitUntil: 'domcontentloaded' });
   else await handle.page.goto(session.url, { waitUntil: 'domcontentloaded' });
-  await waitForState(handle, isReady, `ready after ${how} of ${session.address}`);
+  try { await waitForState(handle, isReady, `ready after ${how} of ${session.address}`); }
+  catch (error) {
+    const file = join(dirname(outFile), `stall-${label ?? 'run'}-${Date.now()}.json`);
+    writeFileSync(file, JSON.stringify({ error: String(error.message), session: session.address, how, state: await handle.page.evaluate(() => ({ url: location.href, body: document.body.innerText.slice(0, 400), log: window.__baseline?.log.slice(-8) })).catch(() => null), ...handle.dump() }, null, 1));
+    throw new Error(`${error.message} (dump: ${file})`);
+  }
   await delay(600); // trailing requests and states that follow ready
   const capture = await handle.capture(start);
   const summary = openSummary(capture, start);
@@ -449,6 +460,28 @@ const scenarios = {
       }
       return { method: 'Same context. Each session is opened once (discarded), then reloaded; "navigations" go to the session by URL from another session.',
         reload: summarizeOpen(samples), navigations: summarizeOpen(navigations), firstOpensInContext: summarizeOpen(firstOpens), samples, navigationSamples: navigations };
+    });
+  },
+  // T1 after the cached lease ended: the stored lease's expiry is set to the past before each reload (what 120 s of waiting does), so the rows wait for the
+  // Relay's answer. One extra sample really waits 125 s to show the two are the same.
+  async 'open-known-expired'() {
+    return inContext(async context => {
+      const handle = await instrument(context);
+      const expire = () => handle.page.evaluate(() => {
+        const key = 'agent-remote:workspace-access', saved = JSON.parse(localStorage.getItem(key) ?? 'null');
+        if (saved?.lease) { saved.lease.expiresAt = Date.now() - 1; localStorage.setItem(key, JSON.stringify(saved)); }
+        return !!saved?.lease;
+      });
+      const samples = [];
+      for (const session of sessions) {
+        await openSample(handle, session, 'goto');
+        for (let i = 0; i < reps; i++) { if (!(await expire())) throw new Error('No stored lease to expire.'); samples.push({ ...(await openSample(handle, session, 'reload')), expiredBy: 'edit' }); }
+      }
+      const waited = sessions[0];
+      await openSample(handle, waited, 'goto');
+      await delay(125_000);
+      samples.push({ ...(await openSample(handle, waited, 'reload')), expiredBy: 'waiting' });
+      return { method: 'Same context. Each session is opened once, then reloaded with its cached lease expired by editing the stored expiry; one reload after really waiting 125 s.', summary: summarizeOpen(samples), samples };
     });
   },
   // T2: device storage of the origin cleared before each open; the sign-in and the HTTP cache stay.

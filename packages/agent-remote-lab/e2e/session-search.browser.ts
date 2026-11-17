@@ -52,7 +52,7 @@ beforeAll(async () => {
         } });
         const tail = ${JSON.stringify(history('one'))}; tail.payload.agentId = id; replica.applyHistory(tail); return replica;
       });
-      const [client] = useState(() => new RemoteSessionClient(id, new HttpWebSocketTransport(location.origin), replica, { historyPageSize: 20 }));
+      const [client] = useState(() => new RemoteSessionClient(id, new HttpWebSocketTransport(location.origin), replica, { historyPageSize: 20, timelineRecovery: 'http' }));
       const [state, setState] = useState(replica.getState());
       useEffect(() => replica.subscribe(() => setState(replica.getState())), [replica]);
       return <div data-view={id}><SessionWorkbench defaultDisplayMode="content" state={state} readOnly sessionStatus="ready" actions={{

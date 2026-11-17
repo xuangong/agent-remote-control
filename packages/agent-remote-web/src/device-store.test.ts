@@ -3,10 +3,10 @@ import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentSnapshotPayload, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { BROWSER_DATABASE, requestBrowserDatabase } from './browser-database.js';
-import { DeviceStore, type DeviceScope, type SessionIdentity } from './device-store.js';
+import { DeviceStore, type SessionIdentity } from './device-store.js';
 import { createStoredRecord, DEFAULT_WINDOW_LIMITS, type SessionToStore } from './session-record.js';
 
-const scope: DeviceScope = { relayUrl: 'https://relay.example/u/a/', principalId: 'alice' };
+const scope = 'https://relay.example/u/a/';
 const identity = (name: string): SessionIdentity => ['local', 'codex', name];
 const snapshot = (): AgentSnapshotPayload => ({
   id: 'agent-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null,
@@ -19,7 +19,7 @@ const entry = (seq: number, text = `row ${seq}`): ProjectedTimelineEntry => ({
 });
 const session = (rows = 3, text?: string): SessionToStore => ({ agentId: 'agent-1', epoch: 'e1', nextSeq: rows + 1, hasOlder: false,
   entries: Array.from({ length: rows }, (_, index) => entry(index + 1, text)), snapshot: snapshot() });
-const record = (who: DeviceScope, name: string, at: number, rows = 3, text?: string) => createStoredRecord(who, identity(name), session(rows, text), DEFAULT_WINDOW_LIMITS, at)!;
+const record = (who: string, name: string, at: number, rows = 3, text?: string) => createStoredRecord(who, identity(name), session(rows, text), DEFAULT_WINDOW_LIMITS, at)!;
 
 let factory = new IDBFactory();
 const make = (options: ConstructorParameters<typeof DeviceStore>[0] = {}) => new DeviceStore({ factory: () => factory, writeBehindMs: 5, ...options });
@@ -61,8 +61,8 @@ it('batches writes that arrive within the delay into one transaction', async () 
   expect(await diskKeys()).toHaveLength(2);
 });
 
-it('never reads, lists or keeps a record of another principal on the same Relay', async () => {
-  const bob: DeviceScope = { ...scope, principalId: 'bob' };
+it('never reads or lists a record of another Relay URL, which is where another person is', async () => {
+  const bob = 'https://relay.example/u/b/';
   const first = make();
   first.put(record(scope, 'private', 1));
   await first.flush();
@@ -70,17 +70,33 @@ it('never reads, lists or keeps a record of another principal on the same Relay'
   await second.preload(bob);
   expect(second.read(bob, identity('private'))).toBeUndefined();
   expect(await second.load(bob, identity('private'))).toBeUndefined();
-  expect(await diskKeys()).toEqual([]);
   expect(second.read(scope, identity('private'))).toBeUndefined();
 });
 
+it('does not put a record back into memory when a purge ran while its read was in flight', async () => {
+  const first = make();
+  first.put(record(scope, 'a', 1)); first.put(record(scope, 'b', 2));
+  await first.flush();
+  const second = make();
+  const preloading = second.preload(scope);
+  const purging = second.purge(scope);
+  await Promise.all([preloading, purging]);
+  expect(second.read(scope, identity('a'))).toBeUndefined();
+  expect(second.read(scope, identity('b'))).toBeUndefined();
+  const third = make();
+  const loading = third.load(scope, identity('a'));
+  await third.purge();
+  expect(await loading).toBeUndefined();
+  expect(third.read(scope, identity('a'))).toBeUndefined();
+});
+
 it('purges every record of a Relay, or of all Relays, from memory, the queue and the disk', async () => {
-  const other: DeviceScope = { relayUrl: 'https://other.example/', principalId: 'alice' };
+  const other = 'https://other.example/';
   const store = make();
   store.put(record(scope, 'a', 1)); store.put(record(other, 'b', 2));
   await store.flush();
   store.put(record(scope, 'queued', 3));
-  await store.purge(scope.relayUrl);
+  await store.purge(scope);
   expect(store.read(scope, identity('a'))).toBeUndefined();
   expect(store.read(scope, identity('queued'))).toBeUndefined();
   expect(store.read(other, identity('b'))).toBeDefined();

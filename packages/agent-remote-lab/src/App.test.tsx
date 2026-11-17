@@ -362,7 +362,8 @@ describe('App', () => {
       const container = await render(<App transport={labTransport()} />);
       expect(container.querySelector('[data-testid="workbench"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
-      expect(container.textContent).toContain('Opening session remembered-agent');
+      // A conversation that is still opening says nothing until it has rows, and is not the session-start empty state.
+      expect(container.textContent).not.toContain('Opening session remembered-agent');
       expect(container.textContent).not.toContain('Start with a Provider');
     } finally {
       window.history.replaceState(null, '', '/');
@@ -1128,7 +1129,7 @@ it('shows stored conversation content in the first render on a cached lease, wit
     providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
     item: { type: 'assistant_message', text: 'Cached on a lease, first render.' },
   }] } });
-  setWorkspaceReady(path, false, undefined, Date.now() + 60_000);
+  setWorkspaceReady(path, false, Date.now() + 60_000);
   window.history.replaceState(null, '', '/?window=w1&host=desk&agent=agent-1&provider=recorded&session=recorded-session');
   const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
   try {

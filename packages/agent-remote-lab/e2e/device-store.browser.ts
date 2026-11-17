@@ -27,7 +27,7 @@ beforeAll(async () => {
     import { deviceStore } from '../../agent-remote-web/src/device-store.ts';
     import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '../../agent-remote-web/src/session-record.ts';
 
-    const scope = { relayUrl: 'https://relay.example/u/alice/', principalId: 'alice' };
+    const scope = 'https://relay.example/u/alice/';
     const identity = ['host', 'copilot', 'one'];
     const capabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: false, planApproval: false, toolApproval: false } };
     const snapshot = { id: 'one', providerId: 'copilot', createdAt: '2026-11-16T00:00:00.000Z', updatedAt: '2026-11-16T00:00:00.000Z',

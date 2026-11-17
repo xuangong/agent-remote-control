@@ -21,11 +21,7 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
 }) {
   const [access, setAccess] = useState<WorkspaceAccess | null | undefined>(() => {
     const cached = readWorkspaceAccess();
-    if (cached) {
-      const lease = readStoredLease();
-      // The cached lease counts only for the principal it was granted to.
-      setWorkspaceReady(cached.basePath, false, cached.user?.id, lease && lease.principalId === cached.user?.id ? lease.expiresAt : undefined);
-    }
+    if (cached) setWorkspaceReady(cached.basePath, false, readStoredLease());
     return cached;
   });
   const display = useRef(access); display.current = access;
@@ -115,14 +111,9 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
           retireWorkspace(previousPath);
           clearConversationRecovery(new URL(previousPath, window.location.origin).href);
         }
-        // Another principal than the one whose rows were shown on the cached lease: what was stored for them goes.
-        if (display.current?.user?.id !== undefined && value.user?.id !== undefined && display.current.user.id !== value.user.id) {
-          void deviceStore.purge(scopeFor(value.basePath)).catch(() => { /* Storage may be unavailable. */ });
-          revokeStoredRows(value.basePath);
-        }
         current = value; retries = 0;
         rememberWorkspaceAccess(value);
-        setWorkspaceReady(value.basePath, true, value.user?.id);
+        setWorkspaceReady(value.basePath, true);
         display.current = value; setAccess(value); setReady(true); setFailed(false); setNeedsSignIn(false);
         clearTimeout(expiry);
         expiry = setTimeout(() => { confirmExpiredAccess(); void request(true); }, value.expiresAt - Date.now());

@@ -29,4 +29,4 @@ export type { SessionDescriptionIdentity, SessionAttributionTarget, SessionAttri
 
 export { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from './session-record.js';
 export type { SessionToStore, StoredSession } from './session-record.js';
-export type { DeviceScope, SessionIdentity } from './device-store.js';
+export type { SessionIdentity } from './device-store.js';

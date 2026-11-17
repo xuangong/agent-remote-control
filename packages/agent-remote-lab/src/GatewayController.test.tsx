@@ -343,7 +343,7 @@ it('shows stored rows on a cached unexpired lease before the status answers, and
   const basePath = '/u/' + 'b'.repeat(64) + '/', scope = window.location.origin + basePath;
   const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
   const { setWorkspaceReady } = await import('./workspace-access.js');
-  setWorkspaceReady(basePath, true, 'alice');
+  setWorkspaceReady(basePath, true);
   saveStoredDisplay(scope, target, replicaState);
   rememberWorkspaceAccess({ basePath, user: { id: 'alice' }, expiresAt: Date.now() + 60_000 });
   let answer!: (response: Response) => void;
@@ -353,5 +353,5 @@ it('shows stored rows on a cached unexpired lease before the status answers, and
   expect(readStoredDisplay(scope, target)?.agent?.id).toBe('agent-1');
   await act(async () => answer(Response.json({ error: 'Sign in' }, { status: 401 })));
   expect(readStoredDisplay(scope, target)).toBeUndefined();
-  await vi.waitFor(async () => expect(await deviceStore.load({ relayUrl: scope, principalId: 'alice' }, ['host', 'recorded', 'recorded-session'])).toBeUndefined());
+  await vi.waitFor(async () => expect(await deviceStore.load(scope, ['host', 'recorded', 'recorded-session'])).toBeUndefined());
 });

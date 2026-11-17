@@ -1,8 +1,10 @@
 import type { AgentSnapshotPayload, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { requestBrowserDatabase, SESSION_INDEX_STORE, SESSIONS_STORE } from './browser-database.js';
 
-/** Whose conversations these are: the Relay a person signed in to and who they are there. A record is never read for another scope. */
-export interface DeviceScope { readonly relayUrl: string; readonly principalId: string }
+/**
+ * Whose conversations these are is the Relay URL: a Relay with accounts puts the person in it (`/u/<hash of issuer and subject>/`), and one without accounts
+ * has one person. A record is never read for another Relay URL.
+ */
 /** `[hostId, providerId, nativeSessionId]`. */
 export type SessionIdentity = readonly [hostId: string, providerId: string, nativeSessionId: string];
 
@@ -10,7 +12,6 @@ export type SessionIdentity = readonly [hostId: string, providerId: string, nati
 export interface StoredRecord {
   readonly key: string;
   readonly relayUrl: string;
-  readonly principalId: string;
   readonly version: number;
   readonly agentId: string;
   readonly epoch: string;
@@ -21,9 +22,9 @@ export interface StoredRecord {
   readonly updatedAt: number;
   readonly bytes: number;
 }
-interface IndexRow { readonly key: string; readonly relayUrl: string; readonly principalId: string; readonly updatedAt: number; readonly bytes: number }
+interface IndexRow { readonly key: string; readonly relayUrl: string; readonly updatedAt: number; readonly bytes: number }
 
-export const deviceKey = (scope: DeviceScope, identity: SessionIdentity): string => JSON.stringify([scope.relayUrl, scope.principalId, identity]);
+export const deviceKey = (relayUrl: string, identity: SessionIdentity): string => JSON.stringify([relayUrl, identity]);
 
 /** The two limits of the device store. Disk: whole records, oldest update first, pinned (mounted) sessions never. Memory: what the preload loaded plus mounted sessions. */
 export const DEFAULT_DISK_CAP_BYTES = 32 * 1024 * 1024;
@@ -50,56 +51,59 @@ export class DeviceStore {
   private readonly pinned = new Map<string, number>();
   private readonly queue = new Map<string, StoredRecord | null>();
   private indexLoaded = false;
+  /** Counts purges: a disk read that began before one must not put its record back. */
+  private purges = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private chain: Promise<void> = Promise.resolve();
   private database: Promise<IDBDatabase> | undefined;
   private persistent = () => true;
 
-  constructor(private readonly options: DeviceStoreOptions = {}) {}
+  constructor(private readonly options: DeviceStoreOptions = {}) {
+    // The one place a leaving page writes what is queued: a record is kept once a page confirmed it or a turn ended, and the page's own listeners stop there.
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      window.addEventListener('pagehide', () => { void this.flush(); });
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void this.flush(); });
+    }
+  }
 
   /** The embedding application owns the device's retention preference; without persistence records live in memory only. */
   configurePersistence(persistent: () => boolean): void { this.persistent = persistent; }
 
   /** The record in memory (a preloaded or saved one), synchronously. */
-  read(scope: DeviceScope, identity: SessionIdentity): StoredRecord | undefined {
-    const record = this.records.get(deviceKey(scope, identity));
-    return record && record.relayUrl === scope.relayUrl && record.principalId === scope.principalId ? record : undefined;
+  read(relayUrl: string, identity: SessionIdentity): StoredRecord | undefined {
+    const record = this.records.get(deviceKey(relayUrl, identity));
+    return record && record.relayUrl === relayUrl ? record : undefined;
   }
 
   /** The record in memory or on disk. */
-  async load(scope: DeviceScope, identity: SessionIdentity): Promise<StoredRecord | undefined> {
-    const key = deviceKey(scope, identity);
-    const held = this.read(scope, identity);
+  async load(relayUrl: string, identity: SessionIdentity): Promise<StoredRecord | undefined> {
+    const key = deviceKey(relayUrl, identity);
+    const held = this.read(relayUrl, identity);
     if (held || !this.diskAllowed()) return held;
+    const generation = this.purges;
     const record = await this.enqueueDisk(async database => {
       const stored = await request<StoredRecord | undefined>(database.transaction(SESSIONS_STORE, 'readonly').objectStore(SESSIONS_STORE).get(key));
-      return stored && stored.relayUrl === scope.relayUrl && stored.principalId === scope.principalId ? stored : undefined;
+      return stored && stored.relayUrl === relayUrl ? stored : undefined;
     }, undefined);
-    if (record && !this.records.has(key) && !this.queue.has(key)) this.records.set(key, record);
-    return this.read(scope, identity);
+    if (record && generation === this.purges && !this.records.has(key) && !this.queue.has(key)) this.records.set(key, record);
+    return this.read(relayUrl, identity);
   }
 
-  /**
-   * Loads the scope's newest records into memory up to the preload budget. Records of another principal on the same
-   * Relay are deleted: the principal changed, and they are not this person's.
-   */
-  async preload(scope: DeviceScope): Promise<void> {
+  /** Loads the Relay's newest records into memory up to the preload budget. */
+  async preload(relayUrl: string): Promise<void> {
     if (!this.diskAllowed()) return;
+    const generation = this.purges;
     await this.enqueueDisk(async database => {
       await this.loadIndex(database);
-      const foreign = [...this.index.values()].filter(row => row.relayUrl === scope.relayUrl && row.principalId !== scope.principalId);
-      if (foreign.length) {
-        await this.remove(database, foreign.map(row => row.key));
-        for (const row of foreign) this.records.delete(row.key);
-      }
       let budget = this.options.preloadBytes ?? DEFAULT_PRELOAD_BYTES;
-      const own = [...this.index.values()].filter(row => row.relayUrl === scope.relayUrl && row.principalId === scope.principalId).sort((a, b) => b.updatedAt - a.updatedAt);
+      const own = [...this.index.values()].filter(row => row.relayUrl === relayUrl).sort((a, b) => b.updatedAt - a.updatedAt);
       for (const row of own) {
         if (row.bytes > budget) break;
         budget -= row.bytes;
         if (this.records.has(row.key)) continue;
         const record = await request<StoredRecord | undefined>(database.transaction(SESSIONS_STORE, 'readonly').objectStore(SESSIONS_STORE).get(row.key));
-        if (record && !this.records.has(row.key) && !this.queue.has(row.key)) this.records.set(row.key, record);
+        // A purge while this read was in flight wins: what it removed is not put back into memory.
+        if (record && generation === this.purges && !this.records.has(row.key) && !this.queue.has(row.key)) this.records.set(row.key, record);
       }
     }, undefined);
   }
@@ -107,15 +111,15 @@ export class DeviceStore {
   /** Keeps a record: in memory at once, on disk after a short delay, so a frame never waits for the disk. The last write wins. */
   put(record: StoredRecord): void {
     this.records.set(record.key, record);
-    this.index.set(record.key, { key: record.key, relayUrl: record.relayUrl, principalId: record.principalId, updatedAt: record.updatedAt, bytes: record.bytes });
+    this.index.set(record.key, { key: record.key, relayUrl: record.relayUrl, updatedAt: record.updatedAt, bytes: record.bytes });
     if (!this.diskAllowed()) return;
     this.queue.set(record.key, record);
     this.timer ??= setTimeout(() => { void this.flush(); }, this.options.writeBehindMs ?? WRITE_BEHIND_MS);
   }
 
   /** Drops one record, for a person who lost access to the session. */
-  forget(scope: DeviceScope, identity: SessionIdentity): void {
-    const key = deviceKey(scope, identity);
+  forget(relayUrl: string, identity: SessionIdentity): void {
+    const key = deviceKey(relayUrl, identity);
     this.records.delete(key);
     this.index.delete(key);
     if (!this.diskAllowed()) return;
@@ -124,8 +128,8 @@ export class DeviceStore {
   }
 
   /** A mounted session's record is never evicted from disk and its memory copy stays. */
-  pin(scope: DeviceScope, identity: SessionIdentity): () => void {
-    const key = deviceKey(scope, identity);
+  pin(relayUrl: string, identity: SessionIdentity): () => void {
+    const key = deviceKey(relayUrl, identity);
     this.pinned.set(key, (this.pinned.get(key) ?? 0) + 1);
     let released = false;
     return () => {
@@ -158,8 +162,9 @@ export class DeviceStore {
     }, undefined);
   }
 
-  /** Deletes every record of a Relay, or of all Relays: sign-out, a lost lease, a principal change. Memory and disk, and what was queued. */
+  /** Deletes every record of a Relay, or of all Relays: sign-out, a lost lease, a change of Relay URL (another person). Memory and disk, and what was queued. */
   async purge(relayUrl?: string): Promise<void> {
+    this.purges++;
     const matches = (row: { relayUrl: string }) => relayUrl === undefined || row.relayUrl === relayUrl;
     for (const [key, record] of [...this.records]) if (matches(record)) this.records.delete(key);
     for (const [key, row] of [...this.index]) if (matches(row)) this.index.delete(key);
@@ -247,7 +252,7 @@ export class DeviceStore {
       for (const [key, record] of batch) {
         if (record) {
           sessions.put(record);
-          index.put({ key, relayUrl: record.relayUrl, principalId: record.principalId, updatedAt: record.updatedAt, bytes: record.bytes } satisfies IndexRow);
+          index.put({ key, relayUrl: record.relayUrl, updatedAt: record.updatedAt, bytes: record.bytes } satisfies IndexRow);
         } else { sessions.delete(key); index.delete(key); }
       }
       transaction.oncomplete = () => resolve();

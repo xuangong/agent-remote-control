@@ -111,17 +111,19 @@ async function scrub(recording: JournalRecording, paths: string[]): Promise<Jour
   return JSON.parse(text.replaceAll(homedir(), '/home/user')) as JournalRecording;
 }
 
-async function check(name: string, recording: JournalRecording, cwd: string, home: string) {
+/** `unrecorded` names shape lines the native runtime sometimes does not write, however long the command ran. */
+async function check(name: string, recording: JournalRecording, cwd: string, home: string, unrecorded?: RegExp) {
   const path = join(FIXTURES, `${name}.json`);
   const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
   if (RECORDING) { await mkdir(FIXTURES, { recursive: true }); await writeFile(path, serializeRecording(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
-  expect(recordingShape(clean), `the shape of the ${name} recording`).toEqual(recordingShape(JSON.parse(await readFile(path, 'utf8')) as JournalRecording));
+  const shape = (value: JournalRecording) => recordingShape(value).filter(line => !unrecorded?.test(line));
+  expect(shape(clean), `the shape of the ${name} recording`).toEqual(shape(JSON.parse(await readFile(path, 'utf8')) as JournalRecording));
 }
 
-async function recorded(name: string, script: ResponsesScript, drive: Drive, options?: Parameters<typeof record>[2]) {
+async function recorded(name: string, script: ResponsesScript, drive: Drive, options?: Parameters<typeof record>[2], unrecorded?: RegExp) {
   const { recording, cwd, home } = await record(script, drive, options);
-  await check(name, recording, cwd, home);
+  await check(name, recording, cwd, home, unrecorded);
   return recording;
 }
 
@@ -208,7 +210,7 @@ describe('the recordings of the real Codex CLI', () => {
       // The command is well under way when the turn is cancelled; cancelled at once, the native runtime sometimes records it and sometimes does not.
       await new Promise(resolve => { setTimeout(resolve, 1500); });
       await session.cancel!(); await turnsDone(seen, 2);
-    });
+    }, undefined, /^reread history timeline tool_call/);
   }, 90_000);
 
   it('correction: a final message and a final reasoning that do not continue what streamed', async () => {

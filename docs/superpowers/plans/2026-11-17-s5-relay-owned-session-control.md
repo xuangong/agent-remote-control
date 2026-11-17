@@ -113,7 +113,7 @@ Budget: about 80 lines and one flag per composer send; tests in Task 6.
 
 ### 3.6 Revocation and queued `next_turn` sends
 
-Today a lease revoked after a `next_turn` send is queued in the Controller stops that send at dispatch (`assertControl` in `dispatch`). With Relay-owned leases the Controller no longer holds the lease, so without a replacement a revoked stream's queued send would still dispatch. Decision: restore the check cheaply, with no new state. The Relay ends a stream's Controller stream whenever it revokes the lease or the browser stream ends (the share is revoked, access expires, the lease is replaced), and the Controller's dispatch check becomes "my uplink stream is still open", which the wire already tracks as its `closed` state. A native-owner change is the Controller's own check, as before. Task 5 confirms that the wire stops dispatch on a closed stream; if it does not, it adds that one check. Test: queue a `next_turn` send, revoke the lease, and assert the provider receives no call.
+Today a lease revoked after a `next_turn` send is queued in the Controller stops that send at dispatch (`assertControl` in `dispatch`). With Relay-owned leases the Controller no longer holds the lease, so without a replacement a revoked stream's queued send would still dispatch. Decision: restore the check cheaply, with no new state. The Relay ends a stream's Controller stream whenever it revokes the lease or the browser stream ends (the share is revoked, access expires, the lease is replaced), and the Controller's dispatch check becomes "my uplink stream is still open", which the wire already tracks as its `closed` state. A native-owner change is the Controller's own check, as before. Task 4 confirms that the wire stops dispatch on a closed stream; if it does not, it adds that one check. Test: queue a `next_turn` send, revoke the lease, and assert the provider receives no call.
 
 ## 4. Removed, replaced, and the state accounting
 
@@ -203,7 +203,7 @@ Each test runs a real hosted Relay in process (the existing broker with real Web
 
 **E. Reconnects.**
 - Browser socket drops and returns: a new lease, the old token is invalid, reads resume from the cursor.
-- Relay restart in process: Controllers register again, send the full owner report, pages reconnect and acquire; no stale lease survives.
+- Relay restart in process: Controllers register again, pages reconnect and acquire; no stale lease survives.
 - Control-message and capacity limits: a view that never sends occupies no Controller stream (the Host's and the account's stream counts do not change when journal-served views open); a send refused for capacity (429) refuses that message only, and does not close the browser stream.
 
 **F. Authorization.**
@@ -283,4 +283,4 @@ Each task ends with its tests passing and the existing suites green. Run `pnpm c
 
 ## 12. Results
 
-To be filled in after Task 8 and Task 9: measured accounting, T4 and T5 counts, compatibility matrix evidence, suites run.
+To be filled in after Tasks 7 and 8: measured accounting, T4 and T5 counts, update-path evidence, suites run.

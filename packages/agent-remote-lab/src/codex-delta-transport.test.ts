@@ -75,7 +75,8 @@ it.each([
     const expected = type === 'reasoning' ? { type: 'reasoning', text: final } : { type: 'assistant_message', messageId: 'message', text: final };
     expect(first.replica.getState().timeline.entries.map(entry => entry.item)).toEqual([expected]);
     const timeline = received.filter(message => message.payload.event.type === 'timeline');
-    expect(timeline).toHaveLength(deltas.length);
+    // Every delta, and the final message that finishes the item with an empty body.
+    expect(timeline).toHaveLength(deltas.length + 1);
     for (const message of timeline) first.replica.applyStream(message);
     expect(first.replica.getState().timeline.entries.map(entry => entry.item)).toEqual([expected]);
     first.client.stop();

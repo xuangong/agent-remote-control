@@ -2,7 +2,7 @@ import type { AgentReplica, AgentReplicaState } from '@orchardworks/agent-remote
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
 import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
 import { recoveryGeneration } from './conversation-recovery.js';
-import { isStoredSource, pinStoredSession, saveStoredDisplay } from './stored-display.js';
+import { hasStoredRecord, isStoredSource, pinStoredSession, saveStoredDisplay } from './stored-display.js';
 
 /** A shared session owns what this device stores of it, independently of views and control readiness. */
 export function observeStoredDisplay(baseUrl: string, target: ControllerLocation, replica: AgentReplica): () => void {
@@ -24,7 +24,8 @@ export function observeStoredDisplay(baseUrl: string, target: ControllerLocation
     // Rows that no connection has confirmed yet, and a replacement still waiting for its tail, are not what was last read.
     if (!isStoredSource(target, state) || state.agent === latest?.agent && state.timeline === latest?.timeline) return;
     latest = state; dirty = true;
-    timer ??= setTimeout(flush, 2000);
+    // A conversation this device has no record of yet is kept soon, so leaving at once does not lose it; later changes are written at most every two seconds.
+    timer ??= setTimeout(flush, hasStoredRecord(baseUrl, target) ? 2000 : 250);
   };
   const hide = () => { if (document.visibilityState === 'hidden') flush(); };
   const stop = replica.subscribe(observe);

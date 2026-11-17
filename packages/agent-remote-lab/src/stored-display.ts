@@ -107,3 +107,9 @@ export function storedRowsPending(baseUrl: string, target?: ControllerLocation):
   const identity = target && sessionIdentity(target);
   return !!identity && !storedRowsScope(baseUrl) && !!deviceStore.read(cachedRowsScope(baseUrl), identity);
 }
+
+/** Whether this device already keeps a record of the conversation (memory only). */
+export function hasStoredRecord(baseUrl: string, target: ControllerLocation): boolean {
+  const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
+  return !!scope && !!identity && !!deviceStore.read(scope, identity);
+}

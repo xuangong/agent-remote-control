@@ -518,3 +518,8 @@ Recorded 2026-11-17 on this checkout's instance (build `0325a66e` for Codex, the
 5. Codex raw-binary terminal test (plan test 7) is not a `*.local.test.ts`: a shared-mode test needs a temporary daemon whose updater process cannot be stopped without killing it; the scripted real-transport tests and the instance check cover it.
 6. Two of the eleven duplicated mock Responses servers of the Codex local tests (fork, prompt edit) moved onto the new fixture; the others need per-test configuration and stay; the `identity === undefined` audit was not re-run.
 7. Codex `configWarning` and `deprecationNotice` joined the non-timeline notifications (found on the instance); the publisher's `drain` now waits for a window still opening, and `JournalPublisher.release` returns whether the journal served the session.
+
+
+## 13. Correction (2026-11-18)
+
+The Codex holes of §12 (30 of 35) were an artifact of the measuring runner: it set `scrollTop = 0` without a wheel event, so the page never asked for older history and the `TERMINAL_*` turns, which were older than the window, looked missing. With the runner fixed (`75bd423a`): 35/35 opens journal-served, 0 holes, 71/71 messages (`.tmp/s6a-codex-mix4.json`). Terminal refresh verified on a fresh and on the long-lived session; the model repeats the terminal's word after a page send, so Codex does not fork. This state is the baseline `baseline/im-session-2026-11-18`.

@@ -7,8 +7,11 @@ import { join } from 'node:path';
 /** A block of a scripted reply: text (optionally split into several deltas), a thinking block, or a tool call. */
 export type NativeBlock = { type: 'text'; text: string; deltas?: string[] } | { type: 'thinking'; thinking: string; deltas?: string[] } | { type: 'tool_use'; id: string; name: string; input: unknown };
 
-function nativeEvents(content: NativeBlock[], usage: { inputTokens: number; outputTokens: number }, finish: boolean): any[] {
-  const events: any[] = [{ type: 'message_start', message: { id: `msg-${Math.random()}`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-5-20250929', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.inputTokens, output_tokens: 0 } } }];
+/** A reply's message id: the fixture numbers its replies in order, so a recording does not change from run to run. */
+const messageIdOf = (response: ServerResponse): string => (response as ServerResponse & { messageId?: string }).messageId ?? `msg-${Math.random()}`;
+
+function nativeEvents(response: ServerResponse, content: NativeBlock[], usage: { inputTokens: number; outputTokens: number }, finish: boolean): any[] {
+  const events: any[] = [{ type: 'message_start', message: { id: messageIdOf(response), type: 'message', role: 'assistant', model: 'claude-sonnet-4-5-20250929', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.inputTokens, output_tokens: 0 } } }];
   for (const [index, block] of content.entries()) {
     const last = !finish && index === content.length - 1;
     if (block.type === 'text') {
@@ -32,13 +35,13 @@ const sse = (events: any[]) => events.map((event) => `event: ${event.type}\ndata
 
 export function nativeReply(response: ServerResponse, content: NativeBlock[] | any[], usage = { inputTokens: 10, outputTokens: 5 }): void {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.end(sse(nativeEvents(content as NativeBlock[], usage, true)));
+  response.end(sse(nativeEvents(response, content as NativeBlock[], usage, true)));
 }
 
 /** A reply that never finishes: its blocks so far, then silence until the turn is interrupted. The last block stays open. */
 export function nativeStalled(response: ServerResponse, content: NativeBlock[], usage = { inputTokens: 10, outputTokens: 5 }): void {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.write(sse(nativeEvents(content, usage, false)));
+  response.write(sse(nativeEvents(response, content, usage, false)));
 }
 
 export async function nativeFixture(handler: (body: any, response: ServerResponse) => void, options: { sessionTitles?: 'automatic' | 'manual' } = {}) {
@@ -66,6 +69,7 @@ export async function nativeFixture(handler: (body: any, response: ServerRespons
           return;
         }
       }
+      (response as ServerResponse & { messageId?: string }).messageId = `msg-${bodies.length + 1}`;
       bodies.push(body); handler(body, response);
     });
   });

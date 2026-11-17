@@ -1,0 +1,13 @@
+{
+ "live": [
+  {"type":"observation","sourceKey":"claude:26de58af-5bf1-4aed-887a-33d6cee58c9f:2","occurredAt":1794919009898,"delivery":"live","event":{"type":"turn_started","provider":"claude","turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"}},
+  {"type":"observation","sourceKey":"claude:81d47120-e071-4855-be9e-9f67390fc9bd:message:6521e467-8469-4e91-9c3a-4486b08ac74b","occurredAt":1794919009898,"delivery":"live","event":{"type":"timeline","provider":"claude","item":{"type":"user_message","text":"Hello","messageId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"itemIdentity":{"key":"user:6521e467-8469-4e91-9c3a-4486b08ac74b","completes":true}},
+  {"type":"observation","sourceKey":"claude:81d47120-e071-4855-be9e-9f67390fc9bd:stream:msg-1:0:8","occurredAt":1794919009934,"delivery":"live","event":{"type":"timeline","provider":"claude","item":{"type":"assistant_message","messageId":"msg-1:0","text":"SAW_HOOK"},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"itemIdentity":{"key":"assistant:msg-1:0"}},
+  {"type":"observation","sourceKey":"claude:81d47120-e071-4855-be9e-9f67390fc9bd:message:8fbebb97-5510-422c-a859-64b405b21c0c:0","occurredAt":1794919009934,"delivery":"live","event":{"type":"timeline","provider":"claude","item":{"type":"assistant_message","messageId":"msg-1:0","text":""},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"itemIdentity":{"key":"assistant:msg-1:0","completes":true}},
+  {"type":"observation","sourceKey":"claude:26de58af-5bf1-4aed-887a-33d6cee58c9f:5","occurredAt":1794919009939,"delivery":"live","event":{"type":"turn_completed","provider":"claude","usage":{"inputTokens":10,"outputTokens":5,"cachedInputTokens":0,"cacheCreationInputTokens":0,"tokenScope":"runtime","totalTokens":15,"totalCostUsd":0.000105},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"}}
+ ],
+ "reread": [
+  {"type":"observation","sourceKey":"claude:81d47120-e071-4855-be9e-9f67390fc9bd:message:6521e467-8469-4e91-9c3a-4486b08ac74b","occurredAt":1794919009910,"delivery":"history","event":{"type":"timeline","provider":"claude","item":{"type":"user_message","text":"Hello","messageId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"itemIdentity":{"key":"user:6521e467-8469-4e91-9c3a-4486b08ac74b","completes":true}},
+  {"type":"observation","sourceKey":"claude:81d47120-e071-4855-be9e-9f67390fc9bd:message:8fbebb97-5510-422c-a859-64b405b21c0c:0","occurredAt":1794919009934,"delivery":"history","event":{"type":"timeline","provider":"claude","item":{"type":"assistant_message","messageId":"msg-1:0","text":"SAW_HOOK"},"turnId":"6521e467-8469-4e91-9c3a-4486b08ac74b"},"itemIdentity":{"key":"assistant:msg-1:0","completes":true}}
+ ]
+}

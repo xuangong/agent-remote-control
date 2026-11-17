@@ -49,6 +49,7 @@ describe.each(['copilot', 'codex', 'claude'] as const)('journal continuity of %s
 
   if (provider === 'codex') codexScenarios(present);
   if (provider === 'copilot') copilotScenarios();
+  if (provider === 'claude') claudeScenarios(present);
 
   // Defined last, so it runs after the scenarios above have named their recordings.
   it('has a test for every recording it has', () => {
@@ -263,6 +264,141 @@ function copilotScenarios(): void {
       const run = live('settled');
       const lastUser = run.reread.map(({ event }) => event.type === 'timeline' && event.item.type === 'user_message').lastIndexOf(true);
       expect(await continuityOutcome({ live: run.live, reread: run.reread.slice(0, lastUser) })).toEqual(CHANGED);
+    });
+  });
+}
+
+function claudeScenarios(present: (...wanted: string[]) => string[]): void {
+  describe.skipIf(present('settled').length === 0)('Claude Code', () => {
+    it.each(unchangedOnReopen('claude', ['settled', 'restart', 'after-reopen', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'images', 'hook', 'slash-command', 'subagent']))('%s: reopening gives unchanged, and a second reread adds nothing', async name => {
+      const run = use('claude', name);
+      const journal = await journalOfRun(run.live);
+      expect(journal.openKeys()).toEqual([]);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('settled: a tool row reread from the transcript equals the live one, so a reopened session keeps its file diffs', async () => {
+      const run = use('claude', 'settled');
+      const toolRows = (observations: typeof run.live) => observations.flatMap(({ event, itemIdentity }) => event.type === 'timeline' && event.item.type === 'tool_call' && event.item.status === 'completed' ? [[itemIdentity?.key, JSON.stringify(event.item.result)] as const] : []);
+      expect(toolRows(run.reread)).toEqual(toolRows(run.live));
+      expect(toolRows(run.reread).some(([, result]) => result.includes('file_changes'))).toBe(true);
+    });
+
+    it('approval: the question and the permission prompt, which the transcript never held, stay in the journal as live-only items', async () => {
+      const run = use('claude', 'approval');
+      const journal = await journalOfRun(run.live);
+      const before = journal.keys();
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+      expect(journal.keys()).toEqual(before);
+      expect(journal.liveOnlyKeys().map(key => key.replace(/:[0-9a-f-]{36}$/, ''))).toEqual(['interaction:claude:ask-1', 'interaction:claude:write-1']);
+    });
+
+    it('thinking: the thinking block the SDK read keeps is not live-only', async () => {
+      const journal = await journalOfRun(use('claude', 'thinking').live);
+      expect(journal.liveOnlyKeys()).toEqual([]);
+      expect(journal.keys().filter(key => key.startsWith('reasoning:'))).toHaveLength(1);
+    });
+
+    it('steer and images: input folded into a running turn keeps its uuid, its place and its image', async () => {
+      for (const name of ['steer', 'images']) {
+        const run = use('claude', name);
+        const folded = (observations: typeof run.live) => observations.flatMap(({ event, itemIdentity }) => event.type === 'timeline' && event.item.type === 'user_message' && /FOLDED/.test(event.item.text) ? [[itemIdentity?.key, event.item.text, JSON.stringify(event.item.content ?? null)] as const] : []);
+        expect(folded(run.live)).toHaveLength(1);
+        expect(folded(run.reread), name).toEqual(folded(run.live));
+      }
+    });
+
+    it('compaction: the compaction costs one changed replacement, because the chain restarts at the boundary, and then settles', async () => {
+      const run = use('claude', 'compaction');
+      const journal = await journalOfRun(run.live);
+      expect(journal.compactionStatuses()).toEqual(['completed']);
+      expect(journal.keys().filter(key => key.startsWith('compaction:'))).toHaveLength(1);
+      expect(await journal.reread(run.reread)).toEqual(CHANGED);
+      expect(journal.compactionStatuses()).toEqual([]);
+      for (let open = 0; open < 5; open += 1) expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('failed-compaction: a compaction that never reached its boundary ends failed, beside the error the CLI printed, which is live-only', async () => {
+      const run = use('claude', 'failed-compaction');
+      const journal = await journalOfRun(run.live);
+      expect(journal.compactionStatuses()).toEqual(['failed']);
+      expect(journal.openKeys()).toEqual([]);
+      expect(journal.liveOnlyKeys()).toHaveLength(1);
+      expect(await journal.reread(run.reread)).toEqual(CHANGED);
+      expect(journal.liveOnlyKeys()).toHaveLength(1);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('withdrawn: input removed from the native queue stays visible until the next reopen, which replaces once and drops it', async () => {
+      const run = use('claude', 'withdrawn');
+      const journal = await journalOfRun(run.live);
+      const withdrawn = journal.keys().filter(key => key.startsWith('user:')).length;
+      expect(await journal.reread(run.reread)).toEqual(CHANGED);
+      expect(journal.keys().filter(key => key.startsWith('user:')).length).toBe(withdrawn - 1);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('slash-command: a built-in that prints its own output keeps it as a live-only item the SDK read omits, and the typed row equals the transcript row', async () => {
+      const run = use('claude', 'slash-command');
+      const journal = await journalOfRun(run.live);
+      expect(journal.liveOnlyKeys()).toHaveLength(1);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+      expect(journal.liveOnlyKeys()).toHaveLength(1);
+    });
+
+    it('subagent: the sidechain is absent and the parent tool row has equal keys, and the wake-up row the stream never shows is not in the reread', async () => {
+      const run = use('claude', 'subagent');
+      expect(run.reread.some(({ event }) => event.type === 'timeline' && event.item.type === 'user_message' && event.item.text.includes('<task-notification>'))).toBe(false);
+      const parent = (observations: typeof run.live) => observations.flatMap(({ itemIdentity }) => itemIdentity?.key === 'tool:task-1' ? [itemIdentity.key] : []);
+      expect(new Set(parent(run.reread))).toEqual(new Set(parent(run.live)));
+      expect(JSON.stringify(run.live)).not.toContain('SUBAGENT_DONE');
+    });
+
+    it('parallel-tools: two tool calls of one message keep their order and block indices', async () => {
+      const run = use('claude', 'parallel-tools');
+      const journal = await journalOfRun(run.live);
+      expect(journal.keys().filter(key => key.startsWith('tool:'))).toEqual(['tool:par-1', 'tool:par-2']);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('interrupted: an interrupted turn leaves no item open, the partial text history keeps is the live text, and five reopens are unchanged', async () => {
+      const run = use('claude', 'interrupted');
+      const journal = await journalOfRun(run.live);
+      expect(journal.openKeys()).toEqual([]);
+      for (let open = 0; open < 5; open += 1) expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('a tool that completed while the Controller was away replaces the journal once, as an open item', async () => {
+      const run = use('claude', 'settled');
+      const completes = run.live.findIndex(({ itemIdentity }) => itemIdentity?.key === 'tool:write-1' && itemIdentity.completes === true);
+      expect(completes).toBeGreaterThan(0);
+      const journal = await journalOfRun(run.live.slice(0, completes));
+      expect(journal.openKeys().filter(key => key.startsWith('tool:'))).toEqual(['tool:write-1']);
+      expect(await journal.reread(run.reread)).toEqual(OPEN_ITEM);
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('a session that grew while the Controller was away appends the newest items of its reread', async () => {
+      const run = use('claude', 'settled');
+      const firstTurn = run.live.findIndex(({ event }) => event.type === 'turn_completed') + 1;
+      const grown = (await itemsOf(run.reread.map(observation => ({ ...observation, delivery: 'history' as const })))).length;
+      const known = (await itemsOf(run.live.slice(0, firstTurn))).length;
+      const journal = await journalOfRun(run.live.slice(0, firstTurn));
+      expect(known).toBeLessThan(grown);
+      expect(await journal.newest(run.reread, grown - known + 1)).toEqual({ outcome: 'appended' });
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
+    it('a session whose reread lost an item the journal holds replaces the journal, as a changed item', async () => {
+      const run = use('claude', 'settled');
+      const lastUser = run.reread.map(({ event }) => event.type === 'timeline' && event.item.type === 'user_message').lastIndexOf(true);
+      expect(await continuityOutcome({ live: run.live, reread: run.reread.slice(0, lastUser) })).toEqual(CHANGED);
+    });
+
+    it('the live-only items of the recordings are the interactions and what a local command prints, and nothing else', async () => {
+      const kinds = await liveOnlyKinds('claude', present('settled', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'images', 'hook', 'slash-command', 'subagent'));
+      expect(kinds).toEqual(['assistant', 'interaction']);
     });
   });
 }

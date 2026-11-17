@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Independent agent session control and protocol workbench.",
   "scripts": {
+    "smoke": "node scripts/run-smoke.mjs",
+    "smoke:quick": "node scripts/run-smoke.mjs --quick",
     "test:installer:windows": "node scripts/run-tests.mjs installer-windows",
     "start": "node scripts/start.mjs",
     "dev": "node scripts/dev.mjs",

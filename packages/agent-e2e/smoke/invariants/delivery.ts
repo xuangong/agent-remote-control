@@ -7,7 +7,7 @@ export function firstPaintFromDeviceStore(page: PageReport, limitMs = 300): Inva
   const violations: Violation[] = stored.filter(paint => paint.ms > limitMs)
     .map(paint => ({ message: `${paint.label}: first rows from the device store took ${paint.ms} ms, over ${limitMs} ms`, detail: paint }));
   const slowRevisits = page.paints.filter(paint => !paint.fromDeviceStore && /revisit/.test(paint.label));
-  for (const paint of slowRevisits) violations.push({ message: `${paint.label}: a revisit was not painted from the device store`, detail: paint });
+  for (const paint of slowRevisits) violations.push({ message: `${paint.label}: the first rows came at ${paint.ms} ms, after the Relay's first page, not from the device store`, detail: paint });
   return result('first-paint-from-device-store', stored.length + slowRevisits.length, violations);
 }
 

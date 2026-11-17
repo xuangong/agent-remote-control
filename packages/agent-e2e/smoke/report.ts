@@ -81,3 +81,21 @@ export function writeReport(directory: string, run: RunReport, transcripts: Reco
   writeFileSync(path, `${JSON.stringify(run, null, 2)}\n`);
   return path;
 }
+
+/**
+ * Combines the results of one invariant over several conditions of a scenario (a latency level, a restart round) into one
+ * result per invariant: failed when any failed, with each violation prefixed by the condition it came from.
+ */
+export function mergeInvariantResults(conditions: Array<{ label: string; results: InvariantResult[] }>): InvariantResult[] {
+  const merged = new Map<string, InvariantResult>();
+  for (const { label, results } of conditions) {
+    for (const item of results) {
+      const found = merged.get(item.invariant) ?? { invariant: item.invariant, status: 'not_exercised' as InvariantStatus, checked: 0, violations: [] };
+      found.checked += item.checked;
+      found.violations.push(...item.violations.map(violation => ({ ...violation, message: `[${label}] ${violation.message}` })));
+      found.status = found.violations.length > 0 ? 'failed' : found.checked > 0 ? 'passed' : 'not_exercised';
+      merged.set(item.invariant, found);
+    }
+  }
+  return [...merged.values()];
+}

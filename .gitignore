@@ -21,3 +21,4 @@ coverage/
 
 # Visual brainstorming companion (mockups and session state)
 .superpowers/
+.arc-local/

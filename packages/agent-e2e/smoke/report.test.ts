@@ -38,3 +38,15 @@ describe('the report', () => {
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });
+
+describe('merging conditions', () => {
+  it('fails when any condition failed and names the condition in the violation', async () => {
+    const { mergeInvariantResults } = await import('./report.js');
+    const merged = mergeInvariantResults([
+      { label: '300 ms', results: [result('a', 2, []), result('b', 0, [])] },
+      { label: '1500 ms', results: [result('a', 3, [{ message: 'late' }]), result('b', 1, [])] },
+    ]);
+    expect(merged.find(item => item.invariant === 'a')).toMatchObject({ status: 'failed', checked: 5, violations: [{ message: '[1500 ms] late' }] });
+    expect(merged.find(item => item.invariant === 'b')?.status).toBe('passed');
+  });
+});

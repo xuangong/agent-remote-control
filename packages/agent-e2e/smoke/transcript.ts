@@ -25,7 +25,7 @@ export class TranscriptRecorder {
   private readonly entries: Transcript = [];
   private count = 0;
   private readonly nextNumber = () => ++this.count;
-  constructor(private readonly now: () => number = Date.now, private readonly origin = now()) {}
+  constructor(private readonly now: () => number = Date.now, readonly origin = now()) {}
 
   /** Time on the run's clock. */
   clock(): number { return this.now() - this.origin; }

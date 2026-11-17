@@ -9,9 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=2000 --hookTimeout=5000",
-    "smoke": "tsx smoke/cli.ts",
-    "smoke:quick": "tsx smoke/cli.ts --quick"
+    "test": "vitest run --testTimeout=2000 --hookTimeout=5000"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

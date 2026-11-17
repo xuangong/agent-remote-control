@@ -1,0 +1,89 @@
+import { createRequire } from 'node:module';
+import { join } from 'node:path';
+import type { PageReport } from '../invariants/types.js';
+import { observerSource, toPageRows, toPageSamples, type RawSample } from './observer.js';
+
+/** Playwright of the Lab package, with its bundled Chromium: the checkout's headless browser, never the user's own. */
+export function loadChromium(checkout: string): any {
+  return createRequire(join(checkout, 'packages/agent-remote-lab/package.json'))('@playwright/test').chromium;
+}
+
+export interface Paint { label: string; ms: number; fromDeviceStore: boolean }
+
+/** One headless page opened on a session through the proxy, with the observer and the Network events that the invariants need. */
+export class PageProbe {
+  private readonly paints: Paint[] = [];
+  private readonly rowKeys: string[][] = [];
+  private timelinePageAt: number | undefined;
+  private constructor(readonly page: any, private readonly clockOrigin: number) {}
+
+  static async create(context: any, clockOrigin: number): Promise<PageProbe> {
+    const page = await context.newPage();
+    page.setDefaultTimeout(30_000);
+    await page.addInitScript(observerSource);
+    const probe = new PageProbe(page, clockOrigin);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Network.enable');
+    cdp.on('Network.webSocketFrameReceived', (event: any) => {
+      if (probe.timelinePageAt === undefined && typeof event.response?.payloadData === 'string' && event.response.payloadData.includes('"timeline_page"')) probe.timelinePageAt = Date.now();
+    });
+    return probe;
+  }
+
+  /**
+   * Opens a session URL and waits for its first rows. Records a paint: how long the first row took and whether it appeared
+   * before the first timeline page crossed the wire, which is only possible from the device store.
+   */
+  async open(url: string, label: string, { rowsDeadlineMs = 60_000 }: { rowsDeadlineMs?: number } = {}): Promise<Paint> {
+    this.timelinePageAt = undefined;
+    const started = Date.now();
+    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await this.page.waitForFunction(() => document.querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: rowsDeadlineMs });
+    const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
+    const paint = { label, ms: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
+    this.paints.push(paint);
+    return paint;
+  }
+
+  /** Types the text into the composer and submits it. */
+  async send(text: string): Promise<void> {
+    const composer = this.page.locator('[data-testid="prompt-input"]');
+    await composer.click();
+    await this.page.keyboard.type(text);
+    await this.page.locator('[data-testid="prompt-submit"]').click();
+  }
+
+  assistantCount(): Promise<number> { return this.page.evaluate(() => document.querySelectorAll('.agent-message-assistant').length); }
+
+  /** Waits until the page shows more assistant messages than `before`, containing `needle`. */
+  async waitForReplyContaining(needle: string, deadlineMs: number): Promise<boolean> {
+    try {
+      await this.page.waitForFunction((word: string) => [...document.querySelectorAll('.agent-message-assistant')].some(node => (node.textContent ?? '').includes(word)), needle, { timeout: deadlineMs });
+      return true;
+    } catch { return false; }
+  }
+
+  rows(): Promise<Array<{ key: string; kind: string; text: string }>> { return this.page.evaluate(() => (window as any).__smoke.rows()); }
+  /** Remembers the item keys the page renders now. */
+  async snapshotKeys(): Promise<string[]> { const keys = (await this.rows()).map(row => row.key); this.rowKeys.push(keys); return keys; }
+  setHidden(hidden: boolean): Promise<void> { return this.page.evaluate((value: boolean) => (window as any).__smoke.setHidden(value), hidden); }
+
+  async report(extra: Partial<PageReport> = {}): Promise<PageReport> {
+    const raw: RawSample[] = await this.page.evaluate(() => (window as any).__smoke.log.slice());
+    const finalRows = toPageRows(await this.rows());
+    return { samples: toPageSamples(raw, this.clockOrigin), paints: [...this.paints], rowKeys: [...this.rowKeys], finalRows, ...extra };
+  }
+
+  async close(): Promise<void> { await this.page.close().catch(() => {}); }
+}
+
+/** One browser context signs in once; closing it signs out so the instance does not keep the page's session. */
+export async function withContext<T>(browser: any, origin: string, body: (context: any) => Promise<T>): Promise<T> {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try { return await body(context); }
+  finally {
+    for (const open of context.pages()) await open.close().catch(() => {});
+    await context.request.post(`${origin}/auth/logout`, { headers: { origin, 'content-type': 'application/json' }, data: '{}', timeout: 10_000 }).catch(() => {});
+    await context.close().catch(() => {});
+  }
+}

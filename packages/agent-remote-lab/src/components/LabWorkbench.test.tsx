@@ -255,7 +255,8 @@ describe('LabWorkbench', () => {
 
   it('says nothing while a conversation is still opening and has no rows', async () => {
     const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} draftOnly />);
-    expect(container.textContent).not.toMatch(/Opening session|Awaiting Agent|Start with a Provider|Loading conversation/);
+    // The heading and the timeline say nothing; the draft composer keeps its own status.
+    expect(container.querySelector('.lab-timeline, .agent-timeline')?.textContent ?? '').not.toMatch(/Opening session|Awaiting Agent|Start with a Provider|Loading conversation/);
     expect(container.querySelector('.lab-empty-state')).toBeNull();
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('');
   });

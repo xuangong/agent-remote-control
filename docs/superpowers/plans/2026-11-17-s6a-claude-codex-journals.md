@@ -459,3 +459,17 @@ The measurement is the 35-open mix of Task 11 per provider, plus the Task 12 ses
 - The live-only rule is the invariant "never emitted at open" (D12); `liveOnlyKeyViolations` is deleted.
 - The listing trigger rides existing reads (page revision check, minute confirmation); no timer is added (D11).
 - Runner proof of journal serving is the epoch of S4 (`negotiated` echoes `itemKeys`; the page's epoch equals `journals.sqlite` `meta`), not the old attach-timing signal that S3 found unreliable.
+
+## 11. Facts recorded by the recordings (Codex 0.169.0, Claude Code 2.1.319)
+
+**Codex (`src/journal-facts.local.test.ts`, Task 1).**
+
+- FC1 holds: ids of user, reasoning, assistant, file change, command, plan and compaction items are equal in notifications and in `thread/turns/list`. FC7 holds for commands and file changes: both paths project the same tool item.
+- FC2 holds: an approval and a question are in no history; both requests name their native item (`itemId` `c1` and `q1`), so `interaction:<itemId>` is available.
+- FC3: an interrupted turn keeps only its user message. The streamed text and reasoning are not in history, and an interrupted command is never completed live and is not in history either, so its live row stays `running` until a replacement drops it (one `open_item`, then settled). The plan does not invent a native result for it.
+- FC4: the plan item id is equal in both paths, but history orders it before the message it was cut from (completion order), while the live stream saw the message first. The adapter's history projection orders a turn's items by `startedAtMs`, which is the order the live stream sees (Task 2).
+- FC5: a compaction is a turn of its own whose `contextCompaction` item has equal ids; history keeps every earlier item. The generated app-server schema documents `thread/compacted` as deprecated in favor of the item, and 0.169 never sent it, so its branch is deleted, not kept (no `compactionItemTurns`).
+- FC6 holds: `summaryPartAdded` carries `summaryIndex`; history joins `summary[]`.
+- FC8 differs from the plan: the start-up notices of a failing MCP server carry the thread id in 0.169. They are in no history, so they still cost a replacement; the decision of the plan (not a timeline item) stands. Also new: `thread/readState/changed` arrives after every turn and the projector turns it into an "Unsupported Codex notification" error row today; it joins `NON_TIMELINE_NOTIFICATION_METHODS`.
+- FC9 holds: a steered message has its own item id, equal in both.
+- `turn/plan/updated` (needs `[tools.update_plan] enabled = true`) arrives live and history holds no trace of it.

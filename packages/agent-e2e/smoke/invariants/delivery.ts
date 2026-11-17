@@ -1,14 +1,16 @@
 import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
 import { payloadOf, received, sent } from './wire.js';
 
-/** M1: a revisit paints its first rows from the device store within the limit, whatever the network does. */
+/** M1: a revisit paints its first rows from the device store within the limit, whatever the network does. An open that shows no rows at all within its deadline fails too. */
 export function firstPaintFromDeviceStore(page: PageReport, limitMs = 300): InvariantResult {
   const stored = page.paints.filter(paint => paint.fromDeviceStore);
   const violations: Violation[] = stored.filter(paint => paint.ms > limitMs)
     .map(paint => ({ message: `${paint.label}: first rows from the device store took ${paint.ms} ms, over ${limitMs} ms`, detail: paint }));
-  const slowRevisits = page.paints.filter(paint => !paint.fromDeviceStore && /revisit/.test(paint.label));
+  const timedOut = page.paints.filter(paint => paint.timedOut);
+  for (const paint of timedOut) violations.push({ message: `${paint.label}: no rows within ${paint.ms} ms`, detail: paint });
+  const slowRevisits = page.paints.filter(paint => !paint.fromDeviceStore && !paint.timedOut && /revisit/.test(paint.label));
   for (const paint of slowRevisits) violations.push({ message: `${paint.label}: the first rows came at ${paint.ms} ms, after the Relay's first page, not from the device store`, detail: paint });
-  return result('first-paint-from-device-store', stored.length + slowRevisits.length, violations);
+  return result('first-paint-from-device-store', stored.length + slowRevisits.length + timedOut.length, violations);
 }
 
 /**

@@ -1,4 +1,4 @@
-import { restartInstance } from '@orchardworks/agent-e2e/faults/instance-process.mjs';
+import { restartInstance } from '../../faults/instance-process.mjs';
 import { mergeInvariantResults, type ScheduleStep } from '../report.js';
 import type { Scenario } from '../scenario.js';
 import { runRestartRound, type Phase, type RoundPlan } from '../lib/restart-round.js';

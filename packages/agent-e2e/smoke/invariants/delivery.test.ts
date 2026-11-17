@@ -14,6 +14,10 @@ describe('first paint from the device store', () => {
     const network = firstPaintFromDeviceStore(page({ paints: [{ label: 'revisit', ms: 40, fromDeviceStore: false }] }));
     expect([slow.status, network.status]).toEqual(['failed', 'failed']);
   });
+  it('fails when a page shows no rows within its deadline', () => {
+    const verdict = firstPaintFromDeviceStore(page({ paints: [{ label: 'revisit', ms: 90_000, fromDeviceStore: false, timedOut: true }] }));
+    expect(verdict.violations[0]?.message).toMatch(/no rows within 90000 ms/);
+  });
   it('is not exercised without a revisit', () => {
     expect(firstPaintFromDeviceStore(page({ paints: [{ label: 'first open', ms: 4000, fromDeviceStore: false }] })).status).toBe('not_exercised');
   });

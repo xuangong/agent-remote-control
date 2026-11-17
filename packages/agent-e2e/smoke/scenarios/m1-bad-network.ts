@@ -1,4 +1,4 @@
-import { startLatencyProxy } from '@orchardworks/agent-e2e/faults/latency-proxy.mjs';
+import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { firstPaintFromDeviceStore, journalSequencesContiguous, messagesSettleOnce, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import type { Provider } from '../lib/sessions.js';
@@ -29,6 +29,7 @@ export const badNetwork: Scenario = {
     const recorder = new TranscriptRecorder();
     for (const condition of conditions) {
       const name = label(condition);
+      context.log(`M1: ${name}`);
       const address = await context.sessionWithHistory(condition.provider);
       const url = await context.pool.link(address);
       const proxy = await startLatencyProxy({ target: context.instance.origin, rttMs: condition.rttMs, jitterMs: Math.round(condition.rttMs * 0.2), lossRate: condition.lossRate,
@@ -39,11 +40,12 @@ export const badNetwork: Scenario = {
         const word = `ZEPHYR${context.random.int(100, 999)}`;
         const condition_ = await withContext(context.browser, proxy.origin, async browserContext => {
           const first = await PageProbe.create(browserContext, recorder.origin);
-          await first.open(viaProxy, `first open, ${name}`, { rowsDeadlineMs: 90_000 });
+          const firstOpen = await first.open(viaProxy, `first open, ${name}`, { rowsDeadlineMs: 90_000 });
           await first.close();
           const probe = await PageProbe.create(browserContext, recorder.origin);
-          const revisit = await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
-          await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 });
+          const revisit = firstOpen.timedOut ? firstOpen : await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
+          const ready = !revisit.timedOut && await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 }).then(() => true, () => false);
+          if (!ready) { const page = await probe.report(); await probe.close(); return { revisit, replied: false, page }; }
           recorder.mark('turn-sent', { condition: name, word });
           schedule.push({ t: recorder.clock(), action: 'send', detail: { word } });
           await probe.send(`Reply with the single word ${word} and nothing else.`);
@@ -57,15 +59,16 @@ export const badNetwork: Scenario = {
         const transcript = recorder.transcript();
         const forCondition = transcript.filter(entry => entry.t >= (schedule.at(-2)?.t ?? 0));
         const verdicts = [
-          firstPaintFromDeviceStore({ ...condition_.page, paints: condition_.page.paints.filter(paint => /^revisit/.test(paint.label)) }),
+          firstPaintFromDeviceStore({ ...condition_.page, paints: condition_.page.paints.filter(paint => /^revisit/.test(paint.label) || paint.timedOut) }),
           messagesSettleOnce(forCondition, { final: condition_.replied }),
           noDuplicateItemKey(forCondition, condition_.page),
           journalSequencesContiguous(forCondition),
           noStaleLabel(forCondition, condition_.page),
         ];
         results.push({ label: name, results: verdicts });
+        context.log(`M1: ${name}: first rows on revisit ${condition_.revisit.ms} ms, replied ${condition_.replied}`);
         (measurements.conditions as unknown[]).push({ name, revisit: condition_.revisit, replied: condition_.replied, retransmits: proxy.counts.retransmits, webSocketsCrossed: proxy.counts.webSocketsCrossed });
-        if (proxy.counts.webSocketsCrossed === 0) throw new Error(`No WebSocket crossed the proxy for ${name}; these would not be network results.`);
+        if (!condition_.revisit.timedOut && proxy.counts.webSocketsCrossed === 0) throw new Error(`No WebSocket crossed the proxy for ${name}; these would not be network results.`);
       } finally { await proxy.close(); }
     }
     return { measurements, invariants: mergeInvariantResults(results), schedule, transcript: recorder };

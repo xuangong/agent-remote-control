@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Test support for the real stack: fault injection (the latency proxy, process faults, quota and many-session profiles) and the smoke harness that runs real Claude Code and Codex sessions on a `pnpm local` instance under those faults.",
   "exports": {
-    "./faults/*": "./faults/*"
+    "./faults/latency-proxy.mjs": "./faults/latency-proxy.mjs"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

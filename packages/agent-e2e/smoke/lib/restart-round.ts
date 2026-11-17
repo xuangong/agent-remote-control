@@ -1,4 +1,4 @@
-import { startLatencyProxy } from '@orchardworks/agent-e2e/faults/latency-proxy.mjs';
+import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { noBlankFrame, noDuplicateItemKey, noStaleLabel, journalSequencesContiguous, messagesSettleOnce, oneReplacementPerRestart, turnRowsCompleteAfterReturn, type InvariantResult, type MarkerName } from '../invariants/index.js';
 import type { ScheduleStep } from '../report.js';
 import type { RunContext } from '../scenario.js';

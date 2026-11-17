@@ -54,7 +54,7 @@ export interface PageRow { key: string; kind: string; text: string; status?: str
 export interface PageReport {
   samples: PageSample[];
   /** Time from the start of an open to the first conversation row, and whether the rows came from the device store. */
-  paints: Array<{ label: string; ms: number; fromDeviceStore: boolean }>;
+  paints: Array<{ label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean }>;
   /** The item keys of the rendered timeline, in order, at each moment the scenario read them. */
   rowKeys: string[][];
   /** The rows shown at the end of the run. */

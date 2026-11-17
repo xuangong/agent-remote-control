@@ -98,6 +98,27 @@ pnpm local screenshot / --out page.png
 pnpm --filter @orchardworks/agent-remote-lab exec playwright install chromium
 ```
 
+### Smoke runs
+
+`pnpm smoke:quick` and `pnpm smoke` run real Claude Code and Codex sessions on this checkout's instance under faults: a
+proxy that adds latency, jitter, loss, a bandwidth cap, half-open sockets and offline periods, and restarts of the instance
+mid-turn. They check the invariants of the
+[test architecture](superpowers/specs/2026-11-18-target-architecture-and-tests.md#57-smoke-tests) against the wire and the page and
+write `.arc-local/smoke/<date>/report.json`, a `summary.txt` and the wire transcripts (not committed). They report; they
+never gate a task and are not part of `pnpm test`.
+
+```bash
+ARC_LOCAL_JOURNALS=1 pnpm local up        # the instance the run uses; a restart fault runs `up --no-build` with the same variable
+pnpm smoke:quick                           # M1, M2 and M7 in a few minutes
+pnpm smoke M3 --seed 7 --rounds 4          # one scenario, a replayable seed
+pnpm smoke                                 # every scenario
+```
+
+A run drives only sessions it creates in the instance workspace and releases its Codex sessions at the end. The restart
+scenarios refuse to run while sessions it did not create are running or waiting, because the restart would interrupt them. A
+scenario that stops the Controller takes the site down with it (the runner stops the site when its Controller exits), so
+those faults restart the whole instance.
+
 ### Development command
 
 `up` installs `agent-remote-controller-dev` beside your `agent-remote-controller`,

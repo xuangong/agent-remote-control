@@ -2,8 +2,8 @@ import type { InvariantResult } from './invariants/types.js';
 import type { Finding, ScheduleStep } from './report.js';
 import type { TranscriptRecorder } from './transcript.js';
 import type { SessionPool, Provider } from './lib/sessions.js';
-import type { Instance, } from '@orchardworks/agent-e2e/faults/instance-process.mjs';
-import type { SeededRandom } from '@orchardworks/agent-e2e/faults/seeded-random.mjs';
+import type { Instance } from '../faults/instance-process.mjs';
+import type { SeededRandom } from '../faults/seeded-random.mjs';
 
 /** Everything a scenario needs from the run: the instance, a browser, the sessions it may drive and the seeded generator. */
 export interface RunContext {

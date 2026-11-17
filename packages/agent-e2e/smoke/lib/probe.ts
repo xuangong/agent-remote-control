@@ -8,7 +8,7 @@ export function loadChromium(checkout: string): any {
   return createRequire(join(checkout, 'packages/agent-remote-lab/package.json'))('@playwright/test').chromium;
 }
 
-export interface Paint { label: string; ms: number; fromDeviceStore: boolean }
+export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean }
 
 /** One headless page opened on a session through the proxy, with the observer and the Network events that the invariants need. */
 export class PageProbe {
@@ -37,10 +37,16 @@ export class PageProbe {
   async open(url: string, label: string, { rowsDeadlineMs = 60_000 }: { rowsDeadlineMs?: number } = {}): Promise<Paint> {
     this.timelinePageAt = undefined;
     const started = Date.now();
-    await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await this.page.waitForFunction(() => document.querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: rowsDeadlineMs });
-    const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
-    const paint = { label, ms: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
+    let paint: Paint;
+    try {
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: rowsDeadlineMs });
+      await this.page.waitForFunction(() => document.querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
+      const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
+      paint = { label, ms: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
+    } catch {
+      // A page that shows nothing in time is a result, not a harness failure.
+      paint = { label, ms: rowsDeadlineMs, fromDeviceStore: false, timedOut: true };
+    }
     this.paints.push(paint);
     return paint;
   }

@@ -1,5 +1,5 @@
-import { readInstance } from '@orchardworks/agent-e2e/faults/instance-process.mjs';
-import { seededRandom } from '@orchardworks/agent-e2e/faults/seeded-random.mjs';
+import { readInstance } from '../../faults/instance-process.mjs';
+import { seededRandom } from '../../faults/seeded-random.mjs';
 import { loadChromium } from './probe.js';
 import { SessionPool, type Provider } from './sessions.js';
 import type { RunContext } from '../scenario.js';

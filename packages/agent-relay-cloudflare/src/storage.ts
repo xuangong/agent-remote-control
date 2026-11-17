@@ -25,6 +25,7 @@ export class SqliteRelayStore implements RelayStateStore {
     auth = this.auth = resolveHostedAuth(auth);
     const config = hostedAuthStateConfig(auth);
     // Flatten the shared identity to retain the original Gateway fingerprint bytes.
+    // The fingerprint identity keeps its original name: stored state is bound to it.
     const fingerprint = createHmac('sha256', auth.secret).update(JSON.stringify(['agent-remote-cloudflare', 1, ...JSON.parse(hostedAuthStorageIdentity(auth))])).digest('hex');
     storage.transactionSync(() => {
       storage.sql.exec(`CREATE TABLE IF NOT EXISTS relay_metadata (

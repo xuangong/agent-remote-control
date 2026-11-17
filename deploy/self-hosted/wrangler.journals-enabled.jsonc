@@ -2,7 +2,7 @@
   // The Relay configuration with the journal partitions on. Use it only after the partitions Worker
   // (wrangler.journals.jsonc) is deployed; keep it identical to wrangler.jsonc apart from the JOURNALS binding and the
   // AGENT_REMOTE_JOURNALS variable (a test checks this).
-  "$schema": "../../packages/agent-remote-cloudflare/node_modules/wrangler/config-schema.json",
+  "$schema": "../../packages/agent-relay-cloudflare/node_modules/wrangler/config-schema.json",
   "name": "my-agent-remote",
   "main": "../../dist/cloudflare/worker.js",
   "compatibility_date": "2026-06-01",

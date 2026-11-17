@@ -134,7 +134,7 @@ Optional preview hostnames additionally need matching DNS/TLS/proxy routing.
 
 Use Node 22+ and pnpm 10.34.5 for build tooling. The independent template is
 `deploy/self-hosted/wrangler.jsonc`; do not reuse the production config under
-`packages/agent-remote-cloudflare/`. Change the template's Worker name, public
+`packages/agent-relay-cloudflare/`. Change the template's Worker name, public
 origin, Google client ID and email allowlist to your own values. With `workers_dev`
 enabled, the origin is `https://WORKER.YOUR-SUBDOMAIN.workers.dev`. Alternatively,
 configure your own Custom Domain and set that as the canonical origin.
@@ -144,15 +144,15 @@ From the repository root:
 ```sh
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
 pnpm build:relay
-pnpm --filter @orchardworks/agent-remote-cloudflare run build
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+pnpm --filter @orchardworks/agent-relay-cloudflare run build
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc --dry-run
 
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret put \
   AGENT_REMOTE_SIGNING_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret put \
   AGENT_REMOTE_GOOGLE_CLIENT_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc
 ```
 

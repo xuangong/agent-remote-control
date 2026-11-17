@@ -12,7 +12,7 @@ import { serializeAgentPreparedTextInput, parseAgentPreparedTextInput } from '@o
 import { createHostedRelay, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { createAgentHostRuntime } from '../../agent-controller/src/host.js';
-import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
+import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';
 import { relaySocket, webRequest, writeResponse } from '../src/server/remote-host-broker.js';
 

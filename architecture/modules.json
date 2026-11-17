@@ -55,8 +55,8 @@
       "dir": "packages/agent-remote-lab",
       "entry": "src/main.tsx"
     },
-    "@orchardworks/agent-remote-cloudflare": {
-      "dir": "packages/agent-remote-cloudflare",
+    "@orchardworks/agent-relay-cloudflare": {
+      "dir": "packages/agent-relay-cloudflare",
       "entry": "src/worker.ts"
     },
     "@orchardworks/agent-provider-claude": {
@@ -520,7 +520,7 @@
       "name": "relay-cloudflare",
       "layer": 4,
       "paths": [
-        "packages/agent-remote-cloudflare/src/**"
+        "packages/agent-relay-cloudflare/src/**"
       ],
       "seams": [
         "S4",
@@ -535,7 +535,7 @@
       "name": "relay-cloudflare-tests",
       "layer": 5,
       "paths": [
-        "packages/agent-remote-cloudflare/test/**"
+        "packages/agent-relay-cloudflare/test/**"
       ],
       "seams": [
         "S5"

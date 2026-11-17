@@ -17,7 +17,7 @@ and install published Controller packages separately.
 Deploy this independent Worker from the repository root:
 
 ```sh
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
   --config ../../deploy/install-shortlink/wrangler.jsonc
 ```
 

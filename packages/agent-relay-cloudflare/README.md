@@ -15,10 +15,10 @@ From the repository root:
 
 ```sh
 pnpm build:relay
-pnpm --filter @orchardworks/agent-remote-cloudflare build
-pnpm --filter @orchardworks/agent-remote-cloudflare typecheck
+pnpm --filter @orchardworks/agent-relay-cloudflare build
+pnpm --filter @orchardworks/agent-relay-cloudflare typecheck
 pnpm test:cloudflare
-pnpm --filter @orchardworks/agent-remote-cloudflare deploy:dry-run
+pnpm --filter @orchardworks/agent-relay-cloudflare deploy:dry-run
 ```
 
 The Relay bundle is `dist/cloudflare/worker.js`; the journal partitions Worker (`wrangler.journals.jsonc`, deployed before a Relay that enables journals with `wrangler.journals-enabled.jsonc`) is `dist/cloudflare/journals.js`; Controller assets are `dist/relay/web`.

@@ -206,7 +206,7 @@
     {
       "rule": "cross-package-relative",
       "from": [
-        "packages/agent-remote-cloudflare/**"
+        "packages/agent-relay-cloudflare/**"
       ],
       "max": 22,
       "owner": "M3",

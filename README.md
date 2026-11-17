@@ -358,24 +358,24 @@ Use Node.js 22+ and pnpm **10.34.5**, and your own Cloudflare account. Edit
   deploy the partitions Worker (`deploy/self-hosted/wrangler.journals.jsonc`) first, then the Relay with
   `wrangler.journals-enabled.jsonc`, which adds the `JOURNALS` binding and `AGENT_REMOTE_JOURNALS=1`.
 
-Do **not** use `packages/agent-remote-cloudflare/wrangler.jsonc` for a private
+Do **not** use `packages/agent-relay-cloudflare/wrangler.jsonc` for a private
 deployment: it contains this project's production Worker name and domains.
 
 ```sh
 pnpm install --frozen-lockfile --registry=https://mirrors.cloud.tencent.com/npm/
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler login
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler login
 pnpm build:relay
-pnpm --filter @orchardworks/agent-remote-cloudflare run build
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+pnpm --filter @orchardworks/agent-relay-cloudflare run build
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc --dry-run
 
 # Paste the previously generated signing secret when prompted.
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret put \
   AGENT_REMOTE_SIGNING_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
 # Google mode only: paste your Google OAuth client secret when prompted.
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler secret put \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler secret put \
   AGENT_REMOTE_GOOGLE_CLIENT_SECRET --config ../../deploy/self-hosted/wrangler.jsonc
-pnpm --filter @orchardworks/agent-remote-cloudflare exec wrangler deploy \
+pnpm --filter @orchardworks/agent-relay-cloudflare exec wrangler deploy \
   --config ../../deploy/self-hosted/wrangler.jsonc
 ```
 

@@ -1,11 +1,11 @@
-import { codecState } from '../../agent-remote-cloudflare/test/storage-codec-fixture.js';
+import { codecState } from '../../agent-relay-cloudflare/test/storage-codec-fixture.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
-import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
+import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 's'.repeat(32) };
 const costs: SuccessionEncodingCosts = {

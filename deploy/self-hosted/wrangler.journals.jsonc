@@ -1,5 +1,5 @@
 {
-  "$schema": "../../packages/agent-remote-cloudflare/node_modules/wrangler/config-schema.json",
+  "$schema": "../../packages/agent-relay-cloudflare/node_modules/wrangler/config-schema.json",
   // The Worker that holds the journal partitions. Deploy it before the Relay Worker: the Relay's JOURNALS binding
   // names it. It answers no request; only your Relay Worker calls it.
   "name": "my-agent-remote-journals",

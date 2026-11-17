@@ -1,5 +1,5 @@
 {
-  "name": "@orchardworks/agent-remote-cloudflare",
+  "name": "@orchardworks/agent-relay-cloudflare",
   "version": "0.1.0",
   "private": true,
   "type": "module",

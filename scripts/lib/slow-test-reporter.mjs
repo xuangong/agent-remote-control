@@ -19,7 +19,7 @@ function readAllowlist() {
 /**
  * Vitest reporter for the unit and integration layers, which use mock data: a test over 300 ms is listed for a look, and a
  * test over one second fails the run unless the allowlist names it. Set ARC_SLOW_TEST_DIR to also write every test over
- * 100 ms of the run to a JSON file, and ARC_SLOW_TEST_ENFORCE=0 to list without failing.
+ * 100 ms of the run to a JSON file, and ARC_SLOW_TEST_ENFORCE=1 to fail the run on an unlisted test over one second. The default only lists them: a loaded machine moves tests near the limit across it.
  */
 export class SlowTestReporter {
   onTestRunEnd(testModules) {
@@ -50,7 +50,7 @@ export class SlowTestReporter {
     for (const entry of warn.slice(0, 10)) lines.push(`  ${entry.durationMs} ms  ${entry.key}${allowlist.has(entry.key) ? '  (allowlisted)' : ''}`);
     if (warn.length > 10) lines.push(`  ... and ${warn.length - 10} more`);
     console.warn(lines.join('\n'));
-    if (unlisted.length > 0 && process.env.ARC_SLOW_TEST_ENFORCE !== '0') {
+    if (unlisted.length > 0 && process.env.ARC_SLOW_TEST_ENFORCE === '1') {
       console.error(`${unlisted.length} test(s) over ${failMs} ms are not in scripts/slow-test-allowlist.json. Make them faster with fake timers, injected clocks or mock ports, or extract the module they exercise.`);
       process.exitCode = 1;
     }

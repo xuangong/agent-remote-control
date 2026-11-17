@@ -1,25 +1,25 @@
 # S5: Relay-owned session control
 
-**State: planned, awaiting owner approval. Nothing in this plan is implemented.** S5 changes the contract between the Relay and every Controller, so the owner approves it first (roadmap S5; [design, Compatibility and rollout](../specs/2026-11-15-im-session-service-design.md); [assessment, Lever B](../specs/2026-11-16-journal-simplification.md)).
+**State: approved by the owner with no transition window; implementation in progress.** S5 changes the contract between the Relay and every Controller (roadmap S5; [design, Compatibility and rollout](../specs/2026-11-15-im-session-service-design.md); [assessment, Lever B](../specs/2026-11-16-journal-simplification.md)).
 
-S5 is the first slice of P2. It moves the session-control lease and the native-owner fact to the Relay, and it removes the five shims that P1-B2 built so that the Relay could imitate the Controller's session wire: the pending revision, held acquires, the offline-Host amendment, `hostReturned` and the `restoring` override. The operation queue itself (requesters, receipts, preconditions, the outbox, Team and TPM queues) stays in S6.
+S5 is the first slice of P2. It moves the session-control lease and the native-owner fact to the Relay, and it removes the five shims that P1-B2 built so that the Relay could imitate the Controller's session wire: the pending revision, held acquires, the offline-Host amendment, `hostReturned` and the `restoring` override. It also removes the Controller's own lease for uplink streams. There is one end state and no transition: the old session-control path is deleted in the same step. The operation queue itself (requesters, receipts, preconditions, the outbox, Team and TPM queues) stays in S6.
 
 ## 1. For the owner: approve in one read
 
 **What changes for you.** A browser asks the Relay for control and gets the answer at once, whether the Controller is online, offline or just coming back. Today a journal-served view waits for a Controller stream to learn its control state, shows "Restoring" while it opens, and closes and reconnects when a Host returns. After S5 none of that happens: reading and control never need the Controller. The Controller is contacted only when something is sent, and it still decides everything that depends on the native runtime (a terminal in control, provider capabilities).
 
-**What you must do: update every Controller.** The Controller gains one negotiated capability. A Controller that is not updated keeps working through the old path until the window ends (section 5). After the window, the next release deletes the old path. Which of two endings applies to updated Controllers is your decision (section 5.5); a Controller that was not updated can still register, appear in the Hosts list and be updated from the website, but it cannot open sessions.
+**What you must do: update every Controller before continuing.** You decided that compatibility may be compromised and that you will update every Controller. So the Controller gains one capability, `control`, and there is no window in which both paths run. The only compatibility kept is the update path: a Controller that is not updated can still register, appear in the Hosts list and be updated from the website, but it cannot open sessions. The Hosts page shows "Update required" with manual-update instructions for such a Host.
 
-**The session protocol stays at 1.8.0.** No bridge release and no multi-hop update (the runbook's intermediate releases) is needed. Any Controller that runs 1.8.0 updates in one step. The change is an opt-in uplink capability, as for outbox, journal and Team recipients.
+**The session protocol stays at 1.8.0.** No bridge release and no multi-hop update is needed. Any Controller that runs 1.8.0 updates in one step. The change is an uplink capability, as for outbox, journal and Team recipients, except that the Relay requires it for sessions.
 
-**Deploy order** (section 5.4): publish the Controller release; deploy the Relay and website (the `primary` Worker; the journal partitions Worker is untouched); ask you to update every Controller from the Hosts page; you confirm; the next release removes the old path. Nothing here needs two Workers to be deployed in a given order.
+**Deploy order** (section 5.4): the Relay and website go first (`deploy/self-hosted` says so); then the Controller release is published; then you update every Controller from the Hosts page. Between the Relay deployment and a Controller's update, that Controller cannot open sessions. The Relay must never be rolled back below this release once Controllers are updated.
 
 **Risks, in order of weight.**
-1. The change also routes ordinary (crude) sessions through the Relay's control gate, so every updated Controller is affected, not only journal-served sessions. Journal-served sessions exist only where you turned smart reading on, which is off by default. Mitigation: an updated Controller falls back to the old path against a Relay that does not acknowledge the capability, and redeploying the previous Relay is the rollback.
+1. The change also routes ordinary (crude) sessions through the Relay's control gate, so every Controller is affected, not only journal-served sessions (smart reading, off by default). There is no fallback: a Relay below this release stops sessions of every updated Controller, and an updated Controller whose Relay does not acknowledge `control` shows "Update the Relay". Rollback of the Relay below this release is therefore not available once Controllers are updated.
 2. A terminal that already owns a session the Controller has not opened is learned by the Relay only when the first send is refused. The composer then turns read-only, the draft stays, and take-over works. P1-C3's read-only observation closes this gap later.
-3. A Controller that is updated but whose uplink drops while a send is in flight ends that stream, as today; the client's uncertain-send handling is unchanged.
+3. A Controller whose uplink drops while a send is in flight ends that stream, as today; the client's uncertain-send handling is unchanged.
 
-**Your decisions, recorded in section 11:** no fixed window (R2 waits for your word that every Controller is updated); R2 requires a Relay at R1 or later; machines that cannot update can register but not open sessions.
+**Your decisions, recorded in section 11:** compatibility is compromised (no window, no fallback, no mixed-version matrix); the Relay must be at this release first; machines that cannot update can register but not open sessions.
 
 ## 2. How control works today, and why
 
@@ -52,7 +52,7 @@ The journal-served path is where all five shims live. Journal-served streams exi
 | Runtime connection state (`reconnecting`, `restoring`, `unavailable`) | Adapters, through the Controller | The Relay never writes this field again. |
 
 Invariants:
-- **I1.** For a Host that acknowledged the capability, lease state exists only in the Relay.
+- **I1.** Lease state exists only in the Relay, except in a transport that is its own Relay (direct-serve).
 - **I2.** A mutation reaches a Controller only from a stream with a live control lease, and the Controller still refuses it if a terminal owns the session.
 - **I3.** The Relay synthesizes no runtime state.
 - **I4.** A journal-served stream opens a Controller stream only for a mutation, a command, an interaction answer or an upload, and keeps it until the browser leaves; reading and control never open one. Crude streams are unchanged: they hold a Controller stream from the open.
@@ -76,11 +76,11 @@ Invariants:
 One addition, opt-in and on the Host uplink. No change to the browser-facing session protocol (1.8.0) or to `REMOTE_HOST_UPLINK_VERSION` (2). There is no new message.
 
 1. **Capability `control`.** The Controller offers `control=1` in its uplink URL; the Relay acknowledges `control: 1` in `registered` only for that offer (the Team-recipient pattern in the runbook). The acknowledgement is per connection, never stored.
-   - With the acknowledgement: the Relay owns the leases of every stream of that Host, crude and journal-served. The Controller's uplink streams attach no lease, ignore `controlToken`, and run the native-owner check at delivery.
-   - Without it (an old Controller, or an old Relay): both sides behave exactly as today.
+   - With both sides at this release, the Relay owns the leases of every stream of that Host, crude and journal-served. The Controller's uplink streams attach no lease, ignore `controlToken`, and run the native-owner check at delivery.
+   - A Host that did not offer `control` registers and is managed, but a session open for it is answered 409 `controller_upgrade_required`; the Relay forwards no session frame for it.
+   - A Controller whose `registered` has no `control` (an older Relay) serves no session on that connection and reports "Update the Relay"; management stays. There is no registry fallback on uplink streams.
 
-
-Rule 5 (protocol surface): one capability, no new message, no new refusal reason, no schema field. The Relay stops forwarding `session_control` frames, which is a behaviour change with no schema change.
+Rule 5 (protocol surface): one capability, no new message, no new refusal reason, no schema field. The Relay stops forwarding `session_control` frames, which is a behaviour change with no schema change. The refusal for a Host without `control` is the existing 409 refusal shape with a new `controller_upgrade_required` code in the Relay's error text, not a schema change.
 
 Wire fields that become dead (`resumeToken`, `retainOnDisconnect`, `clientKind`, `ownerKind`, the `take_over` action) stay in the schema until the next session-protocol bump, because removing a schema field is a bump and the runbook's staged release. Clients stop sending them in S5. They are listed in section 8.
 
@@ -93,11 +93,12 @@ The `token` and `controlToken` stay: the Relay issues and checks them per stream
 - The lease: the existing `SessionControlRegistry` holds its owner per session, which this design no longer wants, so Task 2 either uses one registry instance per stream or writes the lease (about 20 lines: revision, token, access, owner). The owner is one field of the stream's lease (+1 field), cleared by `acquire`.
 - `journal-session-stream.ts` loses the five shims (section 4) and opens the Controller stream lazily.
 - `registered` carries `control: 1` when offered. The acknowledgement is held on the Host's connection; there is no Hosts-list field, because the owner reads the Controller's version in the Hosts list, which already exists.
-- The smart-reading switch, and the journal gate (`serves`), require `control` on the Host. A Host without it is served crude, and the switch shows the existing "Update the Controller" message.
+- A session open for a Host without `control` is refused 409 `controller_upgrade_required`, crude and journal-served alike. The Hosts page shows "Update required" on that Host (the Relay knows the acknowledgement; the Hosts page already reads the Controller's version).
 
 **Controller (`agent-host`, `agent-remote-relay`).**
 - The uplink client offers `control=1` and records the acknowledgement.
-- `remote-host-plugin` passes no `sessionControls` to the session wire of an acknowledged connection; the wire's per-mutation control check becomes the native-owner check (`native_session_owned`). Direct-serve transports (the lab server, DSH shared web, `websocket-stream`) are their own Relay and keep the registry unchanged.
+- `remote-host-plugin` passes no `sessionControls` to the session wire; the wire's per-mutation control check becomes the native-owner check (`native_session_owned`). The registry fallback and the lease branch of uplink streams are deleted. Direct-serve transports (the lab server, DSH shared web, `websocket-stream`) are their own Relay and keep the registry.
+- A connection whose `registered` lacks `control` serves no session and shows "Update the Relay".
 - A refusal at delivery that is `native_session_owned` is one more outcome of the existing wire; no owner reporting goes to the uplink.
 
 **Client (`agent-remote-web`, `agent-remote-lab`).** No behaviour change is required. It stops sending the dead fields, always sends `acquire`, and loses the `controlProofs` and `resumeToken` handling and the never-sent `ownerKind` string. It still waits for `session_control` with no owner after a take-over.
@@ -116,7 +117,7 @@ Today a lease revoked after a `next_turn` send is queued in the Controller stops
 
 ## 4. Removed, replaced, and the state accounting
 
-Rule 1: every row states the change. Line counts are judged from reading, not measured; Task 9 records the measured numbers.
+Rule 1: every row states the change. Line counts are judged from reading, not measured; Task 8 records the measured numbers.
 
 | Removed | Replaced by | State and paths |
 |---|---|---|
@@ -127,7 +128,8 @@ Rule 1: every row states the change. Line counts are judged from reading, not me
 | `restoring` override, `hostReady`, `RESTORING_REASON`, the `agent_update` on ready (`hostIsReady`) | Nothing: the Relay never writes runtime state (I3) | field -1, constant -1, path -1 |
 | Refusal classes in `ensureHost` (429 close with 4029, hopeless 4xx, offline wait, other) and `CAPACITY_CLOSE_REASON` | One rule: refuse the held messages with the refusal's code; the browser stream stays | paths 4 to 1 |
 | The eager Controller stream at negotiation | Lazy open on the first mutation (I4) | Controller streams held by journal-served views: one per view to zero |
-| Controller-issued leases on uplink streams of acknowledged Hosts | The Relay's registry | Controller state per stream -1 lease |
+| Controller-issued leases on uplink streams, the registry fallback in `remote-host-plugin`, the lease branch of the uplink stream | The Relay's lease | Controller state per stream -1 lease, paths -2 |
+| The legacy crude pass-through of session-control frames, and the journal gate's per-Host `control` test | One path: every stream goes through the gate; a Host without `control` is refused 409 | paths -2 |
 | Client: `controlProofs`, `resumeControlToken`, `retainControlOnDisconnect`, `clientKind` sending, the `take_over` action, `ownerKind` display, `resumeToken` redaction (transport, ARDB) | Always `acquire`; no resume proof | client fields -5 |
 
 Added: one uplink capability, one registry instance or lease (per stream), one gate module, one lease handle and one owner field per stream, and the client recovery of 3.5. Each is named in section 3 and replaces the Controller round trip it makes unnecessary. Not added after review: `session_owners`, the owners map, its 1024 cap, the family fan-out, the Hosts-list `control` field, the operator switch.
@@ -136,53 +138,43 @@ Added: one uplink capability, one registry instance or lease (per stream), one g
 - `createJournalSessionStream` mutable fields: 19 today (phase, activityOnly, keyed, subscribed, hostReady, stale, hostState, hostStream, waitingForHost, controlRevision, held, heldControl, queued, activitySnapshot, activityCursor, lastActivity, lastStatus, lastActivityCursor, activityTimer). After: at most 16 (minus hostReady, waitingForHost, controlRevision and heldControl; plus the lease handle).
 - Its recovery and refusal paths: 7 (429 close, hopeless 4xx, offline wait, other refusal, `hostReturned` close, held-control rewrite, `restoring` to ready update) to at most 2: refuse held messages with the refusal; the Controller stream ended, so close as `hostEnded` does today.
 - `journal-session-stream.ts` ends shorter than its 530 lines today.
-- Production lines in `packages/` over the whole step (R1 and R2), tests excluded: net negative. At R1 alone: at most zero net. Tests fall by about 600 lines (the control parts of `journal-session-stream.test.ts` 563, `-amendments` 179, `broker-journal-sessions.test.ts` 401, and the control emulation in `test-utils/journal-session-fixture.ts`) and rise by the new suites; the plan only requires that the removed behaviour has no test left that asserts it.
+- Production lines in `packages/` over the whole step, tests excluded: net negative. Tests fall by about 600 lines (the control parts of `journal-session-stream.test.ts` 563, `-amendments` 179, `broker-journal-sessions.test.ts` 401, and the control emulation in `test-utils/journal-session-fixture.ts`) and rise by the new suites; the plan only requires that the removed behaviour has no test left that asserts it.
 - No new rate limit, pool, timer, cache or table. The one cap is the held messages: 32 and 1 MiB (unchanged).
 
-## 5. Version, upgrade order and compatibility window
+## 5. Version, upgrade order and what breaks
 
 ### 5.1 The change in one paragraph
 
-No session protocol bump (1.8.0 stays; `ProtocolVersionSchema` unchanged; no intermediate Controller releases). One negotiated capability, `control=1` offered by the Controller and acknowledged by the Relay. The uplink version stays 2. Fixtures, schemas, the uplink decoder and `compatibility.json` are updated together (`pnpm compatibility:update`, then `pnpm compatibility:check`). There is no operator switch: redeploying the previous Relay is the rollback, and updated Controllers fall back per connection.
+No session protocol bump (1.8.0 stays; `ProtocolVersionSchema` unchanged; no intermediate Controller releases). One capability, `control=1`, offered by the Controller and acknowledged by the Relay, required on both sides for sessions. The uplink version stays 2. Fixtures, schemas, the uplink decoder and `compatibility.json` are updated together (`pnpm compatibility:update`, then `pnpm compatibility:check`). There is no operator switch, no fallback and no mixed-version path.
 
-### 5.2 Who talks to whom during the window
+### 5.2 Who talks to whom
 
 | Pair | Result |
 |---|---|
-| Old Controller, new Relay (R1) | Registration, heartbeat, Hosts list and Controller update work as before. The Relay sees no offer and does not acknowledge. Crude sessions run exactly as today: the pass-through code is untouched and the Controller issues the leases. Journal-served reading is not offered for that Host: the journal gate requires `control`, so its sessions are served crude, and the smart-reading switch shows "Update the Controller". The five shims are gone from the Relay for every Host, because only acknowledged Hosts can be journal-served. |
-| New Controller, old Relay | The Relay does not acknowledge. The Controller attaches leases and checks tokens as today, and behaves as before. Verified by a test, not assumed. |
-| New Controller, new Relay | Relay-owned control, for crude and journal-served streams. |
-| Mixed Hosts on one Relay | Per Host: the acknowledgement is stored on the Host's connection state and never persisted. |
+| New Controller, new Relay | Relay-owned control, crude and journal-served. |
+| Old Controller, new Relay | Registration, heartbeat, the Hosts list and the Controller update request work. The Relay sees no offer and does not acknowledge. A session open answers 409 `controller_upgrade_required`. The Hosts page shows "Update required" with manual-update instructions. |
+| New Controller, old Relay | Management works. The Controller sees no acknowledgement, serves no sessions on that connection and shows "Update the Relay". Not supported beyond that. |
 
-### 5.3 Is a window with both paths needed, and how short?
+The update path is the only compatibility kept, and it is tested: an old Controller built from the commit before S5 registers on the new Relay, appears, and accepts an update request; a session open for it shows the "Update required" refusal.
 
-Yes, and only on the Relay's crude pass-through and the Controller's uplink-stream branch. Both are the code that exists today; the window adds no new code for old Controllers. **The window has no fixed length.** It lasts from the R1 deployment until the owner says that every Controller is updated; R2 lands only after that statement (the Hosts list shows each Controller's version). An update is one step, with no bridge, because the session protocol is unchanged.
+### 5.3 Deleted in this step
 
-Old paths are deleted in R2, a separate release after the owner confirms (design rule, runbook phase 2):
-- The Relay refuses a stream of a Host without `control` with 409 `controller_upgrade_required` and the "Update the Controller" message, and stops forwarding session-control frames. Registration and management stay.
-- The Controller's uplink streams drop the lease branch (the registry fallback stays only for direct-serve transports). A Controller whose `registered` has no `control` serves no sessions on that connection and shows "Update the Relay"; management stays.
-- The client's dead-field handling that survived for old pages is deleted.
+- The Relay's pass-through of Controller `session_control` frames, and the shims of section 2.
+- The Controller's lease branch on uplink streams and the registry fallback there (the registry stays for direct-serve transports).
+- The client's dead-field handling.
 - No Hosts-list field was added, so none is deleted.
 
 ### 5.4 Cloudflare and deploy order
 
 Control state is per connection and in memory in the `primary` Durable Object, which already owns every socket. S5 changes nothing the journal partitions Worker (`agent-remote-control-journals`) or the RPC contract between them (`journal-partition.contract.json`) sees, so no cross-Worker ordering is introduced. If a deployment has journals enabled, the standing rule applies and is a no-op here: partitions Worker first, then `primary`.
 
-Order (the runbook's phase 1, steps 5 to 8):
-1. Build from a clean reviewed commit; publish the Controller release (tag, manifest, tarball checksum) and verify the public bytes. The release's declared session protocol is 1.8.0, so the website offers it as an ordinary update to every Controller on 1.8.0.
-2. Deploy the `primary` Worker and the website together. The Relay acknowledges `control`; old Controllers keep working.
-3. Tell the owner: update every Controller (Hosts page, "Update Host" for each). The owner confirms each as it reconnects and shows the new version. Offline machines are not retired because they are offline. The owner says when every Controller is updated; R2 waits for that.
-4. After the owner confirms, R2 ships on the same order (Controller first, then the Relay). A Controller that is not updated by then keeps management and shows the reason.
+Order:
+1. Deploy the Relay: the `primary` Worker and the website together. Controllers that are not updated keep management and lose sessions from this moment.
+2. Build from a clean reviewed commit; publish the Controller release (tag, manifest, tarball checksum) and verify the public bytes. The release's declared session protocol is 1.8.0, so the website offers it as an ordinary update to every Controller on 1.8.0.
+3. The owner updates every Controller (Hosts page, "Update Host" for each; manual instructions for a machine that cannot). A Controller returns to service when it reconnects with the new version.
+4. `deploy/self-hosted/README.md` and `docs/self-hosted-deployment.md` say: upgrade the Relay first; never roll it back below this release once Controllers are updated.
 
-Rollback: redeploy the previous Relay; updated Controllers fall back per connection with no loss. A Controller rollback needs nothing on the Relay.
-
-### 5.5 R2 requires a Relay at R1 or later (owner decision, option b)
-
-**Decided by the owner.** R2 Controllers drop the registry fallback for uplink streams. A Controller whose `registered` carries no `control` serves no sessions on that connection and shows "Update the Relay"; management stays.
-- **Accepted consequence:** rolling the Relay back below R1, or running an older self-hosted Relay, stops sessions for every R2 Controller. Before R2 the rollback is still safe (redeploy the previous Relay; R1 Controllers fall back).
-- The R2 release notes and the Hosts page say "Relay R1 or later first".
-- `deploy/self-hosted` and `docs/self-hosted-deployment.md` are updated in R2: upgrade the Relay first and never roll it back below R1 once Controllers are on R2; the Relay-first order is added to the deploy steps.
-- **Machines that cannot update.** After R2 they can still register, appear in the Hosts list and be updated, but cannot open sessions. The Hosts page shows "Update required" on such a Host, with manual-update instructions (the existing installer and `controller-updates.md` steps for the Host's platform), and a session open for it answers 409 `controller_upgrade_required` with the same words. This message is part of Task 6 (client) and Task 11 (R2); it needs no new Hosts-list field, because the Relay knows the Host has no acknowledgement and the Hosts page already reads the Controller's version.
+There is no rollback to the previous Relay for updated Controllers; the owner accepts this. A Controller rollback needs nothing on the Relay, but a rolled-back Controller cannot open sessions.
 
 ## 6. Acceptance tests, over real transports
 
@@ -218,15 +210,15 @@ Each test runs a real hosted Relay in process (the existing broker with real Web
 - A read-only share recipient: `acquire` returns `read_only`, mutations are refused at the Relay, nothing reaches the uplink. The gate applies the same rule as the Relay's existing message admission; the test proves `session_control_request` is covered by it.
 - A revoked or expired session ends the socket and the lease with it.
 
-**G. Compatibility matrix** (section 5.2), including the old Controller built from the commit before S5 in a temporary worktree and run against the new Relay on a free port, and the new Controller against a Relay build before S5. Each row shows a send, a take-over and a reconnect. The existing crude and journal suites run unchanged for old Controllers: they must pass without edits.
+**G. Update path (the only compatibility kept).** An old Controller built from the commit before S5 in a temporary worktree runs against the new Relay on a free port: it registers, appears in the Hosts list, accepts a Controller update request, and a session open for it answers 409 `controller_upgrade_required` and the page shows "Update required" with manual-update instructions. A new Controller against a Relay without the acknowledgement serves no session and reports "Update the Relay".
 
-**H. Management.** Old and new Controllers register, heartbeat, appear in the Hosts list and accept a Controller update request on the new Relay (the runbook's "Old Controller, new Relay" row).
+**H. Management.** Registration, heartbeat, the Hosts list and the update request of a Controller without `control` on the new Relay (merged into G's old-Controller row if the harness is shared).
 
 **I. Contract.** Schema and fixture tests for the capability offer and the acknowledgement; replay fixtures and `pnpm compatibility:check`.
 
 ## 7. Measurement on `pnpm local` (T4 and T5, the part S5 can claim)
 
-T4 and T5 are completed in S6 with the queue. S5 owns the blockers that came from the Relay's own shims. The runner is `packages/agent-remote-lab/performance/local-baselines.mjs` with the latency proxy, at 1x, 4x CPU, 100 ms round trip and both, as in S4b; the control arm is this branch before S5, on this checkout's instance, journals on for Copilot (the S3 setup). The instance and its Controller come from `pnpm local up` (`.agents/skills/prepare-arc-local/SKILL.md`), with free ports.
+T4 and T5 are completed in S6 with the queue. S5 owns the blockers that came from the Relay's own shims. The runner is `packages/agent-remote-lab/performance/local-baselines.mjs` with the latency proxy, at 1x, 4x CPU, 100 ms round trip and both, as in S4b; the control arm is this branch before S5 (an old Controller and Relay build in a temporary worktree), on this checkout's instance, journals on for Copilot (the S3 setup). The instance and its Controller come from `pnpm local up` (`.agents/skills/prepare-arc-local/SKILL.md`), with free ports.
 
 | Counted condition (deterministic) | Target | Control |
 |---|---|---|
@@ -255,30 +247,27 @@ These wait for the next session-protocol bump, which needs the runbook's staged 
 
 **What S5 changes nearby.** The Controller-stream capacity refusals (`HOST_STREAM_LIMIT`, `USER_STREAM_LIMIT`, close code 4029) are a different 429. Journal-served views no longer hold a Controller stream until they send, so those refusals stop for them; the stream-preemption note in the roadmap (preemption cannot free a slot from a view that holds none) is partly met for journal-served views, and P3 finishes it.
 
-**Decision.** Keep the limit. A person cannot open 60 sessions in a minute, and a layout write is a real write. The queue (S6) must not submit operations by HTTP on this bucket: operations go over the session socket, or get a bucket of their own like drafts and reads. The runner is fixed instead (Task 8): it spaces fresh opens by more than the refill interval, and reads a 429 as a pause, not as a hang. **Follow-up outside S5:** move window writes (`POST windows/:id/operations`) to the ambient rate bucket, as drafts and read positions already are, so layout writes follow the user's actions and no longer use up the budget for control requests. Not part of this step.
+**Decision.** Keep the limit. A person cannot open 60 sessions in a minute, and a layout write is a real write. The queue (S6) must not submit operations by HTTP on this bucket: operations go over the session socket, or get a bucket of their own like drafts and reads. The runner is fixed instead (Task 7): it spaces fresh opens by more than the refill interval, and reads a 429 as a pause, not as a hang. **Follow-up outside S5:** move window writes (`POST windows/:id/operations`) to the ambient rate bucket, as drafts and read positions already are, so layout writes follow the user's actions and no longer use up the budget for control requests. Not part of this step.
 
 ## 10. Tasks
 
-Each task ends with its tests passing and, from Task 3 on, the existing suites unchanged and green. Run `pnpm compatibility:update` and then `pnpm compatibility:check` after Task 5. Work in the worktree `.worktrees/im-session-service`; use free ports; keep existing local services.
+Each task ends with its tests passing and the existing suites green. Run `pnpm compatibility:update` and then `pnpm compatibility:check` before each commit. Work in the worktree `.worktrees/im-session-service`; use free ports; keep existing local services. Each commit records its state accounting. Deletions land in the task that makes them possible; there is no later cleanup pass beyond Task 8's audit.
 
 1. **Contract.** `control` offer and acknowledgement (URL query, `registered`); decoder, fixtures and replay. Tests: schema, decoder, replay (section 6 I). State: +1 capability, no message, no list field.
-2. **The gate and the lease (Relay).** `stream-control.ts`; the per-stream lease with its owner field; refusal handling (re-read the owner through the open refusal); `session_control` answers. Unit tests with fakes, then the real-transport suites A and D against a scripted Controller.
-3. **Journal-served stream.** Use the gate; open the Controller stream lazily; one refusal rule; drop the five shims and the eager open; remove `hostReturned` through `JournalSessions` and the broker; require `control` in the journal gate and the smart-reading switch. Tests: A, B, C, E; delete the tests that assert removed behaviour.
-4. **Crude path.** The same gate in the pass-through for acknowledged Hosts (`negotiated` rewrite, drop of Controller `session_control`, token check before forwarding); unacknowledged Hosts keep today's pass-through untouched. Tests: A and D for crude; G for the legacy rows with the pre-S5 Controller.
-5. **Controller.** Offer `control=1`; no lease on uplink streams after the acknowledgement; the native-owner check at delivery replaces the token check, and the dispatch check of I5 (section 3.6) uses the Controller stream's own open state; legacy branch kept. Tests: D with a real fake provider (zero native calls on a raced mutation), the `next_turn` revocation test, G.
-6. **Client.** Stop sending the dead fields; always `acquire`; remove `controlProofs`, `resumeControlToken`, `retainControlOnDisconnect`, the `ownerKind` string and the `resumeToken` redactions. Plus the Hosts-page "Update required" state with manual-update instructions for a Host whose Controller has no `control` acknowledgement (shown from R1 where smart reading is requested, for every such Host from R2), and the draft-kept recovery of 3.5: budget about 80 lines in `agent-remote-web` and `agent-remote-lab`, no new state beyond one flag per composer send. Tests: web and lab suites; component and real-transport tests that the text stays in the composer after a refused send; that "Take over" is offered for `native_session_owned` and "Send when back" for `host_offline` (also when the Host fact lags); the same client suite runs against crude and journal-served Hosts.
-7. **Acceptance and compatibility suite.** Sections 6 F, G, H over real transports, including the pre-S5 Controller and Relay builds.
-8. **Measurement.** `pnpm local up`; the runner's S4b pacing fix; section 7 at 1x, 4x CPU, 100 ms and both against the control arm; plus a Host offline-and-return scenario (stop and restart the Controller with views open: labels, closes, first send afterwards) and a Relay-side count of Controller streams opened before the first send (target 0 on journal-served views; read from the Host's stream table through the Relay's diagnostics); record results.
-9. **Deletion task (rule 7).** Delete what Tasks 3 to 6 made unnecessary, and record the measured accounting: `PENDING_CONTROL_REVISION`, `CAPACITY_CLOSE_REASON`, `RESTORING_REASON`, `hostReturned` (three places), the control emulation in `test-utils/journal-session-fixture.ts` and its tests, client dead-field code. Check the budgets of section 4. Also look for anything else the step made unnecessary: the eager-open comments in `broker.ts` (`acceptJournalServed`), the `recoverForJournalStream` call at negotiation, the roadmap note on stream preemption for journal-served views. List what remains and why.
-10. **Owner gate, then wait for the owner's go for R2.** Update the roadmap (S5 row, progress), the design's compatibility paragraph, and the runbook (a "negotiated session control" paragraph, as for Team recipients). Tell the owner to update every Controller. Do nothing further until the owner says every Controller is updated; that statement is the go for R2. There is no time limit.
-11. **R2: delete the old path.** After the owner's go: the Relay refuses streams of Hosts without `control` with 409 `controller_upgrade_required`; the Controller's uplink streams drop the lease branch; the Hosts page "Update required" state with manual-update instructions; release notes and `deploy/self-hosted` documentation ("Relay R1 or later first"); records updated. It has its own review, its own deploy and the same acceptance suites minus the legacy rows, plus a row that proves an old Controller can still register, appear and be updated, and a row that shows "Update required".
+2. **The gate and the lease (Relay).** `stream-control.ts`; the per-stream lease with its owner field; refusal handling (re-read the owner through the open refusal); `session_control` answers; the 409 `controller_upgrade_required` refusal for a Host without `control`. Unit tests with fakes, then the real-transport suites A and D against a scripted Controller.
+3. **Relay streams.** Journal-served: use the gate, open the Controller stream lazily, one refusal rule, drop the five shims and the eager open, remove `hostReturned` through `JournalSessions` and the broker, delete `PENDING_CONTROL_REVISION`, `CAPACITY_CLOSE_REASON`, `RESTORING_REASON`, the eager-open comments in `broker.ts` and the `recoverForJournalStream` call at negotiation. Crude: the same gate in the pass-through (`negotiated` rewrite, drop of Controller `session_control`, token check before forwarding); the legacy pass-through is deleted. Tests: A, B, C, E, D for crude; delete the tests and the control emulation in `test-utils/journal-session-fixture.ts` that assert removed behaviour.
+4. **Controller.** Offer `control=1`; no lease on uplink streams; delete the registry fallback and the lease branch of the uplink stream; "Update the Relay" when there is no acknowledgement; the native-owner check at delivery replaces the token check, and the dispatch check of section 3.6 uses the Controller stream's own open state. Tests: D with a real fake provider (zero native calls on a raced mutation), the `next_turn` revocation test.
+5. **Client.** Stop sending the dead fields; always `acquire`; remove `controlProofs`, `resumeControlToken`, `retainControlOnDisconnect`, the `ownerKind` string and the `resumeToken` redactions. The Hosts-page "Update required" state with manual-update instructions for a Host whose Controller has no `control` acknowledgement, and the draft-kept recovery of 3.5: budget about 80 lines in `agent-remote-web` and `agent-remote-lab`, no new state beyond one flag per composer send. Tests: web and lab suites; component and real-transport tests that the text stays in the composer after a refused send; that "Take over" is offered for `native_session_owned` and "Send when back" for `host_offline` (also when the Host fact lags); the same client suite runs against crude and journal-served Hosts.
+6. **Acceptance and update-path suite.** Sections 6 F, G, H over real transports, including the pre-S5 Controller build; `deploy/self-hosted` and `docs/self-hosted-deployment.md` (Relay first, no rollback below this release); the runbook's "negotiated session control" paragraph, the design's compatibility paragraph, the roadmap.
+7. **Measurement.** `pnpm local up`; the runner's S4b pacing fix; section 7 at 1x, 4x CPU, 100 ms and both against the control arm; plus a Host offline-and-return scenario and a Relay-side count of Controller streams opened before the first send (target 0 on journal-served views); record results.
+8. **Audit (rule 7).** Measure the accounting and the budgets of section 4 against the tree; look for anything else the step made unnecessary (the roadmap note on stream preemption for journal-served views); list what remains and why. Section 12 is filled in.
 
 ## 11. Open questions, and decisions made
 
 **Decided by the owner (2026-11-17).**
-1. The transition window has no fixed length; R2 lands only after the owner says every Controller is updated.
-2. R2 requires a Relay at R1 or later (5.5, option b); rolling the Relay back below R1 after R2, or an old self-hosted Relay, stops sessions. Accepted.
-3. Machines that cannot update can still register after R2 but cannot open sessions; the Hosts page shows "Update required" with manual-update instructions (Tasks 6 and 11).
+1. The transition window is removed: "compatibility may be compromised; I will update every Controller before continuing". One end state, no dual paths, no registry fallback, no mixed-version matrix.
+2. The update path is the only compatibility kept: an old Controller can register and be updated from the Hosts page; it cannot open sessions until updated, and the Hosts page shows "Update required" with manual-update instructions.
+3. The Relay must be at this release first; `deploy/self-hosted` says so. Rolling the Relay back below it, or running an older self-hosted Relay, stops sessions of updated Controllers. Accepted.
 
 **No open questions remain for the owner.**
 

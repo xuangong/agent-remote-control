@@ -15,9 +15,9 @@ export function gatewayServiceProof(auth: GatewayAuthOptions, operation: string,
     .map(part => Buffer.from(JSON.stringify(part)).toString('base64url')).join('.');
   return input + '.' + createHmac('sha256', auth.secret).update(input).digest('base64url');
 }
-export async function queryGatewayAuthority(auth: GatewayAuthOptions, operation: 'renew' | 'user-status', value: { continuation: string } | { subject: string }, observe?: (diagnostic: AuthorityDiagnostic) => void): Promise<AuthorityResult> {
+export async function queryGatewayAuthority(auth: GatewayAuthOptions, operation: 'renew' | 'user-status', value: { continuation: string } | { subject: string }, observe?: (diagnostic: AuthorityDiagnostic) => void, deadlineMs = 5000): Promise<AuthorityResult> {
   const body = JSON.stringify(value); const proof = gatewayServiceProof(auth, operation, body);
-  const started = Date.now(), signal = AbortSignal.timeout(5000);
+  const started = Date.now(), signal = AbortSignal.timeout(deadlineMs);
   let status: number | undefined;
   const done = (result: AuthorityResult, reason: AuthorityDiagnostic['reason']): AuthorityResult => {
     try { observe?.({ reason, ...(status === undefined ? {} : { status }), durationMs: Math.max(0, Date.now() - started) }); }

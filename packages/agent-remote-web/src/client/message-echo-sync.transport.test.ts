@@ -68,13 +68,16 @@ it.each([false, true])('recovers an omitted live echo through HTTP without recon
   const client = new RemoteSessionClient('one', transport, replica);
   const statuses: string[] = [];
   const unsubscribe = client.subscribeStatus(status => statuses.push(status));
+  // The client's echo wait runs on a fake clock; the sockets and HTTP stay real.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     client.start();
     await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'), { timeout: 2000, interval: 10 });
     statuses.length = 0;
     await client.sendMessage('Recover my message');
     expect(replica.getState().outgoingMessages).toMatchObject([{ status: 'awaiting_echo' }]);
-    await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]), { timeout: 12_000, interval: 25 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.waitFor(() => expect(replica.getState().outgoingMessages).toEqual([]), { timeout: 2000, interval: 10 });
     expect(replica.getState().timeline.entries[0]?.item).toMatchObject({ type: 'user_message', text: submittedText });
     expect(reads).toHaveLength(1);
     expect(reads[0]?.searchParams.get('direction')).toBe('after');
@@ -83,6 +86,7 @@ it.each([false, true])('recovers an omitted live echo through HTTP without recon
     expect(connections).toBe(1);
     expect(statuses).toEqual([]);
   } finally {
+    vi.useRealTimers();
     unsubscribe(); client.stop(); transport.dispose();
     for (const socket of sockets.clients) socket.terminate();
     await new Promise<void>(resolve => sockets.close(() => resolve()));

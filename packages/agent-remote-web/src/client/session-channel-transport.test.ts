@@ -277,8 +277,13 @@ describe('session channel transport', () => {
 
   it('falls back for an unanswered ready handshake without disabling multiplexing for later sessions', async () => {
     const harness = await server(false);
+    // The ten-second handshake deadline runs on a fake clock; the sockets stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'agent one');
-    await vi.waitFor(() => expect(harness.frames).toHaveLength(1), { timeout: 12000 });
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    await vi.advanceTimersByTimeAsync(10_000);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     expect(harness.urls).toEqual(['/base/v1/session-channel?observation=session&migrations=1&titles=1&preemption=1', '/base/v1/sessions/agent%20one/events']);
     expect(harness.frames[0]!.frame).toEqual(negotiate);
     expect(a.opened).toHaveBeenCalledOnce();
@@ -577,6 +582,7 @@ describe('session channel transport', () => {
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
     cleanups.push(() => vi.unstubAllGlobals());
     const harness = await server();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
     const activity = connect(harness.transport, 'a', true);
     await vi.waitFor(() => expect(harness.frames).toHaveLength(2));
@@ -592,7 +598,7 @@ describe('session channel transport', () => {
     browserWindow.dispatchEvent(new Event('online'));
     now.mockRestore();
     await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(2));
-    await new Promise(resolve => setTimeout(resolve, 1200));
+    await vi.advanceTimersByTimeAsync(1200);
     expect(a.disconnect).not.toHaveBeenCalled(); expect(activity.disconnect).not.toHaveBeenCalled();
     expect(harness.sockets).toHaveLength(2);
     harness.transport.dispose();
@@ -605,7 +611,8 @@ describe('session channel transport', () => {
     vi.stubGlobal('window', browserWindow);
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
     cleanups.push(() => vi.unstubAllGlobals());
-    const harness = await server(); const a = connect(harness.transport, 'a');
+    const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
+    const a = connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     let pongTimer: ReturnType<typeof setTimeout> | undefined;
     cleanups.push(() => clearTimeout(pongTimer));
@@ -616,7 +623,8 @@ describe('session channel transport', () => {
     });
     const resumedAt = performance.now();
     browserWindow.dispatchEvent(new Event('online'));
-    await new Promise(resolve => setTimeout(resolve, 1700));
+    await vi.advanceTimersByTimeAsync(1700);
+    await new Promise(resolve => setImmediate(resolve));
     console.info('Delayed foreground pong', { delayMs: 1500, elapsedMs: Math.round(performance.now() - resumedAt), disconnects: a.disconnect.mock.calls.length });
     expect(a.disconnect).not.toHaveBeenCalled();
     expect(harness.sockets).toHaveLength(1);
@@ -624,10 +632,11 @@ describe('session channel transport', () => {
   });
 
   it('keeps multiplexing when the first channel ready frame takes 3500 ms to arrive', async () => {
-    const harness = await server(false); const a = connect(harness.transport, 'a');
+    const harness = await server(false); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
+    const a = connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const openedAt = performance.now();
-    await new Promise(resolve => setTimeout(resolve, 3500));
+    await vi.advanceTimersByTimeAsync(3500);
     harness.sockets[0]!.send(JSON.stringify({ protocolVersion: version, type: 'ready' }));
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     console.info('Delayed channel readiness', { delayMs: 3500, elapsedMs: Math.round(performance.now() - openedAt), sockets: harness.sockets.length });
@@ -641,11 +650,13 @@ describe('session channel transport', () => {
     vi.stubGlobal('window', browserWindow);
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
     cleanups.push(() => vi.unstubAllGlobals());
-    const harness = await server(); const a = connect(harness.transport, 'a');
+    const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
+    const a = connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
     browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(a.disconnect).toHaveBeenCalledTimes(1), {timeout: 5500});
+    await vi.advanceTimersByTimeAsync(5500);
+    expect(a.disconnect).toHaveBeenCalledTimes(1);
     browserWindow.dispatchEvent(new Event('online'));
     expect(a.disconnect).toHaveBeenCalledTimes(1);
   });

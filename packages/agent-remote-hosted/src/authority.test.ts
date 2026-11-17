@@ -56,7 +56,7 @@ it.each([[503, 'authority_http_error'], [403, 'access_revoked'], [200, 'authorit
       const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing listener');
       const diagnostics: unknown[] = [];
       await queryGatewayAuthority({ origin: 'https://relay.example', issuer: `http://127.0.0.1:${address.port}`, secret: 'authority-safe-metadata-secret-0123456789' },
-        'user-status', { subject: 'private-user' }, value => diagnostics.push(value));
+        'user-status', { subject: 'private-user' }, value => diagnostics.push(value), 50);
       expect(diagnostics).toEqual([{ reason, status, durationMs: expect.any(Number) }]);
       expect(JSON.stringify(diagnostics)).not.toMatch(/private|secret/);
     } finally {

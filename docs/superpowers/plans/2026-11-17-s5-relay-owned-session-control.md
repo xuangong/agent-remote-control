@@ -283,4 +283,53 @@ Each task ends with its tests passing and the existing suites green. Run `pnpm c
 
 ## 12. Results
 
-To be filled in after Tasks 7 and 8: measured accounting, T4 and T5 counts, update-path evidence, suites run.
+Recorded 2026-11-17. Production code is that of the commit named in each row; the instance ran `85687621` for the S5 arm and `5e7383ae` (the plan commit, whose code is the code before S5) for the control arm, with journals on and smart reading on for Copilot (Apple M4, Chromium, Node 22).
+
+**Commits.** The plan was revised first (three docs commits). Tasks 2, 3 and 4 landed in one commit, because the contract flips on both sides at once and neither side is green alone.
+
+| Task | State accounting |
+|---|---|
+| 1 Contract | fields +1 (`Host.control`, per connection), paths +1 (a Controller refuses streams without the acknowledgement); +1 capability, no message |
+| 2 to 4 Gate, streams, Controller | the journal-served stream 19 to 15 mutable fields plus one control handle; 7 recovery and refusal paths to 2; the Controller's lease branch and registry fallback on uplink streams deleted; +1 Hosts-list field `sessionControl` |
+| 5 Client | client fields -5; +1 composer flag; no new schema field |
+| 6 Update path | tests and docs |
+| simplify | the gate's lease object removed; the registry's request takes the revision alone |
+
+**Budgets.**
+- Stream mutable fields: 15 plus the control handle, at most 16. Met.
+- Recovery and refusal paths: 2 (`openFailed`, and the accepted Controller stream's end). Met.
+- Client fields: -5. Met.
+- `journal-session-stream.ts`: 530 to 480 lines. Met.
+- Production lines over the step: +272 -188, **net +84. Not met.** The gate (`stream-control.ts`, about 100 lines) and the Controller's owner check are new; the shims it replaces were 108 lines in the stream and 14 in `journal-sessions.ts`. Tests: +1213 -419.
+
+**Departures from the plan.**
+- The Hosts list carries `sessionControl: true`, which the plan said it would not. The Hosts page needs the Relay's own fact to say "Update required".
+- Opening the Controller stream is two-state (`accepted`): a stream the Controller closes before accepting is a refusal at open, not a close of the browser stream, because the Relay's attach is cached per connection and the Controller refuses the open without naming the owner on the wire.
+- A take-over acquires at once, as planned, and the client then opens a new stream: the Controller session of a stream whose session a terminal took is closed. A journal-served stream also drops its Controller stream when its grant is revoked (3.6); a crude stream cannot, so the new stream is the client's.
+- "Send when back" after a refused send is offered for Hosts whose Controller delivers from the outbox; for other Hosts the composer shows the refusal text.
+- The old Controller of the update-path test is emulated on the wire (registers without the offer, answers heartbeats and update requests), not built from the pre-S5 commit.
+- The Host offline-and-return case is covered over real transports (suite C), not on the instance: `pnpm local` has no command that stops only the Controller. A terminal-owned session is covered the same way: its lease lives under `~/.copilot`, which the instance rules forbid touching.
+
+**T4 and T5 on the instance** (journal-served Copilot session, one context per condition; 30 opens at 1x and 10 at the others; 3 pages of two sends each; p50 / p95 in ms):
+
+| Condition | Arm | Opens naming Restoring / Checking access | Controller streams opened by a view before it sent | Socket `negotiated` to control granted | First send: shown as sending / acknowledged (p95) | Second send (p95) |
+|---|---|---|---|---|---|---|
+| 1x, 0 ms | control | 0 / 0 | 30 of 30 | 18 / 19 | 32 / 34 | 37 / 37 |
+| 1x, 0 ms | S5 | 0 / 0 | **0 of 30** | 17 / 19 | 41 / 41 | 46 / 47 |
+| 4x CPU, 0 ms | control | 0 / 0 | 10 of 10 | 36 / 39 | 125 / 125 | 103 / 104 |
+| 4x CPU, 0 ms | S5 | 0 / 0 | **0 of 10** | 32 / 40 | 120 / 121 | 107 / 108 |
+| 1x, 100 ms | control | 1 / 0 | 10 of 10 | 254 / 262 | 154 / 154 | 146 / 146 |
+| 1x, 100 ms | S5 | 0 / 0 | **0 of 10** | 107 / 111 | 130 / 130 | 140 / 141 |
+| 4x CPU, 100 ms | control | 1 / 0 | 10 of 10 | 140 / 140 | 233 / 234 | 202 / 204 |
+| 4x CPU, 100 ms | S5 | 0 / 0 | **0 of 10** | 208 / 226 | 190 / 192 | 171 / 173 |
+
+- Streams are the Relay's `stream_opening` diagnostics inside each open; the S5 arm opened one Controller stream per first send (3 per condition).
+- Control is granted in one Relay round trip with no Controller frame in between: 107 ms at 100 ms round trip, against 254 ms before. At 4x CPU and 100 ms the figure is dominated by the throttled page (208 against 140 for the control arm, n=10, one run each).
+- A send is shown as sending within 100 ms at 1x. At 4x CPU it takes 116 to 125 ms for a first send and 101 to 108 ms for a resident one in both arms: that is the throttled page, not a Controller stream (S5 and control differ by less than the noise). The 100 ms target at 4x CPU is not met by 16 to 25 ms.
+- Every send was acknowledged by the Controller within 1 s (the largest value is 234 ms). The stream-open time of the first send shows as the difference between its acknowledgement and the second send's: 0 to 20 ms.
+- The control arm showed "Restoring" in one open of each 100 ms condition; the S5 arm in none of 60.
+- The page shows its composer from the device store before `negotiated` arrives, so "negotiated to composer" is negative in both arms; the grant time is the figure that matters.
+
+**Update-path evidence.** `relay-session-control.test.ts` ("a Controller from before session control moved to the Relay"): registers without the offer, appears in the Hosts list without `sessionControl`, answers the update request, and `attach` answers 409 `controller_upgrade_required` with "Update required" words. `remote-host-session-control.test.ts`: a Controller whose Relay does not acknowledge opens no stream (`Update the Relay to open sessions.`). `HostOverview.test.tsx`: the "Update required" card with the manual steps, and the recipient's note.
+
+**Suites.** Root `pnpm test` (all packages, Node 22): 9277 tests passed and one failed: an `App.succession.test.tsx` test (page-resume read counts, no control code on its path) that passes in 3 of 4 repeats; the lab suite run again passes whole (2839). `pnpm test:conformance`: 31 passed. Cloudflare: 239 passed. `pnpm test:preview-browser`: the first run had one webkit lifecycle test fail on a `/v1/remote/hosts` console error (3 of 3 repeats pass); the second run passes whole (73 tests), including the new `session-control-refusals.browser.ts`. The known `claude-side-prompt-edit.local.test.ts` failure is not in these suites.

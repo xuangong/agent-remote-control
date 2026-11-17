@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
-import { startDshAgentRemote } from '../../../agent-remote-dsh/src/agent-remote.js';
+import { startDshAgentRemote } from '@orchardworks/dsh/host';
 import { createRemoteHostBroker } from './remote-host-broker.js';
 
 const cleanup: Array<() => Promise<void>> = [];

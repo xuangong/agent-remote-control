@@ -40,6 +40,7 @@
     "@types/node": "24.13.3",
     "typescript": "5.9.3",
     "vitest": "4.1.11",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.1",
+    "@orchardworks/agent-remote-protocol": "workspace:*"
   }
 }

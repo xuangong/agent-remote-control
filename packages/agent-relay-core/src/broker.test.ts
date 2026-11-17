@@ -1,4 +1,4 @@
-import { AgentRuntimeError } from '../../agent-provider-sdk/dist/index.js';
+import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
 import { afterEach, expect, it } from 'vitest';
 import { freeze } from 'immer';
 import { acceptSessionChannel, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';

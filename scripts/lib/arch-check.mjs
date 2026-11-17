@@ -143,11 +143,10 @@ export function analyze({ root, config }) {
       const targetModule = target && assigned.get(target);
       if (!targetModule || targetModule === module) continue;
       if (testFile) continue;
-      for (const edge of config.edges ?? []) {
-        if (matchesAny(module.name, edge.from) && matchesAny(targetModule.name, edge.to) && !matchesAny(file, edge.exceptFiles ?? [])) {
-          record(edge.id, file, specifier, `${module.name} imports ${targetModule.name} (rule ${edge.rule})`, targetModule.name);
-        }
-      }
+      // An edge names the rule more precisely than the layer table, so the import is reported once, under the edge.
+      const forbidden = (config.edges ?? []).filter(edge => matchesAny(module.name, edge.from) && matchesAny(targetModule.name, edge.to) && !matchesAny(file, edge.exceptFiles ?? []));
+      for (const edge of forbidden) record(edge.id, file, specifier, `${module.name} imports ${targetModule.name} (rule ${edge.rule})`, targetModule.name);
+      if (forbidden.length > 0) continue;
       if (targetModule.layer === TEST_SUPPORT_LAYER) record('test-support-in-production', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);
       else if (targetModule.layer > module.layer && module.layer < 4) record('layer', file, specifier, `${module.name} (layer ${module.layer}) imports ${targetModule.name} (layer ${targetModule.layer})`, targetModule.name);
       else if (module.layer === 3 && targetModule.layer === 3 && packageOf(file) !== packageOf(target)) record('adapter-imports-adapter', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);

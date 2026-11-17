@@ -1,7 +1,7 @@
 import { showNewSession } from './session-navigation';
 import { expect, test } from '@playwright/test';
 import { createAgentHost, createClaudeSessionDirectory } from '@orchardworks/agent-remote-controller';
-import { ClaudeAgentProvider } from '../../agent-provider-claude/dist/index.js';
+import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 
 test('uses Claude settings, plan review, skills and a read-only native child through the Host', async ({ page, request }, testInfo) => {
   const relayUrl = `http://127.0.0.1:${process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910}`;

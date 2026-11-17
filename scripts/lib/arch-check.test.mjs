@@ -184,16 +184,17 @@ test('rule 5: adapters never import each other and import no application code', 
 
 test('rule 6: the Relay does not know the Controller, the client or a provider', () => {
   for (const target of ['controller', 'client', 'provider-a']) {
-    assert.deepEqual(kindsOf(one('packages/relay/src/index.ts', `import { x } from '@sample/${target}';\nexport const relay = x;\n`)), { 'relay-knows-controller': 1, ...(target === 'provider-a' ? { layer: 1 } : {}) }, target);
+    assert.deepEqual(kindsOf(one('packages/relay/src/index.ts', `import { x } from '@sample/${target}';\nexport const relay = x;\n`)), { 'relay-knows-controller': 1 }, target);
   }
 });
 
 test('rule 7: the Controller does not know the Relay, and names a concrete provider only in providers.ts', () => {
   assert.deepEqual(kindsOf(one('packages/controller/src/index.ts', "import { relay } from '@sample/relay';\nexport const controller = relay;\n")), { 'controller-knows-relay': 1 });
   const stray = one('packages/controller/src/index.ts', "import { providerA } from '@sample/provider-a';\nexport const controller = providerA;\n");
-  assert.deepEqual(kindsOf(stray), { 'controller-concrete-provider': 1, layer: 1 });
+  assert.deepEqual(kindsOf(stray), { 'controller-concrete-provider': 1 });
   const root = one('packages/controller/src/providers.ts', "import { providerA } from '@sample/provider-a';\nexport const providers = [providerA];\n");
   assert.deepEqual(kindsOf(root), { layer: 1 });
+  // Layer 3 may not be imported from layer 2 even in the one file allowed to name a provider; the exception is the edge, not the layer table.
 });
 
 test('rule 8: the client does not know the Relay or the Controller and imports no React, DOM or IndexedDB', () => {

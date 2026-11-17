@@ -9,9 +9,53 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "import": "./dist/*.js"
+    "./access-page": {
+      "types": "./dist/access-page.d.ts",
+      "import": "./dist/access-page.js"
+    },
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "import": "./dist/auth.js"
+    },
+    "./authority": {
+      "types": "./dist/authority.d.ts",
+      "import": "./dist/authority.js"
+    },
+    "./control": {
+      "types": "./dist/control.d.ts",
+      "import": "./dist/control.js"
+    },
+    "./diagnostic-journal": {
+      "types": "./dist/diagnostic-journal.d.ts",
+      "import": "./dist/diagnostic-journal.js"
+    },
+    "./favorites": {
+      "types": "./dist/favorites.d.ts",
+      "import": "./dist/favorites.js"
+    },
+    "./host-recovery": {
+      "types": "./dist/host-recovery.d.ts",
+      "import": "./dist/host-recovery.js"
+    },
+    "./journal-uplink": {
+      "types": "./dist/journal-uplink.d.ts",
+      "import": "./dist/journal-uplink.js"
+    },
+    "./request": {
+      "types": "./dist/request.d.ts",
+      "import": "./dist/request.js"
+    },
+    "./sessions": {
+      "types": "./dist/sessions.d.ts",
+      "import": "./dist/sessions.js"
+    },
+    "./state": {
+      "types": "./dist/state.d.ts",
+      "import": "./dist/state.js"
+    },
+    "./succession-capacity": {
+      "types": "./dist/succession-capacity.d.ts",
+      "import": "./dist/succession-capacity.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -37,6 +81,7 @@
     "@types/node": "^24.3.0",
     "typescript": "^5.7.0",
     "vitest": "4.1.11",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@orchardworks/agent-provider-sdk": "workspace:*"
   }
 }

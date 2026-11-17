@@ -1,6 +1,6 @@
 import { once } from 'node:events';
 
-import { decodeServerMessage, PROTOCOL_VERSION } from '../../agent-remote-protocol/src/index.js';
+import { decodeServerMessage, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { CodexAppServerSession } from './session.js';

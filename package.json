@@ -14,7 +14,7 @@
     "typecheck": "pnpm -r run typecheck",
     "test": "node scripts/run-tests.mjs unit",
     "test:local": "node scripts/run-tests.mjs local",
-    "verify": "pnpm compatibility:check && pnpm -r run build && pnpm typecheck && pnpm test",
+    "verify": "pnpm compatibility:check && pnpm arch:check && pnpm -r run build && pnpm typecheck && pnpm test",
     "verify:changed": "sh scripts/verify-changed.sh",
     "task:start": "sh scripts/task-start.sh",
     "test:unit": "node scripts/run-tests.mjs unit-package",

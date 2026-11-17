@@ -24,7 +24,7 @@ beforeAll(async () => {
     import { AgentActivityStatus } from '../../agent-remote-web/src/react/AgentActivityStatus.tsx';
     import { remoteSessionState } from '../../agent-remote-web/src/client/session-state.ts';
     import { AgentReplica } from '../../agent-remote-web/src/replica/store.ts';
-    import { deviceStore } from '../../agent-remote-web/src/device-store.ts';
+    import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
     import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '../../agent-remote-web/src/session-record.ts';
 
     const scope = 'https://relay.example/u/alice/';

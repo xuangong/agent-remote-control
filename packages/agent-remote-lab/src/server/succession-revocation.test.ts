@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, expect, test } from 'vitest';
-import { createRelayState, emptyRelayState, validateRelayState, stageRelayState, type HostedRelayState } from '../../../agent-relay-core/src/state.js';
+import { createRelayState, emptyRelayState, validateRelayState, stageRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core/state';
 import type { RemoteHostBrokerState } from '../../../agent-relay-core/src/broker.js';
-import { MAX_RETAINED_HOST_IDENTITIES } from '../../../agent-relay-core/src/host-recovery.js';
+import { MAX_RETAINED_HOST_IDENTITIES } from '@orchardworks/agent-relay-core/host-recovery';
 import { createRemoteHostBroker } from './remote-host-broker.js';
 
 const origin = 'http://127.0.0.1:6175';

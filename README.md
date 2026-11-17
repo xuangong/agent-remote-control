@@ -874,14 +874,19 @@ The root test runner probes each selected native executable with a five-second `
 | --- | --- |
 | `agent-provider-sdk` | Native-independent session and observation contract. |
 | `agent-provider-dsh`, `agent-provider-codex` | Native provider interpretation and runtime adapters. |
-| `agent-remote-protocol` | Public schemas, codecs, versioned uplink envelopes, and contract fixtures. |
-| `agent-session-runtime` | Session execution, ordered public state, transport, and uplink clients. |
+| `agent-remote-protocol` | Public schemas, codecs, versioned uplink envelopes, shared model types (`./model`), and contract fixtures. |
+| `agent-timeline` | Canonical timeline rows, item identity and projection of rows to timeline entries. |
+| `agent-session-runtime` | The Controller's session execution, ordered public state, transport, and uplink clients. |
+| `agent-relay-core` | The Relay: brokering, account state, journals' fan-out, gateway and the HTTP and socket edge. |
+| `@orchardworks/agent-remote-controller` (`packages/agent-controller`) | The Controller: session core, publisher, native owner and the process shell. |
 | `agent-remote-web` | Browser transport, recovery, replica, and reusable React DOM rendering. |
 | `agent-remote-debugger` | Headless Session View protocol/state debugging and scripted regression through `ardb`. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |
 | `@orchardworks/agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |
 
 All workspace packages use the `@orchardworks` scope. The standalone DSH runtime uses `@orchardworks/dsh`; its installable profile bundle is `@orchardworks/dsh-host`.
+
+Layers and import rules are in the [target architecture](docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md); `pnpm arch:check` enforces them against `architecture/modules.json` and `architecture/exceptions.json`.
 
 See the [product design](docs/blueprint/agent-remote-observation.md), [architecture map](docs/current/agent-remote/README.md), and [source and license notices](NOTICE.md).
 

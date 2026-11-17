@@ -7,6 +7,7 @@ Write code, comments, and documentation in English. Respond to the user in Chine
 - The standalone workbench has no account system. Pairing keys are temporary and process-local. Never add hidden dependencies on Borgee services, source paths, workspace packages, or user credentials.
 - Keep protocol fixtures, replay behavior, public schemas, and compatibility metadata synchronized with contract changes.
 - Run `pnpm compatibility:update` after reviewed implementation changes, then verify `pnpm compatibility:check`.
+- `pnpm arch:check` is blocking and enforces the layer rules of `docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md` section 1.2 against `architecture/modules.json`. Every source file belongs to a module. A violation that cannot be fixed yet is listed in `architecture/exceptions.json` with the migration step (M3 to M14) that removes it; fix, never add, and lower an entry's `max` when you fix one.
 - Use per-test and outer process deadlines for every test run. Root test commands already enforce both.
 - Test observable behavior rather than source text. Use real transports for changes to protocol, pairing, or reconnect behavior.
 - Preserve existing local services and untracked user material. Use configurable free ports for local validation.

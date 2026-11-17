@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Draft module map for pnpm arch:report. Each source and test file under packages belongs to the module whose most specific path matches it. Modules are named by their target role (docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md, section 3) and placed where the code lives today. Layers: 0 contracts, 1 domain, 2 application, 3 adapters, 4 apps, 5 test support (may import any layer).",
+  "description": "Module map for pnpm arch:check. Each source and test file under packages belongs to the module whose most specific path matches it. Modules are named by their target role (docs/superpowers/specs/2026-11-18-target-architecture-and-tests.md, section 3) and placed where the code lives today. Layers: 0 contracts, 1 domain, 2 application, 3 adapters, 4 apps, 5 test support (may import any layer). `edges`, `bans` and `roots` encode rules 3 and 5 to 10 of section 1.2; the others are structural. Violations that cannot be fixed yet are listed in architecture/exceptions.json with the step that removes them.",
   "scan": [
     "packages/*/src/**",
     "packages/*/test/**",
@@ -302,7 +302,7 @@
     },
     {
       "name": "relay-core-edge",
-      "layer": 3,
+      "layer": 2,
       "paths": [
         "packages/agent-relay-core/src/gateway*.ts",
         "packages/agent-relay-core/src/auth*.ts",
@@ -461,7 +461,8 @@
       "name": "provider-codex",
       "layer": 3,
       "paths": [
-        "packages/agent-provider-codex/src/**"
+        "packages/agent-provider-codex/src/**",
+        "packages/codex-daemon-client/src/**"
       ],
       "seams": [
         "S1"
@@ -514,16 +515,6 @@
       "invariants": [
         "item-key-stability"
       ]
-    },
-    {
-      "name": "codex-daemon-client",
-      "layer": 3,
-      "paths": [
-        "packages/codex-daemon-client/src/**"
-      ],
-      "seams": [],
-      "flows": [],
-      "invariants": []
     },
     {
       "name": "relay-cloudflare",
@@ -622,12 +613,24 @@
     },
     {
       "name": "tunnel",
-      "layer": 3,
+      "layer": 2,
       "paths": [
         "packages/agent-remote-tunnel/src/**"
       ],
       "seams": [],
       "flows": [],
+      "invariants": []
+    },
+    {
+      "name": "tunnel-node",
+      "layer": 3,
+      "paths": [
+        "packages/agent-remote-tunnel/src/node/**"
+      ],
+      "seams": [],
+      "flows": [
+        "E8"
+      ],
       "invariants": []
     },
     {
@@ -652,13 +655,177 @@
     },
     {
       "name": "dsh-plugin",
-      "layer": 3,
+      "layer": 4,
       "paths": [
         "packages/agent-remote-dsh/src/**"
       ],
       "seams": [],
       "flows": [],
       "invariants": []
+    }
+  ],
+  "edges": [
+    {
+      "id": "relay-knows-controller",
+      "rule": 6,
+      "from": [
+        "relay-core",
+        "relay-core-edge"
+      ],
+      "to": [
+        "session-runtime",
+        "controller",
+        "controller-process",
+        "client",
+        "client-web",
+        "provider-claude",
+        "provider-codex",
+        "provider-copilot",
+        "provider-opencode",
+        "provider-dsh"
+      ],
+      "comment": "The Relay does not know the Controller or the client: relay core never imports providers, the session runtime, the Controller or the client library."
+    },
+    {
+      "id": "controller-knows-relay",
+      "rule": 7,
+      "from": [
+        "controller",
+        "controller-process"
+      ],
+      "to": [
+        "relay-core",
+        "relay-core-edge",
+        "relay-node",
+        "relay-cloudflare"
+      ],
+      "comment": "The Controller talks to the Relay only through the protocol and its own RelayLink port."
+    },
+    {
+      "id": "controller-concrete-provider",
+      "rule": 7,
+      "from": [
+        "controller",
+        "controller-process"
+      ],
+      "to": [
+        "provider-claude",
+        "provider-codex",
+        "provider-copilot",
+        "provider-opencode",
+        "provider-dsh"
+      ],
+      "exceptFiles": [
+        "packages/agent-controller/src/providers.ts"
+      ],
+      "comment": "The Controller names concrete providers only in providers.ts, its composition root."
+    },
+    {
+      "id": "client-knows-server",
+      "rule": 8,
+      "from": [
+        "client",
+        "client-web"
+      ],
+      "to": [
+        "relay-core",
+        "relay-core-edge",
+        "relay-node",
+        "relay-cloudflare",
+        "controller",
+        "controller-process",
+        "session-runtime"
+      ],
+      "comment": "The client imports the protocol only."
+    },
+    {
+      "id": "provider-imports",
+      "rule": 5,
+      "from": [
+        "provider-claude",
+        "provider-codex",
+        "provider-copilot",
+        "provider-opencode",
+        "provider-dsh"
+      ],
+      "to": [
+        "relay-core",
+        "relay-core-edge",
+        "relay-node",
+        "relay-cloudflare",
+        "controller",
+        "controller-process",
+        "client",
+        "client-web",
+        "session-runtime",
+        "timeline",
+        "journal"
+      ],
+      "comment": "Provider adapters import only the SDK, the protocol and their native client library."
+    }
+  ],
+  "bans": [
+    {
+      "id": "domain-impure",
+      "rule": 3,
+      "modules": [
+        "timeline",
+        "journal"
+      ],
+      "imports": [
+        "node:*"
+      ],
+      "code": [
+        "Date\\.now\\(",
+        "Math\\.random\\(",
+        "\\bsetTimeout\\(",
+        "\\bsetInterval\\(",
+        "\\bprocess\\.",
+        "\\bfetch\\(",
+        "\\brandomUUID\\b",
+        "new Date\\(\\)",
+        "\\bperformance\\.now\\("
+      ],
+      "comment": "The domain is pure: no Node built-ins, clock, random numbers, timers, sockets or storage."
+    },
+    {
+      "id": "client-ui",
+      "rule": 8,
+      "modules": [
+        "client"
+      ],
+      "imports": [
+        "react",
+        "react/*",
+        "react-dom",
+        "react-dom/*"
+      ],
+      "code": [
+        "\\bwindow\\.",
+        "\\bdocument\\.",
+        "\\bindexedDB\\b",
+        "\\blocalStorage\\b",
+        "\\bnavigator\\.",
+        "\\bfetch\\("
+      ],
+      "comment": "The headless client imports no React, DOM, IndexedDB or global fetch; those are adapter ports."
+    }
+  ],
+  "roots": [
+    {
+      "file": "packages/agent-relay-core/src/broker.ts",
+      "maxLines": 900,
+      "comment": "Composition root of the Relay."
+    },
+    {
+      "file": "packages/agent-controller/src/host.ts",
+      "maxLines": 900,
+      "comment": "Composition root of the Controller."
+    },
+    {
+      "file": "packages/agent-remote-lab/src/App.tsx",
+      "maxLines": 900,
+      "comment": "Composition root of the Workbench."
     }
   ]
 }

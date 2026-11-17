@@ -10,7 +10,7 @@ import type { AgentSession, AgentProviderAdapter } from '@orchardworks/agent-pro
 import { createAgentRemoteRelay } from '../../agent-session-runtime/src/relay.js';
 import { attachAgentRemoteWebSocketStream } from '../../agent-session-runtime/src/transport/websocket-stream.js';
 import { createAgentHost } from '../../agent-controller/src/host.js';
-import { startDshAgentRemote } from '../../agent-remote-dsh/src/agent-remote.js';
+import { startDshAgentRemote } from '@orchardworks/dsh/host';
 
 const version = '1.8.0';
 type Frame = { type: string; payload?: any; [key: string]: any };

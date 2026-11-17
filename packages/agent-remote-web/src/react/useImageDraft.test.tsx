@@ -441,15 +441,15 @@ it('fences same-key A and B held receipts before sending C through a real WebSoc
   const { once } = await import('node:events');
   const { default: WebSocket } = await import('ws');
   const { PROTOCOL_VERSION } = await import('@orchardworks/agent-remote-protocol');
-  const { IMAGE_INPUT_CAPABILITIES } = await import('../../../agent-provider-sdk/src/index.js');
+  const { IMAGE_INPUT_CAPABILITIES } = await import('@orchardworks/agent-provider-sdk');
   const { InputImageStore } = await import('../../../agent-session-runtime/src/resources/input-image-store.js');
   const { createAgentRemoteRelay } = await import('../../../agent-session-runtime/src/relay.js');
   const { createAgentRemoteHttpServer } = await import('../../../agent-session-runtime/src/transport/http-server.js');
   type ServerMessage = import('@orchardworks/agent-remote-protocol').ServerMessage;
-  type InputPart = import('../../../agent-provider-sdk/src/index.js').AgentInputPart;
+  type InputPart = import('@orchardworks/agent-provider-sdk').AgentInputPart;
   const directory = await mkdtemp(join(tmpdir(), 'draft-binding-wire-'));
   const sent: Array<{ native: string; parts: readonly InputPart[] }> = [];
-  const provider: import('../../../agent-provider-sdk/src/index.js').AgentProviderAdapter = {
+  const provider: import('@orchardworks/agent-provider-sdk').AgentProviderAdapter = {
     descriptor: { providerId: 'vision', displayName: 'Vision fixture' },
     async createSession(config) {
       let finish!: () => void; const ended = new Promise<void>(resolve => { finish = resolve; });

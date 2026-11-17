@@ -13,7 +13,7 @@ import { CodexAppServerSession } from './session.js';
 import { normalizeRecoverySettings } from './shared-recovery.js';
 import { AgentManager } from '../../agent-session-runtime/dist/agent-manager.js';
 import { createSessionWire } from '../../agent-session-runtime/dist/session-wire.js';
-import { decodeServerMessage } from '../../agent-remote-protocol/dist/index.js';
+import { decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 
 interface NativeThread {
   path?: string;

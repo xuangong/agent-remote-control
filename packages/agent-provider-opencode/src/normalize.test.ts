@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { encodeAgentStreamMessage, PROTOCOL_VERSION } from '../../agent-remote-protocol/src/index.js';
+import { encodeAgentStreamMessage, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { OpenCodeImages } from './images.js';
 import { normalize, nativeError, usage } from './normalize.js';
 import { turnIds, type NativeAssistant, type NativeMessage, type NativeTool } from './v2-native.js';

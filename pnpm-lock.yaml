@@ -148,6 +148,9 @@ importers:
         specifier: ^8.21.0
         version: 8.21.1
     devDependencies:
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
@@ -235,6 +238,9 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3
@@ -282,6 +288,9 @@ importers:
         specifier: ^8.5.24
         version: 8.5.24
     devDependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
       '@orchardworks/agent-session-runtime':
         specifier: workspace:*
         version: link:../agent-session-runtime
@@ -571,6 +580,9 @@ importers:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
     devDependencies:
+      '@orchardworks/agent-provider-claude':
+        specifier: workspace:*
+        version: link:../agent-provider-claude
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-controller
@@ -736,6 +748,9 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1
     devDependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
       '@orchardworks/agent-timeline':
         specifier: workspace:*
         version: link:../agent-timeline

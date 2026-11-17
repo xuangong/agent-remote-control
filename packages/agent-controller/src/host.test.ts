@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { controllerReleases } from '@orchardworks/agent-relay-core';
 import { isHostStatus } from '@orchardworks/agent-remote-protocol';
 import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
-import { createHostBroker, type RelaySocket } from '../../agent-relay-core/src/index.js';
+import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';

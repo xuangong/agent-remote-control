@@ -73,6 +73,7 @@
     "typescript": "^5.7.0",
     "vitest": "4.1.11",
     "ws": "^8.21.0",
-    "@orchardworks/agent-timeline": "workspace:*"
+    "@orchardworks/agent-timeline": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*"
   }
 }

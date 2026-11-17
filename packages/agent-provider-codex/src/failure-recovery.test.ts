@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { expect, it } from 'vitest';
 import { AgentManager } from '../../agent-session-runtime/src/agent-manager.js';
-import { decodeServerMessage } from '../../agent-remote-protocol/src/index.js';
+import { decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 import { CodexAppServerProvider } from './provider.js';
 
 it('restores native failure evidence over a shared socket and clears it on a new turn', async () => {

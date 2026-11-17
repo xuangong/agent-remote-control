@@ -7,14 +7,14 @@ describe('shared session connection access', () => {
     const a = registry.attach('session', vi.fn());
     const b = registry.attach('session', vi.fn());
     try {
-      const first = a.request('acquire', a.state().revision, undefined, true, 'web');
-      const second = b.request('acquire', b.state().revision, undefined, false, 'headless');
+      const first = a.request(a.state().revision);
+      const second = b.request(b.state().revision);
       expect(first.access).toBe('control');
       expect(second.access).toBe('control');
       expect(first.token).not.toBe(second.token);
       expect(a.state()).not.toHaveProperty('ownerKind');
       expect(b.state()).not.toHaveProperty('ownerKind');
-      b.request('take_over', b.state().revision);
+      b.request(b.state().revision);
       expect(() => a.assert(first.token)).not.toThrow();
       expect(() => b.assert(second.token)).not.toThrow();
     } finally { a.close(); b.close(); registry.close(); }
@@ -26,10 +26,10 @@ describe('shared session connection access', () => {
     const b = registry.attach('session', vi.fn());
     const other = registry.attach('other', vi.fn());
     try {
-      const first = a.request('acquire', a.state().revision);
+      const first = a.request(a.state().revision);
       expect(() => b.assert(first.token)).toThrow(/read.only/i);
-      expect(() => b.request('acquire', first.revision)).toThrow(/changed/i);
-      const second = b.request('acquire', b.state().revision, first.token);
+      expect(() => b.request(first.revision)).toThrow(/changed/i);
+      const second = b.request(b.state().revision);
       expect(second.access).toBe('control');
       expect(second.token).not.toBe(first.token);
       expect(() => b.assert(first.token)).toThrow(/read.only/i);
@@ -42,13 +42,13 @@ describe('shared session connection access', () => {
     const registry = new SessionControlRegistry();
     const a = registry.attach('session', vi.fn());
     const b = registry.attach('session', vi.fn());
-    const first = a.request('acquire', a.state().revision);
-    const second = b.request('acquire', b.state().revision);
+    const first = a.request(a.state().revision);
+    const second = b.request(b.state().revision);
     a.close();
     const resumed = registry.attach('session', vi.fn());
     try {
       expect(resumed.state().available).toBe(true);
-      const next = resumed.request('acquire', resumed.state().revision, first.token);
+      const next = resumed.request(resumed.state().revision);
       expect(next.access).toBe('control');
       expect(next.token).not.toBe(first.token);
       expect(() => a.assert(first.token)).toThrow(/read.only/i);
@@ -64,8 +64,8 @@ describe('shared session connection access', () => {
     let verifyOther: (() => void) | undefined;
     const a = registry.attach('native', state => { updates.push(state); verifyOther?.(); });
     const b = registry.attach('native', state => updates.push(state));
-    const first = a.request('acquire', a.state().revision);
-    const second = b.request('acquire', b.state().revision);
+    const first = a.request(a.state().revision);
+    const second = b.request(b.state().revision);
     const owner = {kind: 'native_cli' as const, generation: 'generation-one'};
     verifyOther = () => expect(() => b.assert(second.token)).toThrow(/read.only/i);
     try {
@@ -73,7 +73,7 @@ describe('shared session connection access', () => {
       for (const page of [a, b]) {
         expect(page.state()).toMatchObject({access: 'read_only', available: false, nativeOwner: owner});
         expect(page.state()).not.toHaveProperty('token');
-        expect(() => page.request('take_over', page.state().revision)).toThrow(/native/i);
+        expect(() => page.request(page.state().revision)).toThrow(/native/i);
       }
       expect(() => a.assert(first.token)).toThrow(/read.only/i);
       registry.setNativeOwner('native', undefined);
@@ -82,9 +82,9 @@ describe('shared session connection access', () => {
         expect(page.state()).not.toHaveProperty('nativeOwner');
       }
       expect(updates).toHaveLength(4);
-      expect(() => a.request('acquire', first.revision)).toThrow(/changed/i);
-      const next = a.request('acquire', a.state().revision, first.token);
-      const also = b.request('acquire', b.state().revision, second.token);
+      expect(() => a.request(first.revision)).toThrow(/changed/i);
+      const next = a.request(a.state().revision);
+      const also = b.request(b.state().revision);
       expect(next.access).toBe('control'); expect(also.access).toBe('control');
       expect(() => a.assert(first.token)).toThrow(/read.only/i);
       expect(() => b.assert(second.token)).toThrow(/read.only/i);
@@ -97,13 +97,13 @@ describe('shared session connection access', () => {
     const registry = new SessionControlRegistry();
     registry.setNativeOwner('native', {kind: 'controller', generation: 'external-controller'});
     const first = registry.attach('native', vi.fn());
-    expect(() => first.request('acquire', first.state().revision)).toThrow(/native/i);
+    expect(() => first.request(first.state().revision)).toThrow(/native/i);
     first.close();
     const next = registry.attach('native', vi.fn());
     try {
       expect(next.state()).toMatchObject({access: 'read_only', available: false, nativeOwner: {generation: 'external-controller'}});
       registry.setNativeOwner('native', undefined);
-      expect(next.request('acquire', next.state().revision).access).toBe('control');
+      expect(next.request(next.state().revision).access).toBe('control');
     } finally { next.close(); registry.close(); }
   });
 
@@ -111,13 +111,13 @@ describe('shared session connection access', () => {
     const registry = new SessionControlRegistry();
     const a = registry.attach('one', vi.fn());
     const b = registry.attach('two', vi.fn());
-    const first = a.request('acquire', a.state().revision);
-    const second = b.request('acquire', b.state().revision);
+    const first = a.request(a.state().revision);
+    const second = b.request(b.state().revision);
     registry.close();
     for (const [page, token] of [[a, first.token], [b, second.token]] as const) {
       expect(page.state()).toMatchObject({access: 'read_only', available: false});
       expect(() => page.assert(token)).toThrow(/read.only/i);
-      expect(() => page.request('acquire', page.state().revision)).toThrow(/closed/i);
+      expect(() => page.request(page.state().revision)).toThrow(/closed/i);
       page.close();
     }
   });

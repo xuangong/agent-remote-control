@@ -286,7 +286,7 @@ export function createSessionWire(
             return;
           }
           if (!control) throw new SessionControlError('session_control_unavailable', 'Session control requires an updated Controller.');
-          const state = control.request(message.payload.action, message.payload.revision, message.payload.resumeToken, message.payload.retainOnDisconnect, message.payload.clientKind);
+          const state = control.request(message.payload.revision);
           sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { ...state, requestId: message.payload.requestId } });
           return;
         }

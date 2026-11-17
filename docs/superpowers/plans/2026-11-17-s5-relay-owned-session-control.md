@@ -1,6 +1,6 @@
 # S5: Relay-owned session control
 
-**State: approved by the owner with no transition window; implementation in progress.** S5 changes the contract between the Relay and every Controller (roadmap S5; [design, Compatibility and rollout](../specs/2026-11-15-im-session-service-design.md); [assessment, Lever B](../specs/2026-11-16-journal-simplification.md)).
+**State: implemented on `design/im-session-service` (not deployed). The owner approved it with no transition window.** S5 changes the contract between the Relay and every Controller (roadmap S5; [design, Compatibility and rollout](../specs/2026-11-15-im-session-service-design.md); [assessment, Lever B](../specs/2026-11-16-journal-simplification.md)).
 
 S5 is the first slice of P2. It moves the session-control lease and the native-owner fact to the Relay, and it removes the five shims that P1-B2 built so that the Relay could imitate the Controller's session wire: the pending revision, held acquires, the offline-Host amendment, `hostReturned` and the `restoring` override. It also removes the Controller's own lease for uplink streams. There is one end state and no transition: the old session-control path is deleted in the same step. The operation queue itself (requesters, receipts, preconditions, the outbox, Team and TPM queues) stays in S6.
 

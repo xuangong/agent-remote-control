@@ -2211,9 +2211,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     catch (error) { return error instanceof BrokerError ? error.nativeOwner : undefined; }
   }
   /**
-   * A browser stream whose session is read from its journal. Reads never touch the Controller; the Controller stream for
-   * operations and control opens in the background through the Host's stream table, so limits, revocation and Host
-   * disconnects apply to it like to any other stream.
+   * A browser stream whose session is read from its journal. Reads and control never touch the Controller; the Controller
+   * stream for operations opens at the first message that needs it, through the Host's stream table, so limits, revocation
+   * and Host disconnects apply to it like to any other stream.
    */
   function acceptJournalServed(host: Host, binding: Binding, context: BrokerRequestContext) {
     const subject = principal(context);

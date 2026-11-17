@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { NativeSessionOwner, SessionControlClientKind, SessionControlState } from '@orchardworks/agent-remote-protocol';
+import type { NativeSessionOwner, SessionControlState } from '@orchardworks/agent-remote-protocol';
 
 type Listener = (state: SessionControlState) => void;
 interface Connection {
@@ -14,8 +14,8 @@ interface Session {
 
 export interface SessionControlLease {
   state(): SessionControlState;
-  /** Legacy ownership fields are accepted for wire compatibility; grants are always connection-local. */
-  request(action: 'acquire' | 'take_over', revision: string, resumeToken?: string, retainOnDisconnect?: boolean, clientKind?: SessionControlClientKind): SessionControlState;
+  /** Grants are connection-local and not exclusive. */
+  request(revision: string): SessionControlState;
   assert(token: string | undefined): void;
   close(): void;
 }
@@ -72,7 +72,7 @@ export class SessionControlRegistry {
     current.connections.add(connection);
     return {
       state,
-      request: (_action, revision) => {
+      request: revision => {
         if (closed || this.closed) throw denied('session_read_only', 'This connection is closed. Reconnect before operating this session.');
         if (current.nativeOwner) throw denied('native_session_owned', 'The native client owns this session. Explicitly interrupt it before taking control.');
         if (revision !== connection.revision) throw denied('session_control_changed', 'Session access changed. Review its current state and retry.');

@@ -269,7 +269,9 @@ async function sequence(id: OperatingCase, repeat: number, fault?: string) {
 }
 
 // Fixed sequential execution: eighteen nominal sequences and six declared fault attempts.
-for (const id of operatingCases) for (const repeat of [1, 2, 3]) {
+// A measurement run (input and output directories given) repeats each case three times; a test run runs each once.
+const repeats = process.env.TASK9E_INPUT_DIRECTORY === undefined ? [1] : [1, 2, 3];
+for (const id of operatingCases) for (const repeat of repeats) {
   test(`operating ${id} sample ${repeat}`, () => sequence(id, repeat), 30000);
 }
 for (const id of ['L', 'O'] as const) for (const fault of ['late-progress', 'hold', 'reject']) {

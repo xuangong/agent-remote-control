@@ -24,7 +24,7 @@ function socketEvent(socket: WebSocket, type: 'message' | 'close', timeoutMs: nu
 }
 
 it('keeps an acknowledged Host online while expiring an unacknowledged application heartbeat', async () => {
-  const f = await fixture();
+  const f = await fixture({ hostLiveness: { heartbeatIntervalMs: 400, heartbeatTimeoutMs: 150 } });
   const owner = await f.login('heartbeat-owner');
   async function connect(installationId: string) {
     const pairing = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
@@ -43,18 +43,18 @@ it('keeps an acknowledged Host online while expiring an unacknowledged applicati
   const healthy = await connect('heartbeat-responsive');
   const silent = await connect('heartbeat-unresponsive');
   for (const host of [healthy, silent]) {
-    expect(host.registered).toMatchObject({ type: 'registered', heartbeat: { intervalMs: 30_000, timeoutMs: 10_000 } });
+    expect(host.registered).toMatchObject({ type: 'registered', heartbeat: { intervalMs: 400, timeoutMs: 150 } });
   }
-  const acknowledged = socketEvent(healthy.socket, 'message', 40_000).then(message => {
+  const acknowledged = socketEvent(healthy.socket, 'message', 3000).then(message => {
     expect(message).toEqual({ uplinkVersion: 2, type: 'heartbeat', nonce: expect.any(String) });
     expect(message.nonce.length).toBeGreaterThan(0);
     send(healthy.socket, { type: 'heartbeat_ack', nonce: message.nonce });
   });
-  const ignored = socketEvent(silent.socket, 'message', 40_000).then(message => {
+  const ignored = socketEvent(silent.socket, 'message', 3000).then(message => {
     expect(message).toEqual({ uplinkVersion: 2, type: 'heartbeat', nonce: expect.any(String) });
     send(silent.socket, { type: 'heartbeat_ack', nonce: 'unrelated-heartbeat-nonce' });
   });
-  const closed = socketEvent(silent.socket, 'close', 50_000);
+  const closed = socketEvent(silent.socket, 'close', 3000);
   const [, , close] = await Promise.all([acknowledged, ignored, closed]);
   expect(close.code).toBe(1012);
   const hosts = (await (await f.json(owner.basePath + 'v1/remote/hosts', owner.cookie)).json() as {
@@ -63,4 +63,4 @@ it('keeps an acknowledged Host online while expiring an unacknowledged applicati
   expect(hosts.find(host => host.id === healthy.registered.hostId)?.online).toBe(true);
   expect(hosts.find(host => host.id === silent.registered.hostId)?.online).toBe(false);
   expect(healthy.socket.readyState).toBe(1);
-}, 90_000);
+}, 10_000);

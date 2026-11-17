@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
-import { fixture, send } from './fixture.js';
+import { fixture, send } from './test-utils/relay-harness.js';
 
 it('forwards validated daemon control only for the owner and an advertising Host', async () => {
   const f = await fixture(); const alice = await f.login('alice'), bob = await f.login('bob');
@@ -33,4 +33,4 @@ it('forwards validated daemon control only for the owner and an advertising Host
   expect(old.hostId).toBe(host.hostId);
   expect((await f.json(path, alice.cookie, { operationId, revision })).status).toBe(400);
   expect(rpc).toHaveLength(2);
-}, 30000);
+});

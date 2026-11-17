@@ -137,6 +137,8 @@ export interface HostBrokerOptions {
   creationTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  /** How long a connected Host may take to send its registration, in milliseconds. Defaults to 10 seconds. */
+  registrationDeadlineMs?: number;
   keyLifetimeMs?: number;
   publicUrl?: string;
   onPairing?(key: string, expiresAt: number): void;
@@ -865,7 +867,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     uplinkCleanups.set(socket, cleanup);
     cancelExpiry = expire(socket, () => keys.get(credentialHash) === credential ? Math.min(credential.expires, context.connectionExpiresAt?.() ?? credential.expires) : 0, () => keys.get(credentialHash) !== credential ? 1008 : context.connectionExpiryCode?.() ?? 1008, code => closeConnection(code, 'Credential expired'));
-    if (!retired) timer = setTimeout(() => closeConnection(1008, 'Registration deadline exceeded'), 10_000);
+    if (!retired) timer = setTimeout(() => closeConnection(1008, 'Registration deadline exceeded'), options.registrationDeadlineMs ?? 10_000);
     socket.onError(() => closeConnection(1011, 'Host transport failed'));
     socket.onClose(details => { cleanup(); if (host) disconnected(host, socket, 'socket_closed', details?.code, Math.max(0, now() - lastHeartbeatAck), details?.wasClean); });
     const current = () => !retired && host?.socket === socket && host.ready === true;

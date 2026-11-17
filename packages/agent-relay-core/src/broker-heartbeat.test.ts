@@ -76,6 +76,17 @@ it('announces heartbeat deadlines on every registered Host', async () => {
   expect(socket.sent[0]).toMatchObject({ type: 'registered', heartbeat: { intervalMs: 30, timeoutMs: 10 } });
 }, 10_000);
 
+it('closes a connection that sends no registration within the registration deadline, and one that registers in time stays open', async () => {
+  const b = await fixture({ registrationDeadlineMs: 50, heartbeatIntervalMs: 600_000, heartbeatTimeoutMs: 10_000 });
+  const silent = await b.connect(false);
+  const registered = await b.connect();
+  b.clock.advance(49);
+  expect(silent.closes).toEqual([]);
+  b.clock.advance(1);
+  expect(silent.closes).toEqual([{ code: 1008, reason: 'Registration deadline exceeded' }]);
+  expect(registered.closes).toEqual([]);
+});
+
 it('marks a half-open Host offline and rejects pending RPCs before the socket close event', async () => {
   const b = await fixture(); const socket = await b.connect();
   const hostId = socket.sent[0]!.hostId;

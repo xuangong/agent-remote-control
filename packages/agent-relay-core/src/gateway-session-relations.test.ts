@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fixture, send } from './fixture.js';
+import { fixture, send } from './test-utils/relay-harness.js';
 
 it('discovers Side and Ask on another device, retains relations after restart and isolates accounts', async () => {
   const f = await fixture();
@@ -43,7 +43,7 @@ it('discovers Side and Ask on another device, retains relations after restart an
   const restored = await read() as { relations: unknown[] };
   expect(restored.relations).toHaveLength(3);
   expect(restored).toMatchObject({ relations: expect.arrayContaining([expect.objectContaining({ kind: 'ask', id: 'legacy' })]) });
-}, 30000);
+});
 
 it('keeps shared-host relations private, preserves client identities and hides them after revocation', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const bob = await f.login('bob'); const carol = await f.login('carol');
@@ -69,4 +69,4 @@ it('keeps shared-host relations private, preserves client identities and hides t
   expect(await list(carol)).toEqual({ relations: [] });
   expect((await f.control({ subject: 'alice', operation: 'revoke-share', hostId, targetSubject: 'bob' })()).status).toBe(200);
   expect(await list(bob)).toEqual({ relations: [] });
-}, 30000);
+});

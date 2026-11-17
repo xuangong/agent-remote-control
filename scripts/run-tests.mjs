@@ -34,6 +34,14 @@ function affectedFilters(base) {
   return [...directories].filter(directory => existsSync(join(directory, 'package.json')))
     .flatMap(directory => ['--filter', `...${JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8')).name}`]);
 }
+/**
+ * The Cloudflare host proves only what the Workers runtime proves; the Relay's rules are tested in agent-relay-core and the
+ * seams. Its tests therefore run when its own directory changed, not when a package below it did.
+ */
+function hostExclusions(base) {
+  const files = execFileSync('git', ['diff', '--name-only', base, 'HEAD'], { encoding: 'utf8' }).split('\n');
+  return files.some(file => file.startsWith('packages/agent-relay-cloudflare/')) ? [] : ['--filter', '!@orchardworks/agent-relay-cloudflare'];
+}
 const affected = changedSinceModes.includes(mode) ? affectedFilters(process.argv[3]) : [];
 if (changedSinceModes.includes(mode) && !affected.length) {
   console.log('No workspace package changed, so nothing runs.');
@@ -72,8 +80,9 @@ const commands = {
   'windows-services': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/vscode-tunnel.test.ts', 'src/vscode-tunnel-supervisor.test.ts', 'src/windows-autostart.test.ts', 'src/windows-shared.test.ts', '--testTimeout=30000', '--hookTimeout=15000', '--maxWorkers=1'],
   'controller-updates': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/controller-package.test.ts', 'src/controller-update.test.ts', 'src/update-command.test.ts', 'src/controller-launcher.test.ts', 'src/controller-shutdown.test.ts', 'src/host.test.ts', ...(process.platform === 'win32' ? [] : ['src/cli-linux.test.ts', 'src/systemd.test.ts']), '--testTimeout=15000', '--hookTimeout=15000', '--maxWorkers=1'],
   'controller-updates-web': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', 'src/components/ControllerUpdates.test.tsx', '--testTimeout=10000', '--hookTimeout=15000'],
-  'controller-updates-relay': ['--filter', '@orchardworks/agent-relay-cloudflare', 'exec', 'vitest', 'run', 'test/controller-updates.test.ts', '--testTimeout=30000', '--hookTimeout=30000', '--maxWorkers=1'],
+  'controller-updates-relay': ['--filter', '@orchardworks/agent-relay-cloudflare', 'exec', 'vitest', 'run', 'test/controller-updates.workers.test.ts', '--testTimeout=30000', '--hookTimeout=30000', '--maxWorkers=1'],
   cloudflare: ['--filter', '@orchardworks/agent-relay-cloudflare', 'run', 'test', '--hookTimeout=30000'],
+  workers: ['--filter', '@orchardworks/agent-relay-cloudflare', 'run', 'test:workers', '--hookTimeout=30000'],
   claude: ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', '--testTimeout=10000', '--hookTimeout=15000', '--maxWorkers=1'],
   'claude-succession-evidence': ['--filter', '@orchardworks/agent-provider-claude', 'exec', 'vitest', 'run', 'src/native-succession-evidence.local.test.ts', '--testTimeout=30000', '--hookTimeout=10000', '--maxWorkers=1'],
   copilot: ['--filter', '@orchardworks/agent-provider-copilot', 'run', 'test', '--hookTimeout=30000'],
@@ -81,7 +90,7 @@ const commands = {
   // Each package's Vitest already uses every core; running packages one at a time avoids load-induced timeouts.
   unit: ['-r', '--workspace-concurrency=1', 'run', 'test'],
   // The packages changed since a commit and the packages that depend on them; the workspace root runs everything.
-  affected: ['-r', '--workspace-concurrency=1', ...affected, 'run', 'test'],
+  affected: ['-r', '--workspace-concurrency=1', ...affected, ...(mode === 'affected' ? hostExclusions(process.argv[3]) : []), 'run', 'test'],
   'affected-build': ['-r', ...affected, 'run', 'build'],
   'affected-typecheck': ['-r', ...affected, 'run', 'typecheck'],
   // One package's unit suite with its own timeouts and exclusions; extra arguments go to Vitest (a file, --changed, -t).

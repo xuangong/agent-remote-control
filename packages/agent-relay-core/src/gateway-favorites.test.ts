@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fixture, send } from './fixture.js';
+import { fixture, send } from './test-utils/relay-harness.js';
 
 it('persists the account favorites tree through Durable Object restart and enforces revision and isolation over HTTP', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const bob = await f.login('bob');
@@ -31,7 +31,7 @@ it('persists the account favorites tree through Durable Object restart and enfor
   expect(await (await f.json(path, alice.cookie)).json()).toMatchObject({ revision: 3, stars: [] });
   await f.restart();
   expect(await (await f.json(path, alice.cookie)).json()).toMatchObject({ revision: 3, stars: [], folders: [{ id: 'folder' }] });
-}, 15000);
+});
 
 it('does not commit or return a successful tree edit when SQLite rejects persistence', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const path = alice.basePath + 'v1/favorites';
@@ -41,4 +41,4 @@ it('does not commit or return a successful tree edit when SQLite rejects persist
   expect((await f.inspect('restore-commit')).status).toBe(200);
   await f.restart();
   expect(await (await f.json(path, alice.cookie)).json()).toMatchObject({ revision: 1, folders: [{ title: 'Original' }] });
-}, 15000);
+});

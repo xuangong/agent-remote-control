@@ -8,7 +8,9 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=30000 --maxWorkers=1",
-    "deploy:dry-run": "wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run && wrangler deploy --dry-run --config wrangler.journals-enabled.jsonc"
+    "deploy:dry-run": "wrangler deploy --dry-run --config wrangler.journals.jsonc && wrangler deploy --dry-run && wrangler deploy --dry-run --config wrangler.journals-enabled.jsonc",
+    "test:unit": "vitest run --project unit --testTimeout=10000",
+    "test:workers": "vitest run --project workers --testTimeout=30000 --maxWorkers=1"
   },
   "dependencies": {
     "@orchardworks/agent-relay-core": "workspace:*",

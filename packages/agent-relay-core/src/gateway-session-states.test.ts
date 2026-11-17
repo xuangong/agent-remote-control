@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fixture, origin, send } from './fixture.js';
+import { fixture, origin, send } from './test-utils/relay-harness.js';
 
 it('shares a Host\'s session states with every page of its owner over the session channel, without session streams', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const second = await f.login('alice'); const bob = await f.login('bob');
@@ -13,7 +13,7 @@ it('shares a Host\'s session states with every page of its owner over the sessio
     if (frame.type === 'credential_issued') { key = frame.credential; send(host, { type: 'credential_saved' }); }
   });
   send(host, { type: 'register', credentialRotation: true, installationId: 'workers-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-  await expect.poll(() => frames.find(frame => frame.type === 'registered')).toBeTruthy();
+  await f.poll(() => frames.find(frame => frame.type === 'registered')).toBeTruthy();
   const registered = frames.find(frame => frame.type === 'registered');
   expect(registered.sessionStates).toBe(1);
   const hostId = registered.hostId as string;
@@ -24,25 +24,25 @@ it('shares a Host\'s session states with every page of its owner over the sessio
     return { socket, messages, states: () => messages.filter(message => message.type === 'session_states') };
   };
   const first = await listen(alice), other = await listen(second), stranger = await listen(bob), plain = await listen(alice, 'observation=activity');
-  await expect.poll(() => first.states()[0]).toMatchObject({ snapshot: true, hosts: [{ hostId, online: true }] });
+  await f.poll(() => first.states()[0]).toMatchObject({ snapshot: true, hosts: [{ hostId, online: true }] });
   // Each page's snapshot arrives on its own socket, in no particular order.
-  await expect.poll(() => stranger.states()).toEqual([{ protocolVersion: '1.8.0', type: 'session_states', snapshot: true }]);
+  await f.poll(() => stranger.states()).toEqual([{ protocolVersion: '1.8.0', type: 'session_states', snapshot: true }]);
   send(host, { type: 'session_states', full: true, states: [{ providerId: 'codex', nativeSessionId: 'thread', state: 'running', updatedAt: 5 }] });
   for (const page of [first, other]) {
-    await expect.poll(() => page.states().at(-1)).toMatchObject({ hosts: [{ hostId, online: true, confirmedAgeMs: expect.any(Number) }],
+    await f.poll(() => page.states().at(-1)).toMatchObject({ hosts: [{ hostId, online: true, confirmedAgeMs: expect.any(Number) }],
       states: [{ hostId, providerId: 'codex', nativeSessionId: 'thread', state: 'running', updatedAt: 5, ageMs: expect.any(Number) }] });
   }
   send(host, { type: 'session_states', full: false, states: [{ providerId: 'codex', nativeSessionId: 'thread', state: 'waiting', updatedAt: 6 }] });
-  await expect.poll(() => other.states().at(-1)?.states?.[0]?.state).toBe('waiting');
+  await f.poll(() => other.states().at(-1)?.states?.[0]?.state).toBe('waiting');
   expect(other.states().at(-1).hosts).toBeUndefined();
   // A page connecting later starts from the same shared states.
   const late = await listen(second);
-  await expect.poll(() => late.states()[0]).toMatchObject({ snapshot: true, states: [{ nativeSessionId: 'thread', state: 'waiting' }] });
+  await f.poll(() => late.states()[0]).toMatchObject({ snapshot: true, states: [{ nativeSessionId: 'thread', state: 'waiting' }] });
   host.close(1000);
-  await expect.poll(() => first.states().at(-1)).toMatchObject({ hosts: [{ hostId, online: false }], removed: [{ hostId, providerId: 'codex', nativeSessionId: 'thread' }] });
+  await f.poll(() => first.states().at(-1)).toMatchObject({ hosts: [{ hostId, online: false }], removed: [{ hostId, providerId: 'codex', nativeSessionId: 'thread' }] });
   expect(stranger.states()).toHaveLength(1);
   expect(plain.messages.some(message => message.type === 'session_states')).toBe(false);
-}, 15000);
+});
 
 it('shares reply facts only with pages that ask for them', async () => {
   const f = await fixture(); const alice = await f.login('alice');
@@ -55,7 +55,7 @@ it('shares reply facts only with pages that ask for them', async () => {
     if (frame.type === 'credential_issued') send(host, { type: 'credential_saved' });
   });
   send(host, { type: 'register', credentialRotation: true, installationId: 'workers-facts-host', name: 'Workers Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-  await expect.poll(() => frames.find(frame => frame.type === 'registered')).toBeTruthy();
+  await f.poll(() => frames.find(frame => frame.type === 'registered')).toBeTruthy();
   expect(frames.find(frame => frame.type === 'registered').sessionStates).toBe(2);
   const listen = async (query: string) => {
     const messages: any[] = [];
@@ -66,15 +66,15 @@ it('shares reply facts only with pages that ask for them', async () => {
   const current = await listen('observation=activity&states=2'), older = await listen('observation=activity&states=1');
   const thread = { providerId: 'codex', nativeSessionId: 'thread', state: 'idle', updatedAt: 5 };
   send(host, { type: 'session_states', full: true, states: [{ ...thread, replyAt: 7, preview: 'Release notes are ready.' }] });
-  await expect.poll(() => current.states().at(-1)).toMatchObject({ ...thread, replyAt: 7, preview: 'Release notes are ready.' });
-  await expect.poll(() => older.states().at(-1)).toMatchObject(thread);
+  await f.poll(() => current.states().at(-1)).toMatchObject({ ...thread, replyAt: 7, preview: 'Release notes are ready.' });
+  await f.poll(() => older.states().at(-1)).toMatchObject(thread);
   expect(older.states().at(-1)).not.toHaveProperty('preview');
   expect(older.states().at(-1)).not.toHaveProperty('replyAt');
   // A change of facts alone reaches the pages that asked for them, and nothing reaches the others.
   const seen = older.states().length;
   send(host, { type: 'session_states', full: false, states: [{ ...thread, replyAt: 9, preview: 'Shipped.' }] });
-  await expect.poll(() => current.states().at(-1)?.preview).toBe('Shipped.');
+  await f.poll(() => current.states().at(-1)?.preview).toBe('Shipped.');
   await new Promise(resolve => setTimeout(resolve, 100));
   expect(older.states()).toHaveLength(seen);
   host.close(1000);
-}, 15000);
+});

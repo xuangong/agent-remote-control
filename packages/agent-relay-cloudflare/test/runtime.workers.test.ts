@@ -200,11 +200,11 @@ it('rejects oversized native frames and closes registration when its asynchronou
 });
 
 it('enforces the native registration deadline without incoming frames', async () => {
-  const f = await fixture(); const alice = await f.login('alice');
+  const f = await fixture({ hostLiveness: { registrationDeadlineMs: 300 } }); const alice = await f.login('alice');
   const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as any;
   const socket = await f.upgrade('/ws/remote-host', { authorization: `Bearer ${pairing.key}` });
   const closed = new Promise<any>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Registration deadline was not enforced')), 12_000);
+    const timer = setTimeout(() => reject(new Error('Registration deadline was not enforced')), 3000);
     socket.addEventListener('close', value => { clearTimeout(timer); resolve(value); }, { once: true });
   });
   expect((await closed).code).toBe(1008);

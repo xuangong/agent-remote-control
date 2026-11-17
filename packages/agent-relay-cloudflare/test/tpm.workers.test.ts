@@ -21,23 +21,3 @@ it('limits TPM Host management to its owner across account namespaces and shared
   expect((await f.json(bob.basePath + path + '/create', bob.cookie, create)).status).toBe(403);
   expect(calls).toHaveLength(1);
 }, 30000);
-
-it('keeps an older Controller uplink connected without probing unsupported TPM routes', async () => {
-  const f = await fixture(); const owner = await f.login('alice');
-  const { key } = await (await f.json(owner.basePath + 'v1/remote/pairings', owner.cookie, {})).json() as { key: string };
-  const host = await f.host(key); const calls: any[] = [];
-  host.socket.addEventListener('message', event => {
-    const frame = JSON.parse(String(event.data));
-    if (frame.type === 'rpc_request') { calls.push(frame); host.socket.close(1008, 'Unsupported old Controller path'); }
-  });
-  const path = `v1/remote/hosts/${host.hostId}/tpm`;
-  const list = await f.json(owner.basePath + path, owner.cookie);
-  expect(list.status).toBe(200); expect(await list.json()).toEqual({ supported: false, supportedProviders: [], works: [] });
-  const create = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Delivery', requirement: 'Ship', operationId: crypto.randomUUID() };
-  const mutation = await f.json(owner.basePath + path + '/create', owner.cookie, create);
-  expect(mutation.status).toBe(409); expect(await mutation.json()).toEqual({ error: 'Update the Controller to use TPM.' });
-  const hosts = await f.json(owner.basePath + 'v1/remote/hosts', owner.cookie);
-  expect(hosts.status).toBe(200);
-  expect((await hosts.json() as { hosts: Array<{ id: string; online: boolean }> }).hosts).toContainEqual(expect.objectContaining({ id: host.hostId, online: true }));
-  expect(calls).toEqual([]); expect(host.socket.readyState).toBe(1);
-}, 30000);

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fixture, origin, send } from './fixture.js';
+import { fixture, origin, send } from './test-utils/relay-harness.js';
 
 it.each(['codex', 'copilot', 'claude', 'opencode'])('confirms %s rename before updating favorites and broadcasts the same identity to other devices', async providerId => {
   const f = await fixture(); const alice = await f.login('alice'); const second = await f.login('alice'); const bob = await f.login('bob');
@@ -32,7 +32,7 @@ it.each(['codex', 'copilot', 'claude', 'opencode'])('confirms %s rename before u
   const updated = await (await f.json(path, second.cookie)).json() as any;
   expect(updated.stars.find((s: any) => s.nativeSessionId === 'other').title).toBe('Original');
   expect(updated.stars.find((s: any) => s.nativeSessionId === 'native')).toMatchObject({ ...identity, title: 'Renamed', favoriteId: saved.stars[0].favoriteId, folderId: 'folder', order: 0, canRename: true });
-  await expect.poll(() => messages[0]!.some(m => m.type === 'session_title_updated' && m.session.title === 'Renamed')).toBe(true);
+  await f.poll(() => messages[0]!.some(m => m.type === 'session_title_updated' && m.session.title === 'Renamed')).toBe(true);
   expect(messages[1]!.some(m => m.type === 'session_title_updated')).toBe(false);
   const revision = updated.revision;
   expect((await f.json(route, alice.cookie, payload)).status).toBe(200);
@@ -41,7 +41,7 @@ it.each(['codex', 'copilot', 'claude', 'opencode'])('confirms %s rename before u
   reject = true;
   expect((await f.json(route, alice.cookie, { ...payload, title: 'Rejected', operationId: 'b1403532-9dd9-4b0e-9938-d57241cbb96d' })).status).toBe(503);
   expect((await (await f.json(path, alice.cookie)).json() as any).stars.find((s: any) => s.nativeSessionId === 'native').title).toBe('Renamed');
-}, 15000);
+});
 
 it('renames unstarred sessions, restores title broadcasts after reconnect and restart, and removes revoked Host titles', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const second = await f.login('alice'); const bob = await f.login('bob');
@@ -65,7 +65,7 @@ it('renames unstarred sessions, restores title broadcasts after reconnect and re
   const route = alice.basePath + `v1/remote/hosts/${hostId}/session/rename`;
   const input = { providerId: 'codex', nativeSessionId: identity.nativeSessionId, title: 'Main session', operationId: 'new-title' };
   expect((await f.json(route, alice.cookie, input)).status).toBe(200);
-  await expect.poll(() => other.messages.find(message => message.type === 'session_title_updated')?.session).toMatchObject({ ...identity, title: 'Main session' });
+  await f.poll(() => other.messages.find(message => message.type === 'session_title_updated')?.session).toMatchObject({ ...identity, title: 'Main session' });
   const revision = other.messages.find(message => message.type === 'session_title_updated').session.revision;
   expect((await (await f.json(alice.basePath + 'v1/favorites', alice.cookie)).json() as any).stars).toEqual([]);
   expect(stranger.messages.some(message => message.type === 'session_title_updated')).toBe(false);
@@ -75,16 +75,16 @@ it('renames unstarred sessions, restores title broadcasts after reconnect and re
   expect((await f.json(route, alice.cookie, { ...input, title: 'Rejected', operationId: 'reject-title' })).status).toBe(503);
   other.socket.close();
   const reconnected = await listen();
-  await expect.poll(() => reconnected.messages.find(message => message.type === 'session_title_updated')?.session).toEqual({ ...identity, title: 'Main session', revision });
+  await f.poll(() => reconnected.messages.find(message => message.type === 'session_title_updated')?.session).toEqual({ ...identity, title: 'Main session', revision });
   await f.restart();
   const restored = await listen();
-  await expect.poll(() => restored.messages.find(message => message.type === 'session_title_updated')?.session).toEqual({ ...identity, title: 'Main session', revision });
+  await f.poll(() => restored.messages.find(message => message.type === 'session_title_updated')?.session).toEqual({ ...identity, title: 'Main session', revision });
   expect((await f.json(alice.basePath + `v1/remote/hosts/${hostId}/revoke`, alice.cookie, {})).status).toBe(200);
   await f.restart();
   const revoked = await listen();
-  await expect.poll(() => revoked.messages.some(message => message.type === 'ready')).toBe(true);
+  await f.poll(() => revoked.messages.some(message => message.type === 'ready')).toBe(true);
   expect(revoked.messages.some(message => message.type === 'session_title_updated')).toBe(false);
-}, 30000);
+});
 
 it('authorizes an unstarred shared session by its native binding and hides titles after sharing is revoked', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const bob = await f.login('bob');
@@ -108,7 +108,7 @@ it('authorizes an unstarred shared session by its native binding and hides title
   const socket = await f.upgrade(bob.basePath + 'v1/session-channel?observation=session&titles=1', { cookie: bob.cookie, origin });
   socket.addEventListener('message', event => messages.push(JSON.parse(String(event.data))));
   expect((await f.json(route + 'session/rename', bob.cookie, { ...payload, nativeSessionId: 'bob-native', title: 'Bob session', operationId: 'bob-title' })).status).toBe(200);
-  await expect.poll(() => messages.find(message => message.type === 'session_title_updated')?.session.title).toBe('Bob session');
+  await f.poll(() => messages.find(message => message.type === 'session_title_updated')?.session.title).toBe('Bob session');
   expect((await (await f.json(bob.basePath + 'v1/favorites', bob.cookie)).json() as any).stars).toEqual([]);
   expect((await f.json(bob.basePath + 'v1/stars', bob.cookie, { hostId, providerId: 'codex', nativeSessionId: 'bob-native', title: 'Bob session' })).status).toBe(200);
   expect((await f.control({ subject: 'alice', operation: 'revoke-share', hostId, targetSubject: 'bob' })()).status).toBe(200);
@@ -120,6 +120,6 @@ it('authorizes an unstarred shared session by its native binding and hides title
   const after: any[] = [];
   const reconnected = await f.upgrade(bob.basePath + 'v1/session-channel?observation=session&titles=1', { cookie: bob.cookie, origin });
   reconnected.addEventListener('message', event => after.push(JSON.parse(String(event.data))));
-  await expect.poll(() => after.some(message => message.type === 'ready')).toBe(true);
+  await f.poll(() => after.some(message => message.type === 'ready')).toBe(true);
   expect(after.some(message => message.type === 'session_title_updated')).toBe(false);
-}, 30000);
+});

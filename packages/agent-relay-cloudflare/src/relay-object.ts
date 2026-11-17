@@ -36,6 +36,8 @@ export class RelayObject {
       try { this.initialize('runtime_start'); } catch { /* Invalid persisted configuration remains unavailable without exposing it. */ }
     });
   }
+  /** The deadlines of a connected Host's registration and heartbeat; the defaults are the Relay's. */
+  protected hostLiveness(): NonNullable<Parameters<typeof createHostedRelay>[0]['hostLiveness']> { return {}; }
   private initialize(startReason: 'runtime_start' | 'core_recovery') {
     const auth = hostedAuthFromEnv(this.env);
     let log: ReturnType<typeof createStateCommitLog> | undefined;
@@ -62,7 +64,7 @@ export class RelayObject {
       console.error('Configuration error: AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding. The Relay runs without journals; deploy the journal partitions Worker and add the binding (see the deployment guide), or unset the variable.');
     }
     const journalService = partitions && createPartitionJournals({ partition: hostId => partitions.getByName(hostId) as unknown as JournalPartitionApi });
-    this.core = createHostedRelay({ ...auth, ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
+    this.core = createHostedRelay({ ...auth, hostLiveness: this.hostLiveness(), ...(journalService ? { journalService } : {}), ...(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS ? { authorityOutageGraceMs: Number(this.env.AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS) } : {}), previewOrigin: this.env.AGENT_REMOTE_PREVIEW_URL, previewDomain: this.env.AGENT_REMOTE_PREVIEW_DOMAIN, storage, successionEnrollment: true, diagnosticStorage: new SqliteDiagnosticStore(this.context.storage, auth),
       teamResources: namespace => new PortableTeamResourceStore({ storage: new SqliteTeamResourceStorage(this.context.storage, createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }),
       successionEncodingCosts: hostedRecordEncodingCosts(auth, verification('capacity')), onStateCommit: metrics => log!.commit(metrics),
       diagnosticContext: { runtimeInstanceId: this.runtimeInstanceId, workerVersionId: this.env.CF_VERSION_METADATA?.id, startReason }, scheduler, clientAddress: request => request.headers.get('cf-connecting-ip') ?? 'unknown' });

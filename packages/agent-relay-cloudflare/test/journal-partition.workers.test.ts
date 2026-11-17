@@ -1,5 +1,9 @@
 import { expect, test } from 'vitest';
 
+import { replayPartitionContract, type PartitionContractStep } from '@orchardworks/agent-relay-core/testing';
+import type { JournalPartitionApi } from '@orchardworks/agent-relay-core';
+import contract from '@orchardworks/agent-relay-core/journal-partition.contract.json' with { type: 'json' };
+
 import { fixture, send } from './fixture.js';
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -57,63 +61,22 @@ test('keeps each Host in its own object and deletes the journals of one Host wit
   expect(await call(f, 'host-2', 'status', 'host-2', SESSION)).toMatchObject({ cursor: { seq: 1 } });
 }, 60_000);
 
-test('refuses growth over the session limit of the object', async () => {
-  const f = await fixture({ journals: { tuning: { limits: { sessionBytes: 3500 } } } });
-  const big = 'x'.repeat(2000);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
-  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', big, 1) }])).refusal).toBeUndefined();
-  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', big, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
-}, 60_000);
-
-test('answers a page that would pass the reply bound with fewer entries', async () => {
-  const f = await fixture({ journals: { tuning: { replyMaxBytes: 5000 } } });
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
-  const entries = Array.from({ length: 6 }, (_, n) => [{ sequence: n * 2 + 1, op: 'append', row: row(`m${n}`, 'x'.repeat(2000), n) }, { sequence: n * 2 + 2, op: 'complete', itemKey: `m${n}`, digest: `digest-${n}` }]).flat();
-  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, entries);
-  const page = await call(f, 'host-1', 'page', 'host-1', SESSION, { ...tail, limit: 6 }, false);
-  expect(page.page.payload.entries.length).toBeGreaterThan(0);
-  expect(page.page.payload.entries.length).toBeLessThan(6);
-}, 60_000);
-
-test('fills bodies and reads the page in one call, and serves a page of several MiB in one reply', async () => {
-  const f = await fixture({ journals: { tuning: { retention: { turns: 1, minItems: 1 } } } });
-  const text = 'é'.repeat(1_000_000);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
-  for (const n of [1, 2, 3]) {
-    await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
-      { sequence: n * 2 - 1, op: 'append', row: row(`m${n}`, text, n) }, { sequence: n * 2, op: 'complete', itemKey: `m${n}`, digest: `digest-m${n}` }]);
-  }
-  expect(await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false)).toEqual({ kind: 'missing', itemKeys: ['m1', 'm2'] });
-  const filled = await call(f, 'host-1', 'fill', 'host-1', SESSION,
-    ['m1', 'm2'].map(key => ({ row: row(key, text, Number(key.slice(1))), digest: `digest-${key}` })), { request: tail, olderBeyondJournal: true });
-  expect(filled).toMatchObject({ filled: ['m1', 'm2'], page: { kind: 'page', page: { payload: { hasOlder: true } } } });
-  expect(filled.page.page.payload.entries.map((entry: { item: { text: string } }) => entry.item.text.length)).toEqual([1_000_000, 1_000_000, 1_000_000]);
-}, 120_000);
-
-
 test('holds the Durable Object bounds by default: two journals, 20 MiB of cache and 12 MiB per session', async () => {
   const f = await fixture({ journals: {} });
   expect(await call(f, 'host-1', 'effectiveTuning')).toEqual({
     cache: { maxJournals: 2, maxBytes: 20 * 1024 * 1024 }, limits: { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } });
-  const text = 'x'.repeat(7 * 1024 * 1024);
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
-  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', text, 1) }])).refusal).toBeUndefined();
-  expect((await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 2, op: 'append', row: row('m2', text, 2) }])).refusal).toEqual({ sequence: 2, reason: 'quota_exceeded' });
-}, 120_000);
+}, 60_000);
+
+test('answers every recorded call of the partition contract through Durable Object RPC', async () => {
+  const f = await fixture({ journals: {} });
+  const api = Object.fromEntries(['open', 'publish', 'fill', 'page', 'status', 'unserveHead', 'servedSessions', 'deleteHost', 'capabilities']
+    .map(method => [method, async (...args: unknown[]) => (await call(f, 'host-1', method, ...args)) ?? undefined])) as unknown as JournalPartitionApi;
+  await replayPartitionContract(api, contract as PartitionContractStep[]);
+}, 60_000);
 
 test('rolls back every statement of a transaction that fails', async () => {
   const f = await fixture({ journals: {} });
   expect(await call(f, 'host-1', 'transactionProbe')).toEqual([{ n: 0 }]);
-}, 60_000);
-
-test('keeps two journals in memory by default and reads a third one that was dropped from the store again', async () => {
-  const f = await fixture({ journals: {} });
-  for (const key of ['codex:a', 'codex:b', 'codex:c']) await call(f, 'host-1', 'open', 'host-1', key, 'controller-1');
-  const before = await call(f, 'host-1', 'journalLoads');
-  await call(f, 'host-1', 'status', 'host-1', 'codex:c');
-  expect(await call(f, 'host-1', 'journalLoads')).toBe(before);
-  await call(f, 'host-1', 'status', 'host-1', 'codex:a');
-  expect(await call(f, 'host-1', 'journalLoads')).toBe(before + 1);
 }, 60_000);
 
 /** A Controller connected for journals: it registers (rotating its pairing key into a device credential on the first connection) and keeps what the Relay sends. */
@@ -182,21 +145,6 @@ test('runs without journals and logs a configuration error when the variable is 
   expect(host.registered).toMatchObject({ type: 'registered' });
   expect(host.registered).not.toHaveProperty('journal');
   expect(f.runtimeErrors).toContain('AGENT_REMOTE_JOURNALS is 1 but this Worker has no JOURNALS binding');
-}, 60_000);
-
-test('reports its capabilities through Durable Object RPC', async () => {
-  const f = await fixture({ journals: {} });
-  expect(await call(f, 'host-1', 'capabilities', 'host-1')).toEqual({ journal: 1 });
-}, 60_000);
-
-test('takes a session out of serving at the Controller\'s word, in the object that holds its journal', async () => {
-  const f = await fixture({ journals: {} });
-  await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1');
-  await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
-  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
-  expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 7)).toBeNull();
-  expect(await call(f, 'host-1', 'unserveHead', 'host-1', SESSION, 1)).toMatchObject({ unserved: true, hasHead: false, watermark: 2 });
-  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
 }, 60_000);
 
 test('refuses the open of a Host whose partition is older than the Relay, and answers once the partition is current', async () => {

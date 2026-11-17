@@ -75,6 +75,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   keyLifetimeMs?: number;
   /** Trusted composition may override the additional interactive sign-in requirement. */
   recentAuthentication?(grant: HostedGrant): boolean | undefined;
+  /** The deadlines of a connected Host's registration and heartbeat; a host composition lets tests shorten them. */
+  hostLiveness?: Pick<HostBrokerOptions, 'heartbeatIntervalMs' | 'heartbeatTimeoutMs' | 'registrationDeadlineMs'>;
   /** How long access last confirmed by an unreachable account authority stays usable, from 0 to one hour. */
   authorityOutageGraceMs?: number;
   /** Operator diagnostics of each Relay state commit; no account or content data. */
@@ -429,7 +431,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         }
         throw refusal;
       } : undefined;
-      const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs,
+      const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness,
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },

@@ -29,11 +29,15 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
-  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file' } = {}) {
-  const owned = options.lifetime === 'file' ? fileClosers : closers;
-  const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
-  owned.push(() => rm(directory, { recursive: true, force: true }));
+/** The two Worker bundles of a fixture depend only on the entry it asks for, so a process builds each kind once. */
+const bundles = new Map<string, Promise<{ script: string; journalsScript: string }>>();
+function bundleFor(options: { actualEntry?: true; completeCodec?: true; conformance?: true }) {
+  const key = JSON.stringify([options.actualEntry === true, options.completeCodec === true, options.conformance === true]);
+  let bundle = bundles.get(key);
+  if (!bundle) { bundle = buildBundles(options); bundles.set(key, bundle); }
+  return bundle;
+}
+async function buildBundles(options: { actualEntry?: true; completeCodec?: true; conformance?: true }) {
     const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
@@ -42,6 +46,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       import { WorkerRelaySocket } from './src/socket.ts';
       ${options.conformance ? "import { runRelayStateStoreCase } from './test/relay-state-store-case.ts';" : ''}
       export class TestRelayObject extends RelayObject {
+        hostLiveness() { const raw = this.fixtureEnv?.HOST_LIVENESS ?? this.env.HOST_LIVENESS; return raw ? JSON.parse(raw) : super.hostLiveness(); }
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
           this.completeCodec = ${options.completeCodec === true};
           if (this.completeCodec) this.fixtureReady = ctx.blockConcurrencyWhile(async () => this.reopenCodec());
@@ -102,7 +107,6 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
       conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], plugins: [workspaceSourceEsbuild()] });
   const script = result.outputFiles[0]!.text;
-  // The partitions run in a Worker of their own, as in a deployment, so they never share an isolate with `primary`.
   const journalsResult = await build({ stdin: { contents: options.actualEntry ? `export { JournalPartition, default } from './src/journal-worker.ts';` : `
       import { JournalPartition } from './src/journal-partition.ts';
       export class TestJournalPartition extends JournalPartition {
@@ -132,6 +136,18 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     `, resolveDir: process.cwd(), sourcefile: 'journals-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], plugins: [workspaceSourceEsbuild()] });
   const journalsScript = journalsResult.outputFiles[0]!.text;
+  return { script, journalsScript };
+}
+
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
+  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file';
+  /** Shortens the registration and heartbeat deadlines of connected Hosts. */ hostLiveness?: { heartbeatIntervalMs?: number; heartbeatTimeoutMs?: number; registrationDeadlineMs?: number } } = {}) {
+  const owned = options.lifetime === 'file' ? fileClosers : closers;
+  const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
+  owned.push(() => rm(directory, { recursive: true, force: true }));
+  const bundle = await bundleFor(options);
+  const script = bundle.script;
+  const journalsScript = bundle.journalsScript;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   let ownerFailures = 0;
   let renewalDelayMs = 0, activeRenewals = 0, peakRenewals = 0;
@@ -147,7 +163,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   async function start() {
     mf = new Miniflare({ handleRuntimeStdio: (_stdout, stderr) => { stderr.on('data', chunk => { runtimeErrors.push(String(chunk)); }); }, durableObjectsPersist: join(directory, 'state'), workers: [{ name: 'relay', modules: true, script, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
       durableObjects: { RELAY: { className: options.actualEntry ? 'RelayObject' : 'TestRelayObject', useSQLite: true }, ...(options.journals?.withoutBinding ? {} : { JOURNALS: { className: options.journals?.olderPartition ? 'OlderJournalPartition' : options.actualEntry ? 'JournalPartition' : 'TestJournalPartition', scriptName: 'journals', useSQLite: true } }) },
-      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
+      bindings: { ...(options.journals ? { AGENT_REMOTE_JOURNALS: '1' } : {}), ...(options.hostLiveness ? { HOST_LIVENESS: JSON.stringify(options.hostLiveness) } : {}), ...(options.workerVersionId ? { CF_VERSION_METADATA: { id: options.workerVersionId } } : {}), ...(options.authorityOutageGraceMs !== undefined ? { AGENT_REMOTE_AUTHORITY_OUTAGE_GRACE_MS: String(options.authorityOutageGraceMs) } : {}), AGENT_REMOTE_RELAY_URL: origin, ...(options.previewDomain ? { AGENT_REMOTE_PREVIEW_DOMAIN: options.previewDomain } : {}), ...(options.previewOrigin ? { AGENT_REMOTE_PREVIEW_URL: options.previewOrigin } : {}), ...(options.authProvider === 'google' ? {
         AGENT_REMOTE_AUTH_PROVIDER: 'google', AGENT_REMOTE_GOOGLE_CLIENT_ID: googleClientId, AGENT_REMOTE_GOOGLE_CLIENT_SECRET: 'workers-client-secret', AGENT_REMOTE_GOOGLE_ALLOWED_EMAILS: googleEmails,
       } : { ...(options.authProvider ? { AGENT_REMOTE_AUTH_PROVIDER: options.authProvider } : {}), AGENT_REMOTE_ISSUER: issuer }), AGENT_REMOTE_SIGNING_SECRET: envSecret },
       serviceBindings: { ASSETS: async request => new Response(new URL(request.url).pathname === '/index.html'

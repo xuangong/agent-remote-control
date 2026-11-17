@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
-import { fixture, send } from './fixture.js';
+import { fixture, send } from './test-utils/relay-harness.js';
 
 async function setup() {
   const f = await fixture();
@@ -71,7 +71,7 @@ it('retains an unlink across devices and restarts without replaying creation or 
   expect((await change(owner, relation, false, 2)).status).toBe(200);
   expect((await change(mobile, relation, true, 1)).status).toBe(409);
   expect(await list()).toContainEqual(expect.objectContaining({ id: 'side', linked: false, revision: 3 }));
-}, 30000);
+});
 
 it('requires a matching side relation and a valid revision before changing navigation', async () => {
   const { f, owner, create, list, change, source } = await setup();
@@ -90,7 +90,7 @@ it('requires a matching side relation and a valid revision before changing navig
     headers: { origin: 'https://elsewhere.example', cookie: owner.cookie, 'content-type': 'application/json' }, body: '{}' });
   expect(crossOrigin.status).toBe(403);
   expect(await list()).toContainEqual(expect.objectContaining({ id: 'side', linked: true, revision: 0 }));
-}, 30000);
+});
 
 it('authorizes both endpoints and preserves shared-host isolation and revocation', async () => {
   const { f, owner, hostId, create, list, change } = await setup();
@@ -117,7 +117,7 @@ it('authorizes both endpoints and preserves shared-host isolation and revocation
   expect((await f.control({ subject: 'alice', operation: 'revoke-share', hostId, targetSubject: 'bob' })()).status).toBe(200);
   expect((await change(bob, relation, false, 2)).status).toBe(403);
   expect(await list(bob)).toEqual([]);
-}, 30000);
+});
 
 it('does not acknowledge or retain an unlink when durable storage fails', async () => {
   const { f, owner, list, change } = await setup();
@@ -128,4 +128,4 @@ it('does not acknowledge or retain an unlink when durable storage fails', async 
   await f.restart();
   expect(await list()).toContainEqual(expect.objectContaining({ id: 'side', linked: true, revision: 0 }));
   expect((await change(owner, relation, false, 0)).status).toBe(200);
-}, 30000);
+});

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { event, fixture, origin, send } from './fixture.js';
+import { event, fixture, origin, send } from './test-utils/relay-harness.js';
 
 it('commits a prompt fork with favorites, broadcasts to both devices and replays after Worker restart', async () => {
   const f = await fixture();
@@ -29,7 +29,7 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
   const input = { providerId: 'codex', operationId: 'edit-1', editNativeSessionId: 'old', editTurnId: 'turn', editMessageId: 'message' };
   const response = await f.json(path + 'create', alice.cookie, input); expect(response.status).toBe(200);
   const target = await response.json() as { agentId: string };
-  for (const index of [0, 1]) await expect.poll(() => received[index]!.filter(item => item.type === 'session_migrated').length).toBe(1);
+  for (const index of [0, 1]) await f.poll(() => received[index]!.filter(item => item.type === 'session_migrated').length).toBe(1);
   expect(received[0]![0]).toMatchObject({ migration: { id: 'edit-1', from: { ...original, agentId: attached.agentId }, to: { nativeSessionId: 'new', agentId: target.agentId } } });
   expect(received[2]).toEqual([]);
   expect(await (await f.json(alice.basePath + 'v1/stars', second.cookie)).json()).toMatchObject({ stars: [{ title: 'Keep this name', nativeSessionId: 'new' }] });
@@ -43,7 +43,7 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
   expect((await f.json(path + 'create', second.cookie, another)).status).toBe(200);
   expect(creations).toBe(2);
   expect((await f.json(path + 'create', second.cookie, { ...another, editMessageId: 'other-message' })).status).toBe(409);
-  for (const index of [0, 1]) await expect.poll(() => received[index]!.filter(item => item.type === 'session_migrated').length).toBe(2);
+  for (const index of [0, 1]) await f.poll(() => received[index]!.filter(item => item.type === 'session_migrated').length).toBe(2);
   expect(await (await f.json(alice.basePath + 'v1/stars', second.cookie)).json()).toMatchObject({ stars: [{ nativeSessionId: 'new' }] });
   await f.restart();
   expect(await (await f.json(alice.basePath + 'v1/session-migrations', second.cookie)).json()).toMatchObject({ migrations: [{ id: 'edit-1' }, { id: 'second-edit' }] });
@@ -66,8 +66,8 @@ it('commits a prompt fork with favorites, broadcasts to both devices and replays
   const replay = await f.upgrade(alice.basePath + 'v1/session-channel?observation=session&migrations=1', { cookie: second.cookie, origin });
   const replayed: any[] = [];
   replay.addEventListener('message', message => replayed.push(JSON.parse(String(message.data))));
-  await expect.poll(() => replayed.some(item => item.type === 'session_migrated' && item.migration.id === 'edit-1')).toBe(true);
-}, 30000);
+  await f.poll(() => replayed.some(item => item.type === 'session_migrated' && item.migration.id === 'edit-1')).toBe(true);
+});
 
 it('rejects prompt editing on an older Host before sending a native create request', async () => {
   const f = await fixture(); const alice = await f.login('alice');
@@ -83,4 +83,4 @@ it('rejects prompt editing on an older Host before sending a native create reque
   expect((await f.json(path + 'attach', alice.cookie, { providerId: 'codex', nativeSessionId: 'old' })).status).toBe(200);
   const result = await f.json(path + 'create', alice.cookie, { providerId: 'codex', operationId: 'edit', editNativeSessionId: 'old', editTurnId: 'turn', editMessageId: 'message' });
   expect(result.status).toBe(400); expect(await result.json()).toMatchObject({ code: 'unsupported_configuration' }); expect(creations).toBe(0);
-}, 30000);
+});

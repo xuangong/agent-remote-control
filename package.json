@@ -42,6 +42,8 @@
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
     "test:preview-browser": "node scripts/run-tests.mjs preview-browser",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",
+    "test:workers": "node scripts/run-tests.mjs workers",
+    "contracts:record": "pnpm --filter @orchardworks/agent-remote-seams run contracts:record",
     "build:relay": "node scripts/build-relay.mjs",
     "build:devbox": "pnpm build:relay && node scripts/build-devbox.mjs",
     "test:devbox": "node scripts/run-tests.mjs devbox && node scripts/run-tests.mjs devbox-server",

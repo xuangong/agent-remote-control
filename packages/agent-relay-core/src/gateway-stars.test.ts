@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { fixture, origin } from './fixture.js';
+import { fixture, origin } from './test-utils/relay-harness.js';
 
 it('persists deliberate stars across browsers and restart without opening native sessions', async () => {
   const f = await fixture(); const alice = await f.login('alice'); const other = await f.login('alice'); const bob = await f.login('bob');
@@ -25,4 +25,4 @@ it('persists deliberate stars across browsers and restart without opening native
   const headers = { cookie: other.cookie, origin, 'content-type': 'application/json' };
   expect((await f.request(path, { method: 'DELETE', headers, body: JSON.stringify({ hostId: host.hostId, providerId: 'codex', nativeSessionId: star.nativeSessionId }) })).status).toBe(200);
   expect(await (await f.json(path, alice.cookie)).json()).toEqual({ stars: [] });
-}, 30000);
+});

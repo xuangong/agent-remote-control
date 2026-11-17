@@ -88,3 +88,7 @@ Client budgets: one disk cap and one preload budget, each cited to a measurement
 - Lists can be stale for up to their interval after a return; the dead-socket case refetches.
 - A purge on a failed lease check discards the cache for a network blip that fails the check; the next open reads through the Relay as a first open.
 - Not in S4b: the attach shortcut (S5), connection labels beyond the narrow rule (P2), demand leases and retention (P3), the Controller's item keys (S6).
+
+## 9. Results
+
+Recorded in [2026-11-16-s4b-results.md](2026-11-16-s4b-results.md): return budget met with live sockets at 1x and 4x CPU (2 requests against 13 to 14), T1 and the 100 ms round trip return and T2 p50 missed; departures listed there.

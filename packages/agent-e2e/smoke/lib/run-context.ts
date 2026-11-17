@@ -10,24 +10,28 @@ export async function createRunContext({ checkout, seed, quick, runDirectory, lo
   if (instance.state !== 'running') throw new Error(`The instance is ${instance.state}; run pnpm local up first.`);
   const pool = new SessionPool(checkout, log);
   const browser = await loadChromium(checkout).launch({ headless: true });
-  const withHistory = new Map<Provider, Promise<string>>();
+  /** One session per provider and kind of history, created on first use and shared by the scenarios of the run. */
+  const cache = new Map<string, Promise<string>>();
+  const history = (provider: Provider, kind: string, turns: string[]): Promise<string> => {
+    const key = `${provider}:${kind}`;
+    let address = cache.get(key);
+    if (!address) {
+      address = (async () => {
+        const created = await pool.create(provider, 'Reply with the single word READY and nothing else.');
+        await pool.waitForReply(created, undefined);
+        for (const turn of turns) await pool.turn(created, turn);
+        return created;
+      })();
+      cache.set(key, address);
+    }
+    return address;
+  };
   const startedAt = Date.now();
   const context: RunContext = {
     checkout, instance, seed, quick, random: seededRandom(seed), pool, browser, runDirectory, log,
     now: () => Date.now() - startedAt,
-    sessionWithHistory(provider) {
-      let address = withHistory.get(provider);
-      if (!address) {
-        address = (async () => {
-          const created = await pool.create(provider, 'Reply with the single word READY and nothing else.');
-          await pool.waitForReply(created, undefined);
-          await pool.turn(created, 'Now reply with the single word AGAIN and nothing else.');
-          return created;
-        })();
-        withHistory.set(provider, address);
-      }
-      return address;
-    },
+    sessionWithHistory: provider => history(provider, 'short', ['Now reply with the single word AGAIN and nothing else.']),
+    sessionWithLongHistory: provider => history(provider, 'long', ['Print the integers from 1 to 150, one per line, with no other text.', 'Now reply with the single word AGAIN and nothing else.']),
   };
   return { context, async close() { await browser.close().catch(() => {}); await pool.releaseAll(); } };
 }

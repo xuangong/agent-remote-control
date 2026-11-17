@@ -18,6 +18,8 @@ export interface RunContext {
   log(message: string): void;
   /** A session of this run with a few turns of history, created on first use. */
   sessionWithHistory(provider: Provider): Promise<string>;
+  /** A session whose history is taller than the page's viewport, so a reader can be somewhere in the middle of it. */
+  sessionWithLongHistory(provider: Provider): Promise<string>;
   /** The scenario's clock: milliseconds since it started. */
   now(): number;
 }

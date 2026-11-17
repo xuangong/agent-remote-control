@@ -10,7 +10,7 @@ export async function accountingWorker() {
   const directory = await mkdtemp(join(tmpdir(), 'arc-accounting-worker-'));
   const result = await build({ stdin: { contents: `
     import { createHash } from 'node:crypto';
-    import { createRelayState } from '../agent-remote-hosted/src/state.ts';
+    import { createRelayState } from '../agent-relay-core/src/state.ts';
     import { sourceCompletionBroker } from './test/source-completion-fixture.ts';
     import { retentionPeer } from './test/retention-consumption-fixture.ts';
     import { SqliteRelayStore } from './src/storage.ts';
@@ -136,8 +136,8 @@ export async function accountingWorker() {
     export default { fetch(request, env) { return env.STATE.get(env.STATE.idFromName('isolated')).fetch(request); } };
   `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser', conditions: ['workerd', 'worker', 'import'],
     external: ['node:*', 'cloudflare:*'], alias: {
-      '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
-      '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts'),
+      '@orchardworks/agent-relay-core/host-recovery': resolve('../agent-relay-core/src/host-recovery.ts'),
+      '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts'),
     } });
   let mf: Miniflare;
   async function start() {

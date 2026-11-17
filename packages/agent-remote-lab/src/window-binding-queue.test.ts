@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { createRelayState, createWindowWorkspaces, emptyRelayState, handleWindowRequest } from '@orchardworks/agent-remote-hosted';
+import { createRelayState, createWindowWorkspaces, emptyRelayState, handleWindowRequest } from '@orchardworks/agent-relay-core';
 import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { WindowWorkspaceStore } from './window-workspace.js';
 

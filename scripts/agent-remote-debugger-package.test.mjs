@@ -37,7 +37,7 @@ test('installed public ARDB contains its local service and recovers exact prefix
       assert.equal((await lstat(location)).isSymbolicLink(), false, name);
       assert.ok((await realpath(location)).startsWith(prefix + '/'));
     }
-    for (const name of ['agent-remote-controller', 'agent-remote-hosted', 'agent-remote-tunnel', 'agent-provider-claude', 'agent-provider-opencode', 'agent-provider-copilot', 'agent-remote-lab']) {
+    for (const name of ['agent-remote-controller', 'agent-relay-core', 'agent-remote-tunnel', 'agent-provider-claude', 'agent-provider-opencode', 'agent-provider-copilot', 'agent-remote-lab']) {
       await assert.rejects(lstat(join(prefix, 'node_modules/@orchardworks', name)), { code: 'ENOENT' });
     }
     const local = await readFile(join(installed, 'dist/local-session-succession.js'), 'utf8');

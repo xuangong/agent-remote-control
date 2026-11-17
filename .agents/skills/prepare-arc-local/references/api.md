@@ -29,7 +29,7 @@ What matters when you use it:
 Use it to read state the website reads: Hosts and their providers
 (`hosts[].id`, `name`, `online`, `providers[].providerId`) and other `v1/`
 resources. Find a resource's path in the page's network requests or in
-`packages/agent-remote-hosted/src/`.
+`packages/agent-relay-core/src/`.
 
 Writes are acceptable only to prepare fixtures for a check that then uses the
 page — for example creating several items before testing how the page lists

@@ -1,6 +1,6 @@
 import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
-import { createHostBroker, type RelaySocket, type RemoteHostBrokerState } from '@orchardworks/agent-remote-hosted';
+import { createHostBroker, type RelaySocket, type RemoteHostBrokerState } from '@orchardworks/agent-relay-core';
 
 import type { Direction, PlayerPeer } from './transcript.js';
 

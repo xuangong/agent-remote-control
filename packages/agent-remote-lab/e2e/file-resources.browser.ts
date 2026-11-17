@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
-import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
+import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
 import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
 
 for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {

@@ -20,7 +20,7 @@
   "dependencies": {
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-remote-controller": "workspace:*",
-    "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-relay-core": "workspace:*",
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-session-runtime": "workspace:*"

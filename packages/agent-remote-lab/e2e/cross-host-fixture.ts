@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import type { BrowserContext } from '@playwright/test';
 import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentCapabilities, type AgentInputAcceptance, type AgentSession, type AgentSessionNativeEvidence,
   type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { createHostedRelay, createTimerRelayScheduler, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, createTimerRelayScheduler, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { createRemoteHostUplinkClient, type RemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
 import { createAgentHostRuntime, type AgentHostProviderRegistration } from '../../agent-host/src/host.js';

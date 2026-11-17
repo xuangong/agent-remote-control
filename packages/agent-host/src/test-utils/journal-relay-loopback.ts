@@ -1,5 +1,5 @@
-import { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalPublished } from '@orchardworks/agent-remote-hosted';
-import { createJournalConnection, type JournalConnection } from '@orchardworks/agent-remote-hosted/journal-uplink';
+import { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalPublished } from '@orchardworks/agent-relay-core';
+import { createJournalConnection, type JournalConnection } from '@orchardworks/agent-relay-core/journal-uplink';
 import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
 import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 

@@ -1,4 +1,4 @@
-import type { HostedRecordKind, RelayStateCommitMetrics } from '@orchardworks/agent-remote-hosted';
+import type { HostedRecordKind, RelayStateCommitMetrics } from '@orchardworks/agent-relay-core';
 
 export interface StateCommitLogContext { runtimeInstanceId: string; workerVersionId?: string }
 interface Summary {

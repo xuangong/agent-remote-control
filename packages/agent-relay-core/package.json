@@ -1,5 +1,5 @@
 {
-  "name": "@orchardworks/agent-remote-hosted",
+  "name": "@orchardworks/agent-relay-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",

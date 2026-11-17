@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import {
   createHostJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition,
   type HostJournalsOptions, type JournalPartitionApi,
-} from '@orchardworks/agent-remote-hosted';
+} from '@orchardworks/agent-relay-core';
 import { SqlJournalStore, type JournalSqlDatabase } from '@orchardworks/agent-remote-journal-sqlite';
 
 import { durableObjectJournalDatabase } from './journal-sql-database.js';

@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { createHostBroker } from '../../agent-remote-hosted/src/broker.js';
-import { projectSuccessionFavorites } from '../../agent-remote-hosted/src/favorites-succession.js';
-import { pruneSessionTitles } from '../../agent-remote-hosted/src/session-titles.js';
-import type { GatewayAuthOptions } from '../../agent-remote-hosted/src/auth.js';
-import type { RelayState } from '../../agent-remote-hosted/src/state.js';
-import type { RelaySocket } from '../../agent-remote-hosted/src/transport.js';
+import { createHostBroker } from '../../agent-relay-core/src/broker.js';
+import { projectSuccessionFavorites } from '../../agent-relay-core/src/favorites-succession.js';
+import { pruneSessionTitles } from '../../agent-relay-core/src/session-titles.js';
+import type { GatewayAuthOptions } from '../../agent-relay-core/src/auth.js';
+import type { RelayState } from '../../agent-relay-core/src/state.js';
+import type { RelaySocket } from '../../agent-relay-core/src/transport.js';
 import { codecState } from './storage-codec-fixture.js';
 
 export function retentionState(auth: GatewayAuthOptions, recovery = false) {

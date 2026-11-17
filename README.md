@@ -737,11 +737,11 @@ pairing keys, Team/TPM state, shares or usage ledger. Relay owns that applicatio
 state in its volume/Durable Object. Native session history and workspaces remain
 on the Hosts; transcript traffic does not pass through the main site.
 
-Implementation references: [ticket validation](packages/agent-remote-hosted/src/auth.ts),
-[authority requests](packages/agent-remote-hosted/src/authority.ts),
-[browser-session renewal](packages/agent-remote-hosted/src/sessions.ts),
-[sharing control](packages/agent-remote-hosted/src/control.ts) and
-[Host-key setup](packages/agent-remote-hosted/src/host-bootstrap.ts).
+Implementation references: [ticket validation](packages/agent-relay-core/src/auth.ts),
+[authority requests](packages/agent-relay-core/src/authority.ts),
+[browser-session renewal](packages/agent-relay-core/src/sessions.ts),
+[sharing control](packages/agent-relay-core/src/control.ts) and
+[Host-key setup](packages/agent-relay-core/src/host-bootstrap.ts).
 Before enabling a custom main site, verify login/callback, expiry/logout, disabled
 users, authority outages and recovery, and Host pairing/reconnect against both
 services. Exercise sharing and key revocation too if you expose those features.

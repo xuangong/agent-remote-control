@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { createHostBroker } from '../../agent-remote-hosted/src/broker.js';
+import { createHostBroker } from '../../agent-relay-core/src/broker.js';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import { expect, it } from 'vitest';
 import type { AgentCapabilities, AgentRuntimeInfo, AgentSession, AgentSessionConfig, AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';

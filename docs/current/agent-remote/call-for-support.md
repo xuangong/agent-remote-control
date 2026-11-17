@@ -11,7 +11,7 @@ A support group is a Team with `callForSupport` set (`packages/agent-remote-prot
 | Area | Owner | Files |
 | --- | --- | --- |
 | Schemas, Team additions, host calls | Protocol | `call-for-support.ts`, `team.ts`, `remote-host-uplink.ts` (`callForSupport`) |
-| Profiles, enablement, groups, calls, rosters, reports, ledger, usage, pauses, retention | Relay (tenant broker state) | `packages/agent-remote-hosted/src/call-for-support-profiles.ts`, `call-for-support.ts`, `teams.ts`, `team-resources.ts`, `broker.ts` |
+| Profiles, enablement, groups, calls, rosters, reports, ledger, usage, pauses, retention | Relay (tenant broker state) | `packages/agent-relay-core/src/call-for-support-profiles.ts`, `call-for-support.ts`, `teams.ts`, `team-resources.ts`, `broker.ts` |
 | Requester seats, coordinator and supporter extensions, deliveries, idle release, worktrees, bundles, patches, usage accounting, forgetting ended groups | Controller | `packages/agent-host/src/team.ts`, `call-for-support-roles.ts`, `call-for-support-workspaces.ts`, `call-for-support-usage.ts` |
 | Worker tools and their injection | Controller | `packages/agent-host/src/call-for-support-worker.ts`, `host.ts` |
 | Read-only sessions, tool namespaces | Provider adapters | `agent-provider-sdk` (`access`, `toolNamespaces`, `updateToolNamespaces`), Codex `session.ts`, Claude `session.ts`, `permission-modes.ts` |

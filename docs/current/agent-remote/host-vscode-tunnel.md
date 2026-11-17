@@ -36,7 +36,7 @@ Tests cover real fixture subprocesses, split output, process-group cleanup after
 - `packages/agent-host/src/vscode-tunnel-supervisor.ts`
 - `packages/agent-host/src/vscode-tunnel-output.ts`
 - `packages/agent-remote-protocol/src/vscode-tunnel.ts`
-- `packages/agent-remote-hosted/src/broker.ts`
+- `packages/agent-relay-core/src/broker.ts`
 - `packages/agent-remote-lab/src/vscode-tunnel.tsx`
 - `packages/agent-remote-lab/src/components/HostVscodeTunnel.tsx`
 

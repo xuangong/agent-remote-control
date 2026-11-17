@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { expect, test, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
-import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote-hosted/src/broker.js';
+import { createHostBroker, type RemoteHostBrokerState } from '../../agent-relay-core/src/broker.js';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';

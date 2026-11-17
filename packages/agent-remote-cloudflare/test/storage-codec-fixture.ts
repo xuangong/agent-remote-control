@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { successionFreezeKey } from '../../agent-remote-protocol/src/index.js';
 
 /** Complete A -> B -> C evidence follows the hosted immutable replay fixture. */

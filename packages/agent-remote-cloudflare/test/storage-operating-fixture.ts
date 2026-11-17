@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
-import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '../../agent-remote-hosted/src/succession-capacity.js';
+import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '../../agent-relay-core/src/state.js';
+import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '../../agent-relay-core/src/succession-capacity.js';
 import { encodeSqlSnapshot, decodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
 import { codecState } from './storage-codec-fixture.js';

@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
-import { createRelayState, hostedRecordEncodingCosts, type HostedRelayState, type RelayStateCommitMetrics } from '@orchardworks/agent-remote-hosted';
-import { deriveSuccessionCapacity } from '@orchardworks/agent-remote-hosted/succession-capacity';
+import { createRelayState, hostedRecordEncodingCosts, type HostedRelayState, type RelayStateCommitMetrics } from '@orchardworks/agent-relay-core';
+import { deriveSuccessionCapacity } from '@orchardworks/agent-relay-core/succession-capacity';
 import { SqliteRelayStore } from '../src/storage.js';
 import { encodeSqlSnapshot } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';

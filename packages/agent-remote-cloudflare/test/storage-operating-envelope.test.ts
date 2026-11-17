@@ -9,8 +9,8 @@ import { afterAll, beforeAll, expect, test } from 'vitest';
 import { accountingWorker, accountingAuth as auth } from './accounting-worker-fixture.js';
 import { finalizeOperatingSample } from './operating-sample-finalizer.js';
 import { operatingCases, operatingEncoding, operatingWarmUpdate, prepareOperatingDatasets, stateDigest, type OperatingCase } from './storage-operating-fixture.js';
-import { deriveSuccessionCapacity } from '../../agent-remote-hosted/src/succession-capacity.js';
-import { validateRelayState, type HostedRelayState } from '../../agent-remote-hosted/src/state.js';
+import { deriveSuccessionCapacity } from '../../agent-relay-core/src/succession-capacity.js';
+import { validateRelayState, type HostedRelayState } from '../../agent-relay-core/src/state.js';
 import { encodeSqlSnapshot, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 
 let output: string;

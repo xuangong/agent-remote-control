@@ -3,8 +3,8 @@ import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-j
 import { expect } from 'vitest';
 import { WebSocketServer } from 'ws';
 
-import { createHostBroker, type RelaySocket } from '../../../agent-remote-hosted/src/index.js';
-import { createDiagnosticJournal } from '../../../agent-remote-hosted/src/diagnostic-journal.js';
+import { createHostBroker, type RelaySocket } from '../../../agent-relay-core/src/index.js';
+import { createDiagnosticJournal } from '../../../agent-relay-core/src/diagnostic-journal.js';
 import { createAgentHost, type AgentHostProviderRegistration } from '../host.js';
 
 const closers: Array<() => Promise<void> | void> = [];

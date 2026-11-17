@@ -11,8 +11,8 @@ import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime
 import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
 // The real catalog runs its worker process from the build output.
 import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';
-import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
-import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
+import { TeamBroker } from '../../agent-relay-core/src/teams.js';
+import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { createCodexHostRegistration } from './codex.js';
 import { createAgentHostRuntime } from './host.js';

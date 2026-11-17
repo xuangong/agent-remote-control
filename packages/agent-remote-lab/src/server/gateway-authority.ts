@@ -1,1 +1,1 @@
-export * from '@orchardworks/agent-remote-hosted/authority';
+export * from '@orchardworks/agent-relay-core/authority';

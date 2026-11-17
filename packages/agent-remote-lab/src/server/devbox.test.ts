@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { createWindowView, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import * as hosted from '@orchardworks/agent-remote-hosted';
+import * as hosted from '@orchardworks/agent-relay-core';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import * as sqliteNode from '@orchardworks/agent-remote-journal-sqlite/node';
 import { openNodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';

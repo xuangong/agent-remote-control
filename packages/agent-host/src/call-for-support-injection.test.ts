@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { AgentSession, AgentSessionExtensions, AgentSessionToolNamespace, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
-import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
-import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../agent-remote-hosted/src/call-for-support-profiles.js';
+import { TeamBroker } from '../../agent-relay-core/src/teams.js';
+import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
+import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../agent-relay-core/src/call-for-support-profiles.js';
 import { createManagedStdioDirectory } from './stdio-directory.js';
 import { reviewProfile } from './test-utils/call-for-support-harness.js';
 

@@ -14,7 +14,7 @@ async function fixture() {
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const result = await build({ stdin: { contents: `
     import { SqliteTeamResourceStorage } from './src/team-resource-storage.ts';
-    import { PortableTeamResourceStore } from '../agent-remote-hosted/src/team-resources.ts';
+    import { PortableTeamResourceStore } from '../agent-relay-core/src/team-resources.ts';
     export class ResourceObject {
       constructor(ctx) { this.ctx = ctx; }
       async fetch(request) {

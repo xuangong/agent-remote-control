@@ -5,8 +5,8 @@ import { expect, it } from 'vitest';
 import type { AgentMessageOptions } from '@orchardworks/agent-provider-sdk';
 import type { AgentSnapshotPayload, NativeSessionRef, Team, TeamMessage } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, createOperationExecutor, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
-import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
-import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
+import { TeamBroker } from '../../agent-relay-core/src/teams.js';
+import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
 import { TeamRuntime, type TeamRuntimeAccess } from './team.js';
 
 const pendingApproval: AgentSnapshotPayload['pendingInteractions'][number] = { requestId: 'approval', kind: 'tool_approval', toolCallId: 'call', toolName: 'shell', summary: 'Run', detail: { type: 'shell', command: 'pwd' }, allowedDecisions: ['allow', 'deny'], allowScopes: ['once'] };

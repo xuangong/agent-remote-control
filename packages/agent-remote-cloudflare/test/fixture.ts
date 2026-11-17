@@ -32,7 +32,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
       import { SqliteRelayStore } from './src/storage.ts';
-      import { createHostedRelay } from '@orchardworks/agent-remote-hosted';
+      import { createHostedRelay } from '@orchardworks/agent-relay-core';
       import { WorkerRelaySocket } from './src/socket.ts';
       export class TestRelayObject extends RelayObject {
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
@@ -93,8 +93,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
       conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
-        '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
-        '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+        '@orchardworks/agent-relay-core/host-recovery': resolve('../agent-relay-core/src/host-recovery.ts'),
+        '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts') } });
   const script = result.outputFiles[0]!.text;
   // The partitions run in a Worker of their own, as in a deployment, so they never share an isolate with `primary`.
   const journalsResult = await build({ stdin: { contents: options.actualEntry ? `export { JournalPartition, default } from './src/journal-worker.ts';` : `
@@ -123,7 +123,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       export default { fetch() { return new Response(null, { status: 404 }); } };
     `, resolveDir: process.cwd(), sourcefile: 'journals-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
-      '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
+      '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts') } });
   const journalsScript = journalsResult.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   let ownerFailures = 0;

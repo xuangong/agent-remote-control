@@ -3,7 +3,7 @@ import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
-import { hostedAuthFromEnv } from '@orchardworks/agent-remote-hosted';
+import { hostedAuthFromEnv } from '@orchardworks/agent-relay-core';
 
 const auth = hostedAuthFromEnv(process.env);
 const stateDirectory = process.env.AGENT_REMOTE_STATE_DIR ?? join(homedir(), '.agent-remote-control', 'gateway-relay');

@@ -11,9 +11,9 @@ import type { Team } from '@orchardworks/agent-remote-protocol';
 import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
 // The real catalog runs its worker process from the build output.
 import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';
-import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
-import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../agent-remote-hosted/src/call-for-support-profiles.js';
+import { TeamBroker } from '../../agent-relay-core/src/teams.js';
+import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
+import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../agent-relay-core/src/call-for-support-profiles.js';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { createCodexHostRegistration } from './codex.js';
 import { createAgentHostRuntime } from './host.js';
@@ -161,7 +161,7 @@ it.runIf(!!claudeExecutable && !!codexExecutable)('a Codex worker calls for a cr
     createSeat: (_host, seat) => control('/remote/team/create-seat', seat),
     callForSupport: { state: () => support, capable: () => true, assertHost() {}, readOnly: () => true,
       supportBundle: (_host, input) => control('/remote/team/support-bundle', input), supportPatch: (_host, input) => control('/remote/team/support-patch', input) },
-    resources: new (await import('../../agent-remote-hosted/src/team-resources.js')).PortableTeamResourceStore({ storage: (() => {
+    resources: new (await import('../../agent-relay-core/src/team-resources.js')).PortableTeamResourceStore({ storage: (() => {
       const rows = new Map<string, Uint8Array>();
       return { async get(key: string) { return rows.get(key); }, async put(key: string, value: Uint8Array) { rows.set(key, value); }, async delete(key: string) { rows.delete(key); },
         async list(prefix: string) { return [...rows.keys()].filter(key => key.startsWith(prefix)); } };

@@ -1,8 +1,8 @@
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
-import { createRelayState } from '../../agent-remote-hosted/src/state.js';
-import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
+import { createRelayState } from '../../agent-relay-core/src/state.js';
+import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { SqliteRelayStore } from '../src/storage.js';
 import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT, type SqlChunk, type SqlManifest, type SqlSnapshotFormat } from '../src/storage-codec.js';
 import { codecState } from './storage-codec-fixture.js';
@@ -489,7 +489,7 @@ for (const consumer of ['terminal', 'favorites', 'invitation', 'registration', '
 
 test('full recovery registration construction fits the saved claim and ends only future Host growth', async () => {
   const { retentionState, retentionPeer } = await import('./retention-consumption-fixture.js');
-  const { deriveSuccessionCapacity } = await import('../../agent-remote-hosted/src/succession-capacity.js');
+  const { deriveSuccessionCapacity } = await import('../../agent-relay-core/src/succession-capacity.js');
   const initial = retentionState(auth, true), broker = initial.tenants[0]!.broker;
   broker.hosts = []; broker.keys = []; broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
   const f = fixture(); await f.store.commit(initial);

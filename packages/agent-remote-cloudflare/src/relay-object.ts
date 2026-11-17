@@ -1,4 +1,4 @@
-import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type RelayScheduler } from '@orchardworks/agent-remote-hosted';
+import { createHostedRelay, createPartitionJournals, hostedAuthFromEnv, hostedRecordEncodingCosts, PortableTeamResourceStore, type HostedAuthEnvironment, type HostedRecordKind, type JournalPartitionApi, type RelayScheduler } from '@orchardworks/agent-relay-core';
 import { createStateCommitLog } from './state-commit-log.js';
 import { SqliteTeamResourceStorage } from './team-resource-storage.js';
 import { createHmac } from 'node:crypto';

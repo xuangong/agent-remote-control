@@ -1,4 +1,4 @@
-import { isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-remote-hosted';
+import { isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
 

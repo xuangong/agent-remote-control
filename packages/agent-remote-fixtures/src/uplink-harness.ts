@@ -1,7 +1,7 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { createJournalPublisher, type JournalPublisher } from '@orchardworks/agent-remote-controller/journal-publisher';
-import { createHostJournals, type HostJournals, type HostJournalsOptions } from '@orchardworks/agent-remote-hosted';
-import { createJournalConnection } from '@orchardworks/agent-remote-hosted/journal-uplink';
+import { createHostJournals, type HostJournals, type HostJournalsOptions } from '@orchardworks/agent-relay-core';
+import { createJournalConnection } from '@orchardworks/agent-relay-core/journal-uplink';
 import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
 import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 

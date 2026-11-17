@@ -2,7 +2,7 @@ import { watchPageResume } from '@orchardworks/agent-remote-web/browser';
 import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
+import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
 import { WorkspaceShell } from './components/WorkspaceShell.js';
 import { SecurityPanel } from './components/SecurityPanel.js';
 import { AccessPage } from './components/AccessPage.js';

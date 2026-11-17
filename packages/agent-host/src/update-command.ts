@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { controllerReleases } from '@orchardworks/agent-remote-hosted';
+import { controllerReleases } from '@orchardworks/agent-relay-core';
 import { compareControllerVersions, isControllerVersion, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 
 type ManagementCall = (request: Record<string, unknown>) => Promise<Record<string, unknown>>;

@@ -34,7 +34,7 @@
     "@orchardworks/agent-provider-copilot": "workspace:*",
     "@orchardworks/agent-provider-opencode": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
-    "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-relay-core": "workspace:*",
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "@orchardworks/agent-session-runtime": "workspace:*",

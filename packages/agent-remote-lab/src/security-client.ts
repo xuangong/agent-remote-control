@@ -1,5 +1,5 @@
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
-import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
+import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
 
 export interface BrowserSession { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; identified?: boolean; sessionCount?: number; activity?: number[] }
 export interface BrowserSessions { sessions: BrowserSession[]; authenticatedAt: number | null; recentAuthentication: boolean }

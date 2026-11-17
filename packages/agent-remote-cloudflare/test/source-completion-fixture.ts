@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { createHostBroker } from '../../agent-remote-hosted/src/broker.js';
-import type { RelaySocket } from '../../agent-remote-hosted/src/transport.js';
-import { emptyRelayState, type HostedRelayState, type RelayState } from '../../agent-remote-hosted/src/state.js';
-import type { GatewayAuthOptions } from '../../agent-remote-hosted/src/auth.js';
+import { createHostBroker } from '../../agent-relay-core/src/broker.js';
+import type { RelaySocket } from '../../agent-relay-core/src/transport.js';
+import { emptyRelayState, type HostedRelayState, type RelayState } from '../../agent-relay-core/src/state.js';
+import type { GatewayAuthOptions } from '../../agent-relay-core/src/auth.js';
 
 export function sourceCompletionState(auth: GatewayAuthOptions): HostedRelayState {
   const state = emptyRelayState(auth); state.version = 9;

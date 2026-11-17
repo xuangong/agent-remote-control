@@ -1,1 +1,1 @@
-export { HostSharing, SharingError, type HostSharingState } from '@orchardworks/agent-remote-hosted';
+export { HostSharing, SharingError, type HostSharingState } from '@orchardworks/agent-relay-core';

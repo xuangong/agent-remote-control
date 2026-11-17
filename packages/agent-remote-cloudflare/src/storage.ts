@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { SQL_READABLE_SNAPSHOT_FORMATS, SQL_SNAPSHOT_FORMAT, decodeSqlSnapshot, encodeSqlSnapshot, type SqlManifest, type SqlChunk, type SqlEncodedRecord, type SqlSnapshotFormat } from './storage-codec.js';
-import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, HostedRecordCache, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRecordCacheOptions, type HostedRelayState, type RelayStateCommitStats, type RelayStateStore } from '@orchardworks/agent-remote-hosted';
+import { emptyRelayState, hostedAuthStateConfig, hostedAuthStorageIdentity, HostedRecordCache, resolveHostedAuth, validateRelayState, type HostedAuthOptions, type HostedRecordCacheOptions, type HostedRelayState, type RelayStateCommitStats, type RelayStateStore } from '@orchardworks/agent-relay-core';
 
 type RecordKind = 'sessionTitle' | 'sessionTitleRevision' | 'favoritesTree' | 'sessionMigration' | 'sessionStar' | 'preview' | 'securityEvent' | 'session' | 'tenant' | 'deviceKey' | 'host' | 'binding' | 'creation' | 'share' | 'reservation' | 'loginChallenge' | 'consumedProof';
 type StoredRecord = { kind: RecordKind; owner: string; key: string; version: number; value: string };

@@ -5,7 +5,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rename, writeFile, rm, realp
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compareControllerVersions, releaseCoversHost, type ControllerIdentity, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
-import { controllerAssetUrl, controllerReleases } from '@orchardworks/agent-remote-hosted';
+import { controllerAssetUrl, controllerReleases } from '@orchardworks/agent-relay-core';
 import { atomicPrivate } from './autostart-state.js';
 import { publishControllerPackage } from './controller-package.js';
 const exec = promisify(execFile);

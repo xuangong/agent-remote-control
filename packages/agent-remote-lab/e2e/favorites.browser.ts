@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { chromium, webkit, expect as browserExpect, type Page } from '@playwright/test';
 import { expect, it } from 'vitest';
-import { createRelayState } from '@orchardworks/agent-remote-hosted/state';
-import { createFavorites, updateFavoriteSessionTitles } from '@orchardworks/agent-remote-hosted/favorites';
+import { createRelayState } from '@orchardworks/agent-relay-core/state';
+import { createFavorites, updateFavoriteSessionTitles } from '@orchardworks/agent-relay-core/favorites';
 const auth={origin:'http://localhost',issuer:'https://issuer.example',secret:'s'.repeat(32)};
 async function seed() {
  const state=createRelayState(auth,undefined,()=>{},()=>{}), favorites=createFavorites(state,()=>({online:true,hostName:'zhangxians-Mac-mini.local',canRename:true}));

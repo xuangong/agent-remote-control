@@ -9,8 +9,8 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
-import { hostedRecordEncodingCosts, validateRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
-import { deriveSuccessionCapacity } from '@orchardworks/agent-remote-hosted/succession-capacity';
+import { hostedRecordEncodingCosts, validateRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core';
+import { deriveSuccessionCapacity } from '@orchardworks/agent-relay-core/succession-capacity';
 import { createGatewayRelay } from './gateway-relay.js';
 import { createGatewayStaticPages } from './gateway-static.js';
 

@@ -5,7 +5,7 @@ import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-j
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 
-import { createHostBroker, type RelaySocket } from '../../agent-remote-hosted/src/index.js';
+import { createHostBroker, type RelaySocket } from '../../agent-relay-core/src/index.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 import type { JournalPublisherDiagnostic } from './journal-publisher.js';
 import { boundary, item, ScriptedSession, untilReal as until } from './test-utils/journal-scripted-session.js';

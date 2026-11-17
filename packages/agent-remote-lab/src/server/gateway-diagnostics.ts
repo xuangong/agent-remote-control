@@ -2,7 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { mkdir, open, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { GatewayAuthOptions } from '@orchardworks/agent-remote-hosted';
+import type { GatewayAuthOptions } from '@orchardworks/agent-relay-core';
 import { pruneRelayDiagnostics, type RelayDiagnosticStore } from '@orchardworks/agent-remote-protocol/model';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;

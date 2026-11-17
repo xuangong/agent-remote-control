@@ -16,4 +16,4 @@ export {
   type HostedRecordCost as SqlRecordCost,
   type HostedSnapshot as SqlSnapshot,
   type HostedSnapshotFormat as SqlSnapshotFormat,
-} from '@orchardworks/agent-remote-hosted';
+} from '@orchardworks/agent-relay-core';

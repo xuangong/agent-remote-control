@@ -6,10 +6,10 @@ import type { AgentMessageOptions, AgentSessionExtensions } from '@orchardworks/
 import type { AgentSnapshotPayload, CallForSupportProfileInput, NativeSessionRef, Team, TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, createOperationExecutor, type AgentManagerEvent, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
-import { TeamBroker } from '../../../agent-remote-hosted/src/teams.js';
-import type { SavedTeam } from '../../../agent-remote-hosted/src/team-delivery.js';
-import { PortableTeamResourceStore } from '../../../agent-remote-hosted/src/team-resources.js';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../../agent-remote-hosted/src/call-for-support-profiles.js';
+import { TeamBroker } from '../../../agent-relay-core/src/teams.js';
+import type { SavedTeam } from '../../../agent-relay-core/src/team-delivery.js';
+import { PortableTeamResourceStore } from '../../../agent-relay-core/src/team-resources.js';
+import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../../agent-relay-core/src/call-for-support-profiles.js';
 import { TeamRuntime, type TeamRuntimeAccess } from '../team.js';
 import type { SessionCreation } from '../role-session-creation.js';
 

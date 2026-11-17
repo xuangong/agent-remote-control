@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
-import { createHostBroker, type RelaySocket } from '@orchardworks/agent-remote-hosted';
+import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
 import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
 import { WebSocket, WebSocketServer } from 'ws';
 

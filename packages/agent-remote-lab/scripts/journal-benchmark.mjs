@@ -2,7 +2,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { cpus, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createHostJournals } from '@orchardworks/agent-remote-hosted';
+import { createHostJournals } from '@orchardworks/agent-relay-core';
 import { SessionJournal } from '@orchardworks/agent-remote-journal';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';

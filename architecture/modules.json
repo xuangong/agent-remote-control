@@ -39,8 +39,8 @@
       "dir": "packages/agent-session-runtime",
       "entry": "src/index.ts"
     },
-    "@orchardworks/agent-remote-hosted": {
-      "dir": "packages/agent-remote-hosted",
+    "@orchardworks/agent-relay-core": {
+      "dir": "packages/agent-relay-core",
       "entry": "src/index.ts"
     },
     "@orchardworks/agent-remote-controller": {
@@ -280,7 +280,7 @@
       "name": "relay-core",
       "layer": 2,
       "paths": [
-        "packages/agent-remote-hosted/src/**"
+        "packages/agent-relay-core/src/**"
       ],
       "seams": [
         "S2",
@@ -304,13 +304,13 @@
       "name": "relay-core-edge",
       "layer": 3,
       "paths": [
-        "packages/agent-remote-hosted/src/gateway*.ts",
-        "packages/agent-remote-hosted/src/auth*.ts",
-        "packages/agent-remote-hosted/src/access-page.ts",
-        "packages/agent-remote-hosted/src/google-auth.ts",
-        "packages/agent-remote-hosted/src/hosted-auth.ts",
-        "packages/agent-remote-hosted/src/request.ts",
-        "packages/agent-remote-hosted/src/*-routes.ts"
+        "packages/agent-relay-core/src/gateway*.ts",
+        "packages/agent-relay-core/src/auth*.ts",
+        "packages/agent-relay-core/src/access-page.ts",
+        "packages/agent-relay-core/src/google-auth.ts",
+        "packages/agent-relay-core/src/hosted-auth.ts",
+        "packages/agent-relay-core/src/request.ts",
+        "packages/agent-relay-core/src/*-routes.ts"
       ],
       "seams": [
         "S3"
@@ -326,7 +326,7 @@
       "name": "relay-core-test-support",
       "layer": 5,
       "paths": [
-        "packages/agent-remote-hosted/src/test-utils/**"
+        "packages/agent-relay-core/src/test-utils/**"
       ],
       "seams": [],
       "flows": [],

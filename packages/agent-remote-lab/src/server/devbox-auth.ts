@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { GatewayAuthOptions } from '@orchardworks/agent-remote-hosted';
-import { readRequestBytes } from '@orchardworks/agent-remote-hosted/request';
+import type { GatewayAuthOptions } from '@orchardworks/agent-relay-core';
+import { readRequestBytes } from '@orchardworks/agent-relay-core/request';
 import type { GatewayRelayRequestInterceptor } from './gateway-relay.js';
 
 const subject = 'devbox';

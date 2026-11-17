@@ -4,7 +4,7 @@ import { sessionHandoffScope, type SessionHandoffScope, type SessionHandoff, typ
 import { remoteSessionState, type RemoteSessionState } from './session-state.js';
 import { watchPageResume } from './page-resume.js';
 import { equalJitter } from './reconnect-delay.js';
-import { isSessionMutation, type SessionControlClientKind, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
+import { isSessionMutation, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
   PROTOCOL_VERSION,
   type ImageUploadResult,
@@ -52,10 +52,8 @@ export interface RemoteSessionClientOptions {
   /** Stable native target identity when public bindings can change; defaults to agentId. */
   readonly handoffTarget?: string;
   readonly controlExtension?: SessionControlExtension;
-  readonly clientKind?: SessionControlClientKind;
   readonly requireSessionControl?: boolean;
   readonly observeOnly?: boolean;
-  readonly retainControlOnDisconnect?: boolean;
   /** Pipeline recovery over the session wire; HTTP remains available for custom transports. */
   readonly timelineRecovery?: 'http' | 'websocket';
   readonly historyPageSize?: number;
@@ -79,16 +77,13 @@ interface PendingOperation {
   readonly timeout: ReturnType<typeof setTimeout> | undefined;
 }
 
-// Memory-only proof shared by views in one page/transport, never by browser storage.
 const TAIL_LIMIT_MAX = 200;
-const controlProofs = new WeakMap<RemoteAgentTransport, Map<string, string>>();
 
 export class RemoteSessionClient {
   private control?: SessionControlState;
   private readonly controlExtension?: SessionControlExtension;
   private nativeTakeover?: AbortController;
   private readonly handoff: SessionHandoff;
-  private resumeControlToken?: string;
   private controlSupported = false;
   private controlRequested = false;
   private controlAcquiring = false;
@@ -96,8 +91,6 @@ export class RemoteSessionClient {
   private resolveControlReady?: () => void;
   private readonly requireSessionControl: boolean;
   private readonly observeOnly: boolean;
-  private readonly clientKind: SessionControlClientKind;
-  private readonly retainControlOnDisconnect: boolean;
   private readonly historyPageSize: number;
   private readonly timelineRecovery: 'http' | 'websocket';
   private subscriptionReady?: Promise<void>;
@@ -144,9 +137,6 @@ export class RemoteSessionClient {
     this.controlExtension = options.controlExtension;
     this.handoff = (options.handoffScope ?? sessionHandoffScope(transport)).forTarget(options.handoffTarget ?? agentId);
     this.observeOnly = options.observeOnly ?? false;
-    this.clientKind = options.clientKind ?? 'unknown';
-    this.retainControlOnDisconnect = options.retainControlOnDisconnect ?? true;
-    this.resumeControlToken = controlProofs.get(transport)?.get(agentId);
     this.requireSessionControl = options.requireSessionControl ?? false;
     this.connectionTimeoutMs = options.connectionTimeoutMs ?? 20_000;
     this.historyPageSize = options.historyPageSize ?? 100;
@@ -283,14 +273,13 @@ export class RemoteSessionClient {
         await this.handoff.run(owner.generation, async handoff => {
           await this.controlExtension!.resumeNative(owner, { checkOnly: handoff.checkOnly, signal: controller.signal });
           handoff.onRestoring();
-          await this.waitForNativeControl(controller.signal, owner.generation);
         }, options);
       } finally {
         clearTimeout(deadline);
         if (this.nativeTakeover === controller) this.nativeTakeover = undefined;
       }
     }
-    await this.requestControl('take_over');
+    await this.requestControl();
   }
 
   async takeControlAfterNativeResume(): Promise<void> {
@@ -325,14 +314,12 @@ export class RemoteSessionClient {
     });
   }
 
-  private requestControl(action: 'acquire' | 'take_over'): Promise<SessionControlMessage> {
+  private requestControl(automatic = false): Promise<SessionControlMessage> {
     return this.sendOperation({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: {
-      requestId: this.createRequestId(), agentId: this.agentId, action, revision: this.control!.revision, retainOnDisconnect: this.retainControlOnDisconnect, clientKind: this.clientKind,
-      ...(action === 'acquire' && (controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken)
-        ? { resumeToken: controlProofs.get(this.transport)?.get(this.agentId) ?? this.resumeControlToken } : {}),
+      requestId: this.createRequestId(), agentId: this.agentId, action: 'acquire', revision: this.control!.revision,
     } }, 'session_control', (message): message is SessionControlMessage => message.type === 'session_control' && message.payload.agentId === this.agentId,
     // Automatic acquisition is part of synchronization and shares its foreground deadline.
-    action === 'acquire' ? null : this.operationTimeoutMs);
+    automatic ? null : this.operationTimeoutMs);
   }
 
   searchTimeline(query: string, options: TimelineSearchOptions = {}) {
@@ -626,8 +613,8 @@ export class RemoteSessionClient {
 
   private publishControl(): void {
     if (!this.control) return;
-    const { access, available, revision, ownerKind, nativeOwner } = this.control;
-    this.replica.setSessionControl({ access, available, revision, ownerKind, nativeOwner });
+    const { access, available, revision, nativeOwner } = this.control;
+    this.replica.setSessionControl({ access, available, revision, nativeOwner });
   }
 
   private receive(generation: number, message: RemoteServerMessage): void {
@@ -646,22 +633,17 @@ export class RemoteSessionClient {
         if (message.payload.agentId !== this.agentId || !this.controlSupported) return;
         const nativeReleased = !!this.control?.nativeOwner && !message.payload.nativeOwner;
         this.control = message.payload;
-        if (message.payload.access === 'control' && message.payload.token) {
-          this.resumeControlToken = message.payload.token;
-          let proofs = controlProofs.get(this.transport);
-          if (!proofs) { proofs = new Map(); controlProofs.set(this.transport, proofs); }
-          proofs.set(this.agentId, message.payload.token);
-        }
         if (!this.controlAcquiring && (this.controlRequested || this.observeOnly)) this.publishControl();
-        if (nativeReleased) { this.restartDisconnected(this.generation); return; }
         if (message.payload.requestId) this.resolvePendingOperation(message.payload.requestId, message);
+        // The Controller session of the stream is the one the terminal closed; a new stream opens it again.
+        if (nativeReleased) { this.restartDisconnected(this.generation); return; }
         if (!this.controlRequested && !this.observeOnly) {
           this.controlRequested = true;
           this.controlAcquiring = true;
           const ready = this.resolveControlReady;
           // Initial read-only state precedes automatic acquisition, including shared sessions.
           // Publish ownership only after that handshake settles so drafts survive reconnects.
-          void this.requestControl('acquire').catch(error => {
+          void this.requestControl(true).catch(error => {
             if (generation !== this.generation) return;
             if (!this.control?.nativeOwner && !(error instanceof RemoteOperationError && error.code === 'session_control_changed')) {
               this.restartDisconnected(generation);

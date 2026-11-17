@@ -95,6 +95,10 @@ function HostCard({ host, reading, onOpenHost }: { host: RemoteHost; reading?: H
         value={disk.used} total={disk.total} text={usageText(disk.used, disk.total)} />)}
     </div> : null}
     {!host.online ? <p className="lab-host-note">Offline</p>
+      : !host.sessionControl ? <p className="lab-host-note" role="status" data-update-required>
+        {shared ? 'Update required: the owner must update this Controller before its sessions open.'
+          : <>Update required: this Controller cannot open sessions until it is updated. Use Update, or on that machine run <code>agent-remote-controller update --check</code> and follow it.</>}
+        {!shared ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>Update</Button> : null}</p>
       : !host.hostStatus ? <p className="lab-host-note">{shared ? 'Sessions show once the owner updates the Controller.' : 'Update the Controller to see CPU, memory and disks.'}
         {!shared ? <Button className="lab-host-update" onClick={() => onOpenHost(host.id)}>Update</Button> : null}</p>
       : shared && status ? <p className="lab-host-note">Shared with you: sessions only.</p> : null}

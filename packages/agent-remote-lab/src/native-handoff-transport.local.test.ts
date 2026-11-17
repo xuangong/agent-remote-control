@@ -24,7 +24,7 @@ it('broadcasts native handoff over real browser sockets and reconnects both view
     const {url}=await http.listen();
     async function page(){
       const transport=new HttpWebSocketTransport(url,{sessionChannels:false,webSocketFactory:url=>new WebSocket(url) as unknown as WebSocketLike});
-      const replica=new AgentReplica();const client=new RemoteSessionClient('agent',transport,replica,{requireSessionControl:true,clientKind:'web',reconnectInitialDelayMs:10});
+      const replica=new AgentReplica();const client=new RemoteSessionClient('agent',transport,replica,{requireSessionControl:true,reconnectInitialDelayMs:10});
       let status='';client.subscribeStatus(value=>status=value);clients.push(client);client.start();
       await vi.waitFor(()=>expect(status).toBe('ready'),{timeout:5000});return{replica,client,get status(){return status;}};
     }

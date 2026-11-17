@@ -1926,7 +1926,7 @@ it.each(['control', 'read_only'] as const)('publishes confirmed %s access only a
     if (request?.type !== 'session_control_request') throw new Error('Missing control request');
     await expect(client.sendMessage('must not dispatch')).rejects.toMatchObject({ code: 'session_read_only' });
     expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
-    const confirmed = { ...initial, access, available: false, ...(access === 'control' ? { token: 'private-proof' } : { ownerKind: 'web' as const }) };
+    const confirmed = { ...initial, access, available: false, ...(access === 'control' ? { token: 'private-proof' } : {}) };
     transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: confirmed });
     expect(replica.getState().sessionControl?.access).toBe('checking');
     transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { ...confirmed, requestId: request.payload.requestId } });
@@ -1953,7 +1953,6 @@ it('reconnects an unconfirmed control handshake instead of presenting a takeover
     expect(transport.connections).toBe(2);
     expect(states).not.toContain('read_only');
     expect(replica.getState().sessionControl?.access).toBe('checking');
-    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
   } finally { client.stop(); vi.useRealTimers(); }
 });
 
@@ -2102,7 +2101,7 @@ it('exposes synchronized observation separately from native recovery and write a
   } finally { unsubscribe(); client.stop(); }
 });
 
-it('owns native handoff synchronization and only acquires control after the native owner clears', async () => {
+it('resumes the session natively, then acquires control from the Relay at once and opens a new stream for the resumed session', async () => {
   const transport = new FakeTransport();
   const replica = new AgentReplica();
   const resumeNative = vi.fn(async () => {});
@@ -2123,31 +2122,16 @@ it('owns native handoff synchronization and only acquires control after the nati
     await transport.settle();
     const onRestoring = vi.fn();
     const taking = client.takeControl({ onRestoring });
-    void taking.catch(() => {});
     await transport.settle();
     expect(resumeNative).toHaveBeenCalledWith(nativeOwner, { checkOnly: false, signal: expect.any(AbortSignal) });
     expect(onRestoring).toHaveBeenCalledTimes(1);
-    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
-    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
-    await vi.waitFor(() => expect(transport.connections).toBe(2));
-    transport.open();
-    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
-    transport.emit(snapshot());
-    const resubscribe = transport.sent.filter(message => message.type === 'timeline_subscription').at(-1)!;
-    if (resubscribe.type !== 'timeline_subscription') throw new Error('Missing subscription');
-    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: resubscribe.payload });
-    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
-    const reacquire = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
-    if (reacquire.type !== 'session_control_request') throw new Error('Missing reacquisition');
-    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: reacquire.payload.requestId, revision: 'restored', access: 'read_only', available: true } });
-    transport.resolveTimeline(page('after', []));
-    await transport.settle();
-    const request = transport.sent.find(message => message.type === 'session_control_request' && message.payload.action === 'take_over');
-    expect(request).toBeDefined();
-    if (request?.type !== 'session_control_request') throw new Error('Missing takeover');
-    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'ours', access: 'control', available: false, token: 'private' } });
+    const request = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
+    if (request.type !== 'session_control_request') throw new Error('Missing acquisition after the resume');
+    expect(request.payload).toEqual({ requestId: expect.any(String), agentId: 'agent-one', action: 'acquire', revision: 'native' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'native', access: 'control', available: true, token: 'private' } });
     await taking;
-    expect(client.getSessionState().operations.send_message.allowed).toBe(true);
+    // The stream's Controller session is the one the terminal closed, so the client opens a new stream, which grants control again.
+    await vi.waitFor(() => expect(transport.connections).toBe(2));
   } finally { client.stop(); }
 });
 
@@ -2159,7 +2143,7 @@ it('reports unsupported native control without pretending browser takeover can r
     transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
     transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'native', access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'native-one' } } });
     await expect(client.takeControl()).rejects.toMatchObject({ code: 'native_control_unavailable' });
-    expect(transport.sent.some(message => message.type === 'session_control_request' && message.payload.action === 'take_over')).toBe(false);
+    expect(transport.sent.filter(message => message.type === 'session_control_request')).toHaveLength(1);
   } finally { client.stop(); }
 });
 

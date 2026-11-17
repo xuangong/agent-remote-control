@@ -559,7 +559,6 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
       const redacted = structuredClone(message);
       if ('controlToken' in redacted) delete redacted.controlToken;
       if (redacted.type === 'session_control') delete redacted.payload.token;
-      if (redacted.type === 'session_control_request') delete redacted.payload.resumeToken;
       observation = { ...observation, redacted: true, message: redacted };
     }
     if (observation.direction === 'outbound' && observation.message.type === 'interaction_response') {

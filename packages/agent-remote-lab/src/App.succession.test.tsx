@@ -263,7 +263,8 @@ async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: st
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId: frame.agentId, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
       if (frame.message?.type === 'session_control_request') {
-        if (frame.message.payload.action === 'take_over') await controlGate;
+        // The Relay answers a request for control at once; a test holds it to look at the page while control is being acquired.
+        if (controlGate) await controlGate;
         emit({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { agentId, requestId: frame.message.payload.requestId, revision: 'control', access: 'control', available: false, token: 'token' } });
       }
       if (['send_message', 'interaction_response'].includes(frame.message?.type)) emit({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: {
@@ -438,8 +439,9 @@ it.each(['A', 'B'])('keeps native takeover visible from failed initial binding %
     expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Taking control…"]')?.disabled).toBe(true);
     expect(f.requests.filter(request => request.url.endsWith('/attach'))[1]!.body).toMatchObject({ nativeSessionId, takeOver: generation });
     expect(f.frames.some(frame => frame.message?.type === 'send_message')).toBe(false);
+    const controlRequests = f.frames.filter(frame => frame.message?.type === 'session_control_request').length;
     await act(async () => release());
-    await settleApp(() => expect(f.frames.some(frame => frame.message?.type === 'session_control_request' && frame.message.payload?.action === 'take_over')).toBe(true));
+    await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'session_control_request').length).toBeGreaterThan(controlRequests));
     expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Restoring session…"]')?.disabled).toBe(true);
     expect(f.view.querySelector('[data-testid="prompt-submit"]')).toBeNull();
     await act(async () => releaseControl());

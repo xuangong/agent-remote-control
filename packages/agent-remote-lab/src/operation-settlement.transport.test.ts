@@ -15,7 +15,7 @@ import { startDshAgentRemote } from '../../agent-remote-dsh/src/agent-remote.js'
 const version = '1.8.0';
 type Frame = { type: string; payload?: any; [key: string]: any };
 interface Connection { send(frame: Frame): void; next(type: string, requestId?: string): Promise<Frame>; disconnect(): void }
-interface Fixture { connect(agentId?: string, subject?: string): Promise<Connection>; count(): number; reconnect(): Promise<void>; close(): Promise<void> }
+interface Fixture { /** The session wire leases control itself (a transport that is its own Relay); behind a Relay the Relay does. */ leased: boolean; connect(agentId?: string, subject?: string): Promise<Connection>; count(): number; reconnect(): Promise<void>; close(): Promise<void> }
 function inbox() {
   const frames: Frame[] = [];
   return {
@@ -49,7 +49,7 @@ async function standalone(inputAcceptance?: { disposition: 'handled' }): Promise
   const port = (server.address() as { port: number }).port;
   const sockets = new Set<WebSocket>();
   return {
-    count: () => dispatches, async reconnect() {},
+    leased: true, count: () => dispatches, async reconnect() {},
     revoke: subject => { revoked.add(subject); },
     async bind(agentId, nativeId) { await relay.closeAgent('agent'); await relay.resumeAgent({ protocolVersion: version, type: 'resume_agent', payload: { requestId: 'bind', operationId: randomUUID(), agentId, persistence: { providerId: 'fixture', sessionId: nativeId, opaque: '{}' } } }); },
     async connect(agentId = 'agent', subject = 'owner') {
@@ -74,7 +74,7 @@ async function remote(kind: 'host' | 'dsh', inputAcceptance?: { disposition: 'ha
     socket = current;
     current.on('message', data => {
       const frame = JSON.parse(data.toString());
-      if (frame.type === 'register') { registrations++; current.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId: 'owner-host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } })); }
+      if (frame.type === 'register') { registrations++; current.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', control: 1, hostId: 'owner-host', heartbeat: { intervalMs: 30000, timeoutMs: 10000 } })); }
       if (frame.type === 'rpc_response') responses.set(frame.requestId, frame);
       if (frame.streamId) streams.get(frame.streamId)?.push(frame.type === 'stream_message' ? JSON.parse(frame.message) : frame);
     });
@@ -99,7 +99,7 @@ async function remote(kind: 'host' | 'dsh', inputAcceptance?: { disposition: 'ha
   await expect.poll(() => responses.get(requestId)).toBeDefined();
   expect(responses.get(requestId).status).toBe(200);
   return {
-    count: () => dispatches,
+    leased: false, count: () => dispatches,
     async reconnect() { const before = registrations; socket.terminate(); await expect.poll(() => registrations, { timeout: 5000 }).toBeGreaterThan(before); },
     async connect(agentId = 'agent') {
       const streamId = `stream-${++sequence}`; const output = inbox(); streams.set(streamId, output);
@@ -143,6 +143,7 @@ it.each(['standalone', 'host', 'dsh'] as const)('%s settles once across lost rec
   const connect = async () => {
     const connection = await fixture.connect(); connection.send({ type: 'negotiate' });
     await connection.next('agent_snapshot');
+    if (!fixture.leased) return connection;
     const initial = await connection.next('session_control');
     connection.send({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'acquire', action: 'acquire', revision: initial.payload.revision, resumeToken } });
     const acquired = await connection.next('session_control', 'acquire');
@@ -209,6 +210,7 @@ it.each(['standalone', 'host'] as const)('%s retains handled acceptance across a
     const connection = await fixture.connect();
     connection.send({ type: 'negotiate' });
     const snapshot = await connection.next('agent_snapshot');
+    if (!fixture.leased) return { ...connection, snapshot };
     const initial = await connection.next('session_control');
     connection.send({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'acquire', action: 'acquire', revision: initial.payload.revision } });
     const acquired = await connection.next('session_control', 'acquire');

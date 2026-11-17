@@ -21,7 +21,7 @@ export function useSessionView({ agentId, transport, source, cachedReplica, pend
   agentId: string; transport: RemoteAgentTransport; source?: SessionConnectionSource; cachedReplica?: AgentReplica; pending?: boolean; enabled?: boolean; connect?: boolean;
 }) {
   const connections = useMemo<SessionConnectionSource>(() => source ?? { acquire(id, replica) {
-    const client = new RemoteSessionClient(id, transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web' });
+    const client = new RemoteSessionClient(id, transport, replica, { historyPageSize: 100, requireSessionControl: true });
     client.start();
     return { client, replica, release: () => client.stop() };
   } }, [source, transport]);

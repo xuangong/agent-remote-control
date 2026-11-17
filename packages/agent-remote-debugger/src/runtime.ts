@@ -107,7 +107,7 @@ export async function createDebuggerRuntime(agentId: string, options: DebuggerRu
   } finally {
     unsubscribePreflightDiagnostic();
   }
-  const client = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: options.operationTimeoutMs, observeOnly: options.observeOnly, retainControlOnDisconnect: false, clientKind: 'headless' });
+  const client = new RemoteSessionClient(agentId, transport, replica, { operationTimeoutMs: options.operationTimeoutMs, observeOnly: options.observeOnly });
   let status: RemoteSessionStatus = 'idle';
   let closed = false;
   const cancelWaits = new Set<() => void>();

@@ -21,7 +21,6 @@ export async function until<T>(read: () => T | undefined | Promise<T | undefined
   }
   throw new Error(`Timed out waiting for ${label}.`);
 }
-const ORIGIN = 'http://relay.test';
 export const SESSION = 'thread-1';
 export const TERMINAL = '11111111-1111-4111-8111-111111111111';
 
@@ -40,17 +39,32 @@ export interface Page {
 }
 
 /** A Relay (the hosted broker on a real HTTP server), a Controller (a real Host with a scripted provider) and the pages of one session. */
-export async function startRelayAndController(options: { journalServed: boolean }) {
+export async function startRelayAndController(options: { journalServed: boolean; /** Serves a page from the Relay's own origin, for a browser. */ page?: Record<string, { type: string; body: string | (() => string) }> }) {
   const closers: Array<() => Promise<void> | void> = [];
   const store = new MemoryJournalStore();
+  const http: Server = createServer();
+  http.listen(0, '127.0.0.1');
+  await once(http, 'listening');
+  const port = (http.address() as AddressInfo).port;
+  const ORIGIN = `http://127.0.0.1:${port}`;
   const broker = createHostBroker({ origin: ORIGIN, rpcTimeoutMs: 1000, journals: store });
   closers.push(() => broker.close());
   const pairing = await broker.handleRequest(new Request(`${ORIGIN}/v1/remote/pairings`, { method: 'POST', body: '{}' }));
   const { key } = await pairing!.json();
   /** What the Relay wrote to Controllers, in order: the stream openings are counted from it. */
   const toController: Wire[] = [];
-  const http: Server = createServer();
   const sockets = new WebSocketServer({ noServer: true });
+  http.on('request', async (request, response) => {
+    const served = options.page?.[(request.url ?? '').split('?')[0]!];
+    if (served) { response.setHeader('content-type', served.type); response.end(typeof served.body === 'function' ? served.body() : served.body); return; }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const result = await broker.handleRequest(new Request(`${ORIGIN}${request.url}`, { method: request.method, headers: { origin: ORIGIN, ...(request.headers['content-type'] ? { 'content-type': request.headers['content-type'] } : {}) }, ...(chunks.length ? { body: Buffer.concat(chunks) } : {}) }));
+    if (!result) { response.statusCode = 404; response.end(); return; }
+    response.statusCode = result.status;
+    result.headers.forEach((value, name) => response.setHeader(name, value));
+    response.end(Buffer.from(await result.arrayBuffer()));
+  });
   const refusals: number[] = [];
   http.on('upgrade', async (request, socket, head) => {
     const prepared = await broker.prepareUpgrade(new Request(`${ORIGIN}${request.url}`, { headers: { ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}), origin: ORIGIN } }));
@@ -72,10 +86,7 @@ export async function startRelayAndController(options: { journalServed: boolean 
       prepared.accept(relaySocket);
     });
   });
-  http.listen(0, '127.0.0.1');
-  await once(http, 'listening');
   closers.push(async () => { for (const client of sockets.clients) client.terminate(); sockets.close(); http.close(); });
-  const port = (http.address() as AddressInfo).port;
 
   /** What a terminal does to the session: it holds it natively, and the Controller is told to let go. */
   let terminalOwner: NativeOwnerIdentity | undefined;
@@ -127,6 +138,8 @@ export async function startRelayAndController(options: { journalServed: boolean 
     await new Promise(resolve => setTimeout(resolve, 150));
   }
 
+  const hostsOnline = async (): Promise<boolean> => (await (await broker.handleRequest(new Request(`${ORIGIN}/v1/remote/hosts`)))!.json() as Wire).hosts[0].online;
+
   /** Opens a page: a real WebSocket to the session's event stream. */
   let operations = 0;
   function openPage(): Promise<Page> {
@@ -162,7 +175,7 @@ export async function startRelayAndController(options: { journalServed: boolean 
   }
 
   return {
-    broker, hostId, agentId, port, sessions, openPage, attach, toController, refusals, directory,
+    broker, hostId, agentId, port, origin: ORIGIN, sessions, openPage, attach, toController, refusals, directory,
     /** How many Controller streams the Relay opened for sessions, so far. */
     streamOpens: () => toController.filter(message => message.type === 'stream_open').length,
     /** A terminal takes the session: the Controller records the owner and lets the session go. */
@@ -172,7 +185,12 @@ export async function startRelayAndController(options: { journalServed: boolean 
     },
     /** The terminal exits without telling anyone. */
     terminalExits() { terminalOwner = undefined; },
-    async stopController() { await host?.close(); host = undefined; },
+    /** Stops the Controller and waits until the Relay knows the Host is offline. */
+    async stopController() {
+      await host?.close(); host = undefined;
+      await until(async () => (await hostsOnline()) === false ? true : undefined, 'the Host to be offline');
+    },
+    hostsOnline,
     startController,
     async dispose() { for (const close of closers.splice(0).reverse()) await close(); },
   };

@@ -53,7 +53,7 @@ export class ConversationConnections {
     if (!connection) {
       const key = session ? sessionKey(session) : undefined;
       connection = { agentId, key, ...(session ? { session } : {}), replica, viewers: 0, shown: false,
-        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, clientKind: 'web', handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
+        client: new RemoteSessionClient(agentId, this.transport, replica, { historyPageSize: 100, requireSessionControl: true, handoffTarget: key, controlExtension: this.controlExtension?.(agentId, session) }),
         stopRecovery: this.recoveryScope ? recoverMessages(replica, this.recoveryScope, key ?? agentId, agentId) : () => {},
         stopDisplay: this.recoveryScope && session ? observeStoredDisplay(this.recoveryScope, session, replica) : () => {},
       };

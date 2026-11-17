@@ -30,7 +30,7 @@ it.each([
   const tokens = new Set<string>();
   try {
     const { url } = await server.http.listen();
-    async function connect(create = false, clientKind: 'web' | 'headless' = 'web', observeOnly = false) {
+    async function connect(create = false, observeOnly = false) {
       let socket!: WebSocket;
       const sockets: WebSocket[] = [];
       const transport = new HttpWebSocketTransport(url, { sessionChannels, webSocketFactory: url => {
@@ -44,7 +44,7 @@ it.each([
       const replica = new AgentReplica();
       const controlStates: string[] = [];
       replica.subscribe(() => { const access = replica.getState().sessionControl?.access; if (access) controlStates.push(access); });
-      const client = new RemoteSessionClient('agent', transport, replica, { operationTimeoutMs: 2000, requireSessionControl: true, reconnectInitialDelayMs: 10, clientKind, observeOnly });
+      const client = new RemoteSessionClient('agent', transport, replica, { operationTimeoutMs: 2000, requireSessionControl: true, reconnectInitialDelayMs: 10, observeOnly });
       let status = '';
       client.subscribeStatus(value => { status = value; });
       clients.push(client); client.start();
@@ -70,14 +70,13 @@ it.each([
     const b = await connect();
     expect(a.replica.getState().sessionControl?.access).toBe('control');
     expect(b.replica.getState().sessionControl?.access).toBe('control');
-    expect(b.replica.getState().sessionControl?.ownerKind).toBeUndefined();
-    const observer = await connect(false, 'headless', true);
+    const observer = await connect(false, true);
     expect(observer.replica.getState().sessionControl?.access).toBe('read_only');
     await expect(observer.client.sendMessage('observer must not write')).rejects.toMatchObject({ code: 'session_read_only' });
     expect(sendMessage).not.toHaveBeenCalled();
     await a.client.sendMessage('first page input');
     await b.client.sendMessage('second page input');
-    const cli = await connect(false, 'headless');
+    const cli = await connect();
     expect(cli.replica.getState().sessionControl?.access).toBe('control');
     await cli.client.sendMessage('remote command input');
     expect(a.replica.getState().sessionControl?.access).toBe('control');

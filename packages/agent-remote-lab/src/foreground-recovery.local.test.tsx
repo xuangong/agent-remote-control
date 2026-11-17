@@ -298,7 +298,7 @@ it('keeps both pages authorized when another page opens while the foreground cha
     webSocketFactory: url => new WebSocket(url, { origin: window.location.origin }) as unknown as WebSocketLike });
   cleanups.push(() => transport.dispose());
   const replica = new AgentReplica();
-  const otherPage = new RemoteSessionClient('agent', transport, replica, { requireSessionControl: true, clientKind: 'web' });
+  const otherPage = new RemoteSessionClient('agent', transport, replica, { requireSessionControl: true });
   cleanups.push(() => otherPage.stop());
   let status = '';
   otherPage.subscribeStatus(value => { status = value; });

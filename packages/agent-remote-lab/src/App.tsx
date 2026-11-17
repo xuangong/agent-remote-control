@@ -2972,6 +2972,7 @@ function AppContent({
     const writable = !!context.offline && !!host && host.access !== 'shared' && !source.parentNativeSessionId && !context.operationBinding.historical;
     const laterHost = writable && host!.outbox === 1 && transport.queueMessage ? host : undefined;
     const outdatedOffline = writable && host!.outbox !== 1 && !!transport.queueMessage;
+    const refusable = !context.offline && !!host && host.access !== 'shared' && host.outbox === 1 && !!transport.queueMessage && !source.parentNativeSessionId && !context.operationBinding.historical ? host : undefined;
     const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
@@ -3034,7 +3035,9 @@ function AppContent({
       timelineEnd: <>{transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
         {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
-      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
+      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } }
+        // A Host that looks online may have just gone away: a send it refuses as offline leaves its text in the composer, which then offers to wait for the Host.
+        : refusable ? { sendLater: { label: `Send when ${refusable.name} is back`, afterRefusal: true as const, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
         detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
       // Window mode says where a bot's conversation came from; its links read the earlier session in the bot's own pane.

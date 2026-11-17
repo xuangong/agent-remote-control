@@ -13,6 +13,8 @@ export interface RemoteHost {
   teamManagement?: true;
   /** The Controller answers Host status reads: open sessions, CPU, memory and disks. */
   hostStatus?: true;
+  /** The Relay owns this Host's session control; without it the Controller cannot open sessions until it is updated. */
+  sessionControl?: true;
   /** The Controller delivers messages that waited for this Host while it was offline; the Relay remembers it while offline. */
   outbox?: 1;
   credentialRotation?: boolean; environment?: HostEnvironment;

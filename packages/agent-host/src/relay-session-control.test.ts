@@ -68,14 +68,13 @@ describe('control while the Controller is away and when it returns', () => {
     const page = await r.openPage();
     const token = await page.controlled();
     await r.stopController();
-    await until(async () => { const hosts = await (await r.broker.handleRequest(new Request('http://relay.test/v1/remote/hosts')))!.json(); return hosts.hosts[0].online === false ? true : undefined; }, 'the Host to be offline');
     const refused = await page.sendText(token, 'offline');
     expect(refused.payload).toMatchObject({ code: 'host_offline', recoverable: true });
     expect(page.closes).toEqual([]);
     const later = await r.openPage();
     expect(await later.controlled()).toEqual(expect.any(String));
     await r.startController();
-    await until(async () => { const hosts = await (await r.broker.handleRequest(new Request('http://relay.test/v1/remote/hosts')))!.json(); return hosts.hosts[0].online === true ? true : undefined; }, 'the Host to return');
+    await until(async () => (await r.hostsOnline()) ? true : undefined, 'the Host to return');
     expect(page.closes).toEqual([]);
     expect(page.frames.some(frame => JSON.stringify(frame).match(/Reconnecting|Restoring|Checking access/))).toBe(false);
     const delivered = await page.sendText(token, 'back');

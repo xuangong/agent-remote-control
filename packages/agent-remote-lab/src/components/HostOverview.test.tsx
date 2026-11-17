@@ -13,11 +13,11 @@ const status: HostStatus = {
 };
 const environment = { detectedAt: 1, os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0.0' }, wsl: false, container: false,
   shell: { source: 'account' as const }, shells: [], browsers: [], vscode: { status: 'found' as const } };
-const homelab: RemoteHost = { id: 'homelab', name: 'homelab', online: true, hostStatus: true, environment, access: 'owner',
+const homelab: RemoteHost = { id: 'homelab', name: 'homelab', online: true, hostStatus: true, sessionControl: true, environment, access: 'owner',
   controller: { version: '0.2.80', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };
-const outdated: RemoteHost = { id: 'windows', name: 'Windows test', online: true, access: 'owner' };
+const outdated: RemoteHost = { id: 'windows', name: 'Windows test', online: true, sessionControl: true, access: 'owner' };
 const offline: RemoteHost = { id: 'ci', name: 'linux-ci', online: false, hostStatus: true, access: 'owner' };
-const shared: RemoteHost = { id: 'shared', name: 'Shared server', online: true, hostStatus: true, access: 'shared' };
+const shared: RemoteHost = { id: 'shared', name: 'Shared server', online: true, hostStatus: true, sessionControl: true, access: 'shared' };
 const invitation = { key: 'pairing-key', expiresAt: '2099-01-01T00:00:00.000Z', serverUrl: 'https://relay.example' };
 
 const service = (hostStatus: NonNullable<HostPairingService['hostStatus']>): HostPairingService => ({ hosts: async () => ({ hosts: [] }), pair: async () => invitation, hostStatus });
@@ -50,6 +50,23 @@ it('shows each Host with its sessions and machine figures, warning above 90%', a
   expect(workspace.textContent).toContain('432.0 GB / 1.9 TB');
   expect(workspace.title).toBe('/Volumes/Projects');
   expect(workspace.dataset.warning).toBeUndefined();
+});
+
+it('marks a Controller that cannot open sessions as update required, with the manual steps, and tells a recipient to ask the owner', async () => {
+  const outdated: RemoteHost = { id: 'old', name: 'old-mac', online: true, hostStatus: true, access: 'owner' };
+  const outdatedShared: RemoteHost = { id: 'old-shared', name: 'Shared old', online: true, hostStatus: true, access: 'shared' };
+  const opened: string[] = [];
+  const container = await render(<HostOverview hosts={[homelab, outdated, outdatedShared]} service={service(async () => status)} visible onOpenHost={id => opened.push(id)} />);
+  await act(async () => {});
+  expect(card(container, 'homelab').querySelector('[data-update-required]')).toBeNull();
+  const owned = card(container, 'old').querySelector<HTMLElement>('[data-update-required]')!;
+  expect(owned.textContent).toContain('Update required: this Controller cannot open sessions until it is updated.');
+  expect(owned.textContent).toContain('agent-remote-controller update --check');
+  await act(async () => { owned.querySelector('button')!.click(); });
+  expect(opened).toEqual(['old']);
+  const recipient = card(container, 'old-shared').querySelector<HTMLElement>('[data-update-required]')!;
+  expect(recipient.textContent).toContain('the owner must update this Controller');
+  expect(recipient.querySelector('button')).toBeNull();
 });
 
 it('asks for a Controller update, marks offline Hosts and shows shared Hosts as session counts only', async () => {

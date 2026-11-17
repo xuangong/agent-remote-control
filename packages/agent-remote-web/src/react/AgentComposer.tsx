@@ -69,9 +69,10 @@ export interface AgentComposerProps {
   /**
    * Sends text to a session whose Host is offline: the message waits for the Host and is delivered when it returns. Given
    * only while the Host is offline, it replaces sending, even if the session still looks attached. label names the
-   * action, for example "Send when Mac mini is back".
+   * action, for example "Send when Mac mini is back". With `afterRefusal` it is offered for a Host that looks online, from the
+   * moment a send was refused because the Host is offline; the text stays in the composer.
    */
-  sendLater?: { label: string; send(text: string): Promise<void> };
+  sendLater?: { label: string; send(text: string): Promise<void>; afterRefusal?: true };
   /** Current-session waiting messages and unsettled message submissions. */
   onPendingInputChange?(count: number): void;
   onSendMessage?(text: string, options?: AgentMessageOptions): Promise<void>;
@@ -97,6 +98,8 @@ interface Draft {
   commandsOpen?: boolean;
   commandsDismissed?: boolean;
   commandIndex?: number;
+  /** The last send was refused because the Host is offline. */
+  hostRefused?: boolean;
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
@@ -180,7 +183,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     && state?.agent?.status !== 'failed' && state?.agent?.status !== 'closed' && !interruptRequested;
 
   // While the Host is offline, text can still be sent to wait for it; images, files and commands need the Host itself.
-  const laterMode = !!sendLater && !mutationBlocked && !forcedReadOnly;
+  const laterMode = !!sendLater && !mutationBlocked && !forcedReadOnly && (!sendLater.afterRefusal || currentDraft.hostRefused === true);
   const laterBlocked = !laterMode ? undefined : hasAttachments ? 'Images and files cannot wait for the Host. Send them when it is back.'
     : isCommand || currentDraft.selectedSkill ? 'Commands need the Host. Send them when it is back.' : undefined;
   const dispatchReady = ready && !readOnly && !terminal && !operationBusy && session.operations.send_message.allowed;
@@ -451,6 +454,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         if (hasResources) resourceDraft.clear();
         if (richEnabled) imageDraft.setText(''); else { currentDraft.text = ''; if (currentAgent.current === agentId) onDraftChange?.(''); }
       }
+      currentDraft.hostRefused = false;
       currentDraft.feedback = { kind: 'success', message: kind === 'send' ? 'Message sent.' : 'Message queued by Provider.', delivery: true };
       if (currentAgent.current === agentId) focusRequested.current = agentId;
     } catch (error) {
@@ -458,6 +462,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
         imageDraft.rejectAttachments(content, 'The Host could not use this image. Retry the upload, replace it, or remove it.');
       }
       if (content && ownsImageEdit() && error && typeof error === 'object' && 'code' in error && error.code === 'invalid_resource_input') resourceDraft.reject(content, 'The Host could not use this resource. Retry the upload or remove it.');
+      currentDraft.hostRefused = !!error && typeof error === 'object' && 'code' in error && error.code === 'host_offline';
       currentDraft.feedback = { kind: 'error', message: error instanceof Error ? error.message : 'Agent command failed.' };
     } finally {
       currentDraft.pending = undefined;

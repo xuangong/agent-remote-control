@@ -421,13 +421,9 @@ it.each(['shared', 'exclusive'] as const)('keeps the %s composer free of ownersh
   expect(container.textContent).not.toContain('You have control');
 });
 
-it.each([
-  ['web', 'Another page has control'],
-  ['headless', 'Remote CLI has control'],
-  ['unknown', 'Another client has control'],
-  [undefined, 'Another client has control'],
-] as const)('describes a %s owner without assuming it is a native CLI', async (ownerKind, label) => {
-  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one', ownerKind } };
+it('describes an unavailable control that no native client holds without assuming it is a native CLI', async () => {
+  const label = 'Another client has control';
+  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one' } };
   const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
   const composer = container.querySelector('[aria-label="Live provider controls"]')!;
   expect(composer.textContent).toContain(label);
@@ -455,7 +451,7 @@ it('shows takeover for a cold target without enabling the previous conversation'
 });
 
 it('keeps takeover reachable when the composer is collapsed and hides empty input chrome', async () => {
-  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false, ownerKind: 'web' as const}};
+  const state = {...replicaState, sessionControl: {access: 'read_only' as const, available: false}};
   const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{takeControl: async () => {}}} />);
   const input = container.querySelector('[data-testid="prompt-input"]')!;
   expect(input.closest('[hidden]')).not.toBeNull();

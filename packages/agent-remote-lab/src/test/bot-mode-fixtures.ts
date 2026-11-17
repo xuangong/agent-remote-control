@@ -135,7 +135,7 @@ export async function mountBotApp(scope: string, options: { hosted?: boolean; ho
   });
   let setAccessReady!: (ready: boolean) => void, setScope!: (scope: string) => void;
   let hostOnline = options.host?.online ?? true;
-  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: hostOnline, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
+  const hostService = { hosts: async () => ({ hosts: options.hosted ? [{ id: 'local', name: 'Test Host', online: hostOnline, sessionControl: true as const, access: 'owner' as const, ...(options.host?.outbox ? { outbox: options.host.outbox } : {}),
     providers: [{ providerId: 'recorded', displayName: 'Recorded Provider' }] }] : [] }), pair: async () => { throw new Error('No pairing.'); } };
   function Access() {
     const inheritedReady = useContext(WorkspaceReady);

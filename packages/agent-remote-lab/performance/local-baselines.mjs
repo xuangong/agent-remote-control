@@ -533,7 +533,7 @@ const scenarios = {
   // T6: the open conversation across a runtime release.
   async 'release-continuity'() { return releaseContinuity(sessions, false); },
   // T6 for the sessions that read from the Relay's journal: the same release, with the windows the Relay recorded.
-  async 'runtime-release'() { return releaseContinuity(copilotSessions(), true); },
+  async 'runtime-release'() { return releaseContinuity(sessionsOf('copilot'), true); },
   // T6: the open conversation across a Controller (and Relay) restart, `pnpm local up --no-build`. One page per restart: pages of one
   // user share their Window, so a second session page would switch the first. `--reps` restarts, the sessions in turn.
   async 'restart-continuity'() {
@@ -560,7 +560,7 @@ const scenarios = {
   // window differs from the journal's open item and the Relay replaces the journal (reason `open_item`). The page holds a draft in its
   // composer and a scroll position; every row node is marked. One page per restart (see restart-continuity).
   async 'replacement-absorbed'() {
-    const own = copilotSessions();
+    const own = sessionsOf('copilot');
     const samples = [], steps = [];
     for (let rep = 0; rep < reps; rep++) {
       const session = own[rep % own.length];
@@ -682,6 +682,11 @@ async function waitIdle(address, ms = 120_000) {
   while (Date.now() < deadline) {
     const state = controller('session', 'read', address, '--limit', '0').session?.state;
     if (state === 'idle') return;
+    // A turn that waits for a tool approval is answered, as the other scenarios answer theirs.
+    if (state === 'waiting') {
+      const request = controller('session', 'inspect', address).pendingInteractions?.[0];
+      if (request?.kind === 'tool_approval') controller('session', 'answer', address, request.requestId, '--response', JSON.stringify({ kind: 'tool_approval', decision: 'allow', scope: request.allowScopes?.includes('session') ? 'session' : 'once' }));
+    }
     await delay(1500);
   }
   throw new Error(`Deadline of ${ms} ms passed: ${address} did not become idle`);
@@ -747,7 +752,6 @@ const sessionsOf = provider => {
   if (!own.length) throw new Error(`The journal scenarios need a ${provider} session in the instance workspace; create one with a real model turn first.`);
   return own;
 };
-const copilotSessions = () => sessionsOf('copilot');
 const providerName = { copilot: 'Copilot', claude: 'Claude Code', codex: 'Codex' };
 
 async function restartInstance() {

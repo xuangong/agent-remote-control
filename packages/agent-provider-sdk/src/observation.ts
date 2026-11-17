@@ -138,9 +138,9 @@ export interface ProviderItemIdentity {
    */
   completes?: true;
   /**
-   * A reread of native history cannot reproduce this item, so the journal keeps its only copy. The key of a live-only item
-   * names its kind in the session, not an occurrence: a session holds at most one live-only key per item type (`todo`, not
-   * `todo:<uuid>`), and a later observation under that key updates the item in place. `liveOnlyKeyViolations` checks it.
+   * A reread of native history cannot reproduce this item, so the journal keeps its only copy. A live-only item is never emitted
+   * at open, only live, or a reopen would add it again; its key may name an occurrence (`interaction:<id>`) or a kind (`todo`),
+   * and a later observation under the same key updates the item in place.
    */
   liveOnly?: true;
 }

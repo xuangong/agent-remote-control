@@ -489,3 +489,32 @@ The measurement is the 35-open mix of Task 11 per provider, plus the Task 12 ses
 - FL9: a `UserPromptSubmit` hook that adds context writes an attachment, which neither path shows.
 - Not in the plan: the `queued_command` attachment of folded input carries `source_uuid`, the uuid the Controller gave the input, which is the live row's. Both paths key the row `user:<source_uuid>` with that `messageId`: no text hash and no counter, so D7's `foldedCounts` is not needed.
 - Concurrent tool results are written in either order.
+
+## 12. S6a measurements and departures
+
+Recorded 2026-11-17 on this checkout's instance (build `0325a66e` for Codex, the same code for Claude; real models, real homes through the development Controller; Apple M4, Chromium, Node 22). Raw JSON in `.tmp/s6a-{codex,claude}-mix.json` (not committed). `ARC_LOCAL_JOURNALS=1` was exported for every `up` and restart; smart reading was on for `claude`, `codex` and `copilot`.
+
+| Per provider, 35 opens of `journal-reopen-mix` (Claude 37 with the compaction) | Codex | Claude Code |
+|---|---|---|
+| Opens served from the journal (page epoch equals `journals.sqlite` epoch) | 35 of 35 | 37 of 37 |
+| Replacements per open, by reason | 0 (`changed`, `open_item`, `new`, `incomplete` all 0) | 0 |
+| Open item replacements on a settled reopen | 0 | 0 |
+| Opens with a hole against the full native read | 0 | 2 (see below) |
+| Fills, older requests, quota refusals | 0, 0, 0 | 0, 0, 0 |
+| Open time p50 / p95 (ms), throttle 1 | 71 / 84 | 81 / 95 |
+| Bytes to the page per open p50 | 24 KB | 28 KB |
+
+- **Claude holes.** After `/compact` the native read starts at the summary row; the journal-served view, built from the live stream of the resident session, lacks that row (a `user` row "This session is being continued…"). The two opens that show it are the compaction and the reload after it. No replacement happened because the Controller never reread the resident session; a fresh attach (Controller restart) would replace once, as Section 5 says. The row is long boilerplate; live does not project it.
+- **Terminal-driven check (Task 10a).** Codex: a raw `codex exec resume` turn in the instance workspace appeared in the journal 5 s after the page's revision check (the listing that triggers it), the runtime released again, no send. Without the directory mounted the trigger is the Controller's own state confirmation, which reads a quiet catalog every 10 minutes (`quietCatalogMs`), so the unmounted lag is up to about 10 minutes, not the 90 s the plan assumed; with it mounted it is about 5 s plus the 15 s revision cache. Page counts (`SessionDirectory.test.tsx`): one revision check per 5 s while mounted and visible, none while hidden, none on return beyond the next check. Claude Code: not refreshed (see departures).
+- **Live-only bytes.** The longest Codex session here held 1 live-only item (an error row, since removed by the `configWarning` fix); Claude sessions held interactions only. Not near a fifth of the room.
+- Not exercised: take-over from a detached pty, an interactive terminal left open, `/compact` on a session of Codex, and a Claude hook on a real model (FL9 is recorded against the CLI).
+
+**Departures from the plan.**
+
+1. **Claude terminal-driven currency is not met.** The mechanism (D11) works for providers that release idle sessions (Codex in shared mode). Claude Code and Copilot go through the stdio directory, which has no `canReleaseSession`, so a published session stays resident (`session release` answers `released: false`), is held, and a raw terminal turn is not picked up (`journal-terminal-refresh.claude.local.test.ts` names it; on the instance a `claude --resume -p` turn did not reach the journal). Closing it needs idle release for Claude sessions (a lifecycle change with background-task risk) or reading a resident session again: an owner decision.
+2. D11's trigger for Codex reads the sessions one by one (`sessionSummary`), because Codex's directory listing is read only on request and never moves when a terminal writes.
+3. D7: folded input is keyed by the `source_uuid` of its `queued_command` attachment (the uuid the Controller gave it), not by a text hash; there is no `foldedCounts`.
+4. No Claude `correction` recording: the real CLI builds the final record from the streamed deltas, so a non-extending final cannot be produced; offline tests cover it. Interrupted Codex commands read back `failed` from a new process (FC3 refined).
+5. Codex raw-binary terminal test (plan test 7) is not a `*.local.test.ts`: a shared-mode test needs a temporary daemon whose updater process cannot be stopped without killing it; the scripted real-transport tests and the instance check cover it.
+6. The eleven duplicated mock Responses servers of the Codex local tests were not moved onto the new fixture; the `identity === undefined` audit was not re-run.
+7. Codex `configWarning` and `deprecationNotice` joined the non-timeline notifications (found on the instance); the publisher's `drain` now waits for a window still opening, and `JournalPublisher.release` returns whether the journal served the session.

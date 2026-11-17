@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { liveOnlyKeyViolations, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 const mock = vi.hoisted(() => ({client: {} as any, native: {} as any, config: {} as any, handler: undefined as any, history: [] as any[]}));
 vi.mock('@github/copilot-sdk', () => ({RuntimeConnection: {forStdio: (x: unknown) => x}, CopilotClient: class {
   constructor() { return mock.client; }
@@ -570,7 +570,6 @@ it('publishes the todo board as one live-only item named todo, updated by each s
   rows = []; mock.handler(event('session.todos_changed', {})); await new Promise(r => setImmediate(r));
   expect(todos().map(t => t.items)).toEqual([todos()[0]!.items, []]);
   expect(new Set(todos().map(t => t.identity?.key))).toEqual(new Set(['todo']));
-  expect(liveOnlyKeyViolations(seen.values.filter((v): v is ProviderObservation => v.type === 'observation'))).toEqual([]);
  } finally {await provider.dispose(); await seen.done;}
 }, 10000);
 

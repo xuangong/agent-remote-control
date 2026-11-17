@@ -4,16 +4,41 @@ import { createServer, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-export function nativeReply(response: ServerResponse, content: any[], usage = { inputTokens: 10, outputTokens: 5 }): void {
+/** A block of a scripted reply: text (optionally split into several deltas), a thinking block, or a tool call. */
+export type NativeBlock = { type: 'text'; text: string; deltas?: string[] } | { type: 'thinking'; thinking: string; deltas?: string[] } | { type: 'tool_use'; id: string; name: string; input: unknown };
+
+function nativeEvents(content: NativeBlock[], usage: { inputTokens: number; outputTokens: number }, finish: boolean): any[] {
   const events: any[] = [{ type: 'message_start', message: { id: `msg-${Math.random()}`, type: 'message', role: 'assistant', model: 'claude-sonnet-4-5-20250929', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.inputTokens, output_tokens: 0 } } }];
   for (const [index, block] of content.entries()) {
-    events.push({ type: 'content_block_start', index, content_block: block.type === 'text' ? { type: 'text', text: '' } : { ...block, input: {} } },
-      { type: 'content_block_delta', index, delta: block.type === 'text' ? { type: 'text_delta', text: block.text } : { type: 'input_json_delta', partial_json: JSON.stringify(block.input) } },
-      { type: 'content_block_stop', index });
+    const last = !finish && index === content.length - 1;
+    if (block.type === 'text') {
+      events.push({ type: 'content_block_start', index, content_block: { type: 'text', text: '' } },
+        ...(block.deltas ?? [block.text]).map(text => ({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } })));
+    } else if (block.type === 'thinking') {
+      events.push({ type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '', signature: '' } },
+        ...(block.deltas ?? [block.thinking]).map(thinking => ({ type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking } })),
+        ...(last ? [] : [{ type: 'content_block_delta', index, delta: { type: 'signature_delta', signature: 'fixture-signature' } }]));
+    } else {
+      events.push({ type: 'content_block_start', index, content_block: { ...block, input: {} } },
+        { type: 'content_block_delta', index, delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input) } });
+    }
+    if (!last) events.push({ type: 'content_block_stop', index });
   }
-  events.push({ type: 'message_delta', delta: { stop_reason: content.some((part) => part.type === 'tool_use') ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.outputTokens } }, { type: 'message_stop' });
+  if (finish) events.push({ type: 'message_delta', delta: { stop_reason: content.some((part) => part.type === 'tool_use') ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.outputTokens } }, { type: 'message_stop' });
+  return events;
+}
+
+const sse = (events: any[]) => events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+
+export function nativeReply(response: ServerResponse, content: NativeBlock[] | any[], usage = { inputTokens: 10, outputTokens: 5 }): void {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.end(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
+  response.end(sse(nativeEvents(content as NativeBlock[], usage, true)));
+}
+
+/** A reply that never finishes: its blocks so far, then silence until the turn is interrupted. The last block stays open. */
+export function nativeStalled(response: ServerResponse, content: NativeBlock[], usage = { inputTokens: 10, outputTokens: 5 }): void {
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  response.write(sse(nativeEvents(content, usage, false)));
 }
 
 export async function nativeFixture(handler: (body: any, response: ServerResponse) => void, options: { sessionTitles?: 'automatic' | 'manual' } = {}) {

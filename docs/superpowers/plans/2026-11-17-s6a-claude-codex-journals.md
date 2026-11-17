@@ -473,3 +473,19 @@ The measurement is the 35-open mix of Task 11 per provider, plus the Task 12 ses
 - FC8 differs from the plan: the start-up notices of a failing MCP server carry the thread id in 0.169. They are in no history, so they still cost a replacement; the decision of the plan (not a timeline item) stands. Also new: `thread/readState/changed` arrives after every turn and the projector turns it into an "Unsupported Codex notification" error row today; it joins `NON_TIMELINE_NOTIFICATION_METHODS`.
 - FC9 holds: a steered message has its own item id, equal in both.
 - `turn/plan/updated` (needs `[tools.update_plan] enabled = true`) arrives live and history holds no trace of it.
+
+**Codex, after the recordings (Tasks 2 and 3).** FC3 is refined: a Codex process reports an interrupted turn without its command, but a new process (a reopen) reads the command that was under way as `failed` (one cancelled at once is sometimes not recorded). So an interrupted tool is a live row that stays `running` and a reread row that is `failed`: one `changed`, then settled. FC8: the notices carry the thread id, so they would have cost one replacement per session start; they are not timeline items. FC4's order mismatch is real (history lists the plan before the message it was cut from) and is removed by reading history in start order; with the stream paused between the message and the plan, the plan turn reopens `unchanged`.
+
+**Claude Code (`src/journal-facts.local.test.ts`, Task 6).**
+
+- FL1 holds: a typed input keeps its uuid in the transcript and in the live stream; so does an input queued as the next turn.
+- FL2 holds: the raw transcript row of a tool result carries `toolUseResult` and the `tool_use_id`; the live frame is that row (`tool_use_result` equal); the SDK's public read omits it. D6 applies; O3 does not trigger.
+- FL3 holds: a streamed thinking block is in the SDK read with the same text, so reasoning is not live-only.
+- FL4 holds: a permission prompt, a question and a plan approval leave no record beyond their tool rows.
+- FL5: after `/compact` the SDK read starts at the summary row; the loading status and the boundary are live only. The typed `/compact` row and the transcript row of the same uuid differ in text (the transcript holds the `<command-name>` envelope).
+- FL6: the interrupt notice is a row of the stream and of the SDK read with one uuid. A slash command's row differs in text in the two paths (typed text live, envelope in the transcript); the expansion the model saw is a meta row neither path shows. The output of a local command such as `/context` is a synthetic assistant message live (`model` `<synthetic>`) and a system row that the SDK read omits. A finished sub-agent wakes the session with a user row marked `origin.kind: task-notification` that the stream never shows.
+- FL7: the partial assistant text of an interrupted turn is recorded (history keeps it); the tool in flight has its result row.
+- FL8: the catalog names the turn of every history row; the recording asserts equality with the live turn id.
+- FL9: a `UserPromptSubmit` hook that adds context writes an attachment, which neither path shows.
+- Not in the plan: the `queued_command` attachment of folded input carries `source_uuid`, the uuid the Controller gave the input, which is the live row's. Both paths key the row `user:<source_uuid>` with that `messageId`: no text hash and no counter, so D7's `foldedCounts` is not needed.
+- Concurrent tool results are written in either order.

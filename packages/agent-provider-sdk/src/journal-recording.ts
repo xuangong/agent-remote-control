@@ -14,7 +14,7 @@ const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 
 /**
  * What a recording says about identities and delivery, with ids masked and repeated snapshots of one item counted once. A line for
- * which `late` is true moves to the end, for items whose place among their neighbours varies from run to run.
+ * which `late` is true moves to the end, in sorted order, for items whose place among their neighbours varies from run to run.
  */
 export function recordingShape(recording: JournalRecording, late: (line: string) => boolean = () => false): string[] {
   const lines = (observations: ProviderObservation[], side: string) => observations.map(({ delivery, event, itemIdentity }) => {
@@ -22,7 +22,7 @@ export function recordingShape(recording: JournalRecording, late: (line: string)
     return `${side} ${delivery} ${event.type} ${item} ${JSON.stringify(itemIdentity ?? null)}`.replace(UUID, '<id>');
   });
   const all = [...lines(recording.live, 'live'), ...lines(recording.reread, 'reread')].filter((line, at, every) => line !== every[at - 1]);
-  return [...all.filter(line => !late(line)), ...all.filter(late)];
+  return [...all.filter(line => !late(line)), ...all.filter(late).sort()];
 }
 
 /** One observation per line, so a fixture is read and compared as a list of events. */

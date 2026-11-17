@@ -13,7 +13,7 @@
 ## 1. For the owner: approve in one read
 
 1. **No new mechanism.** Adapters give every item a key and say when it is finished. Claude gets four small fixes (Section 4.2), Codex three (Section 4.1). The one addition outside the adapters is a map in `host.ts` (Section 4.3, Task 10a) that keeps a terminal-driven session current. The publisher stays at 19 fields, the protocol does not change, the Relay does not change.
-2. **The release carries no switch change.** A Controller with these adapters only asks for journals. The Relay serves them only with `AGENT_REMOTE_JOURNALS=1` and the Host's per-provider smart-reading switch, both off by default. No Controller update is forced. Whether the switch goes on for the owner's own Host, and when, is decision O2 below.
+2. **The release carries no switch change.** A Controller with these adapters only asks for journals. The Relay serves them only with `AGENT_REMOTE_JOURNALS=1` and the Host's per-provider smart-reading switch, both off by default. No Controller update is forced. The owner turns the switch on for their own Host once Gate S6a has passed (terminal-driven sessions stay current by Task 10a).
 3. **Cost of the relaxed contract, as measured here.** A reopen after a compaction, a withdrawn input or a corrected message replaces the journal once (the client keeps every unchanged row, S4a) and then settles. Anything else that replaces on a settled session is a defect fixed before release, not a number (Section 7 thresholds).
 4. **Decided by the owner:** Codex plan-mode items are shown live (O1), and a session written by a terminal stays current, as a release gate of this plan (O2, Section 4.3). **Still open for the owner:** Section 10 (O3 to O5), each only if a recording shows its condition.
 
@@ -196,7 +196,7 @@ Every row is asserted by a recording-based continuity test and a real-transport 
 
 ## 6. Tasks
 
-Order: shared helpers, Codex (1 to 5), Claude (6 to 10), the runner, local verification of both, measurements, deletions. Each task ends with Gate G. Keep the pieces of a task in one commit with a State line.
+Order: shared helpers, Codex (1 to 5), Claude (6 to 10), terminal-driven currency (10a), the runner, local verification of both, measurements, deletions. Each task ends with Gate G. Keep the pieces of a task in one commit with a State line.
 
 ### Task 1: Codex facts and a scripted model (spike before design)
 
@@ -417,7 +417,7 @@ The measurement is the 35-open mix of Task 11 per provider, plus the Task 12 ses
 
 - **The shared Codex daemon.** Production Codex sessions run in the owner's shared daemon through `codex-daemon-client` (generation-bearing request ids, `restoreSnapshot` recovery, terminal co-owners). A spawned app-server does not reproduce it. Covered by the existing `codex-shared` suite (`AGENT_REMOTE_SHARED_CODEX_TEST_EXECUTABLE`), the `timeline_replacement` sync test of Task 4, and Task 12 on the real daemon. The daemon is never started by this plan; sessions are released after use.
 - **A real model's behaviour:** thinking signatures and redacted thinking, multi-part reasoning summaries of a real reasoning model, real token-limit autocompaction. The scripted model emits the protocol events, so the recordings prove what the adapter does with them; Task 12's real turns prove that a real model produces nothing else (FC6, FL3).
-- **A terminal driving the session.** The native CLI's lock and pid records cannot be set up by an adapter test without a pty. Task 12 does it with a detached `tmux` session; if that fails it is reported as not exercised, and O2 stands.
+- **A terminal driving the session.** The native CLI's lock and pid records cannot be set up by an adapter test without a pty. Task 12 does it with a detached `tmux` session; if that fails it is reported as not exercised and the release gate of Task 10a is not met.
 - **An interactive terminal CLI that stays open** needs a pty; Task 12 uses a detached `tmux`. A terminal that runs one turn and exits (`claude -p`, `codex exec`) is recorded (Task 10a test 7).
 - **A killed Controller or CLI process** is never used: interruptions are `cancel` and `release` (S3, the skill).
 - **Versions.** Fixtures record what 2.1.319 and 0.169.0 do; a change of CLI shows as a changed test name and shape (S3 Task 3). The native test runner already pins minimum versions (`scripts/native-test-versions.test.mjs`).

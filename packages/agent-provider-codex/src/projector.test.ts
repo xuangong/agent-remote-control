@@ -53,19 +53,14 @@ describe('CodexEventProjector', () => {
       threadId: 'thread-1', turnId: 'turn-1', itemId: 'assistant-1', delta: 'helo',
     });
 
-    expect(projector.projectNotification('item/completed', {
+    const observations = projector.projectNotifications('item/completed', {
       threadId: 'thread-1', turnId: 'turn-1',
       item: { type: 'agentMessage', id: 'assistant-1', text: 'hello' },
-    })).toMatchObject({
-      event: {
-        type: 'timeline',
-        item: {
-          type: 'assistant_message',
-          messageId: expect.stringMatching(/^assistant-1:correction:[0-9a-f]{8}$/),
-          text: 'hello',
-        },
-      },
     });
+    expect(observations.map(({ event, itemIdentity }) => [event.type === 'timeline' ? event.item : event, itemIdentity])).toEqual([
+      [{ type: 'assistant_message', messageId: 'assistant-1', text: '' }, { key: 'assistant:assistant-1', completes: true }],
+      [{ type: 'assistant_message', messageId: 'assistant-1:correction', text: 'hello' }, { key: 'assistant:assistant-1:correction', completes: true }],
+    ]);
   });
 
   it('retires streamed state after projecting a corrected completion', () => {
@@ -85,7 +80,7 @@ describe('CodexEventProjector', () => {
     expect(projector.projectNotification('item/completed', {
       threadId: 'thread-1', turnId: 'turn-2',
       item: { type: 'agentMessage', id: 'assistant-1', text: 'Reused ID' },
-    })).toBeNull();
+    })).toMatchObject({ event: { turnId: 'turn-2', item: { text: '' } }, itemIdentity: { key: 'assistant:assistant-1', completes: true } });
   });
 
   it.each([
@@ -108,7 +103,11 @@ describe('CodexEventProjector', () => {
         threadId: 'thread-1', turnId: 'turn-1',
         item: type === 'reasoning' ? { type, id: 'message', summary: [text] } : { type, id: 'message', text },
       };
-      expect(projector.projectNotification('item/completed', completion)).toBeNull();
+      // Streamed text equal to the final text finishes the item with an empty body, once.
+      expect(projector.projectNotification('item/completed', completion)).toMatchObject({
+        event: { item: type === 'reasoning' ? { type: 'reasoning', text: '' } : { type: 'assistant_message', messageId: 'message', text: '' } },
+        itemIdentity: { key: `${type === 'reasoning' ? 'reasoning' : 'assistant'}:message`, completes: true },
+      });
       expect(projector.projectNotification('item/completed', completion)).toBeNull();
     }
   });
@@ -124,15 +123,16 @@ describe('CodexEventProjector', () => {
         threadId: 'thread-1', turnId: 'turn-1',
         item: type === 'reasoning' ? { type, id: 'message', summary: ['hello'] } : { type, id: 'message', text: 'hello' },
       };
-      const first = projector.projectNotification('item/completed', completion);
-      if (initial === 'hello') expect(first).toBeNull();
-      else if (initial === 'helo') expect(first?.event).toMatchObject({
-        item: type === 'reasoning'
-          ? { type: 'error', message: expect.stringContaining('corrected streamed item') }
-          : { type: 'assistant_message', messageId: expect.stringContaining(':correction:'), text: 'hello' },
-      });
-      else expect(first?.event).toMatchObject({ item: { text: initial === 'hel' ? 'lo' : 'hello' } });
-      expect(projector.projectNotification('item/completed', completion)).toBeNull();
+      const first = projector.projectNotifications('item/completed', completion);
+      const text = (observation: (typeof first)[number]) => observation.event.type === 'timeline' && 'text' in observation.event.item ? observation.event.item.text : undefined;
+      if (initial === 'hello') expect(first.map(text)).toEqual(['']);
+      else if (initial === 'helo') {
+        // The item ends as streamed; a corrected message stands beside it, and a reasoning has no such message.
+        expect(first.map(text)).toEqual(type === 'reasoning' ? [''] : ['', 'hello']);
+        if (type !== 'reasoning') expect(first[1]!.itemIdentity?.key).toMatch(/:correction$/);
+      } else expect(first.map(text)).toEqual([initial === 'hel' ? 'lo' : 'hello']);
+      expect(first.every(observation => observation.itemIdentity?.completes === true)).toBe(true);
+      expect(projector.projectNotifications('item/completed', completion)).toEqual([]);
     }
   });
 
@@ -149,7 +149,7 @@ describe('CodexEventProjector', () => {
           keys.add(observation!.sourceKey);
           expect(projector.projectNotification('item/completed', {
             threadId: 'thread-1', turnId, item: { type: 'agentMessage', id: itemId, text: 'hello' },
-          })).toBeNull();
+          })?.event).toMatchObject({ item: { messageId: itemId, text: '' } });
         }
       }
     }
@@ -188,7 +188,7 @@ describe('CodexEventProjector', () => {
     expect(projector.projectNotification('item/completed', {
       threadId: 'thread-1', turnId: 'turn-1',
       item: { type: 'plan', id: 'plan-1', text: '# Plan' },
-    })).toBeNull();
+    })).toMatchObject({ event: { item: { messageId: 'plan-1', text: '' } }, itemIdentity: { key: 'assistant:plan-1', completes: true } });
   });
 
   it.each([
@@ -308,9 +308,8 @@ describe('CodexEventProjector', () => {
     expect(projector.projectNotification('turn/started', {
       threadId: 'thread-1', turn: { id: 'turn-1' },
     })).toMatchObject({ event: { type: 'turn_started', turnId: 'turn-1' } });
-    expect(projector.projectNotification('thread/compacted', {
-      threadId: 'thread-1', turnId: 'turn-1',
-    })).toMatchObject({ event: { type: 'timeline', item: { type: 'compaction', status: 'completed' } } });
+    // The deprecated notice repeats the `contextCompaction` item, which carries the compaction and its end.
+    expect(projector.projectNotification('thread/compacted', { threadId: 'thread-1', turnId: 'turn-1' })).toBeNull();
   });
 
   it('projects unsupported notifications and live items as bounded diagnostics', () => {

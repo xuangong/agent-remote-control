@@ -401,11 +401,13 @@ describe('Codex native children', () => {
         h.notify('turn/completed', { threadId: 'child', turn: { id: 'child-turn', status: 'completed' } });
       };
       const reopened = await h.provider.openChildSession('parent', 'child');
-      expect(await observations(reopened, 5)).toMatchObject([
+      expect(await observations(reopened, 6)).toMatchObject([
         { delivery: 'history', event: { item: { text: 'ee' } } },
         { type: 'history_boundary' },
         { delivery: 'live', event: { item: { text: 'e' } } },
         { delivery: 'live', event: { item: { text: 'e' } } },
+        // The final text equals what streamed, so the item ends with an empty body.
+        { delivery: 'live', event: { item: { text: '' } }, itemIdentity: { key: 'assistant:child-message', completes: true } },
         { event: { type: 'turn_completed' } },
       ]);
     } finally { await h.parent.dispose(); }

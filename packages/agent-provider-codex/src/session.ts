@@ -29,6 +29,7 @@ import type {
   AgentRuntimeInfo,
   AgentSession,
   AgentSessionConfig,
+  ProviderItemIdentity,
   ProviderObservation,
   ProviderStreamItem,
 } from '@orchardworks/agent-provider-sdk';
@@ -44,7 +45,7 @@ import { readCodexHistoryPage } from '@orchardworks/codex-daemon-client';
 import { collectCodexThreadHistoryItems, latestCodexTurnFailure, projectCodexThreadHistory } from './history.js';
 import { CodexImageRegistry } from './images.js';
 import { isRecord, readItem, readItemId, readString } from './native.js';
-import { CodexEventProjector } from './projector.js';
+import { CodexEventProjector, errorIdentity } from './projector.js';
 import { CodexCommunicationHistory } from './communication-history.js';
 import { readCodexPlanningModes, type CodexPlanningModes } from './planning.js';
 import { initializeCodexTransport } from './initialize.js';
@@ -99,6 +100,8 @@ interface NativePendingInteraction {
   reject(error: Error): void;
   respond(response: AgentInteractionResponse): unknown;
   nativeRequestId?: string;
+  /** The journal item of this request: the native item it belongs to, which no process restart renumbers. */
+  identityKey: string;
 }
 
 interface RawNotification {
@@ -137,6 +140,7 @@ export class CodexAppServerSession implements AgentSession {
   private readonly commandEventPrefix = randomUUID();
   private readonly commandInteractions = new CommandInteractions(PROVIDER_ID, (event) => this.emit({
     type: 'observation', sourceKey: `command:${this.commandEventPrefix}:${++this.commandEventSequence}`, occurredAt: Date.now(), delivery: 'live', event,
+    ...(event.type === 'interaction_resolved' ? { itemIdentity: interactionIdentity(`interaction:${event.requestId}`) } : {}),
   }));
   private settingConfirmation: { id: string; value: string; resolve(): void; reject(error: Error): void } | undefined;
   private threadId: string | undefined;
@@ -1047,7 +1051,7 @@ export class CodexAppServerSession implements AgentSession {
     this.pendingInteractions.delete(requestId);
     if (this.threadId) this.runtime.sessionChanged(this.threadId);
     pending.resolve(nativeResponse);
-    this.emitInteractionResolved(requestId, redactInteractionResponse(pending.request, response));
+    this.emitInteractionResolved(requestId, redactInteractionResponse(pending.request, response), pending.identityKey);
   }
 
   async listCommands(): Promise<AgentCommand[]> {
@@ -1259,7 +1263,7 @@ export class CodexAppServerSession implements AgentSession {
     if (!this.config.cwd) this.config.cwd = readString(response.cwd) ?? readString(response.thread.cwd);
     if (!this.config.reasoningEffort) this.config.reasoningEffort = readString(response.reasoningEffort) ?? readString(response.thread.reasoningEffort);
     this.images = new CodexImageRegistry(threadId);
-    this.projector = new CodexEventProjector(threadId, { images: this.images, cwd: this.config.cwd });
+    this.projector = new CodexEventProjector(threadId, { images: this.images, cwd: this.config.cwd, diagnostic: line => this.transport.diagnose(line) });
   }
 
   private finishBootstrap(
@@ -1305,14 +1309,16 @@ export class CodexAppServerSession implements AgentSession {
       }
       if (this.handleRuntimeNotification(raw.method, raw.params)) continue;
       if (this.handleServerRequestResolved(raw.method, raw.params)) continue;
-      const observation = this.projector.projectNotification(raw.method, raw.params);
-      if (observation) this.applyTurnObservation(observation);
-      if (observation && !historyKeys.has(observation.sourceKey)) this.preReadyEvents.push(observation);
-      if (observation?.event.type === 'turn_failed' && observation.event.turnId) {
-        const failure = this.projector.projectTurnFailure(observation.event.error, observation.event.turnId, observation.occurredAt);
-        if (!historyKeys.has(failure.sourceKey)) this.preReadyEvents.push(failure);
+      for (const observation of this.projector.projectNotifications(raw.method, raw.params)) {
+        this.applyTurnObservation(observation);
+        if (!historyKeys.has(observation.sourceKey)) this.preReadyEvents.push(observation);
+        if (observation.event.type === 'turn_failed' && observation.event.turnId) {
+          const failure = this.projector.projectTurnFailure(observation.event.error, observation.event.turnId, observation.occurredAt);
+          if (!historyKeys.has(failure.sourceKey)) this.preReadyEvents.push(failure);
+        }
       }
     }
+    this.projector.forgetCompleted(historyItems);
     this.bufferedNotifications.length = 0;
     if (replacement) {
       const timeline = this.preReadyEvents.filter(item => item.event.type === 'timeline');
@@ -1365,20 +1371,18 @@ export class CodexAppServerSession implements AgentSession {
     }
     if (isRecord(params) && readString(params.threadId) && params.threadId !== this.threadId) return;
     if (method === 'turn/started') this.latestPlan = undefined;
-    if (this.config.collaborationMode === 'plan') {
-      if (method === 'item/plan/delta') return;
+    // The plan of a plan-mode turn is shown as a message like any other; the approval card offers it again after the turn.
+    if (this.config.collaborationMode === 'plan' && method === 'item/completed') {
       const item = readItem(params);
-      if ((method === 'item/started' || method === 'item/completed') && item?.type === 'plan') {
-        const text = readString(item.text);
-        const id = readString(item.id);
-        if (method === 'item/completed' && text && id) this.latestPlan = { id, text };
-        return;
-      }
+      const text = item?.type === 'plan' ? readString(item.text) : undefined;
+      const id = item ? readString(item.id) : undefined;
+      if (text && id) this.latestPlan = { id, text };
     }
-    const observation = this.projector.projectNotification(method, params);
-    if (!observation) return;
-    this.applyTurnObservation(observation);
-    this.emit(observation);
+    const observations = this.projector.projectNotifications(method, params);
+    if (observations.length === 0) return;
+    for (const observation of observations) this.applyTurnObservation(observation);
+    for (const observation of observations) this.emit(observation);
+    const observation = observations.find(candidate => candidate.event.type !== 'timeline') ?? observations[0]!;
     if (observation.event.type === 'turn_failed' && observation.event.turnId) {
       this.emit(this.projector.projectTurnFailure(observation.event.error, observation.event.turnId, observation.occurredAt));
     }
@@ -1394,7 +1398,7 @@ export class CodexAppServerSession implements AgentSession {
         kind: 'plan_approval', requestId: `plan:${this.threadId}:${plan.id}`,
         plan: plan.text, allowedActions: ['approve_and_resume', 'reject'],
       };
-      this.pendingInteractions.set(request.requestId, { kind: 'plan_approval', request, turnId: observation.event.turnId, resolve: () => undefined, reject: () => undefined, respond: () => undefined });
+      this.pendingInteractions.set(request.requestId, { kind: 'plan_approval', request, turnId: observation.event.turnId, resolve: () => undefined, reject: () => undefined, respond: () => undefined, identityKey: `interaction:${request.requestId}` });
       this.emitInteractionRequested(request);
     }
   }
@@ -1455,7 +1459,7 @@ export class CodexAppServerSession implements AgentSession {
       throw error;
     }
     this.pendingInteractions.delete(request.requestId);
-    this.emitInteractionResolved(request.requestId, response);
+    this.emitInteractionResolved(request.requestId, response, `interaction:${request.requestId}`);
     this.emitRuntimeUpdate();
   }
 
@@ -1565,6 +1569,7 @@ export class CodexAppServerSession implements AgentSession {
   private emitInteractionResolved(
     requestId: string,
     response: AgentInteractionResponse,
+    identityKey: string,
   ): void {
     this.emit({
       type: 'observation',
@@ -1574,6 +1579,7 @@ export class CodexAppServerSession implements AgentSession {
       event: {
         type: 'interaction_resolved', provider: PROVIDER_ID, requestId, response,
       },
+      itemIdentity: interactionIdentity(identityKey),
     });
   }
 
@@ -1619,7 +1625,7 @@ export class CodexAppServerSession implements AgentSession {
       : pending.kind === 'permission_approval' ? { kind: 'permission_approval', decision: 'deny' }
       : pending.kind === 'plan_approval' ? { kind: 'plan_approval', action: 'reject' }
       : { kind: 'tool_approval', decision: 'cancel' };
-    this.emitInteractionResolved(requestId, response);
+    this.emitInteractionResolved(requestId, response, pending.identityKey);
     if (pending.kind === 'permission_approval') this.emitUnavailable(requestId, 'Codex permission request closed by the native session; the remote client granted no permissions.');
   }
 
@@ -1657,20 +1663,20 @@ export class CodexAppServerSession implements AgentSession {
     return this.queueInteraction(request, (response) => {
       if (response.kind !== 'question') throw new Error('Invalid question response');
       return mapCodexQuestionResponse(request, response);
-    }, readString(params.turnId), nativeRequestId);
+    }, params, nativeRequestId);
   }
 
   private handleToolRequest(nativeKind: 'command' | 'file', params: unknown, id: string | number): Promise<unknown> {
     this.assertRequestThread(params);
     const mapped = mapCodexToolApproval(nativeKind, params, this.interactionRequestId('tool', id));
-    return this.queueInteraction(mapped.request, mapped.respond, readString(params.turnId), id);
+    return this.queueInteraction(mapped.request, mapped.respond, params, id);
   }
 
   private handleElicitationRequest(params: unknown, id: string | number): Promise<unknown> {
     this.assertRequestThread(params);
     try {
       const request = mapCodexElicitation(params, this.interactionRequestId('elicitation', id));
-      return this.queueInteraction(request, mapCodexElicitationResponse, readString(params.turnId), id);
+      return this.queueInteraction(request, mapCodexElicitationResponse, params, id);
     } catch (error) {
       this.emitUnavailable(this.interactionRequestId('elicitation', id), 'Codex elicitation unavailable: unsupported or invalid form schema or external action.');
       return Promise.resolve({ action: 'decline', content: null, _meta: null });
@@ -1692,17 +1698,21 @@ export class CodexAppServerSession implements AgentSession {
       return this.queueInteraction(request, (response) => {
         if (response.kind !== 'permission_approval') throw new Error('Invalid permission response');
         return { permissions: response.decision === 'allow' ? grant : {}, scope: response.decision === 'allow' ? response.scope : 'turn' };
-      }, readString(params.turnId), id);
+      }, params, id);
     } catch {
       this.emitUnavailable(this.interactionRequestId('permissions', id), 'Codex permission approval unavailable: unsupported or invalid permission scope; no permissions granted.');
       return Promise.resolve({ permissions: {}, scope: 'turn' });
     }
   }
 
-  private queueInteraction(request: AgentInteractionRequest, respond: NativePendingInteraction['respond'], turnId?: string, nativeRequestId?: string | number): Promise<unknown> {
+  private queueInteraction(request: AgentInteractionRequest, respond: NativePendingInteraction['respond'], params: Record<string, unknown>, nativeRequestId: string | number): Promise<unknown> {
     if (this.pendingInteractions.has(request.requestId)) return Promise.reject(new Error('Duplicate native request'));
+    const turnId = readString(params.turnId);
+    const itemId = readString(params.itemId);
+    // A request id is a counter of one process; the native item id is not, so a carried item never meets a new one of the same number.
+    const identityKey = itemId ? `interaction:${itemId}` : `interaction:${turnId ?? this.threadId}:${request.requestId}`;
     return new Promise((resolve, reject) => {
-      this.pendingInteractions.set(request.requestId, { kind: request.kind, request, turnId, resolve, reject, respond,
+      this.pendingInteractions.set(request.requestId, { kind: request.kind, request, turnId, resolve, reject, respond, identityKey,
         ...(nativeRequestId === undefined ? {} : { nativeRequestId: String(nativeRequestId) }) });
       this.emitInteractionRequested(request);
     });
@@ -1716,7 +1726,7 @@ export class CodexAppServerSession implements AgentSession {
 
   private emitUnavailable(requestId: string, message: string): void {
     this.emit({ type: 'observation', sourceKey: `interaction:${requestId}:unavailable`, occurredAt: Date.now(), delivery: 'live',
-      event: { type: 'timeline', provider: PROVIDER_ID, item: { type: 'error', message } } });
+      event: { type: 'timeline', provider: PROVIDER_ID, item: { type: 'error', message } }, itemIdentity: errorIdentity(message) });
   }
 
   private emitInteractionRequested(request: AgentInteractionRequest): void {
@@ -1856,4 +1866,9 @@ class AsyncQueue<T> implements AsyncIterable<T> {
       },
     };
   }
+}
+
+/** An interaction is live-only: no native history replays an approval, a question or a form. */
+function interactionIdentity(key: string): ProviderItemIdentity {
+  return { key, completes: true, liveOnly: true };
 }

@@ -91,3 +91,22 @@ Shared recovery and child snapshots use the same bounded reader. Recovery replac
 ## Host extensions
 
 `instructions` adds to the existing `systemPrompt` developer instructions on create and resume, including native collaboration-mode instructions. Host tools use native dynamic tools with object JSON schemas and validated local callbacks. Schemas are checked before thread creation and arguments before Host effects. Native dynamic tool definitions remain associated with the saved thread; the Host supplies the same named callback binding on resume. Instruction strings persist in the adapter handle; callbacks do not.
+
+## Item identity
+
+Every timeline observation carries the identity of its item (`itemIdentity`), equal in the live stream and in a reread of `thread/turns/list`, so a journal recognizes the item. The adapter owns keys, completion and live-only marks (`src/projector.ts`, `src/history.ts`, `src/session.ts`); the native item id is the same string in notifications, delta parameters and history.
+
+| Item | Key | Notes |
+| --- | --- | --- |
+| user message, steered ones too | `user:<item id>` | complete when emitted |
+| assistant text and the `plan` item of a plan-mode turn | `assistant:<item id>` | deltas and the final item share it; the final completes it with the text it lacks, an empty body when the stream was whole. A final that does not continue the stream completes the item empty and adds a complete `assistant:<item id>:correction` item. The plan streams and completes like any text; the approval card still offers it after the turn |
+| reasoning | `reasoning:<item id>` | the stream marks where each summary part after the first begins with a blank line, so it equals what history joins from `summary[]`; a final that does not continue the stream completes the item empty |
+| tools (command, file change, MCP, dynamic, web search, sleep, collaboration, sub-agent) | `tool:<item id>` | `item/started` is the open row; `item/completed` repeats the whole content and completes |
+| agent communication, image view or generation | `comm:<item id>`, `image:<item id>` | complete when the item completes |
+| compaction | `compaction:<item id>` | `item/started` is loading; `item/completed` completes. The deprecated `thread/compacted` notice repeats the item and is not projected |
+| turn failure | `turn-error:<turn id>` | both paths |
+| plan update | `todo`, live-only | `thread/read` holds no plan update; a later update replaces the board |
+| other error (turn-less `error`, unsupported or invalid notification, interaction unavailable) | `error:<hash of the message>`, live-only | history never holds it; one message is one item |
+| approval, question, form, permission request, plan approval | `interaction:<item id>`, live-only | the native item the request belongs to, which no process restart renumbers; `interaction:<turn id>:<request id>` when a request names no item |
+
+At a turn's end, a text or reasoning that streamed and never got its final message ends with an empty body, and a compaction without its end becomes `failed`. Native history keeps neither, nor an interrupted tool, so the next replacement drops them. History is read in the order items started, because native history lists them in the order they finished, which differs when a plan item and the message it was cut from overlap. A failing MCP server or hook announced at start-up is sent to the diagnostic sink and is not part of the conversation.

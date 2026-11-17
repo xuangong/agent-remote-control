@@ -1,5 +1,5 @@
 import { projectResourceInputText } from '@orchardworks/agent-provider-sdk';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { codexToolResult } from './tool-result.js';
 import { CodexImageRegistry } from './images.js';
@@ -12,6 +12,7 @@ import type {
   AgentTaskItem,
   AgentTimelineItem,
   AgentToolCallTimelineItem,
+  ProviderItemIdentity,
   ProviderObservation,
 } from '@orchardworks/agent-provider-sdk';
 
@@ -43,7 +44,6 @@ const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
   'item/commandExecution/outputDelta',
   'item/commandExecution/terminalInteraction',
   'item/fileChange/patchUpdated',
-  'item/reasoning/summaryPartAdded',
   'item/reasoning/textDelta',
   'remoteControl/status/changed',
   'serverRequest/resolved',
@@ -52,13 +52,21 @@ const NON_TIMELINE_NOTIFICATION_METHODS = new Set([
   'thread/status/changed',
   'turn/diff/updated',
   'warning',
+  // The thread's read position moves after every turn.
+  'thread/readState/changed',
+  // Superseded by the `contextCompaction` item, which carries the compaction and its end.
+  'thread/compacted',
 ]);
+
+const TURN_END = new Set(['turn_completed', 'turn_failed', 'turn_canceled']);
 
 export interface CodexEventProjectorOptions {
   now?: () => number;
   delivery?: 'history' | 'live';
   images?: CodexImageRegistry;
   cwd?: string;
+  /** Receives one JSON line for a native notice that is not part of the conversation, such as a failing MCP server at start-up. */
+  diagnostic?: (line: string) => void;
 }
 
 export class CodexEventProjector {
@@ -66,10 +74,14 @@ export class CodexEventProjector {
   private readonly reasoningText = new Map<string, string>();
   private readonly completedTextItems = new Set<string>();
   private readonly emittedUserItems = new Set<string>();
+  private readonly loadingCompactions = new Set<string>();
+  /** Observations a notification adds after its own, taken by the call that read it. */
+  private readonly trailing: ProviderObservation[] = [];
   private readonly now: () => number;
   private readonly delivery: 'history' | 'live';
   private readonly images: CodexImageRegistry;
   private readonly cwd: string | undefined;
+  private readonly diagnostic: ((line: string) => void) | undefined;
 
   constructor(
     private readonly threadId: string,
@@ -79,6 +91,7 @@ export class CodexEventProjector {
     this.delivery = options.delivery ?? 'live';
     this.images = options.images ?? new CodexImageRegistry(threadId);
     this.cwd = options.cwd;
+    this.diagnostic = options.diagnostic;
   }
 
   snapshotText(): ReadonlyMap<string, string> {
@@ -96,7 +109,50 @@ export class CodexEventProjector {
     }
   }
 
+  /** The history read says these items are complete; only items still streaming keep their text. */
+  forgetCompleted(historyItems: ReadonlyMap<string, unknown>): void {
+    for (const [id, item] of historyItems) {
+      if (isRecord(item) && item.completedAtMs !== null && item.completedAtMs !== undefined) { this.assistantText.delete(id); this.reasoningText.delete(id); }
+    }
+  }
+
+  /** What one native notification adds to the timeline: at a turn's end, first the completion of every item that streamed and never finished. */
+  projectNotifications(method: string, params: unknown): ProviderObservation[] {
+    const observation = this.projectOne(method, params);
+    const trailing = this.trailing.splice(0);
+    if (!observation) return [];
+    const finished = TURN_END.has(observation.event.type) ? this.finishOpenItems(observation.event, observation.occurredAt) : [];
+    return [...finished, observation, ...trailing];
+  }
+
+  /** The observation the notification is about, without the completions and corrections that come with it. */
   projectNotification(method: string, params: unknown): ProviderObservation | null {
+    const observation = this.projectOne(method, params);
+    this.trailing.length = 0;
+    return observation;
+  }
+
+  /**
+   * The turn ended with these items open: a text or reasoning that never received its final message ends with an empty body,
+   * and a compaction that never ended is failed. Native history keeps none of them, so the next replacement may drop them.
+   */
+  private finishOpenItems(end: AgentStreamEvent, occurredAt: number): ProviderObservation[] {
+    const turnId = 'turnId' in end ? end.turnId : undefined;
+    const finished: ProviderObservation[] = [];
+    for (const id of this.assistantText.keys()) {
+      finished.push(this.observation(`item:${id}:abandoned`, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'assistant_message', messageId: id, text: '' } }, occurredAt, identity(`assistant:${id}`, true)));
+    }
+    for (const id of this.reasoningText.keys()) {
+      finished.push(this.observation(`item:${id}:abandoned`, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'reasoning', text: '' } }, occurredAt, identity(`reasoning:${id}`, true)));
+    }
+    for (const id of this.loadingCompactions) {
+      finished.push(this.observation(`item:${id}:abandoned`, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'compaction', status: 'failed' } }, occurredAt, identity(`compaction:${id}`, true)));
+    }
+    this.assistantText.clear(); this.reasoningText.clear(); this.loadingCompactions.clear();
+    return finished;
+  }
+
+  private projectOne(method: string, params: unknown): ProviderObservation | null {
     if (method.startsWith('codex/event/')) return null;
     if (NON_TIMELINE_NOTIFICATION_METHODS.has(method)) return null;
     if (method === 'thread/started') {
@@ -117,13 +173,18 @@ export class CodexEventProjector {
       if (!isRecord(params)) return this.invalidNotification(method, params, turnId);
       const status = method === 'mcpServer/startupStatus/updated' ? params.status : isRecord(params.run) ? params.run.status : undefined;
       if (typeof status !== 'string') return this.invalidNotification(method, params, turnId);
-      if (status !== 'failed') return null;
-      const name = readString(params.name) ?? (isRecord(params.run) ? readString(params.run.eventName) : undefined) ?? method;
-      const detail = readErrorMessage(params.error) ?? readString(params.failureReason) ?? (isRecord(params.run) ? readString(params.run.statusMessage) : undefined);
-      return this.observation(`runtime:${method}:${name}:failed`, {
-        type: 'timeline', provider: PROVIDER_ID, turnId,
-        item: { type: 'error', message: `${name} failed${detail ? `: ${detail}` : '.'}` },
-      });
+      // The native runtime announces its start-up again for every thread it loads and history never holds it, so it is not conversation.
+      if (status === 'failed') {
+        const name = readString(params.name) ?? (isRecord(params.run) ? readString(params.run.eventName) : undefined) ?? method;
+        const detail = readErrorMessage(params.error) ?? readString(params.failureReason) ?? (isRecord(params.run) ? readString(params.run.statusMessage) : undefined);
+        this.diagnostic?.(JSON.stringify({ event: 'codex_startup_notice', method, name, status, ...(detail ? { message: detail.slice(0, 200) } : {}) }));
+      }
+      return null;
+    }
+    if (method === 'item/reasoning/summaryPartAdded') {
+      // History joins the summary parts with a blank line; the stream marks where each part after the first begins.
+      const index = isRecord(params) ? readNumber(params.summaryIndex) : undefined;
+      return index !== undefined && index > 0 ? this.projectTextDelta('item/reasoning/summaryTextDelta', { ...(params as JsonObject), delta: '\n\n' }, turnId) : null;
     }
 
     if (
@@ -159,28 +220,13 @@ export class CodexEventProjector {
       return this.projectUsage(params, turnId)
         ?? this.invalidNotification(method, params, turnId);
     }
-    if (method === 'thread/compacted') {
-      return this.observation(`thread:${this.threadId}:compacted:${turnId ?? 'unknown'}`, {
-        type: 'timeline', provider: PROVIDER_ID, turnId,
-        item: { type: 'compaction', status: 'completed' },
-      });
-    }
     if (method === 'error' && isRecord(params)) {
       const message = readErrorMessage(params.error) ?? readString(params.message);
       if (!message) return this.invalidNotification(method, params, turnId);
       if (turnId && params.willRetry === false) return this.projectTurnFailure(message, turnId);
-      return this.observation(`error:${turnId ?? this.threadId}:${message}`, {
-        type: 'timeline', provider: PROVIDER_ID, turnId,
-        item: { type: 'error', message },
-      });
+      return this.errorItem(`error:${turnId ?? this.threadId}:${message}`, message, turnId);
     }
-    return this.observation(
-      `unsupported:notification:${method}:${nativeFingerprint(params)}`,
-      {
-        type: 'timeline', provider: PROVIDER_ID, turnId,
-        item: { type: 'error', message: unsupportedMessage(`Unsupported Codex notification ${method}`, params) },
-      },
-    );
+    return this.errorItem(`unsupported:notification:${method}:${nativeFingerprint(params)}`, unsupportedMessage(`Unsupported Codex notification ${method}`, params), turnId);
   }
 
   projectHistoryItem(item: unknown, turnId?: string, occurredAt?: number): ProviderObservation | null {
@@ -194,7 +240,7 @@ export class CodexEventProjector {
     if (!timelineItem || !id) return null;
     return this.observation(`item:${id}:completed`, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item: timelineItem,
-    }, occurredAt);
+    }, occurredAt, this.itemIdentity(item, id, 'completed', timelineItem));
   }
 
   private projectTextDelta(
@@ -218,7 +264,7 @@ export class CodexEventProjector {
       : { type: 'assistant_message', messageId: itemId, text: delta };
     return this.observation(sourceKey, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item,
-    });
+    }, undefined, identity(`${reasoning ? 'reasoning' : 'assistant'}:${itemId}`));
   }
 
   private projectItemLifecycle(
@@ -247,9 +293,27 @@ export class CodexEventProjector {
     }
     const mapped = this.mapItem(item, lifecycle);
     if (!mapped) return null;
+    // An item type this adapter does not know is reported once, when it completes, as history reports it.
+    if (mapped.type === 'error' && lifecycle === 'started') return null;
+    if (itemType === 'contextCompaction') {
+      if (lifecycle === 'started') this.loadingCompactions.add(itemId); else this.loadingCompactions.delete(itemId);
+    }
     return this.observation(`item:${itemId}:${lifecycle}`, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item: mapped,
-    });
+    }, undefined, this.itemIdentity(item, itemId, lifecycle, mapped));
+  }
+
+  /** The key of the item a native item becomes, and whether this observation finishes it. The same in a notification and in history. */
+  private itemIdentity(item: JsonObject, id: string, lifecycle: 'started' | 'completed', mapped: AgentTimelineItem): ProviderItemIdentity {
+    switch (mapped.type) {
+      case 'tool_call': return identity(`tool:${id}`, mapped.status !== 'running');
+      case 'agent_communication': return identity(`comm:${id}`, true);
+      case 'compaction': return identity(`compaction:${id}`, lifecycle === 'completed');
+      case 'error': return identity(`error:unsupported-item:${id}`, true);
+      case 'reasoning': return identity(`reasoning:${id}`, true);
+      case 'assistant_message': return identity(`assistant:${id}`, true);
+      default: throw new Error(`Codex item ${readString(item.type)} has no timeline identity`);
+    }
   }
 
   private projectImage(item: JsonObject, itemId: string, turnId?: string, occurredAt?: number): ProviderObservation | null {
@@ -258,7 +322,7 @@ export class CodexEventProjector {
     return {
       ...this.observation(`item:${itemId}:completed`, {
         type: 'timeline', provider: PROVIDER_ID, turnId, item: projected.item,
-      }, occurredAt),
+      }, occurredAt, identity(`image:${itemId}`, true)),
       resourceReferences: projected.resourceReferences,
     };
   }
@@ -278,56 +342,27 @@ export class CodexEventProjector {
       : readString(item.text) ?? '';
     const streamedText = reasoning ? this.reasoningText : this.assistantText;
     const streamed = streamedText.get(itemId);
-    if (streamed !== undefined) {
-      streamedText.delete(itemId);
-      if (finalText === streamed) {
-        return null;
-      }
-      if (!finalText.startsWith(streamed)) {
-        const fingerprint = nativeFingerprint(item);
-        if (!reasoning && finalText) {
-          return this.observation(`item:${itemId}:completed-correction:${fingerprint}`, {
-            type: 'timeline', provider: PROVIDER_ID, turnId,
-            item: {
-              type: 'assistant_message',
-              messageId: `${itemId}:correction:${fingerprint}`,
-              text: finalText,
-            },
-          });
-        }
-        return this.observation(`item:${itemId}:completed-correction:${nativeFingerprint(item)}`, {
-          type: 'timeline', provider: PROVIDER_ID, turnId,
-          item: {
-            type: 'error',
-            message: unsupportedMessage(`Codex final text corrected streamed item ${itemId}`, {
-              streamed,
-              final: finalText,
-            }),
-          },
-        });
-      }
-      const suffix = finalText.slice(streamed.length);
-      if (!suffix) return null;
-      const timelineItem: AgentTimelineItem = reasoning
-        ? { type: 'reasoning', text: suffix }
-        : { type: 'assistant_message', messageId: itemId, text: suffix };
-      return this.observation(`item:${itemId}:completed-suffix`, {
-        type: 'timeline', provider: PROVIDER_ID, turnId, item: timelineItem,
-      });
+    const key = `${reasoning ? 'reasoning' : 'assistant'}:${itemId}`;
+    const timelineOf = (text: string, messageId = itemId): AgentTimelineItem => reasoning
+      ? { type: 'reasoning', text }
+      : { type: 'assistant_message', messageId, text };
+    // What finishes a streamed item differs from the history row of the same item, which a reread would otherwise drop as already known.
+    const complete = (text: string, sourceKey = `item:${itemId}:completed-suffix`) => this.observation(sourceKey, { type: 'timeline', provider: PROVIDER_ID, turnId, item: timelineOf(text) }, undefined, identity(key, true));
+    if (streamed === undefined) return finalText ? complete(finalText, `item:${itemId}:completed`) : null;
+    streamedText.delete(itemId);
+    // The final message finishes what streamed: nothing more when it equals it, the rest when it continues it.
+    if (finalText.startsWith(streamed)) return complete(finalText.slice(streamed.length));
+    // A final that does not continue the stream cannot rewrite it: the item ends as streamed, and a corrected message stands beside it.
+    if (!reasoning && finalText) {
+      this.trailing.push(this.observation(`item:${itemId}:completed-correction`, { type: 'timeline', provider: PROVIDER_ID, turnId, item: timelineOf(finalText, `${itemId}:correction`) }, undefined, identity(`${key}:correction`, true)));
     }
-    const timelineItem: AgentTimelineItem = reasoning
-      ? { type: 'reasoning', text: finalText }
-      : { type: 'assistant_message', messageId: itemId, text: finalText };
-    if (!finalText) return null;
-    return this.observation(`item:${itemId}:completed`, {
-      type: 'timeline', provider: PROVIDER_ID, turnId, item: timelineItem,
-    });
+    return complete('');
   }
 
   projectTurnFailure(message: string, turnId: string, occurredAt?: number): ProviderObservation {
     return this.observation(`turn:${turnId}:error`, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'error', message: message.trim() || 'Codex turn failed without an error detail.' },
-    }, occurredAt);
+    }, occurredAt, identity(`turn-error:${turnId}`, true));
   }
 
   private projectTurnCompleted(
@@ -369,9 +404,10 @@ export class CodexEventProjector {
         : nativeStatus === 'completed' ? 'completed' : 'pending';
       return [{ text, completed: status === 'completed', status }];
     });
+    // Native history holds no plan update, so the journal keeps the only copy; a later update replaces the board.
     return this.observation(`turn:${turnId ?? 'unknown'}:plan:${stringifyJson(items)}`, {
       type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'todo', items },
-    });
+    }, undefined, identity('todo', true, true));
   }
 
   private projectUsage(
@@ -535,7 +571,7 @@ export class CodexEventProjector {
     if (!text) return null;
     return { ...this.observation(key, { type: 'timeline', provider: PROVIDER_ID, turnId,
       item: { type: 'user_message', text, messageId: id, ...(content.some(part=>part.type!=='text') ? { content } : {}),
-        ...(readString(item.clientId) ? { clientMessageId: readString(item.clientId) } : {}) } }, occurredAt),
+        ...(readString(item.clientId) ? { clientMessageId: readString(item.clientId) } : {}) } }, occurredAt, identity(`user:${id}`, true)),
       ...(imageIndex ? { resourceReferences } : {}) };
   }
 
@@ -551,11 +587,17 @@ export class CodexEventProjector {
     sourceKey: string,
     event: AgentStreamEvent,
     occurredAt = this.now(),
+    itemIdentity?: ProviderItemIdentity,
   ): ProviderObservation {
     return {
       type: 'observation', sourceKey, occurredAt, delivery: this.delivery,
-      event,
+      event, ...(itemIdentity ? { itemIdentity } : {}),
     };
+  }
+
+  /** An error the native history never holds. The message names the item, so the same message is one item however often it arrives. */
+  private errorItem(sourceKey: string, message: string, turnId: string | undefined): ProviderObservation {
+    return this.observation(sourceKey, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'error', message } }, undefined, errorIdentity(message));
   }
 
   private invalidNotification(
@@ -563,11 +605,18 @@ export class CodexEventProjector {
     params: unknown,
     turnId?: string,
   ): ProviderObservation {
-    return this.observation(`invalid:notification:${method}:${nativeFingerprint(params)}`, {
-      type: 'timeline', provider: PROVIDER_ID, turnId,
-      item: { type: 'error', message: unsupportedMessage(`Invalid Codex notification ${method}`, params) },
-    });
+    return this.errorItem(`invalid:notification:${method}:${nativeFingerprint(params)}`, unsupportedMessage(`Invalid Codex notification ${method}`, params), turnId);
   }
+}
+
+/** One item of a journal: its key, whether this observation finishes it, and whether native history cannot rebuild it. */
+function identity(key: string, completes = false, liveOnly = false): ProviderItemIdentity {
+  return { key, ...(completes ? { completes: true as const } : {}), ...(liveOnly ? { liveOnly: true as const } : {}) };
+}
+
+/** An error that native history does not hold: live-only, keyed by its message. */
+export function errorIdentity(message: string): ProviderItemIdentity {
+  return identity(`error:${createHash('sha256').update(message).digest('hex').slice(0, 16)}`, true, true);
 }
 
 function unsupportedMessage(prefix: string, details: unknown): string {

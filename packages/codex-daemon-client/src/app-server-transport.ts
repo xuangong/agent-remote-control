@@ -141,6 +141,11 @@ export class CodexAppServerTransport {
     this.requestHandlers.set(method, handler);
   }
 
+  /** One line for the diagnostic sink this transport was given. */
+  diagnose(line: string): void {
+    try { this.onDiagnostic(line); } catch { /* A sink cannot fail a session. */ }
+  }
+
   request(method: string, params?: unknown, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
     if (this.closed) return Promise.reject(new CodexTransportUnavailableError('Codex app-server transport is closed'));
     const id = this.nextId++;

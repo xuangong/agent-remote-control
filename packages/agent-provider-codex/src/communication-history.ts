@@ -184,9 +184,11 @@ function agentPath(thread: Record<string, unknown>, log: CommunicationLog): stri
   return recipients.size === 1 ? recipients.values().next().value : undefined;
 }
 
+const UNAVAILABLE = 'Some agent communication history could not be recovered from local records. Other session history is still available.';
+
 function diagnostic(observations: ProviderObservation[], id: string): ProviderObservation[] {
   const sourceKey = `communication-history:${id}:unavailable`;
   if (observations.some(o => o.sourceKey === sourceKey)) return observations;
   return [...observations, { type: 'observation', sourceKey, occurredAt: observations.at(-1)?.occurredAt ?? Date.now(), delivery: 'history', event: { type: 'timeline', provider: 'codex',
-    item: { type: 'error', message: 'Some agent communication history could not be recovered from local records. Other session history is still available.' } } }];
+    item: { type: 'error', message: UNAVAILABLE } }, itemIdentity: { key: 'error:communication-history-unavailable', completes: true } }];
 }

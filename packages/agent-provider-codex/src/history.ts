@@ -19,8 +19,7 @@ export function projectCodexThreadHistory(
     const turnId = readString(value.id);
     const startedAt = secondsToMilliseconds(readNumber(value.startedAt));
     const completedAt = secondsToMilliseconds(readNumber(value.completedAt)) ?? startedAt;
-    const items = Array.isArray(value.items) ? value.items : [];
-    for (const item of items) {
+    for (const item of inStartOrder(Array.isArray(value.items) ? value.items : [])) {
       const userItem = isRecord(item) && item.type === 'userMessage';
       const observation = projector.projectHistoryItem(
         item,
@@ -34,6 +33,17 @@ export function projectCodexThreadHistory(
     }
   }
   return observations;
+}
+
+/**
+ * Native history lists a turn's items in the order they finished; a live stream shows them in the order they started. They differ when
+ * lifetimes overlap, as a plan item and the message it was cut from do. The journal keys items by first appearance, so history is
+ * read in the order a stream shows. Items without a start time keep the native order.
+ */
+function inStartOrder(items: unknown[]): unknown[] {
+  const started = items.map(item => isRecord(item) ? readNumber(item.startedAtMs) : undefined);
+  if (started.some(at => at === undefined)) return items;
+  return items.map((item, index) => ({ item, index, at: started[index]! })).sort((a, b) => a.at - b.at || a.index - b.index).map(({ item }) => item);
 }
 
 /** Only the latest turn can explain the current failure; older failures remain timeline history. */

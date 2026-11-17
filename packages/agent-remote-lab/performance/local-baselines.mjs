@@ -720,6 +720,8 @@ function readServed(handle) {
     const scroller = scrollerOf(document.querySelector('.agent-timeline-entry'));
     let last = -1;
     for (let round = 0; round < 60; round++) {
+      // The page loads older history for a reader scrolling up, which only the wheel says; assigning scrollTop alone shows the window.
+      scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
       scroller.scrollTop = 0;
       await new Promise(resolve => setTimeout(resolve, 400));
       const count = document.querySelectorAll('.agent-message').length;

@@ -1,0 +1,33 @@
+{
+  "name": "@orchardworks/agent-remote-fixtures",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Test support: wire transcripts and the players, recorder and in-memory harnesses that produce them, builders and scenarios.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000",
+    "transcripts:record": "vitest run --config vitest.record.config.ts --testTimeout=30000"
+  },
+  "dependencies": {
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-remote-controller": "workspace:*",
+    "@orchardworks/agent-remote-hosted": "workspace:*",
+    "@orchardworks/agent-remote-journal": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-relay": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
+  }
+}

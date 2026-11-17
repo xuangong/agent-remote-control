@@ -1,0 +1,13 @@
+{"kind":"transcript","producedBy":"transcripts:record","seam":"S3","scenario":"send-acknowledged","description":"A page with control sends a message; the Relay opens a Controller stream and returns the Controller's acknowledgement.","consumers":["packages/agent-remote-seams/tests/S3/session-wire.integration.test.ts"],"protocolVersion":"1.8.0","recordedAt":"baseline/im-session-2026-11-18"}
+{"n":1,"direction":"browser->relay","message":{"protocolVersion":"1.8.0","type":"negotiate"}}
+{"n":2,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"negotiated","sessionControl":true}}
+{"n":3,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"agent_snapshot","payload":{"id":"agent","providerId":"codex","createdAt":"<iso>","updatedAt":"<iso>","status":"idle","activeTurn":null,"capabilities":{"history":true,"sendMessage":true,"steer":true,"cancel":true,"readResource":true,"interactions":{"question":true,"planApproval":true,"toolApproval":true}},"pendingInteractions":[],"runtimeInfo":{"providerId":"codex","sessionId":"native-session","status":"idle"}}}}
+{"n":4,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"session_control","payload":{"agentId":"agent","revision":"<uuid:1>","available":true,"access":"read_only"}}}
+{"n":5,"direction":"browser->relay","message":{"protocolVersion":"1.8.0","type":"timeline_subscription","payload":{"requestId":"sub-1","agentIds":["agent"]}}}
+{"n":6,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"timeline_subscribed","payload":{"requestId":"sub-1","agentIds":["agent"]}}}
+{"step":"acquire"}
+{"n":7,"direction":"browser->relay","message":{"protocolVersion":"1.8.0","type":"session_control_request","payload":{"agentId":"agent","requestId":"acquire-1","revision":"<uuid:1>","action":"acquire"}}}
+{"n":8,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"session_control","payload":{"agentId":"agent","revision":"<uuid:1>","available":true,"access":"control","token":"<token:1>","requestId":"acquire-1"}}}
+{"step":"send"}
+{"n":9,"direction":"browser->relay","message":{"protocolVersion":"1.8.0","type":"send_message","controlToken":"<token:1>","payload":{"requestId":"send-1","operationId":"<uuid:2>","agentId":"agent","text":"Hi"}}}
+{"n":10,"direction":"relay->browser","message":{"protocolVersion":"1.8.0","type":"command_acknowledged","payload":{"requestId":"send-1","agentId":"agent","command":"send_message","inputAcceptance":{"disposition":"started"}}}}

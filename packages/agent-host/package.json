@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./journal-publisher": {
+      "types": "./dist/journal-publisher.d.ts",
+      "import": "./dist/journal-publisher.js"
+    },
     "./local-session-succession": {
       "types": "./dist/local-session-succession.d.ts",
       "import": "./dist/local-session-succession.js"

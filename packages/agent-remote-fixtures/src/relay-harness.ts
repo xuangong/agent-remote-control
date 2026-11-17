@@ -2,7 +2,7 @@ import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-j
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { createHostBroker, type RelaySocket, type RemoteHostBrokerState } from '@orchardworks/agent-remote-hosted';
 
-import type { Direction } from './transcript.js';
+import type { Direction, PlayerPeer } from './transcript.js';
 
 export type Wire = Record<string, any>;
 export const HOST_ID = 'host';
@@ -52,7 +52,8 @@ export function socketPair(closers: Array<() => void | Promise<void>>, tap?: Tap
   class Socket implements RelaySocket {
     readyState = 1; bufferedAmount = 0; peer!: Socket;
     messages = new Set<(data: string, binary: boolean) => void | Promise<void>>(); closes = new Set<() => void>();
-    constructor(private readonly direction: 'toPeer' | 'toRelay') {}
+    readonly direction: 'toPeer' | 'toRelay';
+    constructor(direction: 'toPeer' | 'toRelay') { this.direction = direction; }
     send(data: string) {
       if (this.readyState !== 1) throw new Error('Socket is closed');
       tap?.(this.direction, data);
@@ -157,7 +158,8 @@ export async function startRelay(options: { seed?: boolean; recorder?: FrameReco
     const inbox = collect(pair.native);
     prepared.accept(pair.server);
     const send = (fields: Wire) => pair.native.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields }));
-    return { pair, frames: inbox.all, take: inbox.take, send };
+    const peer: PlayerPeer = { send: json => pair.native.send(json), next: () => inbox.take(() => true, 'the next frame from the Relay') };
+    return { pair, frames: inbox.all, take: inbox.take, send, peer };
   }
 
   return {

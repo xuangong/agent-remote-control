@@ -7,6 +7,7 @@ import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks
 
 import { attachScripted, historyBoundary, observationsOf, ScriptedSession } from './scripted-session.js';
 import type { FrameRecorder } from './relay-harness.js';
+import type { PlayerPeer } from './transcript.js';
 import { driver, virtualClock } from './virtual-clock.js';
 
 const HOST_ID = 'host-1';
@@ -118,4 +119,30 @@ export function observationBuilder() {
       itemIdentity: { key, ...(completes ? { completes: true as const } : {}) },
     };
   };
+}
+
+/**
+ * The Relay's real journal service alone, for a player that stands in for the Controller: what it is sent goes to the service, and
+ * what the service answers is what the player reads. Nothing here waits on the wall clock; it yields to the event loop between checks.
+ */
+export function journalServicePeer(options: UplinkOptions = {}) {
+  const clock = virtualClock();
+  const real = createHostJournals({ store: new MemoryJournalStore(), ...(options.limits === undefined ? {} : { limits: options.limits }) });
+  const queue: unknown[] = [];
+  const connection = createJournalConnection({
+    hostId: HOST_ID, journals: real, current: () => true, scheduler: clock,
+    send: (message: RemoteHostUplinkMessage) => { queue.push(message); },
+    diagnostic: () => undefined, published: () => undefined,
+  });
+  const peer: PlayerPeer = {
+    send: json => { void connection.receive(JSON.parse(json)).catch(() => undefined); },
+    async next() {
+      for (let turn = 0; turn < 5_000; turn += 1) {
+        if (queue.length > 0) return queue.shift();
+        await new Promise<void>(resolve => { setImmediate(resolve); });
+      }
+      throw new Error('The journal service sent nothing.');
+    },
+  };
+  return { peer, close: () => connection.close() };
 }

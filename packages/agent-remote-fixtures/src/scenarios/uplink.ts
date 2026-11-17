@@ -15,7 +15,7 @@ const reread = (context: ScenarioContext) => context.recording('codex', 'settled
 
 export const uplinkScenarios: Scenario[] = [
   {
-    seam: 'S2', name: 'publish-recorded-session', consumers: [CONSUMER],
+    seam: 'S2', name: 'publish-recorded-session', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'A Controller opens a journal for a session that was recorded live: open, the window, the head, and the acknowledgements.',
     run: withUplink({}, async (uplink, recorder, context) => {
       recorder.step('open and publish the recorded run');
@@ -25,7 +25,7 @@ export const uplinkScenarios: Scenario[] = [
     }),
   },
   {
-    seam: 'S2', name: 'reopen-unchanged', consumers: [CONSUMER],
+    seam: 'S2', name: 'reopen-unchanged', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'The session is released and opened again with the same native history: the Relay answers unchanged and stores nothing.',
     run: withUplink({}, async (uplink, recorder, context) => {
       const publisher = uplink.start();
@@ -39,7 +39,7 @@ export const uplinkScenarios: Scenario[] = [
     }),
   },
   {
-    seam: 'S2', name: 'restart-controller', consumers: [CONSUMER],
+    seam: 'S2', name: 'restart-controller', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'The Controller restarts: a new publisher reads the same native history and meets the journal the Relay kept.',
     run: withUplink({}, async (uplink, recorder, context) => {
       const first = uplink.start();
@@ -53,7 +53,7 @@ export const uplinkScenarios: Scenario[] = [
     }),
   },
   {
-    seam: 'S2', name: 'reopen-changed-history', consumers: [CONSUMER],
+    seam: 'S2', name: 'reopen-changed-history', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'The native history read after a reopen no longer matches what the Relay holds: the Relay replaces its journal with the new window.',
     run: withUplink({}, async (uplink, recorder, context) => {
       const publisher = uplink.start();
@@ -67,7 +67,7 @@ export const uplinkScenarios: Scenario[] = [
     }),
   },
   {
-    seam: 'S2', name: 'live-rows-after-open', consumers: [CONSUMER],
+    seam: 'S2', name: 'live-rows-after-open', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'Rows that arrive after the window was published go to the journal as appended rows, completed by their digest.',
     run: withUplink({}, async (uplink, recorder) => {
       const item = observationBuilder();
@@ -98,7 +98,7 @@ export const uplinkScenarios: Scenario[] = [
     })(),
   },
   {
-    seam: 'S2', name: 'quota-refuses-window', consumers: [CONSUMER],
+    seam: 'S2', name: 'quota-refuses-window', consumers: [CONSUMER], relayBacking: { uplink: { limits: { sessionBytes: 9_000 } } },
     description: 'The Relay has no room for the whole window: it refuses with quota_exceeded, and the Controller retries only with backoff.',
     run: withUplink({ limits: { sessionBytes: 9_000 } }, async (uplink, recorder) => {
       const item = observationBuilder();
@@ -109,7 +109,7 @@ export const uplinkScenarios: Scenario[] = [
     }),
   },
   {
-    seam: 'S2', name: 'connection-drops-and-returns', consumers: [CONSUMER],
+    seam: 'S2', name: 'connection-drops-and-returns', consumers: [CONSUMER], relayBacking: { uplink: {} },
     description: 'The uplink drops while a session is published and comes back: the Controller opens the journal again and the Relay answers from what it kept.',
     run: withUplink({}, async (uplink, recorder, context) => {
       const publisher = uplink.start();

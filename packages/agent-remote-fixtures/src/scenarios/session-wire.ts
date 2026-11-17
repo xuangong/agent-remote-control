@@ -30,11 +30,18 @@ async function publishedController(relay: Relay) {
   return controller;
 }
 
+/** Scenery for a browser scenario: the Controller the Relay talks to, set up before the page opens. */
+type Scenery = (relay: Relay) => Promise<void>;
+const publishedScenery: Scenery = async relay => { await publishedController(relay); };
+const offlineHostScenery: Scenery = async relay => { (await publishedController(relay)).disconnect(); await new Promise(resolve => setTimeout(resolve, 20)); };
+const nativeOwnerScenery: Scenery = async relay => { await relay.connectController({ attach: { status: 409, body: { code: 'native_session_owned', nativeOwner: TERMINAL_OWNER } } }); };
+const connectedScenery: Scenery = async relay => { await relay.connectController(); };
+
 /** Runs the body against a fresh Relay and always disposes it. */
-const withRelay = (options: Parameters<typeof startRelay>[0], body: (relay: Relay, recorder: ScenarioRecorder) => Promise<void>) =>
+const withRelay = (options: { seed?: boolean; scenery?: Scenery }, body: (relay: Relay, recorder: ScenarioRecorder) => Promise<void>) =>
   async (recorder: ScenarioRecorder): Promise<void> => {
-    const relay = await startRelay({ ...options, recorder });
-    try { await body(relay, recorder); } finally { await relay.dispose(); }
+    const relay = await startRelay({ ...(options.seed ? { seed: true } : {}), recorder });
+    try { await options.scenery?.(relay); await body(relay, recorder); } finally { await relay.dispose(); }
   };
 
 /** The revision of the latest control state the page was sent. */
@@ -49,6 +56,7 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'open-offline-host', consumers: [CONSUMER],
     description: 'A page opens a session whose Host is offline: negotiation, the Snapshot, the control state, the subscription and the newest page, all from the journal.',
+    relayBacking: { seed: true },
     run: withRelay({ seed: true }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       recorder.step('negotiate');
@@ -110,6 +118,7 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'acquire-control', consumers: [CONSUMER],
     description: 'A page acquires control; the Relay answers with the lease: its revision, access and token.',
+    relayBacking: { seed: true },
     run: withRelay({ seed: true }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await negotiated(browser);
@@ -120,8 +129,8 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'send-without-lease', consumers: [CONSUMER],
     description: 'A page that holds no lease sends a message: the Relay refuses it with the reason, keeps the stream open, and does not forward it to a Controller.',
-    run: withRelay({ seed: true }, async (relay, recorder) => {
-      await relay.connectController();
+    relayBacking: { seed: true, scenery: connectedScenery },
+    run: withRelay({ seed: true, scenery: connectedScenery }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await negotiated(browser);
       recorder.step('send without a lease');
@@ -135,6 +144,7 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'acquire-stale-revision', consumers: [CONSUMER],
     description: 'An acquire that names a revision the Relay no longer holds is refused with session_control_changed, not given a lease.',
+    relayBacking: { seed: true },
     run: withRelay({ seed: true }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await negotiated(browser);
@@ -146,8 +156,8 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'send-acknowledged', consumers: [CONSUMER],
     description: 'A page with control sends a message; the Relay opens a Controller stream and returns the Controller\'s acknowledgement.',
-    run: withRelay({}, async (relay, recorder) => {
-      await publishedController(relay);
+    relayBacking: { scenery: publishedScenery },
+    run: withRelay({ scenery: publishedScenery }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await subscribed(browser);
       recorder.step('acquire');
@@ -160,8 +170,8 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'native-owner-refuses-send', consumers: [CONSUMER],
     description: 'The Controller refuses a message because a terminal owns the session: the page gets the reason, then a read-only control state, and reads keep working.',
-    run: withRelay({ seed: true }, async (relay, recorder) => {
-      await relay.connectController({ attach: { status: 409, body: { code: 'native_session_owned', nativeOwner: TERMINAL_OWNER } } });
+    relayBacking: { seed: true, scenery: nativeOwnerScenery },
+    run: withRelay({ seed: true, scenery: nativeOwnerScenery }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await subscribed(browser);
       recorder.step('acquire');
@@ -181,10 +191,8 @@ export const sessionWireScenarios: Scenario[] = [
   {
     seam: 'S3', name: 'send-offline-host', consumers: [CONSUMER],
     description: 'A page with control sends while the Host is offline: the Relay answers with the reason and keeps control and reads.',
-    run: withRelay({}, async (relay, recorder) => {
-      const controller = await publishedController(relay);
-      controller.disconnect();
-      await new Promise(resolve => setTimeout(resolve, 20));
+    relayBacking: { scenery: offlineHostScenery },
+    run: withRelay({ scenery: offlineHostScenery }, async (relay, recorder) => {
       const browser = await relay.openBrowser();
       await subscribed(browser);
       recorder.step('acquire');

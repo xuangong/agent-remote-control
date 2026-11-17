@@ -655,6 +655,36 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
+  packages/agent-remote-seams:
+    devDependencies:
+      '@orchardworks/agent-provider-claude':
+        specifier: workspace:*
+        version: link:../agent-provider-claude
+      '@orchardworks/agent-provider-codex':
+        specifier: workspace:*
+        version: link:../agent-provider-codex
+      '@orchardworks/agent-provider-copilot':
+        specifier: workspace:*
+        version: link:../agent-provider-copilot
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@orchardworks/agent-remote-fixtures':
+        specifier: workspace:*
+        version: link:../agent-remote-fixtures
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/agent-remote-tunnel:
     dependencies:
       ws:

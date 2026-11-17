@@ -72,6 +72,7 @@ export class RawAppServer {
   }
 
   async close(): Promise<void> {
+    if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     this.child.stdin.end();
     // The app-server leaves when its input ends; a test never kills a process.
     await new Promise<void>(resolve => { this.child.once('exit', () => resolve()); setTimeout(resolve, 5_000).unref(); });

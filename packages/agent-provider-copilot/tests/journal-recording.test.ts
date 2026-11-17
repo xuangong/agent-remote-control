@@ -5,7 +5,8 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import type {ServerResponse} from 'node:http';
 import {describe, expect, it} from 'vitest';
-import type {AgentSession, ProviderObservation, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
+import type {AgentSession, ProviderObservation} from '@orchardworks/agent-provider-sdk';
+import {journalObservation as kept, recordingShape, serializeRecording, type JournalRecording as Recording} from '@orchardworks/agent-provider-sdk/testing';
 import {CopilotAgentProvider} from '../src/provider.js';
 import {fixture, observe, reply, waitFor, type ModelRequest} from './native-fixture.js';
 
@@ -18,12 +19,8 @@ import {fixture, observe, reply, waitFor, type ModelRequest} from './native-fixt
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'journal');
 const RECORDING = process.env.RECORD_JOURNAL_FIXTURES === '1';
 
-interface Recording { live: ProviderObservation[]; reread: ProviderObservation[] }
 type Handler = (body: ModelRequest, res: ServerResponse, index: number) => void;
 type Drive = (session: AgentSession, seen: ReturnType<typeof observe>, context: {cwd: string; home: string}) => Promise<void>;
-
-const kept = (item: ProviderStreamItem): item is ProviderObservation => item.type === 'observation'
-  && ['timeline', 'interaction_requested', 'interaction_resolved', 'interaction_invalidated', 'turn_started', 'turn_completed', 'turn_failed', 'turn_canceled'].includes(item.event.type);
 
 async function readAgain(provider: CopilotAgentProvider, handle: NonNullable<Awaited<ReturnType<AgentSession['runtimeInfo']>>['persistence']>): Promise<ProviderObservation[]> {
   const resumed = await provider.resumeSession(handle); const history = observe(resumed);
@@ -65,17 +62,8 @@ function stream(res: ServerResponse, body: ModelRequest, deltas: object[]) {
   res.end([...deltas.map(delta => chunk(delta, null)), chunk({}, 'stop')].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
 
-const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
-/** What a recording says about identities and delivery, with ids masked and repeated snapshots of one item counted once. */
-function shape(recording: Recording): string[] {
-  const lines = (observations: ProviderObservation[], side: string) => observations.map(({delivery, event, itemIdentity}) => {
-    const item = event.type === 'timeline' ? event.item.type : event.type === 'interaction_resolved' ? 'resolved' : '';
-    return `${side} ${delivery} ${event.type} ${item} ${JSON.stringify(itemIdentity ?? null)}`.replace(UUID, '<id>');
-  });
-  // The todo snapshot is read from the CLI after the event that announced it, so its place among its neighbours varies from run to run.
-  const todoLast = (all: string[]) => [...all.filter(line => !line.includes(' todo ')), ...all.filter(line => line.includes(' todo '))];
-  return todoLast([...lines(recording.live, 'live'), ...lines(recording.reread, 'reread')].filter((line, at, all) => line !== all[at - 1]));
-}
+/** The todo snapshot is read from the CLI after the event that announced it, so its place among its neighbours varies from run to run. */
+const lateTodo = (line: string) => line.includes(' todo ');
 
 /** Paths of this machine and run never enter a fixture. */
 async function scrub(recording: Recording, paths: string[]): Promise<Recording> {
@@ -85,16 +73,12 @@ async function scrub(recording: Recording, paths: string[]): Promise<Recording> 
   return JSON.parse(text.replaceAll(homedir(), '/home/user'));
 }
 
-/** One observation per line, so a fixture is read and compared as a list of events. */
-const oneObservationPerLine = (recording: Recording): string =>
-  `{\n${(['live', 'reread'] as const).map(side => ` "${side}": [\n${recording[side].map(observation => `  ${JSON.stringify(observation)}`).join(',\n')}\n ]`).join(',\n')}\n}\n`;
-
 async function check(name: string, recording: Recording, cwd: string, home: string) {
   const path = join(FIXTURES, `${name}.json`);
   const clean = await scrub(recording, [cwd, home, tmpdir(), homedir()]);
-  if (RECORDING) { await mkdir(FIXTURES, {recursive: true}); await writeFile(path, oneObservationPerLine(clean)); return; }
+  if (RECORDING) { await mkdir(FIXTURES, {recursive: true}); await writeFile(path, serializeRecording(clean)); return; }
   if (!existsSync(path)) throw new Error(`No recording ${name}.json: run with RECORD_JOURNAL_FIXTURES=1.`);
-  expect(shape(clean), `the shape of the ${name} recording`).toEqual(shape(JSON.parse(await readFile(path, 'utf8')) as Recording));
+  expect(recordingShape(clean, lateTodo), `the shape of the ${name} recording`).toEqual(recordingShape(JSON.parse(await readFile(path, 'utf8')) as Recording, lateTodo));
 }
 
 async function recorded(name: string, handler: Handler, drive: Drive, options?: Parameters<typeof record>[2]) {

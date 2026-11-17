@@ -7,7 +7,7 @@ import { Projector } from '../../agent-provider-copilot/src/projector.js';
 import type { SessionEvent } from '@github/copilot-sdk';
 import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher } from './journal-publisher.js';
-import { recording, type CopilotRecording } from './test-utils/copilot-recordings.js';
+import { recording, type Recording as CopilotRecording } from './test-utils/recordings.js';
 import { relayLoopback } from './test-utils/journal-relay-loopback.js';
 import { attachScripted, boundary, driver, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
 
@@ -79,7 +79,7 @@ async function restart(relay: Relay, previous: JournalPublisher, history: readon
 
 /** Publishes a recorded live run to a Relay, and returns what the Relay holds. */
 async function published(name: string, relay: Relay = relayLoopback(clock)) {
-  const run = recording(name);
+  const run = recording('copilot', name);
   const publisher = start(relay);
   await follow(publisher, [], { live: liveOf(run.live) });
   await settled(relay);
@@ -166,7 +166,7 @@ describe('a recorded Copilot session that is opened again', () => {
     });
 
     it('replaces once, as an open item, when a tool completed while the Controller was away', async () => {
-      const run = recording('partial-tool');
+      const run = recording('copilot', 'partial-tool');
       const completes = run.live.findIndex(({ itemIdentity }) => itemIdentity?.key.startsWith('tool:') && itemIdentity.completes === true);
       const relay = relayLoopback(clock);
       const first = start(relay);
@@ -213,7 +213,7 @@ describe('a recorded Copilot session that is opened again', () => {
   });
 
   it('sends a scroll past the window as an older request, lands the page below the oldest item, and reports one older request', async () => {
-    const run = recording('settled');
+    const run = recording('copilot', 'settled');
     const secondTurn = run.reread.findIndex(({ event }) => event.type === 'timeline' && event.item.type === 'user_message' && event.item.text === 'Second');
     expect(secondTurn).toBeGreaterThan(0);
     const relay = relayLoopback(clock);
@@ -236,7 +236,7 @@ describe('a recorded Copilot session that is opened again', () => {
 describe('the size of a Copilot session', () => {
   /** A large assistant message in the shape the CLI recorded. */
   function large(key: string, share: number): ProviderObservation[] {
-    const template = recording('settled').reread.find(({ event }) => event.type === 'timeline' && event.item.type === 'assistant_message')!;
+    const template = recording('copilot', 'settled').reread.find(({ event }) => event.type === 'timeline' && event.item.type === 'assistant_message')!;
     if (template.event.type !== 'timeline' || template.event.item.type !== 'assistant_message') throw new Error('The recording has no assistant message.');
     return [{ ...template, sourceKey: `copilot:public:${key}`, itemIdentity: { key: `assistant:${key}`, completes: true }, event: { ...template.event, item: { ...template.event.item, messageId: key, text: 'x'.repeat(Math.floor(MESSAGE_BUDGET_BYTES * share)) } } }];
   }

@@ -82,7 +82,7 @@ describe('what the native Codex 0.169 runtime does, which the journal keys depen
     expect(run.items.some(item => item.id === 'q1')).toBe(false);
   }, 60_000);
 
-  it('FC3: an interrupted turn keeps its user message and nothing it streamed or started', async () => {
+  it('FC3: an interrupted turn keeps its user message, a command that was under way as failed, and nothing it streamed', async () => {
     const partial = [{ type: 'response.output_item.added', item: { type: 'message', role: 'assistant', id: 'm1', content: [] } }, { type: 'response.output_text.delta', item_id: 'm1', delta: 'Half of ' }];
     const thought = [{ type: 'response.output_item.added', item: { type: 'reasoning', id: 'r1', summary: [] } }, { type: 'response.reasoning_summary_part.added', item_id: 'r1', summary_index: 0 }, { type: 'response.reasoning_summary_text.delta', item_id: 'r1', summary_index: 0, delta: 'Thinking ' }];
     const run = await scenario((request, index) => index === 0 ? stalled([...thought, ...partial]) : stalled(shell('c1', 'sleep 30')), {}, async (server, f, threadId) => {
@@ -92,14 +92,25 @@ describe('what the native Codex 0.169 runtime does, which the journal keys depen
       await server.until('turn/completed', () => true, first.from);
       const second = await turn(server, threadId, 'Run then stop');
       await server.until('item/started', params => params.item?.type === 'commandExecution', second.from);
+      // Interrupted at once, the native runtime sometimes records the command and sometimes does not; once it is under way it always does.
+      await new Promise(resolve => { setTimeout(resolve, 1500); });
       await server.request('turn/interrupt', { threadId, turnId: second.turnId });
       await server.until('turn/completed', () => true, second.from);
-      return native('interrupted', server, threadId);
+      const sameProcess = await native('interrupted', server, threadId);
+      // What a reopen reads comes from the rollout a new process loads, which is not what the process that ran the turn reports.
+      await server.close();
+      const fresh = new RawAppServer(executable, f.cwd, f.env);
+      try {
+        await fresh.initialize();
+        await fresh.request('thread/resume', { threadId });
+        expect(sameProcess.items.map(item => item.type), 'the process that ran the turn does not report the interrupted command').toEqual(['userMessage', 'userMessage']);
+        return await native('interrupted-reopened', fresh, threadId);
+      } finally { await fresh.close(); }
     });
-    expect(live(run, 'turn/completed').map(entry => entry.params.turn.status)).toEqual(['interrupted', 'interrupted']);
-    expect(live(run, 'item/started', 'commandExecution')).toHaveLength(1);
-    expect(live(run, 'item/completed', 'commandExecution'), 'an interrupted tool is never completed live').toHaveLength(0);
-    expect(run.items.map(item => item.type), 'history holds neither the streamed text, the reasoning nor the interrupted tool').toEqual(['userMessage', 'userMessage']);
+    expect(live(run, 'turn/completed').map(entry => entry.params.turn.status)).toEqual([]);
+    expect(run.turns.map(turn => turn.status)).toEqual(['interrupted', 'interrupted']);
+    expect(run.items.map(item => item.type), 'history holds neither the streamed text nor the reasoning, and the interrupted command it records').toEqual(['userMessage', 'userMessage', 'commandExecution']);
+    expect(run.items[2].status, 'the command history records for the interrupted turn failed; the live row never left running').toBe('failed');
   }, 90_000);
 
   it('FC4: the plan item of a plan-mode turn has the same id live and in history, and history lists it before the message it was cut from', async () => {

@@ -107,8 +107,9 @@ describe('Codex item identity', () => {
     const liveOnly = timeline(everything).filter(({ itemIdentity }) => itemIdentity?.liveOnly === true).map(({ itemIdentity }) => itemIdentity!.key.replace(/^error:.*/, 'error:*'));
     expect([...new Set(liveOnly)].sort()).toEqual(['error:*', 'todo']);
     // The kind key of the board is not an occurrence key, and an error is keyed by its message.
-    const [first, again] = [1, 2].map(() => projector.projectNotification('error', { threadId: THREAD, turnId: TURN, error: { message: 'Same words' }, willRetry: true })!);
-    expect(first.itemIdentity).toEqual(again.itemIdentity);
+    const same = () => projector.projectNotification('error', { threadId: THREAD, turnId: TURN, error: { message: 'Same words' }, willRetry: true })!;
+    const first = same();
+    expect(first.itemIdentity).toEqual(same().itemIdentity);
     expect(projector.projectNotification('error', { threadId: THREAD, turnId: TURN, error: { message: 'Other words' }, willRetry: true })!.itemIdentity!.key).not.toBe(first.itemIdentity!.key);
   });
 
@@ -184,7 +185,7 @@ describe('Codex item identity', () => {
     const open = { type: 'agentMessage', id: 'open', text: 'par', completedAtMs: null };
     const done = { type: 'agentMessage', id: 'done', text: 'all', completedAtMs: 5 };
     projector.seedHistoryItem(open); projector.seedHistoryItem(done);
-    projector.forgetCompleted(new Map([['open', open], ['done', done]]));
+    projector.forgetCompleted(new Map<string, unknown>([['open', open], ['done', done]]));
     const ended = projector.projectNotifications('turn/completed', { threadId: THREAD, turn: { id: TURN, status: 'interrupted' } });
     expect(ended.filter(({ event }) => event.type === 'timeline').map(({ itemIdentity }) => itemIdentity?.key)).toEqual(['assistant:open']);
   });

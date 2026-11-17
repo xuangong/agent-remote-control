@@ -135,3 +135,5 @@ export function runAgentProviderContractTests(
     });
   });
 }
+
+export * from './journal-recording.js';

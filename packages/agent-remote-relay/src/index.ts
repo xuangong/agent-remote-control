@@ -7,7 +7,7 @@ export * from './resources/resource-ingestor.js';
 export * from './resources/resource-store.js';
 export * from './resources/resource-id-index.js';
 export * from './session-wire.js';
-export type { TimelinePageRequest } from './timeline-projector.js';
+export type { TimelinePageRequest } from '@orchardworks/agent-timeline';
 export * from './transport/http-server.js';
 export * from './transport/http-executor.js';
 export * from './transport/plugin-host.js';

@@ -1,0 +1,28 @@
+{
+  "name": "@orchardworks/agent-timeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Canonical timeline rows, item identity and projection of rows to timeline entries.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --testTimeout=10000"
+  },
+  "dependencies": {
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
+  }
+}

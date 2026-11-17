@@ -11,10 +11,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./timeline-projection": {
-      "types": "./dist/timeline-projector.d.ts",
-      "import": "./dist/timeline-projector.js"
     }
   },
   "types": "./dist/index.d.ts",
@@ -34,7 +30,8 @@
     "@orchardworks/agent-remote-protocol": "workspace:*",
     "ws": "^8.21.0",
     "image-size": "2.0.4",
-    "@orchardworks/agent-platform": "workspace:*"
+    "@orchardworks/agent-platform": "workspace:*",
+    "@orchardworks/agent-timeline": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

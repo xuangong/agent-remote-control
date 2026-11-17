@@ -1,6 +1,6 @@
 import type { AgentTimelineItem, BackgroundActivity, ProjectedTimelineEntry, TimelineSeqRange } from '@orchardworks/agent-remote-protocol';
 import { mergeBackgroundActivity } from '@orchardworks/agent-remote-protocol';
-import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 
 import { JournalInvalidPublicationError, type JournalBody, type JournalItem, type JournalRow, type JournalRowInput } from './types.js';
 

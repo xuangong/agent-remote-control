@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentManager, type AgentJournalTap } from './agent-manager.js';
-import { rowItemKey } from './timeline-projector.js';
+import { rowItemKey } from '@orchardworks/agent-timeline';
 
 const capabilities: AgentCapabilities = {
   history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: true, planApproval: true, toolApproval: true },

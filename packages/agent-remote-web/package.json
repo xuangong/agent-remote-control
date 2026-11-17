@@ -72,6 +72,7 @@
     "react-dom": "^18.3.0",
     "typescript": "^5.7.0",
     "vitest": "4.1.11",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "@orchardworks/agent-timeline": "workspace:*"
   }
 }

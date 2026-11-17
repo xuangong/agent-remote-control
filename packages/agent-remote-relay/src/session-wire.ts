@@ -26,7 +26,7 @@ import {
 
 import type { AgentManagerEvent } from './agent-manager-events.js';
 import { AgentBusyError, UnsupportedAgentCapabilityError, type AgentManagerListener } from './agent-manager.js';
-import type { TimelinePageRequest } from './timeline-projector.js';
+import type { TimelinePageRequest } from '@orchardworks/agent-timeline';
 
 export interface HandoffAdmissionState {
   connected: boolean;

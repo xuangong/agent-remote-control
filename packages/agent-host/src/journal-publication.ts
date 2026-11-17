@@ -6,7 +6,7 @@ import {
   type RemoteHostUplinkMessage, type ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 import type { AgentJournalSubscription, AgentJournalTap, AgentManagerEvent } from '@orchardworks/agent-remote-relay';
-import { rowItemKey, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { rowItemKey, type CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 
 import {
   blocksOf, chunkOps, digestOf, entryBytes, groupItems, isLiveOnlyRow, mergedRow, MESSAGE_BUDGET_BYTES, sizedItems, type PublishOp, type SizedOp, type TimelineItem,

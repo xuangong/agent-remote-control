@@ -1,5 +1,5 @@
 import { mergeBackgroundActivity, type AgentTimelineItem, type BackgroundActivity, type ProjectedTimelineEntry, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { entryFromRow, mergeRowIntoEntry } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { entryFromRow, mergeRowIntoEntry } from '@orchardworks/agent-timeline';
 
 import {
   canonicalRow, carryKnownFields, entryBody, extendSequenceRanges, knownFields, residentEntry, stampRow,

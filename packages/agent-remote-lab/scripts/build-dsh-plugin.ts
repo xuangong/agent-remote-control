@@ -24,11 +24,9 @@ export async function buildDshPlugin(options: DshPluginBuildOptions = {}): Promi
   try {
     const alias = Object.fromEntries([
       'agent-provider-sdk', 'agent-provider-dsh', 'agent-provider-codex',
-      'agent-remote-protocol', 'agent-remote-relay',
+      'agent-remote-protocol', 'agent-remote-relay', 'agent-timeline',
     ].map((name) => [`@orchardworks/${name}`, join(packagesRoot, name, 'src/index.ts')]));
     alias['@orchardworks/dsh'] = join(packagesRoot, 'agent-remote-dsh/src/index.ts');
-    // A subpath export needs its own source entry; otherwise it would resolve inside the package's src/index.ts.
-    alias['@orchardworks/agent-remote-relay/timeline-projection'] = join(packagesRoot, 'agent-remote-relay/src/timeline-projector.ts');
     const bundle = await build({
       entryPoints: [join(labRoot, 'src/server/installed-dsh-plugin.ts')],
       outfile: join(stage, 'lib/index.js'),

@@ -2,7 +2,7 @@ import { itemDigest, type JournalItemInput, type JournalRowInput } from '@orchar
 import {
   encodeRemoteHostUplinkMessage, JOURNAL_ITEMS_PER_ENTRY_MAX, JOURNAL_PUBLISH_MAX_ENTRIES, REMOTE_HOST_UPLINK_VERSION, type JournalPublishEntry,
 } from '@orchardworks/agent-remote-protocol';
-import { entryFromRow, mergeRowIntoEntry, rowItemKey, type CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import { entryFromRow, mergeRowIntoEntry, rowItemKey, type CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 
 /** What one publication message may carry in bytes: half of the 8 MiB the Relay accepts, so every estimate has room. */
 export const MESSAGE_BUDGET_BYTES = 4 * 1024 * 1024;

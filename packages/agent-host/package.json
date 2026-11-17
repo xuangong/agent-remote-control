@@ -41,7 +41,8 @@
     "@orchardworks/agent-remote-tunnel": "workspace:*",
     "qrcode": "1.5.4",
     "ws": "^8.21.0",
-    "@orchardworks/agent-platform": "workspace:*"
+    "@orchardworks/agent-platform": "workspace:*",
+    "@orchardworks/agent-timeline": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "24.13.3",

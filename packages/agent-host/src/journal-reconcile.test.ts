@@ -1,4 +1,4 @@
-import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 import { describe, expect, it } from 'vitest';
 
 import { digestOf, groupItems, MESSAGE_BUDGET_BYTES } from './journal-items.js';

@@ -39,8 +39,8 @@ import { createLocalFileResourceReader, type LocalFileResourceReader } from './r
 import { ResourceIngestor } from './resources/resource-ingestor.js';
 import type { ResourceIdIndex } from './resources/resource-id-index.js';
 import { InMemoryResourceStore, type ResourceStore } from './resources/resource-store.js';
-import { projectTimelinePage, type TimelinePageRequest } from './timeline-projector.js';
-import { rowItemKey, TimelineStore, type CanonicalTimelineRow } from './timeline-store.js';
+import { projectTimelinePage, type TimelinePageRequest } from '@orchardworks/agent-timeline';
+import { rowItemKey, TimelineStore, type CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 import { SessionSettingChanges, type SessionSettingIntentLifecycle } from './session-setting-changes.js';
 import type { OperationLifecycle } from './operation-settlement.js';
 

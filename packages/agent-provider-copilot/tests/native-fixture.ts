@@ -4,8 +4,7 @@ import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {CopilotAgentProvider, type CopilotAgentProviderOptions} from '../src/provider.js';
-import {TimelineStore} from '../../agent-remote-relay/src/timeline-store.js';
-import {projectTimelineRows} from '../../agent-remote-relay/src/timeline-projector.js';
+import {TimelineStore, projectTimelineRows} from '@orchardworks/agent-timeline';
 import type {AgentSession, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
 
 export type ModelRequest = {model: string; messages: Array<{role: string; content: unknown}>};

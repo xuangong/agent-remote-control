@@ -11,7 +11,9 @@
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -19,7 +21,7 @@
   },
   "dependencies": {
     "@orchardworks/agent-remote-protocol": "workspace:*",
-    "@orchardworks/agent-remote-relay": "workspace:*"
+    "@orchardworks/agent-timeline": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

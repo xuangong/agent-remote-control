@@ -1,6 +1,6 @@
 import { itemDigest } from '@orchardworks/agent-remote-journal';
 import { JOURNAL_PUBLISH_MAX_ENTRIES } from '@orchardworks/agent-remote-protocol';
-import type { CanonicalTimelineRow } from '@orchardworks/agent-remote-relay/timeline-projection';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 import { describe, expect, it } from 'vitest';
 
 import { blocksOf, chunkOps, entryBytes, groupItems, mergedRow, MESSAGE_BUDGET_BYTES, newestItems, sizedItems, type PublishOp, type SizedItem } from './journal-items.js';

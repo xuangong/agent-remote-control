@@ -10,7 +10,7 @@ import type {
   ResourceState,
 } from '@orchardworks/agent-remote-protocol';
 
-import type { CanonicalTimelineRow } from './timeline-store.js';
+import type { CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 
 export type AgentManagerEvent =
   | { type: 'agent_state'; agentId: string; snapshot: AgentSnapshot; cursor?: TimelineCursor }

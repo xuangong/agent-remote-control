@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TimelineStore } from '../../../agent-remote-relay/src/timeline-store.js';
-import { projectTimelinePage } from '../../../agent-remote-relay/src/timeline-projector.js';
+import { TimelineStore, projectTimelinePage } from '@orchardworks/agent-timeline';
 import type {
   AgentInteractionRequest,
   AgentSnapshot,

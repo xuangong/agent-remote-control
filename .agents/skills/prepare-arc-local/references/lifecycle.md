@@ -122,7 +122,7 @@ program reused the pid.
 
 `The runner is gone but Controller pid <pid> still runs.` State `orphaned`.
 `ps -ww -o command= -p <pid>` must show
-`<this checkout>/packages/agent-host/dist/cli.js foreground`, with this checkout's
+`<this checkout>/packages/agent-controller/dist/cli.js foreground`, with this checkout's
 path. Only then `kill <pid>`, then `up`. Any other command is not this instance's:
 stop and ask the user.
 

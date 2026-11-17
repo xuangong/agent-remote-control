@@ -14,7 +14,7 @@ test('the installed bin symlink invokes CLI help outside the repository', { time
   const windows = process.platform === 'win32';
   const link = join(directory, 'agent-remote-controller');
   const bin = windows ? join(link, 'cli.js') : link;
-  await symlink(fileURLToPath(new URL(windows ? '../packages/agent-host/dist/' : '../packages/agent-host/dist/cli.js', import.meta.url)),
+  await symlink(fileURLToPath(new URL(windows ? '../packages/agent-controller/dist/' : '../packages/agent-controller/dist/cli.js', import.meta.url)),
     link, windows ? 'junction' : 'file');
   const { stdout } = await exec(process.execPath, [bin, '--help'], { cwd: directory, timeout: 10000 });
   assert.match(stdout, /Usage: agent-remote-controller/);

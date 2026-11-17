@@ -83,7 +83,7 @@ async function workflow(t, failCatalog = false, providers, bundled = false, fail
   for (const name of ['pnpm', 'codex', 'claude', 'copilot', 'dsh']) await executable(join(directory, 'bin', name), name);
   // The launcher prioritizes Node's directory; keep it inside the fixture toolchain.
   await cp(process.execPath, join(directory, 'bin/node'));
-  await executable(join(directory, 'packages/agent-host/dist/cli.js'), 'host');
+  await executable(join(directory, 'packages/agent-controller/dist/cli.js'), 'host');
   if (bareScript) await writeFile(join(directory, 'bin/copilot.mjs'), "console.log('GitHub Copilot CLI 1.0.83.');", { mode: 0o600 });
   await executable(join(state, 'dsh/tools', PNPM_VERSION, 'node_modules/.bin/pnpm'), 'pnpm');
   await mkdir(join(directory, 'packages/agent-remote-dsh'), { recursive: true });

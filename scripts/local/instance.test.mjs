@@ -145,10 +145,10 @@ test('recognizes this instance runner and an orphaned Controller', async t => {
 test('counts a Controller as orphaned only when it runs the recorded script', async t => {
   const directory = await temporaryRoot(t);
   const pid = await exitedPid();
-  const controller = await idleProcess(t, '/src/one/packages/agent-host/dist/cli.js', 'foreground');
-  assert.equal(await runState(directory, { runnerPid: pid, controllerPid: controller.pid, controllerScript: '/src/one/packages/agent-host/dist/cli.js' }), 'orphaned');
+  const controller = await idleProcess(t, '/src/one/packages/agent-controller/dist/cli.js', 'foreground');
+  assert.equal(await runState(directory, { runnerPid: pid, controllerPid: controller.pid, controllerScript: '/src/one/packages/agent-controller/dist/cli.js' }), 'orphaned');
   // Another checkout's Controller that reused the PID is not this instance's.
-  assert.equal(await runState(directory, { runnerPid: pid, controllerPid: controller.pid, controllerScript: '/src/two/packages/agent-host/dist/cli.js' }), 'stale');
+  assert.equal(await runState(directory, { runnerPid: pid, controllerPid: controller.pid, controllerScript: '/src/two/packages/agent-controller/dist/cli.js' }), 'stale');
 });
 
 test('matches a runner command only for exactly its instance directory', () => {

@@ -7,8 +7,8 @@ import type { Options, SDKSessionInfo } from '@anthropic-ai/claude-agent-sdk';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { createClaudeSessionDirectory } from '../../agent-host/src/claude-directory.js';
-import { SessionReferenceStore } from '../../agent-host/src/session-reference.js';
+import { createClaudeSessionDirectory } from '../../agent-controller/src/claude-directory.js';
+import { SessionReferenceStore } from '../../agent-controller/src/session-reference.js';
 import { ClaudeAgentProvider } from './provider.js';
 import { Channel } from './channel.js';
 

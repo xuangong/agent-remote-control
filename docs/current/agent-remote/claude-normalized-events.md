@@ -93,6 +93,6 @@ Idle model/permission changes, planning, discovered skills, interrupt, image inp
 Build first. Set an absolute `AGENT_CLAUDE_TEST_EXECUTABLE` path so pnpm PATH resolution cannot select an older installation.
 
 - `pnpm test:claude`: adapter units and real native lifecycle/history/controls/resources/children/diff/approval probes, with process and individual deadlines.
-- `packages/agent-host/src/claude-handoff.local.test.ts`: actual running SDK → CLI → SDK, same native ID and stale-writer rejection.
-- `packages/agent-host/src/stdio-directory.test.ts`: lease retention on failed exit and persistence settings across transfer.
+- `packages/agent-controller/src/claude-handoff.local.test.ts`: actual running SDK → CLI → SDK, same native ID and stale-writer rejection.
+- `packages/agent-controller/src/stdio-directory.test.ts`: lease retention on failed exit and persistence settings across transfer.
 - `packages/agent-remote-debugger/e2e/claude-session.spec.ts`: real Query → ARDB Relay → shared Session View, pending approval through disconnect, actual diff, reload deduplication and mobile width.

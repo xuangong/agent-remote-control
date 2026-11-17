@@ -9,7 +9,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createDiagnosticJournal } from '@orchardworks/agent-relay-core/diagnostic-journal';
 import { parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
-import { createRelayDiagnosticSink } from '../../../agent-host/src/relay-diagnostics.js';
+import { createRelayDiagnosticSink } from '../../../agent-controller/src/relay-diagnostics.js';
 import { createRemoteHostBroker, type RemoteHostBrokerOptions } from './remote-host-broker.js';
 
 const cleanup: Array<() => Promise<unknown>> = [];

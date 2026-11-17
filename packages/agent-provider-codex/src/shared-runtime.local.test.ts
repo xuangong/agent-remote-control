@@ -1,6 +1,6 @@
-import { createAgentHostRuntime } from '../../agent-host/src/host.js';
-import { createCodexSessionDirectory } from '../../agent-host/src/directory.js';
-import { createHostExecutionPolicy, protectHostDirectory } from '../../agent-host/src/execution-policy.js';
+import { createAgentHostRuntime } from '../../agent-controller/src/host.js';
+import { createCodexSessionDirectory } from '../../agent-controller/src/directory.js';
+import { createHostExecutionPolicy, protectHostDirectory } from '../../agent-controller/src/execution-policy.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, realpath, rm, writeFile, stat } from 'node:fs/promises';

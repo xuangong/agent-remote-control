@@ -1,2 +1,2 @@
 #!/usr/bin/env node
-await import('../packages/agent-host/dist/cli.js');
+await import('../packages/agent-controller/dist/cli.js');

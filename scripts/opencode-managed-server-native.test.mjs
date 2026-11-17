@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 
 const execute = promisify(execFile);
 const executable = process.env.AGENT_OPENCODE_TEST_EXECUTABLE;
-const controller = process.env.AGENT_HOST_TEST_CLI ?? fileURLToPath(new URL('../packages/agent-host/dist/cli.js', import.meta.url));
+const controller = process.env.AGENT_HOST_TEST_CLI ?? fileURLToPath(new URL('../packages/agent-controller/dist/cli.js', import.meta.url));
 
 async function reservePort(port = 0) {
   const server = createServer();

@@ -19,7 +19,7 @@ async function localApplication() {
     }
     response.end('not found');
   });
-  const requireFromHost = createRequire(new URL('../../agent-host/package.json', import.meta.url));
+  const requireFromHost = createRequire(new URL('../../agent-controller/package.json', import.meta.url));
   const { WebSocketServer } = requireFromHost('ws') as any;
   const webSockets = new WebSocketServer({ server, handleProtocols: (protocols: Set<string>) => protocols.has('echo-v1') ? 'echo-v1' : false });
   webSockets.on('connection', (socket: any) => socket.on('message', (data: Buffer, binary: boolean) => socket.send(data, { binary })));

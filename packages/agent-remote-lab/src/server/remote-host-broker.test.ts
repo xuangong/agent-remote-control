@@ -375,7 +375,7 @@ it('rejects expired credentials and prevents a bound key from registering anothe
 });
 
 it('advertises Controller environment over a real uplink and preserves it across Relay restart', async () => {
-  const { createAgentHost } = await import('../../../agent-host/src/host.js');
+  const { createAgentHost } = await import('../../../agent-controller/src/host.js');
   const environment = { detectedAt: 1234, os: { platform: 'linux', name: 'Ubuntu', release: '6.8', arch: 'arm64' },
     wsl: false, container: true, shell: { name: 'bash', source: 'account' as const }, shells: [],
     browsers: [{ id: 'chromium', name: 'Chromium', status: 'found' as const }], vscode: { status: 'not-found' as const } };

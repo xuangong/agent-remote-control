@@ -38,7 +38,7 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
-  packages/agent-host:
+  packages/agent-controller:
     dependencies:
       '@orchardworks/agent-platform':
         specifier: workspace:*
@@ -379,7 +379,7 @@ importers:
         version: link:../agent-provider-opencode
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
-        version: link:../agent-host
+        version: link:../agent-controller
       '@orchardworks/agent-remote-lab':
         specifier: workspace:*
         version: link:../agent-remote-lab
@@ -467,7 +467,7 @@ importers:
         version: link:../agent-relay-core
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
-        version: link:../agent-host
+        version: link:../agent-controller
       '@orchardworks/agent-remote-journal':
         specifier: workspace:*
         version: link:../agent-remote-journal
@@ -573,7 +573,7 @@ importers:
     devDependencies:
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
-        version: link:../agent-host
+        version: link:../agent-controller
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.62.0

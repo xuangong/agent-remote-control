@@ -74,13 +74,13 @@ try {
   if (native) report.nativeVersion = execFileSync(env[nativeVariable], ['--version'], { encoding: 'utf8', timeout: 10000, windowsHide: true }).trim();
   await run('build', ...packageManager('pnpm', ['--filter', '@orchardworks/agent-remote-controller...', 'run', 'build']));
   await tests('filesystem', 'agent-platform', ['src/filesystem']);
-  await tests('host-storage', 'agent-host', ['src/connection-config.test.ts', 'src/controller-package.test.ts', 'src/environment.test.ts', 'src/platform/services/services.test.ts']);
+  await tests('host-storage', 'agent-controller', ['src/connection-config.test.ts', 'src/controller-package.test.ts', 'src/environment.test.ts', 'src/platform/services/services.test.ts']);
   await tests('images', 'agent-session-runtime', ['src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts']);
   await tests('transport', 'codex-daemon-client', ['src/app-server-transport.test.ts']);
   const services = requested === 'windows'
     ? ['src/windows.test.ts', 'src/windows-autostart.test.ts', 'src/windows-shared.test.ts']
     : requested === 'macos' ? ['src/launchd.test.ts'] : ['src/systemd.test.ts', 'src/cli-linux.test.ts'];
-  await tests('services-processes', 'agent-host', [...services, 'src/vscode-tunnel.test.ts', 'src/vscode-tunnel-supervisor.test.ts', 'src/controller-shutdown.test.ts', 'src/controller-launcher.test.ts']);
+  await tests('services-processes', 'agent-controller', [...services, 'src/vscode-tunnel.test.ts', 'src/vscode-tunnel-supervisor.test.ts', 'src/controller-shutdown.test.ts', 'src/controller-launcher.test.ts']);
   if (native && requested !== 'windows') await tests('native-codex', 'agent-provider-codex', ['src/shared-runtime.local.test.ts']);
   if (packaged) {
     await run('build-package', process.execPath, ['scripts/build-agent-host.mjs'], root, 300000);

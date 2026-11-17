@@ -13,7 +13,7 @@ const args = process.argv.slice(2);
 if (args.length && !(args.length === 2 && args[0] === '--out-dir')) throw new Error('Usage: node scripts/build-agent-host.mjs [--out-dir PATH]');
 const output = resolve(args[1] ?? join(root, 'dist/agent-remote-controller'));
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
-const manifest = await readJson(join(root, 'packages/agent-host/package.json'));
+const manifest = await readJson(join(root, 'packages/agent-controller/package.json'));
 const sdkDependencies = {};
 for (const provider of ['claude', 'copilot', 'opencode']) {
   const { dependencies } = await readJson(join(root, `packages/agent-provider-${provider}/package.json`));
@@ -28,14 +28,14 @@ const { build } = require('esbuild');
 const stage = await mkdtemp(join(tmpdir(), 'agent-host-package-'));
 try {
   await build({
-    entryPoints: { cli: join(root, 'packages/agent-host/src/cli.ts'), 'catalog-worker': join(root, 'packages/agent-provider-claude/src/catalog-worker.ts') },
+    entryPoints: { cli: join(root, 'packages/agent-controller/src/cli.ts'), 'catalog-worker': join(root, 'packages/agent-provider-claude/src/catalog-worker.ts') },
     outdir: join(stage, 'dist'), bundle: true, platform: 'node', format: 'esm', target: 'node22',
     external: [...Object.keys(sdkDependencies), 'bufferutil', 'utf-8-validate'],
     banner: { js: 'import { createRequire as agentHostCreateRequire } from "node:module"; const require = agentHostCreateRequire(import.meta.url);' },
   });
   await cp(join(root, 'packages/agent-provider-opencode/dist/bridge-plugin.mjs'), join(stage, 'dist/bridge-plugin.mjs'));
   // Session skills, in the Claude Code plugin layout, next to the bundle that locates them.
-  await cp(join(root, 'packages/agent-host/skills'), join(stage, 'dist/skills'), { recursive: true });
+  await cp(join(root, 'packages/agent-controller/skills'), join(stage, 'dist/skills'), { recursive: true });
   await chmod(join(stage, 'dist/cli.js'), 0o755);
   const launcherSource = await readFile(join(root, 'scripts/controller-launcher.mjs'), 'utf8');
   const launcherStamp = '/* launcher-version */ undefined';
@@ -44,7 +44,7 @@ try {
   await chmod(join(stage, 'dist/launcher.js'), 0o755);
   await writeFile(join(stage, 'package.json'), JSON.stringify({
     name: manifest.name, version: manifest.version,
-    repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-host' },
+    repository: { type: 'git', url: 'git+https://github.com/xuangong/agent-remote-control.git', directory: 'packages/agent-controller' },
     publishConfig: { access: 'public', registry: 'https://registry.npmjs.org/' },
     description: 'Agent Remote Controller CLI: connect local Codex, Claude Code, Copilot and OpenCode to a Relay.',
     type: 'module', bin: { 'agent-remote-controller': 'dist/launcher.js' }, engines: { node: '>=22' }, os: ['darwin', 'linux', 'win32'],
@@ -54,7 +54,7 @@ try {
   const provenance = await controllerBuildProvenance(root);
   await writeFile(join(stage, 'build-info.json'), JSON.stringify({ version: manifest.version, ...provenance,
     builtAt: new Date().toISOString(), dependencies: sdkDependencies }, null, 2) + '\n');
-  await cp(join(root, 'packages/agent-host/README.md'), join(stage, 'README.md'));
+  await cp(join(root, 'packages/agent-controller/README.md'), join(stage, 'README.md'));
   await cp(join(root, 'NOTICE.md'), join(stage, 'NOTICE'));
   await mkdir(join(stage, 'licenses/codex'), { recursive: true });
   for (const name of ['LICENSE', 'NOTICE']) await cp(join(root, 'packages/agent-provider-codex', name), join(stage, 'licenses/codex', name));

@@ -447,7 +447,7 @@ roster entry follow a handoff. Both validate the complete committed lineage firs
 
 Some sessions get Controller tools from a role, such as a Team seat. On the
 Controller each such role implements `SessionRole`
-(`packages/agent-host/src/session-role-succession.ts`): it gives the extensions of
+(`packages/agent-controller/src/session-role-succession.ts`): it gives the extensions of
 the role a session holds, bound to the session that runs them, and decides whether
 a generic succession may keep the role. A Team seat may move when the Relay
 acknowledged Team succession and the target provider runs session instructions and

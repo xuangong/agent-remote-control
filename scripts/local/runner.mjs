@@ -28,7 +28,7 @@ export async function startInstance({ directory, environment = process.env, crea
   const files = instanceFiles(directory);
   const record = await readJson(files.recordFile);
   if (!record) throw new Error(`${directory} has no instance record.`);
-  const script = controllerScript ?? join(record.source, 'packages/agent-host/dist/cli.js');
+  const script = controllerScript ?? join(record.source, 'packages/agent-controller/dist/cli.js');
   signal?.throwIfAborted();
   const startedAt = new Date().toISOString();
   await writeJson(files.runtimeFile, { version: 1, runnerPid: process.pid, startedAt });

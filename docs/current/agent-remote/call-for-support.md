@@ -12,8 +12,8 @@ A support group is a Team with `callForSupport` set (`packages/agent-remote-prot
 | --- | --- | --- |
 | Schemas, Team additions, host calls | Protocol | `call-for-support.ts`, `team.ts`, `remote-host-uplink.ts` (`callForSupport`) |
 | Profiles, enablement, groups, calls, rosters, reports, ledger, usage, pauses, retention | Relay (tenant broker state) | `packages/agent-relay-core/src/call-for-support-profiles.ts`, `call-for-support.ts`, `teams.ts`, `team-resources.ts`, `broker.ts` |
-| Requester seats, coordinator and supporter extensions, deliveries, idle release, worktrees, bundles, patches, usage accounting, forgetting ended groups | Controller | `packages/agent-host/src/team.ts`, `call-for-support-roles.ts`, `call-for-support-workspaces.ts`, `call-for-support-usage.ts` |
-| Worker tools and their injection | Controller | `packages/agent-host/src/call-for-support-worker.ts`, `host.ts` |
+| Requester seats, coordinator and supporter extensions, deliveries, idle release, worktrees, bundles, patches, usage accounting, forgetting ended groups | Controller | `packages/agent-controller/src/team.ts`, `call-for-support-roles.ts`, `call-for-support-workspaces.ts`, `call-for-support-usage.ts` |
+| Worker tools and their injection | Controller | `packages/agent-controller/src/call-for-support-worker.ts`, `host.ts` |
 | Read-only sessions, tool namespaces | Provider adapters | `agent-provider-sdk` (`access`, `toolNamespaces`, `updateToolNamespaces`), Codex `session.ts`, Claude `session.ts`, `permission-modes.ts` |
 | Settings, Team panel, group views | Website | `packages/agent-remote-lab/src/components/call-for-support/` |
 
@@ -98,5 +98,5 @@ The `agent_remote` namespace holds `call_for_support`, `support_status`, `read_s
 
 - Protocol, Relay, Controller and website unit suites cover schemas, invariants, profiles, enablement, groups, rosters, reports, ledger, usage, pauses, projection, capacity, retention, negotiation, requester seats, extensions, deliveries, idle release, worktrees, bundles, patches, worker tools and injection.
 - Native provider tests: `agent-provider-codex/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts` (including a thread started without the namespace and resumed with it); `agent-provider-copilot/tests/worker-tools.test.ts`; `agent-provider-claude/src/read-only.local.test.ts`, `tool-namespaces.local.test.ts`.
-- End to end: `packages/agent-host/src/call-for-support.local.test.ts` (Codex worker on a search-capable fixture model, Codex coordinator, read-only Claude and Codex reviewers, a worktree fixer whose patch applies, and a follow-up that reuses the sessions). Run with `AGENT_CLAUDE_TEST_EXECUTABLE` and `BORGEE_CODEX_TEST_EXECUTABLE`.
+- End to end: `packages/agent-controller/src/call-for-support.local.test.ts` (Codex worker on a search-capable fixture model, Codex coordinator, read-only Claude and Codex reviewers, a worktree fixer whose patch applies, and a follow-up that reuses the sessions). Run with `AGENT_CLAUDE_TEST_EXECUTABLE` and `BORGEE_CODEX_TEST_EXECUTABLE`.
 - Browser: `packages/agent-remote-lab/e2e/call-for-support.spec.ts`.

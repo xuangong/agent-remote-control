@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { runWindowCommand } from '../../agent-host/src/window-command.js';
+import { runWindowCommand } from '../../agent-controller/src/window-command.js';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';

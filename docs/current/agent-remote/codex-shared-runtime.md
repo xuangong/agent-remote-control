@@ -74,7 +74,7 @@ explicit restart to apply it.
 Use `agent-remote-controller codex daemon status|restart|stop` to manage this
 independent runtime. Stopping the Controller or closing a client leaves it running.
 A Windows Job Object reclaims its native process tree if its manager crashes.
-See [Windows shared daemon](../../../packages/agent-host/README.md#windows-shared-daemon)
+See [Windows shared daemon](../../../packages/agent-controller/README.md#windows-shared-daemon)
 for requirements and lifecycle details.
 
 ### Starting from the terminal

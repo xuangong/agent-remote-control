@@ -7,7 +7,7 @@ import { readJson, runState, withLock } from './instance.mjs';
 import { approveCommandLine } from './session.mjs';
 
 /** The Controller command line of a checkout, run against an instance's state. */
-export const controllerCli = source => join(source, 'packages/agent-host/dist/cli.js');
+export const controllerCli = source => join(source, 'packages/agent-controller/dist/cli.js');
 
 const controllerCommands = new Set(['status', 'diagnostics', 'session', 'host', 'window', 'api', 'role', 'login', 'logout', '--skill', 'help', '--help', '-h', '--version']);
 

@@ -320,10 +320,10 @@ async function commandLine(t, { inviteDelayMs = 0, beforeStart } = {}) {
   const f = await fixture(t);
   const checkout = join(f.root, 'checkout');
   await mkdir(join(checkout, 'dist/devbox'), { recursive: true });
-  await mkdir(join(checkout, 'packages/agent-host/dist'), { recursive: true });
+  await mkdir(join(checkout, 'packages/agent-controller/dist'), { recursive: true });
   await writeFile(join(checkout, 'package.json'), '{"type":"module"}');
   await writeFile(join(checkout, 'dist/devbox/server.mjs'), standInSite);
-  await writeFile(join(checkout, 'packages/agent-host/dist/cli.js'),
+  await writeFile(join(checkout, 'packages/agent-controller/dist/cli.js'),
     `import { writeFileSync } from 'node:fs';\nwriteFileSync(process.env.AGENT_HOST_STATE_DIR + '/pid', String(process.pid));\n` + fakeController);
   await beforeStart?.(f);
   const child = spawn(process.execPath, [runnerScript, f.instance.directory],

@@ -155,7 +155,7 @@ try {
     import('../packages/agent-provider-opencode/dist/index.js'), import('../packages/agent-remote-debugger/dist/replay-server.js'),
     import('../packages/agent-remote-debugger/dist/runtime.js'), import('../packages/agent-remote-debugger/dist/recording.js'),
   ]);
-  const { sourceSessionExtensions } = await import('../packages/agent-host/dist/session-reference.js');
+  const { sourceSessionExtensions } = await import('../packages/agent-controller/dist/session-reference.js');
   async function nativeRequest(path, body) {
     const response = await fetch(`${serverUrl}${path}`, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
     const text = await response.text(); assert.ok(response.ok, `Native ${path}: ${response.status} ${text}`); return JSON.parse(text);

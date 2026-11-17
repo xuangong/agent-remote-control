@@ -5,8 +5,8 @@ import {createGatewayRelay} from '../src/server/gateway-relay.js';
 import {createGatewayStaticPages} from '../src/server/gateway-static.js';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
-import {createAgentHost} from '../../agent-host/src/host.js';
-import {createCopilotSessionDirectory} from '../../agent-host/src/copilot-directory.js';
+import {createAgentHost} from '../../agent-controller/src/host.js';
+import {createCopilotSessionDirectory} from '../../agent-controller/src/copilot-directory.js';
 import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';
 
 for (const cold of [false, true]) test(`takes a running native CLI session back through the ${cold ? 'cold' : 'open'} product Chatbox`,async({page,browser},info)=>{
@@ -43,7 +43,7 @@ for (const cold of [false, true]) test(`takes a running native CLI session back 
     await input.fill('Keep this draft');
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
-    cli=spawn(process.execPath,[resolve('../agent-host/dist/cli.js'),'copilot','--resume='+nativeId,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
+    cli=spawn(process.execPath,[resolve('../agent-controller/dist/cli.js'),'copilot','--resume='+nativeId,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
       cwd:f.cwd,env:{...process.env,AGENT_HOST_STATE_DIR:state,AGENT_HOST_COPILOT:undefined,AGENT_HOST_COPILOT_HOME:undefined,GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined,COPILOT_PROVIDER_BASE_URL:f.baseUrl,COPILOT_MODEL:'native-fixture'},stdio:['ignore','pipe','pipe'],
     });
     let stderr='';cli.stderr!.on('data',chunk=>stderr+=chunk);cli.stdout!.resume();

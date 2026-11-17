@@ -223,7 +223,7 @@ directory (set it the same way for `list`).
 If that directory holds a `runtime.json`, its `runnerPid` and `controllerPid`
 may still run. Confirm each with `ps -ww -o command= -p PID`. The runner shows
 `node …/scripts/local/runner.mjs <directory>` and the Controller shows
-`…/packages/agent-host/dist/cli.js foreground`; leave any other process alone,
+`…/packages/agent-controller/dist/cli.js foreground`; leave any other process alone,
 because the PID may belong to something else by now. Stop the runner with
 `kill PID`, which stops its Controller and closes the site. If the Controller
 still runs, stop it the same way. Then delete the instance directory.
@@ -254,7 +254,7 @@ eight-character hash of its real path:
 `up` builds the Controller, the website and the Devbox server bundle, then
 starts a detached runner. The runner serves the site on
 `http://localhost:<port>` and starts the Controller from the same checkout
-(`packages/agent-host/dist/cli.js foreground`) with its own state directory.
+(`packages/agent-controller/dist/cli.js foreground`) with its own state directory.
 The first start pairs it through the local identity; later starts reuse its
 device credential. The port is chosen on the first start and kept, because the
 local identity is bound to the origin. The site listens on the loopback
@@ -318,7 +318,7 @@ Messages print the absolute path of the instance directory. In this table,
 | `The runner exited during startup.` | The error ends with the last lines of `runner.log` and `controller.log`; `pnpm local logs` shows more. The log names the reason, for example `This instance's Controller state belongs to another site origin. Remove the instance with pnpm local remove --yes.` and `The instance's saved Controller connection is unreadable (…)`. For the second, check `<instance>/controller/connection.json` without pasting it anywhere: it holds the device key. |
 | `The instance did not become ready within 90 seconds while waiting for the site` (or `…for Controller registration`) | `up` stopped the runner it started and printed the log tails. Read them, or raise `ARC_LOCAL_READY_TIMEOUT_MS` on a slow machine. |
 | The Controller never registers | `agent-remote-controller-dev diagnostics --source controller --limit 60`. |
-| `orphaned` in `status`; `The runner is gone but Controller pid <pid> still runs. Stop that process, then retry.` | The runner died while its Controller kept running. Stop that Controller (`ps -ww -o command= -p PID` shows `…/packages/agent-host/dist/cli.js foreground`), then `up`. |
+| `orphaned` in `status`; `The runner is gone but Controller pid <pid> still runs. Stop that process, then retry.` | The runner died while its Controller kept running. Stop that Controller (`ps -ww -o command= -p PID` shows `…/packages/agent-controller/dist/cli.js foreground`), then `up`. |
 | `A previous local command (pid <pid>) was interrupted and left its lock. Remove <instance>/operation.lock and retry.` | A `pnpm local` command was killed before it could release its lock. Remove that directory, then retry. |
 | `Another local command is changing this instance. If none is running, remove <instance>/operation.lock.` | Wait for the running `pnpm local` command to finish. If none is running, remove that directory. |
 | `This environment does not allow listening on local ports (EPERM)` or `This environment does not allow starting background processes (EPERM)` | The session's sandbox refuses the local listener or the detached runner (the code can also be `EACCES`). Run `pnpm local` from a session without the sandbox (YOLO mode). |

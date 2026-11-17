@@ -47,7 +47,7 @@ jobs:
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             import assert from "node:assert/strict";
-            const { version } = JSON.parse(readFileSync("packages/agent-host/package.json", "utf8"));
+            const { version } = JSON.parse(readFileSync("packages/agent-controller/package.json", "utf8"));
             assert.equal(process.env.RELEASE_TAG, `controller-v${version}`);
           '
       - name: Install build tools and dependencies

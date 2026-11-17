@@ -6,8 +6,8 @@ import WebSocket from 'ws';
 import {expect,it,vi} from 'vitest';
 import {AgentReplica,HttpWebSocketTransport,RemoteSessionClient,type WebSocketLike} from '@orchardworks/agent-remote-web';
 import {createAgentRemoteHttpServer} from '@orchardworks/agent-session-runtime';
-import {createAgentHostRuntime} from '../../agent-host/src/host.js';
-import {createCopilotSessionDirectory} from '../../agent-host/src/copilot-directory.js';
+import {createAgentHostRuntime} from '../../agent-controller/src/host.js';
+import {createCopilotSessionDirectory} from '../../agent-controller/src/copilot-directory.js';
 import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';
 
 it('broadcasts native handoff over real browser sockets and reconnects both views to the resumed session',async()=>{
@@ -33,7 +33,7 @@ it('broadcasts native handoff over real browser sockets and reconnects both view
     await a.client.sendMessage('WEB_RUNNING');await vi.waitFor(()=>expect(f.requests).toHaveLength(1));
     const state=join(f.home,'controller');await mkdir(state);
     await writeFile(join(state,'connection.json'),JSON.stringify({serverUrl:'https://relay.invalid',remoteKey:'fixture',environment:{AGENT_HOST_COPILOT_HOME:join(f.home,'profile')}}));
-    child=spawn(process.execPath,[resolve('../agent-host/dist/cli.js'),'copilot',`--resume=${nativeId}`,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
+    child=spawn(process.execPath,[resolve('../agent-controller/dist/cli.js'),'copilot',`--resume=${nativeId}`,'--take-over','--no-auto-update','--no-auto-login','--disable-builtin-mcps','--allow-all-tools','-p','CLI_RUNNING'],{
       cwd:f.cwd,env:{...process.env,AGENT_HOST_STATE_DIR:state,AGENT_HOST_COPILOT:undefined,AGENT_HOST_COPILOT_HOME:undefined,GITHUB_TOKEN:undefined,GH_TOKEN:undefined,COPILOT_GITHUB_TOKEN:undefined,COPILOT_PROVIDER_BASE_URL:f.baseUrl,COPILOT_MODEL:'native-fixture'},stdio:['ignore','pipe','pipe'],
     });
     let stderr='';child.stderr!.on('data',chunk=>stderr+=chunk);child.stdout!.resume();

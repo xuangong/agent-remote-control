@@ -32,9 +32,9 @@ VS Code's account authorization governs editor access and its own tunnel transpo
 
 Tests cover real fixture subprocesses, split output, process-group cleanup after Controller SIGTERM/SIGKILL, stubborn descendants, disconnect grace periods, owner authorization across real HTTP/WebSocket transport, stale frontend responses, and desktop/mobile browser flows. Browser tests simulate Microsoft's device authorization; they do not log in to a real account or modify an existing tunnel.
 
-- `packages/agent-host/src/vscode-tunnel.ts`
-- `packages/agent-host/src/vscode-tunnel-supervisor.ts`
-- `packages/agent-host/src/vscode-tunnel-output.ts`
+- `packages/agent-controller/src/vscode-tunnel.ts`
+- `packages/agent-controller/src/vscode-tunnel-supervisor.ts`
+- `packages/agent-controller/src/vscode-tunnel-output.ts`
 - `packages/agent-remote-protocol/src/vscode-tunnel.ts`
 - `packages/agent-relay-core/src/broker.ts`
 - `packages/agent-remote-lab/src/vscode-tunnel.tsx`

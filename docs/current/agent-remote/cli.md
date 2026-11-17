@@ -152,7 +152,7 @@ The Relay adds `shared: true` to the creation and attachment requests of a share
 
 ## Skill
 
-The Controller package contains the `agent-remote` skill in the Claude Code plugin layout (`dist/skills/agent-remote`, from `packages/agent-host/skills`). `--skill` prints it.
+The Controller package contains the `agent-remote` skill in the Claude Code plugin layout (`dist/skills/agent-remote`, from `packages/agent-controller/skills`). `--skill` prints it.
 
 - Claude Code sessions with a credential load it as a local SDK plugin: `agent-remote:agent-remote`.
 - Codex has no per-thread skills. The first time the Controller creates or resumes a Codex session with a credential, the Codex adapter writes `$CODEX_HOME/skills/agent-remote/SKILL.md` if that Codex home exists and the file differs, and removes the skill it replaced, `agent-remote-sessions`, if the Controller wrote it. Codex caches its skill list, so the adapter then makes Codex read its skills again once per workspace. The user's own Codex sessions see the skill too. `AGENT_HOST_CODEX_USER_SKILLS=0` leaves the Codex home alone, so the Controller's Codex sessions read the skill another Controller installed there; local development instances set it.

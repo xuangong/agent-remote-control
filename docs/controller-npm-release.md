@@ -16,7 +16,7 @@ No long-lived npm token is needed after initial setup.
 The workflow starts only through an explicit `workflow_dispatch`. Publishing a
 GitHub Release, pushing commits, and creating tags do not start it. Manual
 runs must target a release tag, not a branch. The tag must match the version
-in `packages/agent-host/package.json`, and its commit must be on `main` history.
+in `packages/agent-controller/package.json`, and its commit must be on `main` history.
 Prerelease versions are deliberately excluded from this workflow.
 
 Before a release, update that package's version, refresh `pnpm-lock.yaml`, run

@@ -8,7 +8,7 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { publishSuccessionState } from '../../agent-host/src/succession-persistence.js';
+import { publishSuccessionState } from '../../agent-controller/src/succession-persistence.js';
 import { deadline } from './channel.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 

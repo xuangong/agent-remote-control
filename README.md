@@ -507,7 +507,7 @@ For a custom Controller source build, run `pnpm build:agent-remote-controller` i
 the source checkout and install the generated `.tgz` under
 `dist/agent-remote-controller/` with `npm install -g /path/to/package.tgz
 --registry=https://mirrors.cloud.tencent.com/npm/`. See the
-[installation guide](docs/controller-install.md) and [Agent Host CLI guide](packages/agent-host/README.md)
+[installation guide](docs/controller-install.md) and [Agent Host CLI guide](packages/agent-controller/README.md)
 for platform requirements, startup services, updates and diagnostics.
 
 For simultaneous desktop CLI and phone control of one Codex session, use the

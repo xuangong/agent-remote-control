@@ -58,7 +58,7 @@ async function killLeftovers() {
 }
 
 before(async () => {
-  if (!existsSync(join(source, 'packages/agent-host/dist/cli.js'))) {
+  if (!existsSync(join(source, 'packages/agent-controller/dist/cli.js'))) {
     throw new Error('Build the Controller first: pnpm --filter @orchardworks/agent-remote-controller... run build');
   }
   await run(process.execPath, [join(source, 'scripts/build-devbox.mjs')], { cwd: source, timeout: 60_000 });

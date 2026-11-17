@@ -146,7 +146,7 @@ async function main() {
       const labels = { codex: 'Codex', claude: 'Claude', copilot: 'Copilot' };
       const nativeName = `${options.name} · ${nativeProviders.map((id) => labels[id]).join(' + ')}`;
       expectedHosts.push([nativeName, nativeProviders]);
-      service('Agent Host', process.execPath, [join(root, 'packages/agent-host/dist/cli.js'), 'foreground'], {
+      service('Agent Host', process.execPath, [join(root, 'packages/agent-controller/dist/cli.js'), 'foreground'], {
         env: { ...env, AGENT_HOST_SERVER: options.serverUrl, AGENT_HOST_REMOTE_KEY: invitation.key,
           AGENT_HOST_PROVIDERS: nativeProviders.join(','), AGENT_HOST_COPILOT: options.copilot, AGENT_HOST_CODEX: options.codex, AGENT_HOST_CLAUDE: options.claude,
           AGENT_HOST_NAME: nativeName, AGENT_HOST_WORKSPACE: options.workspace, AGENT_HOST_STATE_DIR: join(options.stateDir, 'agent-host'),

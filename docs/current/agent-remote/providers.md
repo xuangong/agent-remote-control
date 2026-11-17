@@ -28,7 +28,7 @@ The public `capabilities.sessionControl: "shared"` describes Remote client acces
 
 Common authorization, operation settlement and interaction claims apply to operations routed through the Host; the native service coordinates clients that connect directly to it. One native observation is reused per Host binding, not globally across external native clients. See [Session interaction control](protocol.md#session-interaction-control).
 
-Implementation anchors: `packages/agent-host/src/registrations.ts`, `packages/agent-provider-codex/src/provider.ts`, `packages/agent-provider-opencode/src/transport.ts`, `packages/agent-provider-claude/src/session.ts`, `packages/agent-provider-copilot/src/provider.ts`, and `packages/agent-session-runtime/src/session-control.ts`.
+Implementation anchors: `packages/agent-controller/src/registrations.ts`, `packages/agent-provider-codex/src/provider.ts`, `packages/agent-provider-opencode/src/transport.ts`, `packages/agent-provider-claude/src/session.ts`, `packages/agent-provider-copilot/src/provider.ts`, and `packages/agent-session-runtime/src/session-control.ts`.
 
 ## Collaborators
 
@@ -80,7 +80,7 @@ The process launcher verifies an explicitly selected working directory before sp
 
 The Controller connects its Codex Provider to the shared native app-server daemon through a local Unix socket or an authenticated Windows loopback WebSocket. Controller registration uses shared mode even when legacy configuration requests private mode. Direct Provider construction still supports a private stdio app-server for embedded/debugging use; this is a separate native connection mode, and its Remote clients can still share the owning Host/Relay session. See [shared Codex setup and ownership](codex-shared-runtime.md).
 
-The default Lab backend composes Recorded and the Host broker without constructing Codex. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-host/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+The default Lab backend composes Recorded and the Host broker without constructing Codex. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-controller/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
 
 ## Claude process and native directory
 

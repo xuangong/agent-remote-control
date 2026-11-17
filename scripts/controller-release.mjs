@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { PROTOCOL_VERSION } from '../packages/agent-remote-protocol/dist/index.js';
 const root = new URL('../', import.meta.url);
-const { version } = JSON.parse(await readFile(new URL('packages/agent-host/package.json', root), 'utf8'));
+const { version } = JSON.parse(await readFile(new URL('packages/agent-controller/package.json', root), 'utf8'));
 const asset = `orchardworks-agent-remote-controller-${version}.tgz`;
 const bytes = await readFile(new URL(`dist/agent-remote-controller/${asset}`, root));
 const revision = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();

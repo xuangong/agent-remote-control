@@ -44,7 +44,7 @@
       "entry": "src/index.ts"
     },
     "@orchardworks/agent-remote-controller": {
-      "dir": "packages/agent-host",
+      "dir": "packages/agent-controller",
       "entry": "src/index.ts"
     },
     "@orchardworks/agent-remote-web": {
@@ -336,7 +336,7 @@
       "name": "controller",
       "layer": 2,
       "paths": [
-        "packages/agent-host/src/**"
+        "packages/agent-controller/src/**"
       ],
       "seams": [
         "S1",
@@ -357,15 +357,15 @@
       "name": "controller-process",
       "layer": 4,
       "paths": [
-        "packages/agent-host/src/cli*.ts",
-        "packages/agent-host/src/systemd*.ts",
-        "packages/agent-host/src/windows*.ts",
-        "packages/agent-host/src/vscode-tunnel*.ts",
-        "packages/agent-host/src/controller-update*.ts",
-        "packages/agent-host/src/controller-launcher*.ts",
-        "packages/agent-host/src/codex-daemon-runner*.ts",
-        "packages/agent-host/src/platform/**",
-        "packages/agent-host/src/update-command*.ts"
+        "packages/agent-controller/src/cli*.ts",
+        "packages/agent-controller/src/systemd*.ts",
+        "packages/agent-controller/src/windows*.ts",
+        "packages/agent-controller/src/vscode-tunnel*.ts",
+        "packages/agent-controller/src/controller-update*.ts",
+        "packages/agent-controller/src/controller-launcher*.ts",
+        "packages/agent-controller/src/codex-daemon-runner*.ts",
+        "packages/agent-controller/src/platform/**",
+        "packages/agent-controller/src/update-command*.ts"
       ],
       "seams": [],
       "flows": [
@@ -377,7 +377,7 @@
       "name": "controller-test-support",
       "layer": 5,
       "paths": [
-        "packages/agent-host/src/test-utils/**"
+        "packages/agent-controller/src/test-utils/**"
       ],
       "seams": [
         "S1"

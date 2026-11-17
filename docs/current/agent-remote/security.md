@@ -69,7 +69,7 @@ Canonical paths must exist. Remote commands cannot change this local policy.
 Configuration changes require a Host restart. The explicit local
 `AGENT_HOST_TRUSTED_FULL_CONTROL=1` opt-out restores unrestricted behavior; it
 must not be enabled for an account or workspace that should remain constrained.
-See [Agent Host configuration](../../../packages/agent-host/README.md) for the
+See [Agent Host configuration](../../../packages/agent-controller/README.md) for the
 provider-specific sandbox, environment and persistence behavior.
 
 For stronger execution isolation, run the Host under a dedicated OS account or

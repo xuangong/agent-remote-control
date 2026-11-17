@@ -7,6 +7,8 @@
 //                         send-resident, send-released, release-continuity, restart-continuity, provider-latency, switch,
 //                         journal-open, journal-reopen-mix (the S3 journal measurements), replacement-absorbed, runtime-release
 //                         (the S4a measurements; see README.md)
+//   --provider P          copilot (default), claude or codex: the provider whose sessions the journal scenarios
+//                         (journal-open, journal-reopen-mix) open; export ARC_LOCAL_JOURNALS=1 so a restart keeps journals on
 //   --reps N              samples per session (default 3)
 //   --throttle N          CPU slowdown factor (default 1)
 //   --sessions A,B        session addresses (default: every session `session list` shows in the instance workspace)
@@ -59,6 +61,8 @@ const hiddenShortMs = Number(options['hidden-short'] ?? 30_000);
 const hiddenLongMs = Number(options['hidden-long'] ?? 300_000);
 const outFile = resolve(options.out ?? '.tmp/local-baselines.json');
 const label = options.label;
+const journalProvider = options.provider ?? 'copilot';
+if (!['copilot', 'claude', 'codex'].includes(journalProvider)) throw new Error('--provider must be copilot, claude or codex.');
 const wanted = (options.scenarios ?? 'open-known,open-fresh,open-released,hidden-short,send-resident,send-released,release-continuity,provider-latency,switch').split(',');
 const directOrigin = options.origin ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
 const rttMs = Number(options.rtt ?? 0);
@@ -592,7 +596,7 @@ const scenarios = {
   },
   // S3: the opens of Copilot sessions, journal or Controller. Run it with smart reading on and off (`--label`), at throttle 1 and 4.
   async 'journal-open'() {
-    const own = copilotSessions();
+    const own = sessionsOf(journalProvider);
     const known = [], fresh = [];
     const startedAt = Date.now();
     await inContext(async context => {
@@ -608,15 +612,16 @@ const scenarios = {
     const attaches = controllerLog(startedAt);
     const describe = samples => samples.map(sample => describeOpen(sample, relay, attaches));
     const knownOpens = describe(known), freshOpens = describe(fresh);
-    return { method: 'Copilot sessions only. open-known: the first open is discarded, then reloads in the same context; open-fresh: device storage cleared before each goto. answeredBy is "controller" when a Controller session attach completed before the page showed its first message, otherwise "journal".',
+    return { method: `${providerName[journalProvider]} sessions only. open-known: the first open is discarded, then reloads in the same context; open-fresh: device storage cleared before each goto. answeredBy is "controller" when a Controller session attach completed before the page showed its first message, otherwise "journal".`,
       label: options.label ?? null, sessions: own.map(item => item.address), known: openStats(knownOpens), fresh: openStats(freshOpens),
       firstOpenMisses: freshOpens.filter(sample => sample.answeredBy === 'controller').length, controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
       knownSamples: knownOpens, freshSamples: freshOpens };
   },
   // S3: one Copilot session, 30 reopens in a fixed order, with the Relay's windows and the hole check after each.
   async 'journal-reopen-mix'() {
-    const session = copilotSessions()[0];
-    const plan = [...Array(10).fill('reload'), ...Array(10).fill('release'), ...Array(5).fill('restart'), ...Array(5).fill('interruption')];
+    const session = sessionsOf(journalProvider)[0];
+    // Reloads, releases, Controller restarts, interruptions, and turns (one with a tool) each followed by a release and a reload; Claude Code adds a compaction.
+    const plan = [...Array(10).fill('reload'), ...Array(10).fill('release'), ...Array(5).fill('restart'), ...Array(5).fill('interruption'), ...Array(5).fill('turn'), ...(journalProvider === 'claude' ? ['compaction', 'reload'] : [])];
     const startedAt = Date.now();
     const steps = [];
     await inContext(async context => {
@@ -633,8 +638,8 @@ const scenarios = {
     });
     const relay = await relayDiagnostics(startedAt);
     const attaches = controllerLog(startedAt);
-    const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `copilot:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay, attaches) }));
-    return { method: 'One Copilot session: 10 reloads, 10 releases then a reload, 5 Controller restarts (pnpm local up --no-build) then a reload, 5 interruptions (a turn cancelled through session cancel, then a release and a reload). After each: the Relay windows since the previous step, and a full native read compared with the messages the page shows after scrolling to the start (the hole check).',
+    const described = steps.map(step => ({ ...step, windows: windowCounts(relay, { fromMs: step.fromMs - 1000, toMs: step.toMs + 2000, agentId: `${journalProvider}:${session.address.split('/').at(-1)}` }), sample: describeOpen(step.sample, relay, attaches) }));
+    return { method: 'One session of `--provider` (default copilot): 10 reloads, 10 releases then a reload, 5 Controller restarts (pnpm local up --no-build, with ARC_LOCAL_JOURNALS=1 exported) then a reload, 5 interruptions (a turn cancelled through session cancel, then a release and a reload), 5 turns with a tool (then a release and a reload); Claude Code adds a compaction and the open after it. After each: the Relay windows since the previous step, and a full native read compared with the messages the page shows after scrolling to the start (the hole check).',
       label: options.label ?? null, address: session.address, thresholds: mixThresholds(described), controllerEvents: controllerJournalEvents(controllerLog(startedAt), { fromMs: startedAt }),
       steps: described.map(({ kind, windows, holes, sample }) => ({ kind, windows, holes, answeredBy: sample.answeredBy, pageBytes: sample.pageBytes, readyMs: sample.readyMs })) };
   },
@@ -736,11 +741,14 @@ function describeOpen(sample, relay, controllerEntries) {
     pageBytes: sample.requests.bytesIn + (sample.apiBytes ?? 0), windows: windowCounts(relay, { ...range, agentId: sessionKey }) };
 }
 
-const copilotSessions = () => {
-  const own = byProvider('copilot');
-  if (!own.length) throw new Error('The journal scenarios need a Copilot session in the instance workspace; create one with a real model turn first.');
+/** The instance's sessions of one provider; the journal scenarios need at least one, made with a real model turn first. */
+const sessionsOf = provider => {
+  const own = byProvider(provider);
+  if (!own.length) throw new Error(`The journal scenarios need a ${provider} session in the instance workspace; create one with a real model turn first.`);
   return own;
 };
+const copilotSessions = () => sessionsOf('copilot');
+const providerName = { copilot: 'Copilot', claude: 'Claude Code', codex: 'Codex' };
 
 async function restartInstance() {
   await new Promise((resolveRestart, reject) => {
@@ -760,6 +768,16 @@ async function reopenStep(handle, session, kind) {
     while (Date.now() < deadline && controller('session', 'read', session.address, '--limit', '0').session?.state !== 'running') await delay(500);
     await delay(1500);
     controller('session', 'cancel', session.address);
+    await waitIdle(session.address);
+    controller('session', 'release', session.address); await delay(releaseWaitMs);
+  }
+  if (kind === 'turn') {
+    controller('session', 'send', session.address, 'Run the shell command `echo journal-mix` and then reply with the single word OK.');
+    await waitIdle(session.address);
+    controller('session', 'release', session.address); await delay(releaseWaitMs);
+  }
+  if (kind === 'compaction') {
+    controller('session', 'send', session.address, '/compact');
     await waitIdle(session.address);
     controller('session', 'release', session.address); await delay(releaseWaitMs);
   }

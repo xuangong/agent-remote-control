@@ -81,6 +81,15 @@ describe('the thresholds of the S3 plan', () => {
     expect(mixThresholds(released).i2Triggered).toBe(true);
   });
 
+  it('counts the S6a defect lines: a replacement on a settled reopen, any hole, and the opens served from the journal', () => {
+    const served = <T extends object>(value: T) => ({ ...value, sample: { journalServed: true } });
+    const mix = [...settledMix().map(served), ...Array(5).fill(0).map(() => served(step('turn', { unchanged: 1 })))];
+    expect(mixThresholds(mix)).toMatchObject({ opens: 35, settledReplacements: 0, opensWithHoles: 0, servedOpens: 35, needsRepeat: false });
+    const defective = mix.map((value, index) => index === 3 ? served(step('reload', { changed: 1 })) : index === 31 ? served(step('turn', { open_item: 1 }, { missing: 1 })) : index === 26 ? served(step('interruption', { changed: 1 })) : value);
+    expect(mixThresholds(defective)).toMatchObject({ settledReplacements: 2, opensWithHoles: 1, replacementsByKind: { reload: 1, turn: 1, interruption: 1 } });
+    expect(mixThresholds(settledMix()).needsRepeat).toBe(true);
+  });
+
   it('triggers M3 when more than one interruption leaves a hole, and eviction on fills or a refusal', () => {
     const holes = settledMix().map((value, index) => index >= 25 && index < 27 ? step('interruption', { unchanged: 1 }, { missing: 1 }) : value);
     expect(mixThresholds(holes)).toMatchObject({ interruptionsWithHoles: 2, m3Triggered: true });

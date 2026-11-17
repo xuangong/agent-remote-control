@@ -75,7 +75,16 @@ export function mixThresholds(steps) {
   const openItem = steps.reduce((sum, step) => sum + (step.windows.byReason.open_item ?? 0), 0);
   const settledOpenItem = ['reload', 'release', 'restart'].reduce((sum, kind) => sum + count(kind, 'open_item'), 0);
   const interruptions = steps.filter(step => step.kind === 'interruption');
+  // The S6a defect lines: a replacement on a settled reopen is a defect to fix in the adapter, any hole is one, and fewer than 30 counted opens repeats the run.
+  const replaced = step => ['new', 'incomplete', 'open_item', 'changed'].reduce((sum, reason) => sum + (step.windows.byReason[reason] ?? 0), 0);
+  const settledKinds = ['reload', 'release', 'restart', 'turn'];
+  const served = steps.filter(step => step.sample?.journalServed === true).length;
   return {
+    settledReplacements: steps.filter(step => settledKinds.includes(step.kind)).reduce((sum, step) => sum + replaced(step), 0),
+    replacementsByKind: Object.fromEntries([...new Set(steps.map(step => step.kind))].map(kind => [kind, steps.filter(step => step.kind === kind).reduce((sum, step) => sum + replaced(step), 0)])),
+    opensWithHoles: steps.filter(step => (step.holes?.missing.length ?? 0) > 0).length,
+    servedOpens: served,
+    needsRepeat: served < 30,
     opens,
     openItemReplacements: openItem,
     openItemShare: opens ? Math.round(openItem / opens * 1000) / 1000 : null,

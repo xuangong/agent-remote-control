@@ -228,15 +228,15 @@ The local instance run (six bots with real sessions, 20 minutes, Chromium 1440 x
 
 ## Journal measurements (S3)
 
-`local-baselines.mjs` measures the opens of Copilot sessions on the `pnpm local` instance, with the Relay's journals and the Host's smart-reading switch for `copilot` on or off (`--label journals-on`, `--label journals-off`). Run it from the repository root while the instance runs; it never starts or stops the instance itself, except that `journal-reopen-mix` runs `pnpm local up --no-build` for its Controller restarts.
+`local-baselines.mjs` measures the opens of journal-capable sessions (`--provider copilot|claude|codex`, default `copilot`) on the `pnpm local` instance, with the Relay's journals and the Host's smart-reading switch for that provider on or off (`--label journals-on`, `--label journals-off`). Run it from the repository root while the instance runs; it never starts or stops the instance itself, except that `journal-reopen-mix` runs `pnpm local up --no-build` for its Controller restarts, so export `ARC_LOCAL_JOURNALS=1` first or a restart turns the Relay's journals off. A Codex session is released after each use; `--release-wait` gives the daemon time to unload it.
 
 ```sh
 node packages/agent-remote-lab/performance/local-baselines.mjs --scenarios journal-open --label journals-on --throttle 1 --out .tmp/s3-journal-open.json
 node packages/agent-remote-lab/performance/local-baselines.mjs --scenarios journal-reopen-mix --label journals-on --sessions HOST/copilot/SESSION --out .tmp/s3-journal-reopen-mix.json
 ```
 
-- `journal-open`: for each Copilot session, `open-known` (a first open that is discarded, then `--reps` reloads) and `open-fresh` (device storage cleared before each open). Per open it records which side answered, the Relay's windows for the session, and the bytes the page received (WebSocket frames plus API responses).
-- `journal-reopen-mix`: one Copilot session, 30 reopens in a fixed order: 10 page reloads, 10 session releases then a reload, 5 Controller restarts then a reload, 5 interruptions (a turn cancelled through `session cancel`, then a release and a reload). After each it records the Relay's windows since the previous step and runs the hole check. `thresholds` applies the S3 plan's thresholds to the 30 opens.
+- `journal-open`: for each session of `--provider`, `open-known` (a first open that is discarded, then `--reps` reloads) and `open-fresh` (device storage cleared before each open). Per open it records which side answered, the Relay's windows for the session, and the bytes the page received (WebSocket frames plus API responses).
+- `journal-reopen-mix`: one session of `--provider`, 35 reopens in a fixed order: 10 page reloads, 10 session releases then a reload, 5 Controller restarts then a reload, 5 interruptions (a turn cancelled through `session cancel`, then a release and a reload), 5 turns with a tool (then a release and a reload); Claude Code adds a `/compact` and the open after it. After each it records the Relay's windows since the previous step, whether the page's epoch is the journal's (`journalServed`), and runs the hole check. `thresholds` applies the plan's thresholds to the opens.
 
 Where the numbers come from, all metadata and no content:
 

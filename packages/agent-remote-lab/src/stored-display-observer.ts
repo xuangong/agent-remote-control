@@ -1,5 +1,6 @@
 import type { AgentReplica, AgentReplicaState } from '@orchardworks/agent-remote-web';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
+import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { isStoredSource, pinStoredSession, saveStoredDisplay } from './stored-display.js';
 
@@ -13,6 +14,8 @@ export function observeStoredDisplay(baseUrl: string, target: ControllerLocation
     if (dirty && latest && recoveryGeneration(baseUrl) === generation) {
       dirty = false;
       saveStoredDisplay(baseUrl, target, latest);
+      // The disk write does not wait for its delay when the page is leaving: a reload within it would find nothing.
+      void deviceStore.flush();
     }
   };
   const observe = () => {

@@ -593,8 +593,10 @@ function AppContent({
     if (!store) { store = new DraftStore(owner.scope); draftStores.set(owner.scope, store); }
     return { store, key: owner.key };
   }
-  const state = windowSession.empty ? undefined : succession.active ? succession.state : storedState ?? cachedState;
-  const sessionState = windowSession.empty ? remoteSessionState(undefined, 'idle') : succession.active ? succession.sessionState : storedState || !cachedSessionState ? storedSessionState : cachedSessionState;
+  // While the window has not yet said which conversation it shows, the rows this device stored of the requested one stay on screen instead of an empty shell.
+  const heldWhileResolving = succession.active && !succession.state && !succession.selected && !!cachedState;
+  const state = windowSession.empty ? undefined : succession.active ? heldWhileResolving ? cachedState : succession.state : storedState ?? cachedState;
+  const sessionState = windowSession.empty ? remoteSessionState(undefined, 'idle') : succession.active ? heldWhileResolving ? cachedSessionState! : succession.sessionState : storedState || !cachedSessionState ? storedSessionState : cachedSessionState;
   const status = sessionState.connection;
   const handoff = sessionState.handoff;
   function setStatus(connection: RemoteSessionStatus): void { setSessionState(remoteSessionState(replicaRef.current?.getState() ?? state, connection)); }

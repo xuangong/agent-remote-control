@@ -1114,6 +1114,38 @@ it('shows no stored conversation content before the Relay confirms access, and s
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
 
+it('shows stored conversation content in the first render on a cached lease, with no opening word', async () => {
+  const { WorkspaceReady, rememberWorkspaceAccess, setWorkspaceReady } = await import('./workspace-access.js');
+  const { saveStoredDisplay } = await import('./stored-display.js');
+  const { saveLastSession } = await import('./conversation-recovery.js');
+  const path = '/u/' + 'c'.repeat(64) + '/';
+  const scope = new URL(path, window.location.origin).href;
+  const target = { hostId: 'desk', providerId: 'recorded', nativeSessionId: 'recorded-session', agentId: 'agent-1' };
+  rememberWorkspaceAccess({ basePath: path, expiresAt: Date.now() + 60_000 });
+  saveLastSession(scope, target);
+  setWorkspaceReady(path, true);
+  saveStoredDisplay(scope, target, { ...replicaState, timeline: { ...replicaState.timeline, entries: [{
+    providerId: 'recorded', seqStart: 1, seqEnd: 1, timestamp: '2026-09-18T00:00:00Z', sourceSeqRanges: [], collapsed: [], resources: [],
+    item: { type: 'assistant_message', text: 'Cached on a lease, first render.' },
+  }] } });
+  setWorkspaceReady(path, false, undefined, Date.now() + 60_000);
+  window.history.replaceState(null, '', '/?window=w1&host=desk&agent=agent-1&provider=recorded&session=recorded-session');
+  const fetcher = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Business requests must wait.'));
+  try {
+    // Every state the document passes through, from the first render on.
+    const frames: string[] = [];
+    const watch = new MutationObserver(() => frames.push(document.body.textContent ?? ''));
+    watch.observe(document.body, { subtree: true, childList: true, characterData: true });
+    const view = await render(<WorkspaceReady.Provider value={false}><App baseUrl={scope} userScoped /></WorkspaceReady.Provider>);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+    watch.disconnect();
+    expect(view.textContent).toContain('Cached on a lease, first render.');
+    const bad = frames.filter(text => /Opening session|Awaiting Agent|Start with a Provider|Synchronizing/.test(text));
+    const rowless = frames.filter(text => !text.includes('Cached on a lease, first render.') && /Ready for a session|Conversation/.test(text));
+    expect({ bad: bad.length, rowless: rowless.length, frames: frames.length }).toMatchObject({ bad: 0 });
+  } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
+});
+
 async function openSessionViewOptions(container: ParentNode): Promise<void> {
   const button = container.querySelector<HTMLButtonElement>('button[aria-label="Session view options"]')!;
   if (button.getAttribute('aria-expanded') !== 'true') await act(async () => button.click());

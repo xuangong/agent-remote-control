@@ -78,8 +78,8 @@ export const hiddenAndDrops: Scenario = {
           const wire = recorder.transcript().filter(entry => entry.n > first);
           conditions.push({ label: 'half-open sockets', results: [halfOpenSocketRecovers(wire, 90_000), noStaleLabel(wire, page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
           const faultAt = wire.find(entry => 'marker' in entry && entry.marker === 'fault')?.t;
-          const replacedAt = wire.find(entry => 'marker' in entry && entry.marker === 'socket-open')?.t;
-          (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, replacedAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });
+          const replacedAt = wire.find(entry => 'message' in entry && entry.direction === 'relay->browser' && entry.message.type === 'negotiated' && faultAt !== undefined && entry.t > faultAt)?.t;
+          (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, sessionServedAgainAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });
         }
         await probe.close();
       });

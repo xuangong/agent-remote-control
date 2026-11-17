@@ -56,11 +56,12 @@ describe('draft and reading position are kept', () => {
 
 describe('a half-open socket is replaced', () => {
   const faulted = () => transcript().marker(1000, 'fault', { kind: 'half-open' });
-  it('passes when a new socket opens within the limit', () => {
-    expect(halfOpenSocketRecovers(faulted().marker(9000, 'socket-open', undefined, 2).build(), 30_000).status).toBe('passed');
+  it('passes when the session is negotiated again within the limit', () => {
+    expect(halfOpenSocketRecovers(faulted().marker(9000, 'socket-open', undefined, 2).receive(9100, 'negotiated').build(), 30_000).status).toBe('passed');
   });
-  it('fails when no socket replaces it, or only after the limit', () => {
-    expect(halfOpenSocketRecovers(faulted().build()).violations[0]?.message).toMatch(/never replaced/);
-    expect(halfOpenSocketRecovers(faulted().marker(70_000, 'socket-open', undefined, 2).build(), 30_000).violations[0]?.message).toMatch(/took 69000 ms/);
+  it('fails when only another channel reopened, or the session came back after the limit', () => {
+    const accountOnly = faulted().marker(1500, 'socket-open', undefined, 4).receive(1600, 'session_states').build();
+    expect(halfOpenSocketRecovers(accountOnly).violations[0]?.message).toMatch(/never served again/);
+    expect(halfOpenSocketRecovers(faulted().receive(70_000, 'negotiated').build(), 30_000).violations[0]?.message).toMatch(/took 69000 ms/);
   });
 });

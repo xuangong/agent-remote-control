@@ -82,16 +82,17 @@ export function draftAndPositionKept(page: PageReport): InvariantResult {
 }
 
 /**
- * M7: a socket that went half-open (open, but swallowing traffic) is noticed and replaced: a new socket opens within `withinMs`
- * of the fault marker whose detail says `kind: 'half-open'`.
+ * M7: a socket that went half-open (open, but swallowing traffic) is noticed and its session is served again: the Relay answers a
+ * new negotiation within `withinMs` of the fault marker whose detail says `kind: 'half-open'`. Another channel reopening sooner
+ * (the account channel) does not count.
  */
 export function halfOpenSocketRecovers(transcript: Transcript, withinMs = 60_000): InvariantResult {
   const faults = markers(transcript, 'fault').filter(marker => marker.detail?.kind === 'half-open');
   const violations: Violation[] = [];
   for (const fault of faults) {
-    const reopened = markers(transcript, 'socket-open').find(open => open.t > fault.t);
-    if (!reopened) violations.push({ message: 'the page never replaced the half-open socket', at: fault.t });
-    else if (reopened.t - fault.t > withinMs) violations.push({ message: `the page took ${reopened.t - fault.t} ms to replace the half-open socket`, at: fault.t });
+    const served = received(transcript, 'negotiated').find(frame => frame.t > fault.t);
+    if (!served) violations.push({ message: 'the session was never served again after the half-open socket', at: fault.t });
+    else if (served.t - fault.t > withinMs) violations.push({ message: `the page took ${Math.round(served.t - fault.t)} ms to get its session served again`, at: fault.t });
   }
   return result('half-open-socket-recovers', faults.length, violations);
 }

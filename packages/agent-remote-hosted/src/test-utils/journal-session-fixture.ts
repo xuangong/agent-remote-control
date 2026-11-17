@@ -116,7 +116,7 @@ export async function startRelay(options: RelayOptions = {}) {
 
   /** The Host's Controller, connected with `journal=1` unless `journal` is false. It answers the attach of the session and the streams the Relay opens. */
   async function connectController(behavior: { journal?: boolean; answerStreams?: boolean; attach?: { status: number; body: unknown }; holdAttach?: boolean; strictNegotiate?: boolean } = {}) {
-    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${behavior.journal === false ? '' : '?journal=1'}`, { headers: { authorization: 'Bearer arc_fixture' } }));
+    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${behavior.journal === false ? '?control=1' : '?journal=1&control=1'}`, { headers: { authorization: 'Bearer arc_fixture' } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = socketPair(closers);
     const inbox = collect(pair.native);
@@ -146,12 +146,8 @@ export async function startRelay(options: RelayOptions = {}) {
           // A Controller built before item keys decodes `negotiate` strictly and answers an unknown field with a protocol error.
           toStream(stream.streamId, { type: 'protocol_error', payload: { code: 'invalid_shape', message: 'Unknown field in negotiate.', recoverable: false } });
         } else if (inner.type === 'negotiate') {
-          toStream(stream.streamId, { type: 'negotiated', sessionControl: true });
+          toStream(stream.streamId, { type: 'negotiated' });
           toStream(stream.streamId, { type: 'agent_snapshot', payload: snapshot('running', PUBLIC_ID) });
-          toStream(stream.streamId, { type: 'session_control', payload: { agentId: PUBLIC_ID, revision: 'rev-1', access: 'read_only', available: true } });
-        } else if (inner.type === 'session_control_request') {
-          if (inner.payload.revision !== 'rev-1') toStream(stream.streamId, { type: 'protocol_error', payload: { requestId: inner.payload.requestId, code: 'session_control_changed', message: 'Session access changed.', recoverable: true } });
-          else toStream(stream.streamId, { type: 'session_control', payload: { agentId: PUBLIC_ID, revision: 'rev-1', access: 'control', available: true, token: 'token-1', requestId: inner.payload.requestId } });
         } else if (inner.type === 'send_message') {
           toStream(stream.streamId, { type: 'command_acknowledged', payload: { requestId: inner.payload.requestId, agentId: PUBLIC_ID, command: 'send_message', inputAcceptance: { disposition: 'started' } } });
         }
@@ -183,7 +179,16 @@ export async function startRelay(options: RelayOptions = {}) {
     const pair = socketPair(closers);
     const inbox = collect(pair.native);
     prepared.accept(pair.server);
-    return { pair, frames: inbox.all, take: inbox.take, send: (fields: Wire) => pair.native.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields })) };
+    const send = (fields: Wire) => pair.native.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields }));
+    /** Negotiates and acquires control, as a page does; resolves with the token that grants it. */
+    async function controlled(negotiate: Wire | false = {}): Promise<string> {
+      if (negotiate) send({ type: 'negotiate', ...negotiate });
+      const announced = await inbox.take(message => message.type === 'session_control', 'the control state');
+      send({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId: 'acquire', revision: announced.payload.revision, action: 'acquire' } });
+      const granted = await inbox.take(message => message.type === 'session_control' && message.payload.requestId === 'acquire', 'control');
+      return granted.payload.token;
+    }
+    return { pair, frames: inbox.all, take: inbox.take, send, controlled };
   }
 
   return {

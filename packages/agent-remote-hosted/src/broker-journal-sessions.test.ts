@@ -1,7 +1,6 @@
 import { acceptSessionChannel, PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE } from '@orchardworks/agent-remote-protocol';
 import { afterEach, expect, it } from 'vitest';
 
-import { CAPACITY_CLOSE_REASON } from './journal-session-stream.js';
 import { collect, DIGEST, PUBLIC_ID, row, seedJournal, SESSION_KEY, sleep, snapshot, socketPair, startRelay, STORE_KEY, until, type Wire } from './test-utils/journal-session-fixture.js';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
@@ -48,8 +47,9 @@ it('serves negotiation, the Snapshot, the subscription and a page from the journ
   await browser.take(message => message.type === 'agent_snapshot', 'Snapshot');
   expect(browser.frames.map(frame => frame.type)).toEqual(['negotiated', 'agent_snapshot', 'session_control']);
   expect(browser.frames[0]).toMatchObject({ sessionControl: true });
-  expect(browser.frames[1]!.payload).toMatchObject({ id: PUBLIC_ID, status: 'idle', runtimeInfo: { connection: { state: 'restoring' } } });
-  expect(browser.frames[2]!.payload).toMatchObject({ agentId: PUBLIC_ID, revision: 'relay-pending', access: 'read_only', available: false });
+  expect(browser.frames[1]!.payload).toMatchObject({ id: PUBLIC_ID, status: 'idle' });
+  expect(browser.frames[1]!.payload.runtimeInfo.connection).toBeUndefined();
+  expect(browser.frames[2]!.payload).toMatchObject({ agentId: PUBLIC_ID, access: 'read_only', available: true });
   browser.send({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: [PUBLIC_ID] } });
   expect(await browser.take(message => message.type === 'timeline_subscribed', 'acknowledgement')).toMatchObject({ payload: { requestId: 'sub-1', agentIds: [PUBLIC_ID] } });
   browser.send(tail('page-1'));
@@ -58,6 +58,8 @@ it('serves negotiation, the Snapshot, the subscription and a page from the journ
   expect(texts(page)).toEqual(['Hello', 'World']);
   expect(controller.streams).toEqual([]);
   expect(browser.pair.server.readyState).toBe(1);
+  browser.send({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId: 'control-1', revision: browser.frames[2]!.payload.revision, action: 'acquire' } });
+  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'control')).toMatchObject({ payload: { access: 'control', available: true, token: expect.any(String) } });
 });
 
 it('delivers live rows to subscribers in order, after the subscription is acknowledged, with the journal\'s dense sequences', async () => {
@@ -107,19 +109,16 @@ it('announces a replacing window to subscribers and serves the new epoch', async
   expect(texts(page)).toEqual(['Fresh']);
 });
 
-it('forwards head changes as updates and shows the runtime as restoring until the Controller stream is ready', async () => {
+it('forwards head changes as updates as the Controller published them, and holds no Controller stream for reading', async () => {
   const r = await relay();
-  const { controller } = await publishedController(r, { answerStreams: false });
+  const { controller } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  const stream = await until(() => controller.streams[0], 'the Controller stream');
   await controller.publish([{ op: 'head', head: { snapshot: snapshot('running', 'native-session'), observedAt: 6 } }]);
   const update = await browser.take(message => message.type === 'agent_update', 'update');
-  expect(update.payload).toMatchObject({ id: PUBLIC_ID, status: 'running', runtimeInfo: { connection: { state: 'restoring' } } });
-  controller.acceptStream(stream.streamId);
-  const ready = await browser.take(message => message.type === 'agent_update', 'update once the stream is ready');
-  expect(ready.payload).toMatchObject({ id: PUBLIC_ID, status: 'running' });
-  expect(ready.payload.runtimeInfo.connection).toBeUndefined();
+  expect(update.payload).toMatchObject({ id: PUBLIC_ID, status: 'running' });
+  expect(update.payload.runtimeInfo.connection).toBeUndefined();
+  expect(controller.streams).toEqual([]);
 });
 
 it('asks the Controller to fill a missing body before answering a page', async () => {
@@ -150,17 +149,19 @@ it('asks the Controller for older history when a before page reaches the start, 
   expect(texts(page)).toEqual(['Before']);
 });
 
-it('sends operations and control to the Controller stream, returns its acknowledgements and drops its read frames', async () => {
+/** Acquires control and sends one message, which opens the Controller stream; resolves with that stream, negotiated. */
+async function sentThrough(browser: Browser, controller: Awaited<ReturnType<Relay['connectController']>>) {
+  const token = await browser.controlled(false);
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  return { token, stream: await negotiatedControllerStream(controller) };
+}
+
+it('opens a Controller stream for the first operation, returns its acknowledgement and drops its read frames', async () => {
   const r = await relay();
   const { controller } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  const stream = await until(() => controller.streams[0], 'the Controller stream');
-  await until(() => stream.received.some(message => message.type === 'negotiate') ? true : undefined, 'the Relay\'s negotiation');
-  await browser.take(message => message.type === 'session_control' && message.payload.revision === 'rev-1', 'the Controller\'s control state');
-  browser.send({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId: 'control-1', revision: 'relay-pending', action: 'acquire' } });
-  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'control')).toMatchObject({ payload: { access: 'control', token: 'token-1' } });
-  browser.send({ type: 'send_message', controlToken: 'token-1', payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  const { stream } = await sentThrough(browser, controller);
   expect(await browser.take(message => message.type === 'command_acknowledged', 'acknowledgement')).toMatchObject({ payload: { requestId: 'send-1', command: 'send_message' } });
   controller.toStream(stream.streamId, { type: 'agent_update', payload: snapshot('running', PUBLIC_ID) });
   controller.toStream(stream.streamId, { type: 'agent_stream', payload: { agentId: PUBLIC_ID, timestamp: 't', event: { type: 'turn_started', providerId: 'codex' } } });
@@ -170,9 +171,18 @@ it('sends operations and control to the Controller stream, returns its acknowled
   expect(browser.frames.filter(frame => frame.type === 'agent_snapshot')).toHaveLength(1);
   expect(browser.frames.filter(frame => frame.type === 'agent_snapshot' || frame.type === 'agent_update').every(frame => frame.payload.status === 'idle')).toBe(true);
   expect(browser.frames.filter(frame => frame.type === 'agent_stream' || frame.type === 'timeline_subscribed')).toHaveLength(1);
-  expect(stream.received.map(message => message.type)).toEqual(['negotiate', 'session_control_request', 'send_message']);
-  expect(stream.received[1]!.payload.revision).toBe('rev-1');
+  expect(stream.received.map(message => message.type)).toEqual(['negotiate', 'send_message']);
   expect(controller.attaches).toHaveLength(1);
+});
+
+it('holds no Controller stream for a view that only reads and holds control', async () => {
+  const r = await relay();
+  const { controller } = await publishedController(r);
+  const browsers = [await r.openBrowser(), await r.openBrowser(), await r.openBrowser()];
+  for (const browser of browsers) { await subscribed(browser); await browser.controlled(false); }
+  await sleep(50);
+  expect(controller.streams).toEqual([]);
+  expect(controller.inbox.all.some(message => message.type === 'stream_open')).toBe(false);
 });
 
 it('closes the Controller stream when the browser stream ends', async () => {
@@ -180,24 +190,31 @@ it('closes the Controller stream when the browser stream ends', async () => {
   const { controller } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  const stream = await until(() => controller.streams[0], 'the Controller stream');
-  await until(() => stream.received.some(message => message.type === 'negotiate') ? true : undefined, 'the Relay\'s negotiation');
+  const { stream } = await sentThrough(browser, controller);
   browser.pair.native.close(1000);
   expect(await controller.inbox.take(message => message.type === 'stream_close', 'stream_close')).toMatchObject({ streamId: stream.streamId, code: 1000 });
 });
 
-it('answers an operation with the reason when the Host is offline, and keeps serving reads', async () => {
+it('answers an operation with the reason when the Host is offline, keeps control and reads, and delivers once the Host is back', async () => {
   const r = await relay();
   const { controller } = await publishedController(r);
   controller.disconnect();
   await sleep(20);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  browser.send({ type: 'send_message', payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  const token = await browser.controlled(false);
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
   expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal')).toMatchObject({ payload: { code: 'host_offline', recoverable: true } });
   expect(browser.pair.server.readyState).toBe(1);
   browser.send(tail('page-1'));
   expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello', 'World']);
+  const returned = await r.connectController();
+  await sleep(30);
+  expect(browser.pair.server.readyState).toBe(1);
+  expect(browser.pair.server.closeCode).toBeUndefined();
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-2', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Again' } });
+  expect(await browser.take(message => message.type === 'command_acknowledged' && message.payload.requestId === 'send-2', 'acknowledgement')).toBeDefined();
+  expect(returned.streams).toHaveLength(1);
 });
 
 it('limits and authorizes the messages it answers itself like the ones it forwards', async () => {
@@ -268,7 +285,7 @@ it('delivers a question to the browser only inside the head, never as the Contro
   const { controller } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  const stream = await negotiatedControllerStream(controller);
+  const { stream } = await sentThrough(browser, controller);
   const before = browser.frames.length;
   await controller.publish([{ op: 'head', head: { snapshot: { ...snapshot('running', 'native-session'), pendingInteractions: [question] }, observedAt: 6 } }]);
   controller.toStream(stream.streamId, { type: 'interaction_requested', payload: { agentId: PUBLIC_ID, request: question } });
@@ -309,47 +326,34 @@ async function negotiatedControllerStream(controller: Awaited<ReturnType<Relay['
   return stream;
 }
 
-const acquire = (requestId: string) => ({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId, revision: 'relay-pending', action: 'acquire' } });
-
-it('answers an acquire with the pending state while the Host is offline, and closes the stream for the Host\'s return', async () => {
-  const r = await relay({ seed: store => seedJournal(store) });
-  const browser = await r.openBrowser();
-  await subscribed(browser);
-  browser.send(acquire('control-1'));
-  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'pending control state')).toMatchObject({
-    payload: { agentId: PUBLIC_ID, revision: 'relay-pending', access: 'read_only', available: false },
-  });
-  await sleep(30);
-  expect(browser.pair.server.readyState).toBe(1);
-  await r.connectController();
-  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close when the Host returns');
-  expect(browser.pair.server.closeCode).toBe(1012);
-  expect(browser.pair.server.closeReason).toBe('Remote Host reconnected');
-});
-
-it('shows the native owner in the pending control state and keeps serving reads', async () => {
+it('shows the native owner and revokes control when the first operation is refused for it, and keeps serving reads', async () => {
   const r = await relay({ seed: store => seedJournal(store) });
   const nativeOwner = { kind: 'native_cli', generation: '11111111-1111-4111-8111-111111111111' };
   await r.connectController({ attach: { status: 409, body: { code: 'native_session_owned', nativeOwner } } });
   const browser = await r.openBrowser();
   await subscribed(browser);
-  browser.send(acquire('control-1'));
-  expect(await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'control-1', 'pending control state')).toMatchObject({
-    payload: { revision: 'relay-pending', access: 'read_only', available: false, nativeOwner },
+  const token = await browser.controlled(false);
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal')).toMatchObject({ payload: { code: 'native_session_owned' } });
+  expect(await browser.take(message => message.type === 'session_control' && !message.payload.requestId, 'control state')).toMatchObject({
+    payload: { access: 'read_only', available: false, nativeOwner },
   });
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-2', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-2', 'refusal')).toMatchObject({ payload: { code: 'session_read_only' } });
   browser.send(tail('page-1'));
   expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello']);
   expect(browser.pair.server.readyState).toBe(1);
 });
 
-it('closes the stream with the capacity code when the account has no stream slot for the Controller stream', async () => {
+it('refuses the message, not the stream, when the account has no stream slot for the Controller stream', async () => {
   const r = await relay({ seed: store => seedJournal(store), broker: { userStreamCount: () => 64 } });
   const controller = await r.connectController();
   const browser = await r.openBrowser({ principalSubject: () => 'alice' });
-  browser.send({ type: 'negotiate' });
-  await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
-  expect(browser.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
-  expect(browser.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
+  await subscribed(browser);
+  const token = await browser.controlled(false);
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal')).toMatchObject({ payload: { code: 'session_stream_capacity', recoverable: true } });
+  expect(browser.pair.server.readyState).toBe(1);
   expect(controller.streams).toEqual([]);
 });
 
@@ -358,7 +362,7 @@ it('closes the stream when the Host disconnects, and serves a new stream from th
   const { controller } = await publishedController(r);
   const browser = await r.openBrowser();
   await subscribed(browser);
-  await negotiatedControllerStream(controller);
+  await sentThrough(browser, controller);
   controller.disconnect();
   await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
   expect(browser.pair.server.closeCode).toBe(1012);
@@ -380,7 +384,7 @@ it('closes the Controller stream and the browser stream of a user whose share is
   const controller = await r.connectController();
   const browser = await r.openBrowser({ principalSubject: () => 'bob' });
   await subscribed(browser);
-  const stream = await negotiatedControllerStream(controller);
+  const { stream } = await sentThrough(browser, controller);
   await r.broker.manageShares('alice', 'host', 'revoke-share', 'bob');
   await until(() => browser.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
   expect(browser.pair.server.closeCode).toBe(1008);
@@ -411,40 +415,42 @@ it('opens a session through the Controller when the journal store cannot be read
   expect(await until(() => controller.streams[0], 'the Controller stream')).toBeDefined();
 });
 
-it('refuses a held acquire as retryable when the Controller connection is replaced during the attach, and a new stream controls the new connection', async () => {
+it('refuses a held operation as retryable when the Controller connection is replaced during the attach, and a new operation reaches the new connection', async () => {
   const r = await relay({ seed: store => seedJournal(store) });
   const first = await r.connectController({ holdAttach: true });
   const browser = await r.openBrowser();
   await subscribed(browser);
+  const token = await browser.controlled(false);
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
   await until(() => first.attaches[0], 'the attach');
-  browser.send(acquire('control-1'));
   await sleep(20);
   const second = await r.connectController();
-  const outcome = await until(() => browser.frames.find(frame => frame.payload?.requestId === 'control-1') ?? (browser.pair.server.readyState !== 1 ? { closed: true } : undefined), 'an answer to the acquire');
-  expect(outcome).not.toMatchObject({ type: 'session_control' });
+  const outcome = await until(() => browser.frames.find(frame => frame.payload?.requestId === 'send-1') ?? (browser.pair.server.readyState !== 1 ? { closed: true } : undefined), 'an answer to the send');
+  expect(outcome).not.toMatchObject({ type: 'command_acknowledged' });
   if (!('closed' in outcome)) expect(outcome).toMatchObject({ type: 'protocol_error', payload: { code: 'host_reconnected', recoverable: true } });
   const next = await r.openBrowser();
   await subscribed(next);
-  await negotiatedControllerStream(second);
-  await next.take(message => message.type === 'session_control' && message.payload.revision === 'rev-1', 'the Controller\'s control state');
-  next.send(acquire('control-2'));
-  expect(await next.take(message => message.type === 'session_control' && message.payload.requestId === 'control-2', 'control')).toMatchObject({ payload: { access: 'control', token: 'token-1' } });
+  const { stream } = await sentThrough(next, second);
+  expect(stream.received.map(message => message.type)).toEqual(['negotiate', 'send_message']);
 });
 
-it('closes the stream with the capacity code when the Host has no stream slot left', async () => {
+it('refuses the message, not the stream, when the Host has no stream slot left', async () => {
   const r = await relay({ seed: store => seedJournal(store) });
   const controller = await r.connectController();
   const browsers = [];
   for (let at = 0; at < 128; at++) {
     const browser = await r.openBrowser();
-    browser.send({ type: 'negotiate' });
+    await subscribed(browser);
+    const token = await browser.controlled(false);
+    browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
     browsers.push(browser);
   }
   await until(() => controller.streams.length === 128 ? true : undefined, '128 Controller streams');
   const last = await r.openBrowser();
-  last.send({ type: 'negotiate' });
-  await until(() => last.pair.server.readyState !== 1 ? true : undefined, 'the stream to close');
-  expect(last.pair.server.closeCode).toBe(SESSION_CAPACITY_CLOSE_CODE);
-  expect(last.pair.server.closeReason).toBe(CAPACITY_CLOSE_REASON);
+  await subscribed(last);
+  const token = await last.controlled(false);
+  last.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  expect(await last.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal')).toMatchObject({ payload: { code: 'session_stream_capacity', recoverable: true } });
+  expect(last.pair.server.readyState).toBe(1);
   expect(controller.streams).toHaveLength(128);
 });

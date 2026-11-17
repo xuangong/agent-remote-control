@@ -73,7 +73,7 @@ async function fixture() {
   }
   async function enroll(browser: Awaited<ReturnType<typeof login>>['browser'], purpose = 'gateway-setup') {
     const pairing = await (await browser('v1/remote/pairings', { purpose })).json() as { key: string };
-    const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pairing.key}` } });
+    const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pairing.key}` } });
     cleanups.push(async () => { host.terminate(); });
     await event(host, 'open'); const issued = event(host, 'message');
     const installationId = randomUUID();
@@ -84,7 +84,7 @@ async function fixture() {
     return { host, key, invitation: pairing.key, hostId, installationId };
   }
   async function rename(device: { key: string; installationId: string }, name: string) {
-    const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${device.key}` } });
+    const host = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${device.key}` } });
     cleanups.push(async () => { host.terminate(); });
     await event(host, 'open'); const registered = event(host, 'message');
     host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: device.installationId, name, providers: [{ providerId: 'codex', displayName: 'Codex' }] }));

@@ -19,32 +19,6 @@ function socket() {
 }
 
 describe('the journal sessions of a Relay', () => {
-  it('tells only the waiting streams of the returned Host that it is back', async () => {
-    const head = { snapshot: headSnapshot, observedAt: 1 };
-    const sessions = createJournalSessions({
-      journals: { status: async () => ({ cursor: { epoch: 'e', seq: 0 }, head } as never), page: async () => undefined, unserve: () => undefined },
-      gate: { readingEnabled: () => true, served: () => true, loadServed: async () => undefined },
-      requestFill: async () => ({}) as never,
-      requestOlder: async () => ({ olderAvailable: false }),
-      scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
-    });
-    const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
-    const attach = (hostId: string, sessionKey: string) => {
-      const { client, closed } = socket();
-      const stream = sessions.attach({ hostId, providerId: sessionKey.split(":")[0]!, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
-      stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
-      return { stream, closed };
-    };
-    const first = attach('host-1', 'codex:a');
-    const second = attach('host-1', 'codex:b');
-    const other = attach('host-2', 'codex:a');
-    await new Promise(resolve => setTimeout(resolve, 20));
-    sessions.hostReturned('host-1');
-    expect(first.closed).toEqual([[1012, 'Remote Host reconnected']]);
-    expect(second.closed).toEqual([[1012, 'Remote Host reconnected']]);
-    expect(other.closed).toEqual([]);
-  });
-
   /** A session over a real journal whose bodies can be evicted, with fills and older reads that wait for the test. */
   async function journalSessions(options: { evict?: boolean; anchored?: boolean } = {}) {
     const journal = SessionJournal.create('host-1:codex:thread-1');
@@ -230,7 +204,7 @@ describe('stopping journal-served streams', () => {
     const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
     const attach = (hostId: string, sessionKey: string, providerId = sessionKey.split(':')[0]!) => {
       const { client, closed } = socket();
-      sessions.attach({ hostId, providerId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline });
+      sessions.attach({ hostId, providerId, sessionKey, publicAgentId: 'agent', client, hostStreams: offline, readNativeOwner: async () => undefined });
       return closed;
     };
     return { sessions, attach };
@@ -278,7 +252,7 @@ describe('a journal that has no head although the index said it had one', () => 
     });
     const offline: HostStreamOpener = { open: async () => { throw Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }); } };
     const { client, closed } = socket();
-    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams: offline });
+    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams: offline, readNativeOwner: async () => undefined });
     stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(unserved).toEqual(['host-1/codex:a']);
@@ -299,12 +273,13 @@ describe('a journal that cannot be read', () => {
       requestOlder: async () => ({ olderAvailable: false }),
       scheduler: { setTimeout: () => 0, clearTimeout: () => undefined },
     });
-    let ready!: () => void;
-    const hostStreams: HostStreamOpener = { open: async sink => { ready = () => sink.ready(); return { send: () => undefined, close: () => undefined }; } };
+    const hostStreams: HostStreamOpener = { open: async () => ({ send: () => undefined, close: () => undefined }) };
     const { client, closed } = socket();
-    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams });
+    const stream = sessions.attach({ hostId: 'host-1', providerId: 'codex', sessionKey: 'codex:a', publicAgentId: 'agent', client, hostStreams, readNativeOwner: async () => undefined });
     stream.receive(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
-    return { unserved, closed, ready: () => ready(), opened: () => { if (ready === undefined) throw new Error('not opened'); } };
+    /** Something is published while negotiation is being answered, so the head is read again once it is sent. */
+    const publishedDuringNegotiation = () => sessions.published('host-1', 'codex:a', { events: [{ kind: 'head', head: { snapshot: headSnapshot, observedAt: 2 } as never }], watermark: 1, cursor: { epoch: 'e', seq: 0 } });
+    return { unserved, closed, publishedDuringNegotiation };
   }
 
   it('leaves the head index, so the reconnect is read through the Controller, when negotiating fails', async () => {
@@ -315,16 +290,14 @@ describe('a journal that cannot be read', () => {
 
   it('leaves the head index when refreshing the head fails', async () => {
     const f = build([async () => status, () => Promise.reject(new Error('store unavailable'))]);
-    await vi.waitFor(f.opened);
-    f.ready();
+    f.publishedDuringNegotiation();
     await vi.waitFor(() => expect(f.closed).toEqual([[1011, 'Session journal could not be read']]));
     expect(f.unserved).toEqual(['host-1/codex:a']);
   });
 
   it('leaves the head index when the head is gone at a refresh', async () => {
     const f = build([async () => status, async () => undefined]);
-    await vi.waitFor(f.opened);
-    f.ready();
+    f.publishedDuringNegotiation();
     await vi.waitFor(() => expect(f.closed).toEqual([[1012, 'Session journal unavailable']]));
     expect(f.unserved).toEqual(['host-1/codex:a']);
   });

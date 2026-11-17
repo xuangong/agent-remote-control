@@ -23,7 +23,7 @@ async function setup(options = {}) {
   return { url, post, server };
 }
 async function host(url: string, key: string, installationId = 'native-installation') {
-  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
   await once(socket, 'open');
   const registration = once(socket, 'message');
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: 'My DSH', providerId: 'dsh' }));
@@ -31,7 +31,7 @@ async function host(url: string, key: string, installationId = 'native-installat
   return { socket, id: result.hostId as string };
 }
 async function providerHost(url: string, key: string, installationId = 'provider-installation') {
-  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
   await once(socket, 'open');
   const registration = once(socket, 'message');
   const providers = [{ providerId: 'codex', displayName: 'Codex' }, { providerId: 'example', displayName: 'Example' }];
@@ -121,7 +121,7 @@ describe('Remote Host broker', () => {
   it('requires keys for uplinks and exact local origin for key creation', async () => {
     const f = await setup();
     expect((await fetch(f.url + '/v1/remote/pairings', { method: 'POST', headers: { origin: 'https://untrusted.example', 'content-type': 'application/json' }, body: '{}' })).status).toBe(403);
-    const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host');
+    const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1');
     const rejection = await new Promise<number>((resolve) => socket.once('unexpected-response', (_, response) => { resolve(response.statusCode!); response.resume(); }));
     expect(rejection).toBe(401); socket.terminate(); socket.on('error', () => undefined);
   });
@@ -362,12 +362,12 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
 it('rejects expired credentials and prevents a bound key from registering another installation', async () => {
   const expired = await setup({ keyLifetimeMs: -1 });
   const expiredPair = await (await expired.post('/v1/remote/pairings')).json();
-  const socket = new WebSocket(expired.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${expiredPair.key}` } });
+  const socket = new WebSocket(expired.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${expiredPair.key}` } });
   socket.on('error', () => undefined);
   expect(await new Promise<number>((resolve) => socket.once('unexpected-response', (_, response) => { resolve(response.statusCode!); response.resume(); socket.terminate(); }))).toBe(401);
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();
   const original = await host(f.url, pair.key, 'first-installation');
-  const foreign = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const foreign = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(foreign, 'open'); const closing = once(foreign, 'close');
   foreign.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'other-installation', name: 'Other', providerId: 'dsh' }));
   expect((await closing)[0]).toBe(1008);

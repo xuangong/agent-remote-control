@@ -50,7 +50,7 @@ it('isolates real Host registration, catalog and session forwarding by gateway u
   const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string; serverUrl: string };
   expect(pair.serverUrl).toBe(f.url);
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open');
   const registered = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'same-installation', name: 'Alice Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
@@ -108,7 +108,7 @@ it('enforces exact Origin, HttpOnly cookie and no query token authentication', a
 it('stops an already-open browser stream when its grant expires', async () => {
   const f = await setup(); const alice = await f.login('alice');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registered = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'expiry-host', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   const [raw] = await registered; const { hostId } = JSON.parse(raw.toString());
@@ -129,7 +129,7 @@ it('stops an already-open browser stream when its grant expires', async () => {
 it('still requires recent authentication for production permission changes on a real session WebSocket', async () => {
   const f = await setup(); const alice = await f.login('alice');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` }, handshakeTimeout: 3000 });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` }, handshakeTimeout: 3000 });
   await once(host, 'open'); const registration = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'production-permissions', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   const { hostId } = JSON.parse((await registration)[0].toString());
@@ -163,7 +163,7 @@ it('still requires recent authentication for production permission changes on a 
 it('keeps the same installation ID isolated across users and restores an owner Host on reconnect', async () => {
   const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob');
   async function connect(key: string) {
-    const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     await once(host, 'open'); const received = once(host, 'message');
     host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'collision', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     return { host, id: JSON.parse((await received)[0].toString()).hostId as string };
@@ -212,7 +212,7 @@ async function control(url: string, value: Record<string, unknown>) {
 it('shares one Host with cumulative quotas and revokes only the recipient streams', async () => {
   const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob'); const eve = await f.login('eve');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registration = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'shared-host', name: 'Shared Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   const hostId = JSON.parse((await registration)[0].toString()).hostId as string;
@@ -262,7 +262,7 @@ it('shares one Host with cumulative quotas and revokes only the recipient stream
 async function sharedFixture() {
   const f = await setup(); const owner = await f.login('owner'); const user = await f.login('user');
   const pair = await (await owner.request('v1/remote/pairings', {})).json() as { key: string };
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registered = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'quota-host', name: 'Quota Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   const hostId = JSON.parse((await registered)[0].toString()).hostId as string;
@@ -324,7 +324,7 @@ it('drops buffered user commands when sharing is revoked before the Host acknowl
 it('reuses a hosted channel for isolated session subscriptions and rechecks user access', async () => {
   const f = await setup(); const alice = await f.login('alice'); const bob = await f.login('bob');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
-  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+  const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registered = once(host, 'message');
   host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'channel-host', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   const hostId = JSON.parse((await registered)[0].toString()).hostId as string;

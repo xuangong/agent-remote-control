@@ -232,6 +232,8 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     return { cookie, browserCookie: browser, ticket, loginCookie, ...await response.json() as { basePath: string } };
   }
   async function upgradeResponse(path: string, headers: Record<string, string>, requestOrigin = origin) {
+    // A Controller of this release offers session control on every uplink.
+    if (path.startsWith('/ws/remote-host') && !path.includes('control=1')) path += `${path.includes('?') ? '&' : '?'}control=1`;
     const response = await requestAt(requestOrigin, path, { headers: { ...headers, upgrade: 'websocket' } });
     expect(response.status).toBe(101); const socket = response.webSocket!; socket.accept(); sockets.push(socket); return { response, socket };
   }

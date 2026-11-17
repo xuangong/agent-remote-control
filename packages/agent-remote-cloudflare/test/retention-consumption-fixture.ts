@@ -59,7 +59,7 @@ export function retentionPeer(relay: RelayState, auth: GatewayAuthOptions) {
       onMessage(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
       onClose(listener) { closers.add(listener); return () => { closers.delete(listener); }; }, onError() { return () => {}; },
     };
-    const upgrade = await broker.prepareUpgrade(new Request(auth.origin + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } }));
+    const upgrade = await broker.prepareUpgrade(new Request(auth.origin + '/ws/remote-host?control=1&successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } }));
     if (!upgrade || upgrade instanceof Response) throw new Error('Retention fixture authorization refused.');
     sockets.push(socket); active = { send, socket }; upgrade.accept(socket);
     await send({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Host', credentialRotation: true, providers: [{ providerId: 'fixture', displayName: 'Fixture' }], ...metadata });

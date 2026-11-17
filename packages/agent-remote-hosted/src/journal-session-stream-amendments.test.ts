@@ -34,7 +34,7 @@ function fixture() {
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const scheduler = { setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: (timer: unknown) => { timers.delete(timer as number); } };
-  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
+  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler, readNativeOwner: async () => undefined });
   const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
     journal, sent, closes, at, stream, sink: () => sink!, timers,
@@ -46,11 +46,16 @@ function fixture() {
     },
     async ready(subscribe = true) {
       stream.receive(frame({ type: 'negotiate' }));
-      await vi.waitFor(() => expect(sink).toBeDefined());
       if (subscribe) stream.receive(frame({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
       await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(subscribe ? 4 : 3));
-      sink!.ready();
-      await vi.waitFor(() => expect(sent.at(-1)?.type).toBe('agent_update'));
+    },
+    /** Acquires control and sends one message, which opens the Controller stream. */
+    async withController() {
+      const control = sent.filter(message => message.type === 'session_control').at(-1)!.payload;
+      stream.receive(frame({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'control-1', revision: control.revision, action: 'acquire' } }));
+      await vi.waitFor(() => expect(sent.at(-1)?.payload.token).toBeDefined());
+      stream.receive(frame({ type: 'send_message', controlToken: sent.at(-1)!.payload.token, payload: { requestId: 'send-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: 'agent', text: 'Hi' } }));
+      await vi.waitFor(() => expect(sink).toBeDefined());
     },
     published,
   };
@@ -103,6 +108,7 @@ describe('pending interactions on a journal-served stream', () => {
   it('never forward the interaction frames of the Controller, and keep no timer for them', async () => {
     const f = fixture();
     await f.ready();
+    await f.withController();
     const before = f.sent.length;
     f.stream.deliver(f.setHead([request]));
     f.fromController({ type: 'interaction_requested', payload: { agentId: 'agent', request } });

@@ -1,4 +1,5 @@
 import type { JournalPageRequest, JournalPageResult } from '@orchardworks/agent-remote-journal';
+import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 
 import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 import type { HostStreamOpener } from './journal-host-stream.js';
@@ -38,6 +39,8 @@ export interface JournalSessionAttachment {
   publicAgentId: string;
   client: Pick<RelaySocket, 'readyState' | 'bufferedAmount' | 'send' | 'close'>;
   hostStreams: HostStreamOpener;
+  /** Asks the Controller who holds the session natively; see `JournalSessionStreamOptions`. */
+  readNativeOwner(): Promise<NativeSessionOwner | undefined>;
 }
 
 export interface JournalSessions {
@@ -53,8 +56,6 @@ export interface JournalSessions {
   attach(attachment: JournalSessionAttachment): JournalSessionStream;
   /** Delivers what a stored publication changed to the streams subscribed to the session. */
   published(hostId: string, sessionKey: string, result: JournalPublished): void;
-  /** The Host's Controller connected again: streams of the Host that wait for it close so their clients reconnect. */
-  hostReturned(hostId: string): void;
 }
 
 /** What the streams of one session share. */
@@ -147,13 +148,12 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
         noHead: () => options.journals.unserve(hostId, sessionKey),
         readFailed: () => options.journals.unserve(hostId, sessionKey),
       };
-      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, scheduler: options.scheduler });
+      const stream = createJournalSessionStream({ publicAgentId: attachment.publicAgentId, client: attachment.client, reads, hostStreams: attachment.hostStreams, readNativeOwner: attachment.readNativeOwner, scheduler: options.scheduler });
       shared.streams.add(stream);
       shared.clients.set(stream, attachment.client);
       return {
         receive: stream.receive,
         deliver: stream.deliver,
-        hostReturned: stream.hostReturned,
         close() {
           stream.close();
           shared.streams.delete(stream);
@@ -172,16 +172,6 @@ export function createJournalSessions(options: JournalSessionsOptions): JournalS
       for (const stream of [...shared.streams]) {
         try { stream.deliver(result); }
         catch { /* One stream's failure does not stop the others. */ }
-      }
-    },
-
-    hostReturned(hostId) {
-      for (const shared of [...sessions.values()]) {
-        if (shared.hostId !== hostId) continue;
-        for (const stream of [...shared.streams]) {
-          try { stream.hostReturned(); }
-          catch { /* One stream's failure does not stop the others. */ }
-        }
       }
     },
   };

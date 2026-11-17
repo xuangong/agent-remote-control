@@ -67,7 +67,7 @@ it('restores enrolled Hosts with the same credentials and enforces device revoca
   const f = await fixture(); const prefix = f.state.basePath;
   const pair = await (await f.request(prefix + 'v1/remote/pairings', {})).json();
   async function connect() {
-    const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${pair.key}` } });
+    const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
     await once(host, 'open'); const result = once(host, 'message');
     host.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'persistent', name: 'Saved Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     const issued = JSON.parse((await result)[0].toString());

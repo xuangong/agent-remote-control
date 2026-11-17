@@ -238,7 +238,7 @@ async function controller(f: Awaited<ReturnType<typeof fixture>>, failAtCommit =
   let decline = false, loseRelease = false;
   let describeHold: { entered(): void; waiting: Promise<void> } | undefined;
   async function connect(recipientAware = teamRecipients, teamSuccession = false) {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}${teamSuccession ? '&teamSuccession=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + `/ws/remote-host?control=1&successionEnrollment=${enrollmentVersion}&team=1${recipientAware ? '&teamRecipients=1' : ''}${teamSuccession ? '&teamSuccession=1' : ''}`, { headers: { authorization: 'Bearer ' + f.credential } }); sockets.push(socket);
     socket.on('message', async (data: { toString(): string }) => {
       const message = JSON.parse(data.toString());
       if (message.type === 'heartbeat') { socket.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce })); return; }
@@ -834,7 +834,7 @@ async function sourceController(f: Awaited<ReturnType<typeof fixture>>, respond?
   const witness = new Map<string, string>();
   const nativeId = 'reader-"\\', agentId = 'agent-"\\\n';
   async function connect() {
-    const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer ' + f.credential } });
+    const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?control=1&successionEnrollment=2', { headers: { authorization: 'Bearer ' + f.credential } });
     const registered = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Source Controller registration deadline')), 3000);
       socket.on('message', async (data: { toString(): string }) => {
@@ -1216,7 +1216,7 @@ function fillFeatureBudget(state: HostedRelayState) {
   expect(deriveSuccessionCapacity(state, costs).featureCharge).toBe(8388608);
 }
 async function recoveryPeer(f: Awaited<ReturnType<typeof fixture>>, key = f.credential) {
-  const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } });
+  const socket = new WebSocket(f.origin.replace('http', 'ws') + '/ws/remote-host?control=1&successionEnrollment=2', { headers: { authorization: 'Bearer ' + key } });
   const messages: any[] = [];
   socket.on('message', (data: { toString(): string }) => {
     const value = JSON.parse(data.toString()); messages.push(value);

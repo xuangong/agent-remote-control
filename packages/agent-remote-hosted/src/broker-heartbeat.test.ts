@@ -59,7 +59,7 @@ async function fixture(options: Partial<HostBrokerOptions> = {}) {
       hosts: [], bindings: [], creations: [] }, ...options });
   closers.push(() => broker.close());
   async function connect(register = true, credentialRotation = false, query = '') {
-    const upgrade = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, {
+    const upgrade = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host?control=1${query.replace('?', '&')}`, {
       headers: { authorization: 'Bearer key' },
     }));
     if (!upgrade || upgrade instanceof Response) throw new Error('Host upgrade rejected');

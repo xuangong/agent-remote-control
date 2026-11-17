@@ -19,7 +19,7 @@ it('checks every TPM reference against the admitted Host across list and mutatio
   let result: object = work;
   try {
     const { key } = await (await request('/v1/remote/pairings', {})).json();
-    socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     await once(socket, 'open'); const registered = once(socket, 'message');
     socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', tpmManagement: true, installationId: 'tpm-refs', name: 'Fixture', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     const [raw] = await registered; const { hostId } = JSON.parse(raw.toString());
@@ -61,7 +61,7 @@ it('forwards TPM requests through one authorized Host uplink and preserves mutat
   let socket: WebSocket | undefined;
   try {
     const { key } = await (await request('/v1/remote/pairings', {})).json();
-    socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     await once(socket, 'open'); const registered = once(socket, 'message');
     socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', tpmManagement: true, installationId: 'tpm-transport-test', name: 'TPM Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     const [raw] = await registered; const { hostId } = JSON.parse(raw.toString());
@@ -123,7 +123,7 @@ it.each(['body-owner', 'body-reconnect', 'rpc-reconnect'] as const)('rejects TPM
   try {
     const { key } = await (await request('/v1/remote/pairings', {})).json();
     async function connect() {
-      const socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
       sockets.push(socket); await once(socket, 'open'); const registered = once(socket, 'message');
       socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', tpmManagement: true, installationId: 'tpm-lifetime', name: 'Fixture', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
       const [raw] = await registered; const value = JSON.parse(raw.toString());

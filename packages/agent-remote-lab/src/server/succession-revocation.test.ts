@@ -79,7 +79,7 @@ async function fixture(saved: unknown = legacyInitial()) {
     read: async () => validateRelayState(JSON.parse(await readFile(path, 'utf8')), auth) };
 }
 async function connect(url: string, credential = 'arc_fixture', installationId = 'installation', register = true, enrollmentVersion: 1 | 2 = 1) {
-  const socket = new WebSocket(url.replace('http:', 'ws:') + `/ws/remote-host?successionEnrollment=${enrollmentVersion}`, { headers: { authorization: `Bearer ${credential}` } });
+  const socket = new WebSocket(url.replace('http:', 'ws:') + `/ws/remote-host?control=1&successionEnrollment=${enrollmentVersion}`, { headers: { authorization: `Bearer ${credential}` } });
   const frames: any[] = [];
   const listeners = new Set<() => void>();
   socket.on('error', () => {});

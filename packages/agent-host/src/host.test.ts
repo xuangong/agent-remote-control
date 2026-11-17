@@ -532,18 +532,10 @@ describe('Agent Host runtime', () => {
       broker.sendStream('lost', { protocolVersion: '1.8.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('lost', 'agent_snapshot')).toBeDefined();
 
-      const claim = async (streamId: string, resumeToken?: string): Promise<string> => {
-        const initial = broker.streamMessage(streamId, 'session_control')!.payload as {revision: string};
-        broker.sendStream(streamId, {protocolVersion: '1.8.0', type: 'session_control_request', payload: {agentId: 'agent', requestId: 'claim-'+streamId, action: 'acquire', revision: initial.revision, resumeToken}});
-        await expect.poll(() => broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)).toBeDefined();
-        return (broker.streamMessage(streamId, 'session_control', 'claim-'+streamId)!.payload as {token: string}).token;
-      };
-      const firstToken = await claim('lost');
-      expect(typeof firstToken).toBe('string');
-      broker.sendStream('lost', { protocolVersion: '1.8.0', type: 'send_message', controlToken: firstToken, payload: {
+      broker.sendStream('lost', { protocolVersion: '1.8.0', type: 'send_message', payload: {
         requestId: 'send-lost', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('lost', { protocolVersion: '1.8.0', type: 'interaction_response', controlToken: firstToken, payload: {
+      broker.sendStream('lost', { protocolVersion: '1.8.0', type: 'interaction_response', payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-lost',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -562,11 +554,10 @@ describe('Agent Host runtime', () => {
       await expect.poll(() => broker.streamOpened('retry')).toBe(true);
       broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'negotiate' });
       await expect.poll(() => broker.streamMessage('retry', 'agent_snapshot')).toBeDefined();
-      const retryToken = await claim('retry', firstToken);
-      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'send_message', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'send_message', payload: {
         requestId: 'send-retry', operationId: operationId('integrated-send'), agentId: 'agent', text: 'Run once.',
       } });
-      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'interaction_response', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'interaction_response', payload: {
         agentId: 'agent', requestId: approval.requestId, submissionId: 'approval-retry',
         operationId: operationId('integrated-approval'), response: { kind: 'plan_approval', action: 'approve' },
       } });
@@ -575,7 +566,7 @@ describe('Agent Host runtime', () => {
       expect(session?.sentMessages).toEqual(['Run once.']);
       expect(session?.interactionResponses).toHaveLength(1);
 
-      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'send_message', controlToken: retryToken, payload: {
+      broker.sendStream('retry', { protocolVersion: '1.8.0', type: 'send_message', payload: {
         requestId: 'capacity', operationId: operationId('capacity-send'), agentId: 'agent', text: 'Do not dispatch.',
       } });
       await expect.poll(() => broker.streamMessage('retry', 'protocol_error', 'capacity')).toMatchObject({
@@ -606,20 +597,19 @@ describe('Agent Host runtime', () => {
       expect(opens).toBe(1);
       expect(session.observeCount).toBe(1);
 
-      const firstToken = await openControlledPage(broker, 'first-page', 'first-proposal');
-      const secondToken = await openControlledPage(broker, 'second-page', 'first-proposal');
-      expect(secondToken).not.toBe(firstToken);
+      await openPage(broker, 'first-page', 'first-proposal');
+      await openPage(broker, 'second-page', 'first-proposal');
       for (const streamId of ['first-page', 'second-page']) {
         broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'timeline_subscription', payload: {
           requestId: `subscribe-${streamId}`, agentIds: ['first-proposal'],
         } });
         await expect.poll(() => broker.streamMessage(streamId, 'timeline_subscribed', `subscribe-${streamId}`)).toBeDefined();
       }
-      for (const [streamId, token, text] of [
-        ['first-page', firstToken, 'From the first page.'],
-        ['second-page', secondToken, 'From the second page.'],
+      for (const [streamId, text] of [
+        ['first-page', 'From the first page.'],
+        ['second-page', 'From the second page.'],
       ] as const) {
-        broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'send_message', controlToken: token, payload: {
+        broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'send_message', payload: {
           agentId: 'first-proposal', requestId: `send-${streamId}`, operationId: operationId(`shared-${streamId}`), text,
         } });
         await expect.poll(() => broker.streamMessage(streamId, 'command_acknowledged', `send-${streamId}`)).toBeDefined();
@@ -638,7 +628,7 @@ describe('Agent Host runtime', () => {
       broker.closeStream('first-page');
       await new Promise(resolve => setTimeout(resolve, 220));
       expect(session.disposed).toBe(false);
-      broker.sendStream('second-page', { protocolVersion: '1.8.0', type: 'send_message', controlToken: secondToken, payload: {
+      broker.sendStream('second-page', { protocolVersion: '1.8.0', type: 'send_message', payload: {
         agentId: 'first-proposal', requestId: 'send-after-close', operationId: operationId('shared-after-close'), text: 'Still connected.',
       } });
       await expect.poll(() => broker.streamMessage('second-page', 'command_acknowledged', 'send-after-close')).toBeDefined();
@@ -672,11 +662,11 @@ describe('Agent Host runtime', () => {
     try {
       await host.ready;
       expect((await broker.rpc('POST', '/remote/attach', 'agent', { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
-      const firstToken = await openControlledPage(broker, 'first-page', 'agent');
-      const secondToken = await openControlledPage(broker, 'second-page', 'agent');
-      for (const [streamId, token] of [['first-page', firstToken], ['second-page', secondToken]] as const) {
+      await openPage(broker, 'first-page', 'agent');
+      await openPage(broker, 'second-page', 'agent');
+      for (const streamId of ['first-page', 'second-page']) {
         expect(broker.streamMessage(streamId, 'agent_snapshot')).toMatchObject({ payload: { pendingInteractions: [approval] } });
-        broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'interaction_response', controlToken: token, payload: {
+        broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'interaction_response', payload: {
           agentId: 'agent', requestId: approval.requestId, submissionId: `approval-${streamId}`,
           operationId: operationId(`shared-approval-${streamId}`), response: { kind: 'plan_approval', action: 'approve' },
         } });
@@ -1017,20 +1007,14 @@ function summary(providerId: string, nativeSessionId: string) {
     updatedAt: '2026-09-11T00:00:00.000Z', state: 'idle' as const };
 }
 
-async function openControlledPage(broker: Awaited<ReturnType<typeof uplinkBroker>>, streamId: string, agentId: string): Promise<string> {
+async function openPage(broker: Awaited<ReturnType<typeof uplinkBroker>>, streamId: string, agentId: string): Promise<void> {
   broker.openStream(streamId, agentId);
   await expect.poll(() => broker.streamOpened(streamId)).toBe(true);
   broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'negotiate' });
   await expect.poll(() => broker.streamMessage(streamId, 'agent_snapshot')).toBeDefined();
-  await expect.poll(() => broker.streamMessage(streamId, 'session_control')).toBeDefined();
-  const initial = broker.streamMessage(streamId, 'session_control')!.payload as { revision: string };
-  broker.sendStream(streamId, { protocolVersion: '1.8.0', type: 'session_control_request', payload: {
-    agentId, requestId: `acquire-${streamId}`, action: 'acquire', revision: initial.revision,
-  } });
-  await expect.poll(() => broker.streamMessage(streamId, 'session_control', `acquire-${streamId}`)).toMatchObject({
-    payload: { agentId, access: 'control', token: expect.any(String) },
-  });
-  return (broker.streamMessage(streamId, 'session_control', `acquire-${streamId}`)!.payload as { token: string }).token;
+  // The Relay owns session control: the Controller's session wire sends no lease.
+  expect(broker.streamMessage(streamId, 'session_control')).toBeUndefined();
+  void agentId;
 }
 
 it('stops projected native sessions and reports unsupported and failed cancellation separately', async () => {
@@ -1216,8 +1200,8 @@ it.each(['workspace', 'resume'] as const)('preserves confirmed native session un
   const { key } = await pairing!.json();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
-  server.on('connection', async socket => {
-    const prepared = await broker.prepareUpgrade(new Request('http://relay.test/ws/remote-host', { headers: { authorization: `Bearer ${key}` } }));
+  server.on('connection', async (socket, upgrade) => {
+    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
     if (!prepared || prepared instanceof Response) { socket.close(); return; }
     prepared.accept({
       get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
@@ -1273,8 +1257,8 @@ it('reuses a slow native opening after a Relay timeout over a real WebSocket', a
   const { key } = await pairing!.json();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
-  server.on('connection', async socket => {
-    const prepared = await broker.prepareUpgrade(new Request('http://relay.test/ws/remote-host', { headers: { authorization: `Bearer ${key}` } }));
+  server.on('connection', async (socket, upgrade) => {
+    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
     if (!prepared || prepared instanceof Response) { socket.close(); return; }
     const relaySocket: RelaySocket = {
       get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
@@ -1889,8 +1873,8 @@ it('discovers providers and persists owner preferences over a real uplink withou
   const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }), owner);
   const { key } = await pairing!.json();
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(server, 'listening');
-  server.on('connection', async socket => {
-    const prepared = await broker.prepareUpgrade(new Request('http://relay.test/ws/remote-host', { headers: { authorization: `Bearer ${key}` } }));
+  server.on('connection', async (socket, upgrade) => {
+    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
     if (!prepared || prepared instanceof Response) { socket.close(); return; }
     prepared.accept({
       get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },

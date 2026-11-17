@@ -35,7 +35,7 @@ async function setup(options: Partial<RemoteHostBrokerOptions> = {}, initial: Re
 }
 
 async function connect(url: string, key: string, installationId: string, supported = true, append?: (entries: RelayDiagnostic[]) => Promise<void>, capabilityStatus = 200, diagnosticVersion = 1) {
-  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+  const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
   cleanup.push(async () => { socket.terminate(); });
   const batches: RelayDiagnostic[][] = [], calls: string[] = [], errors: unknown[] = [];
   socket.on('message', raw => {

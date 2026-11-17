@@ -49,7 +49,7 @@ it('pairs a portable Host and preserves its catalog and native creation request'
   const credential = await pairing!.json();
   expect(credential.key).toMatch(/^arc_[A-Za-z0-9_-]{43}$/);
   expect(credential.serverUrl).toBe('https://relay.example');
-  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', {
+  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?control=1', {
     headers: { authorization: `Bearer ${credential.key}` },
   }));
   if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
@@ -63,7 +63,7 @@ it('pairs a portable Host and preserves its catalog and native creation request'
   const host = await registered;
   expect(host.type).toBe('registered');
   expect(await (await broker.handleRequest(request('/v1/remote/hosts')))!.json()).toEqual({
-    hosts: [{ id: host.hostId, name: 'Portable Host', online: true, providers: [{ providerId: 'codex', displayName: 'Codex', sessionReferences: true }], providerId: 'codex' }],
+    hosts: [{ id: host.hostId, name: 'Portable Host', online: true, sessionControl: true, providers: [{ providerId: 'codex', displayName: 'Codex', sessionReferences: true }], providerId: 'codex' }],
   });
   const calls: Array<{ method: string; path: string; body?: string }> = [];
   pair.native.onMessage(data => {
@@ -105,7 +105,7 @@ it('sends session commands to a Host that takes them, for its owner only', async
   });
   async function pair(installationId: string, sessionCommands: boolean) {
     const credential = await (await broker.handleRequest(request('/v1/remote/pairings', {}), alice))!.json();
-    const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', { headers: { authorization: `Bearer ${credential.key}` } }));
+    const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?control=1', { headers: { authorization: `Bearer ${credential.key}` } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const sockets = transportPair();
     const registered = new Promise<{ hostId: string }>(resolve => {
@@ -156,7 +156,7 @@ const restoredState: RemoteHostBrokerState = {
 async function restoredFixture(options: Partial<import('./broker.js').HostBrokerOptions> = {}, query = '') {
   const broker = createHostBroker({ origin: 'https://relay.example', initialState: restoredState, now: () => 10_000, rpcTimeoutMs: 1000, ...options });
   close.push(() => broker.close());
-  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${query}`, { headers: { authorization: 'Bearer arc_fixture' } }));
+  const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host?control=1${query.replace('?', '&')}`, { headers: { authorization: 'Bearer arc_fixture' } }));
   if (!prepared || prepared instanceof Response) throw new Error('Known SHA-256 credential was rejected');
   const pair = transportPair();
   const registered = new Promise<string>(resolve => pair.native.onMessage(data => {
@@ -607,7 +607,7 @@ it('does not acknowledge or publish failed asynchronous Host registration', asyn
   const broker = createHostBroker({ origin: 'https://relay.example', ownerSubject: 'alice', durable: true,
     initialState: restoredState, now: () => 10_000, onStateChange: () => { entered.resolve(); return held.promise; } });
   close.push(() => broker.close());
-  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', { headers: { authorization: 'Bearer arc_fixture' } }));
+  const prepared = await broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?control=1', { headers: { authorization: 'Bearer arc_fixture' } }));
   if (!prepared || prepared instanceof Response) throw new Error('Host preparation failed');
   const pair = transportPair(); pair.native.onMessage(data => { frames.push(data); }); prepared.accept(pair.server);
   const receiving = Promise.all([...pair.server.messages].map(listener => listener('{"uplinkVersion":2,"type":"register","installationId":"restored-installation","name":"Changed name","providers":[{"providerId":"codex","displayName":"Codex"}]}', false)));
@@ -701,7 +701,7 @@ it('binds a temporary credential to only one installation during concurrent regi
   const broker = createHostBroker({ origin: 'https://relay.example', durable: true, initialState, now: () => 10000,
     onStateChange: async () => { if (++commits === 1) { entered.resolve(); await held.promise; } } });
   close.push(() => broker.close());
-  const prepare = () => broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host', { headers: { authorization: 'Bearer arc_fixture' } }));
+  const prepare = () => broker.prepareUpgrade(new Request('https://relay.example/ws/remote-host?control=1', { headers: { authorization: 'Bearer arc_fixture' } }));
   const first = await prepare(); const second = await prepare();
   if (!first || first instanceof Response || !second || second instanceof Response) throw new Error('Known key rejected');
   const a = transportPair(); const b = transportPair(); first.accept(a.server); second.accept(b.server);

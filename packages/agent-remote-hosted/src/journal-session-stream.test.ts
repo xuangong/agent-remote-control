@@ -1,10 +1,10 @@
 import { bodyFromRow, SessionJournal } from '@orchardworks/agent-remote-journal';
-import { PROTOCOL_VERSION, SESSION_CAPACITY_CLOSE_CODE, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
-import { CAPACITY_CLOSE_REASON, createJournalSessionStream, PENDING_CONTROL_REVISION, type JournalReads } from './journal-session-stream.js';
+import { createJournalSessionStream, type JournalReads } from './journal-session-stream.js';
 import { BROKER_MAX_FRAME_BYTES } from './transport.js';
 
 type Wire = Record<string, any>;
@@ -24,7 +24,8 @@ const negotiate = message({ type: 'negotiate' });
 let counter = 0;
 const pageRequest = (direction: 'tail' | 'before' | 'after', cursor?: { epoch: string; seq: number }, limit = 100) =>
   message({ type: 'timeline_request', payload: { requestId: `page-${++counter}`, agentId: 'agent', direction, limit, ...(cursor ? { cursor } : {}) } });
-const sendMessage = message({ type: 'send_message', payload: { requestId: 'send-1', operationId: OPERATION, agentId: 'agent', text: 'Hi' } });
+const sendMessage = (controlToken?: string) => message({ type: 'send_message', ...(controlToken === undefined ? {} : { controlToken }), payload: { requestId: 'send-1', operationId: OPERATION, agentId: 'agent', text: 'Hi' } });
+const acquireRequest = (revision: string, requestId = 'control-1') => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision, action: 'acquire' } });
 
 interface FixtureOptions {
   head?: boolean; evictBodies?: boolean; hostOpen?: Error; hostHang?: boolean; olderFails?: boolean;
@@ -39,6 +40,8 @@ interface FixtureOptions {
   fillGate?: Promise<void>;
   /** The browser socket's close throws like a WebSocket's for a reason over 123 bytes, or for every close. */
   closeThrows?: 'long reason' | 'always';
+  /** What the Controller says when asked who holds the session natively. */
+  nativeOwner?: { kind: 'native_cli' | 'controller'; generation: string };
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -52,7 +55,7 @@ function fixture(options: FixtureOptions = {}) {
   if (options.head !== false) journal.setHead(at(), { snapshot: snapshot(), observedAt: 5 });
   if (options.evictBodies) journal.evict(0);
   let olderBeyondJournal = true;
-  const calls = { fill: [] as string[][], older: [] as number[], pages: [] as Array<{ limit: number }>, hostOpens: 0 };
+  const calls = { fill: [] as string[][], older: [] as number[], pages: [] as Array<{ limit: number }>, hostOpens: 0, ownerReads: 0 };
   const reads: JournalReads = {
     status: async () => {
       const read = { cursor: journal.cursor, ...(journal.head ? { head: journal.head } : {}) };
@@ -100,7 +103,7 @@ function fixture(options: FixtureOptions = {}) {
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const scheduler = { setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: (timer: unknown) => { timers.delete(timer as number); } };
-  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler });
+  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler, readNativeOwner: async () => { calls.ownerReads += 1; return options.nativeOwner; } });
   const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
     journal, stream, client, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
@@ -115,18 +118,35 @@ function fixture(options: FixtureOptions = {}) {
       return published([{ kind: 'head', head: journal.head! }]);
     },
     async negotiated(raw = negotiate) { this.stream.receive(raw); await vi.waitFor(() => expect(this.sent.length).toBeGreaterThanOrEqual(2)); },
+    /** The control state the Relay last sent. */
+    control: () => sent.filter(frame => frame.type === 'session_control').at(-1)!.payload as Wire,
+    /** The Controller accepts the stream the Relay opened. */
+    async accepted() { await vi.waitFor(() => expect(hostWrites.length).toBeGreaterThanOrEqual(1)); sink!.ready(); },
+    /** Negotiates and acquires control; the token that grants it. */
+    async controlled(): Promise<string> {
+      await this.negotiated();
+      this.stream.receive(acquireRequest(this.control().revision));
+      await vi.waitFor(() => expect(this.control().token).toBeDefined());
+      return this.control().token;
+    },
   };
 }
 
 describe('a journal-served session stream', () => {
-  it('answers negotiation from the journal head and opens the Controller stream in the background', async () => {
+  it('answers negotiation and control from the Relay, and opens no Controller stream until something is sent', async () => {
     const f = fixture();
     f.stream.receive(negotiate);
     await vi.waitFor(() => expect(f.types()).toEqual(['negotiated', 'agent_snapshot', 'session_control']));
     expect(f.sent[0]).toMatchObject({ sessionControl: true });
-    expect(f.sent[1]!.payload).toMatchObject({ id: 'agent', status: 'idle', runtimeInfo: { connection: { state: 'restoring' } } });
-    expect(f.sent[2]!.payload).toEqual({ agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false });
-    await vi.waitFor(() => expect(f.hostWrites).toEqual([{ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }]));
+    expect(f.sent[1]!.payload).toMatchObject({ id: 'agent', status: 'idle' });
+    expect(f.sent[1]!.payload.runtimeInfo.connection).toBeUndefined();
+    expect(f.sent[2]!.payload).toMatchObject({ agentId: 'agent', access: 'read_only', available: true });
+    const token = await f.controlled();
+    expect(token).toEqual(expect.any(String));
+    expect(f.control()).toMatchObject({ access: 'control', available: true, requestId: 'control-1' });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(f.calls.hostOpens).toBe(0);
+    expect(f.hostWrites).toEqual([]);
   });
 
   it('requires negotiation first, and closes when the journal has no head any more', async () => {
@@ -164,14 +184,10 @@ describe('a journal-served session stream', () => {
     expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'timeline_replacement', payload: { agentId: 'agent', epoch: 'epoch-2' } });
   });
 
-  it('sends head changes as updates, showing the runtime as restoring until the Controller stream is ready', async () => {
+  it('sends head changes as updates, as the Controller published them', async () => {
     const f = fixture();
     await f.negotiated();
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
     f.stream.deliver(f.setHead('running'));
-    expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { id: 'agent', status: 'running', runtimeInfo: { connection: { state: 'restoring' } } } });
-    f.sink().ready();
-    await vi.waitFor(() => expect(f.sent.at(-1)!.payload.runtimeInfo.connection).toBeUndefined());
     expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { id: 'agent', status: 'running' } });
     f.stream.deliver(f.setHead('idle'));
     expect(f.sent.at(-1)).toMatchObject({ type: 'agent_update', payload: { status: 'idle' } });
@@ -216,10 +232,12 @@ describe('a journal-served session stream', () => {
     expect(f.sent.at(-1)!.payload).toMatchObject({ entries: [], hasOlder: true });
   });
 
-  it('drops the read-path frames of the Controller session, forwards the rest and rewrites the pending control revision', async () => {
+  it('drops the read-path frames of the Controller session and forwards the rest', async () => {
     const f = fixture();
-    await f.negotiated();
-    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await f.accepted();
+    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(2));
     const fromController = (fields: Wire) => f.sink().frame(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields }));
     const before = f.sent.length;
     fromController({ type: 'negotiated', sessionControl: true });
@@ -230,120 +248,127 @@ describe('a journal-served session stream', () => {
     expect(f.sent).toHaveLength(before);
     fromController({ type: 'command_acknowledged', payload: { requestId: 'send-1', agentId: 'agent', command: 'send_message' } });
     expect(f.sent.at(-1)).toMatchObject({ type: 'command_acknowledged' });
-    f.stream.receive(message({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'control-1', revision: PENDING_CONTROL_REVISION, action: 'acquire' } }));
-    expect(f.hostWrites).toHaveLength(1);
-    fromController({ type: 'session_control', payload: { agentId: 'agent', revision: 'rev-1', access: 'read_only', available: true } });
-    expect(f.sent.at(-1)).toMatchObject({ type: 'session_control', payload: { revision: 'rev-1' } });
-    expect(f.hostWrites.at(-1)).toMatchObject({ type: 'session_control_request', payload: { requestId: 'control-1', revision: 'rev-1', action: 'acquire' } });
-    f.stream.receive(message({ type: 'session_control_request', payload: { agentId: 'agent', requestId: 'control-2', revision: 'rev-1', action: 'take_over' } }));
-    expect(f.hostWrites.at(-1)).toMatchObject({ payload: { requestId: 'control-2', revision: 'rev-1' } });
+  });
+
+  it('grants control without the Controller, refuses a stale revision, and refuses a mutation without a live grant before it reaches the Controller', async () => {
+    const f = fixture();
+    await f.negotiated();
+    f.stream.receive(acquireRequest('not-the-revision'));
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'control-1', code: 'session_control_changed', recoverable: true } });
+    f.stream.receive(sendMessage());
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'session_read_only', recoverable: true } });
+    f.stream.receive(sendMessage('forged'));
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(`${token}x`));
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
+    expect(f.calls.hostOpens).toBe(0);
   });
 
   it('holds operations for the Controller stream, behind the Relay\'s own negotiation', async () => {
     const f = fixture();
-    await f.negotiated();
-    f.stream.receive(sendMessage);
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await f.accepted();
     await vi.waitFor(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
     expect(f.hostWrites[1]).toMatchObject({ payload: { requestId: 'send-1', agentId: 'agent', text: 'Hi' } });
     expect(f.types().filter(type => type === 'agent_snapshot')).toHaveLength(1);
   });
 
-  it('answers operations with the reason when the Controller stream cannot open, and keeps serving reads', async () => {
-    const f = fixture({ hostOpen: Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }) });
-    await f.negotiated();
-    f.stream.receive(sendMessage);
+  const offline = () => Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' });
+
+  it('answers an operation with the reason while the Host is offline, keeps control and reads, and delivers the next one once the Host is back', async () => {
+    const f = fixture({ hostOpen: offline() });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
     await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
       payload: { requestId: 'send-1', code: 'host_offline', message: 'The Remote Host is offline.', recoverable: true } }));
+    expect(f.control()).toMatchObject({ access: 'control', token });
     f.stream.receive(pageRequest('tail'));
     await vi.waitFor(() => expect(f.sent.at(-1)?.type).toBe('timeline_page'));
     expect(f.closed).toEqual([]);
-  });
-
-  const offline = () => Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' });
-  const controlRequest = (action: 'acquire' | 'take_over', requestId: string) =>
-    message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action } });
-  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
-
-  it('answers an acquire with the pending control state while the Host is offline, and keeps the stream open', async () => {
-    const f = fixture({ hostOpen: offline() });
-    await f.negotiated();
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
-    await settle();
-    f.stream.receive(controlRequest('acquire', 'control-1'));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'session_control',
-      payload: { agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: 'control-1' } }));
-    expect(f.calls.hostOpens).toBe(2);
-    expect(f.types()).not.toContain('protocol_error');
-    f.stream.receive(sendMessage);
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_offline', recoverable: true } }));
+    f.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(2));
     expect(f.closed).toEqual([]);
   });
 
-  it('refuses a take over while the Host is offline', async () => {
-    const f = fixture({ hostOpen: offline() });
-    await f.negotiated();
-    f.stream.receive(controlRequest('take_over', 'control-2'));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error',
-      payload: { requestId: 'control-2', code: 'host_offline', message: 'The Remote Host is offline.', recoverable: true } }));
+  it('shows the native owner and revokes control when opening the session is refused for it, and gives control back at the next acquire', async () => {
+    const nativeOwner = { kind: 'native_cli', generation: 'g1' };
+    const f = fixture({ hostOpen: Object.assign(new Error('A terminal holds it.'), { code: 'native_session_owned', status: 409, nativeOwner }) });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'session_control', payload: { access: 'read_only', available: false, nativeOwner } }));
+    expect(f.sent.at(-2)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } });
+    expect(f.control().token).toBeUndefined();
+    f.stream.receive(sendMessage(token));
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
+    f.stream.receive(acquireRequest('stale'));
+    expect(f.sent.at(-1)).toMatchObject({ payload: { code: 'session_control_changed' } });
+    f.stream.receive(acquireRequest(f.control().revision, 'control-2'));
+    expect(f.control()).toMatchObject({ access: 'control', available: true, requestId: 'control-2' });
+    expect(f.control().nativeOwner).toBeUndefined();
   });
 
-  it('refuses an acquire when the Controller stream fails to open for another reason', async () => {
-    const f = fixture({ hostOpen: Object.assign(new Error('The session could not be attached.'), { code: 'session_attach_failed' }) });
+  it('learns the owner after a refusal at delivery, which names none, by asking the Controller once', async () => {
+    const nativeOwner = { kind: 'native_cli' as const, generation: 'g2' };
+    const f = fixture({ nativeOwner });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await f.accepted();
+    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(2));
+    f.sink().frame(message({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', message: 'A terminal holds it.', recoverable: true } }));
+    expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned' } });
+    await vi.waitFor(() => expect(f.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
+    expect(f.calls.ownerReads).toBe(1);
+  });
+
+  it('asks who holds the session when the Controller does not accept the stream, and keeps the browser stream', async () => {
+    const nativeOwner = { kind: 'native_cli' as const, generation: 'g3' };
+    const owned = fixture({ nativeOwner });
+    const token = await owned.controlled();
+    owned.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(owned.hostWrites).toHaveLength(1));
+    owned.sink().ended(1011, 'Remote Session restoration failed.');
+    await vi.waitFor(() => expect(owned.control()).toMatchObject({ access: 'read_only', available: false, nativeOwner }));
+    expect(owned.sent.find(frame => frame.type === 'protocol_error')).toMatchObject({ payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } });
+    expect(owned.closed).toEqual([]);
+    const unknown = fixture();
+    const unknownToken = await unknown.controlled();
+    unknown.stream.receive(sendMessage(unknownToken));
+    await vi.waitFor(() => expect(unknown.hostWrites).toHaveLength(1));
+    unknown.sink().ended(1011, 'Remote Session restoration failed.');
+    await vi.waitFor(() => expect(unknown.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_unavailable', recoverable: true } }));
+    expect(unknown.control().access).toBe('control');
+    expect(unknown.closed).toEqual([]);
+  });
+
+  it('keeps the stream open when the Host goes away and comes back with nothing in flight', async () => {
+    const f = fixture();
     await f.negotiated();
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
-    await settle();
-    f.stream.receive(controlRequest('acquire', 'control-3'));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'control-3', code: 'session_attach_failed', recoverable: true } }));
-    expect(f.sent.filter(frame => frame.type === 'session_control' && frame.payload.requestId)).toEqual([]);
-    f.stream.hostReturned();
+    await new Promise(resolve => setTimeout(resolve, 5));
     expect(f.closed).toEqual([]);
-  });
-
-  it('closes a stream that waits for the Host when the Host returns, and leaves every other stream alone', async () => {
-    const waiting = fixture({ hostOpen: offline() });
-    await waiting.negotiated();
-    await vi.waitFor(() => expect(waiting.calls.hostOpens).toBe(1));
-    await settle();
-    waiting.stream.hostReturned();
-    expect(waiting.closed).toEqual([[1012, 'Remote Host reconnected']]);
-    waiting.stream.hostReturned();
-    expect(waiting.closed).toHaveLength(1);
-
-    const connected = fixture();
-    await connected.negotiated();
-    await vi.waitFor(() => expect(connected.hostWrites).toHaveLength(1));
-    connected.stream.hostReturned();
-    expect(connected.closed).toEqual([]);
-
-    const observer = fixture();
-    observer.stream.receive(message({ type: 'negotiate', observation: 'activity' }));
-    await vi.waitFor(() => expect(observer.types()).toEqual(['negotiated', 'agent_activity']));
-    observer.stream.hostReturned();
-    expect(observer.closed).toEqual([]);
-
-    const left = fixture({ hostOpen: offline() });
-    await left.negotiated();
-    await vi.waitFor(() => expect(left.calls.hostOpens).toBe(1));
-    await settle();
-    left.stream.close();
-    left.stream.hostReturned();
-    expect(left.closed).toEqual([]);
+    expect(f.calls.hostOpens).toBe(0);
   });
 
   it('closes the browser stream when the Controller stream ends, and the Controller stream when the browser leaves', async () => {
     const ended = fixture();
-    await ended.negotiated();
-    await vi.waitFor(() => expect(ended.hostWrites).toHaveLength(1));
+    const endedToken = await ended.controlled();
+    ended.stream.receive(sendMessage(endedToken));
+    await ended.accepted();
+    await vi.waitFor(() => expect(ended.hostWrites).toHaveLength(2));
     ended.sink().ended(1012, 'Remote Host disconnected');
     expect(ended.closed).toEqual([[1012, 'Remote Host disconnected']]);
     const left = fixture();
-    await left.negotiated();
-    await vi.waitFor(() => expect(left.hostWrites).toHaveLength(1));
+    const leftToken = await left.controlled();
+    left.stream.receive(sendMessage(leftToken));
+    await left.accepted();
+    await vi.waitFor(() => expect(left.hostWrites).toHaveLength(2));
     left.stream.close();
     expect(left.hostClosed()).toBe(true);
     expect(left.closed).toEqual([]);
+    const sentBefore = left.sent.length;
     left.stream.deliver(left.appendLive('m3', 'ignored'));
-    expect(left.sent).toHaveLength(3);
+    expect(left.sent).toHaveLength(sentBefore);
   });
 
   it('serves an activity observer from the head and the journal cursor, without a Controller stream', async () => {
@@ -365,53 +390,39 @@ describe('a journal-served session stream', () => {
 
 describe('the reasons a Controller stream cannot open', () => {
   const refusal = (code: string, status?: number, extra: Wire = {}) => Object.assign(new Error(`Refused: ${code}.`), { code, ...(status === undefined ? {} : { status }), ...extra });
-  const acquire = (requestId: string) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
 
-  it('closes the browser stream with the capacity code when the limit of streams is reached', async () => {
-    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429), closeThrows: 'long reason' });
-    f.stream.receive(negotiate);
-    await vi.waitFor(() => expect(f.closed).toEqual([[SESSION_CAPACITY_CLOSE_CODE, CAPACITY_CLOSE_REASON]]));
+  it('refuses the message for a full Controller and keeps the browser stream', async () => {
+    const f = fixture({ hostOpen: refusal('session_stream_capacity', 429) });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'session_stream_capacity', recoverable: true } }));
+    expect(f.closed).toEqual([]);
   });
 
   it('cuts a close reason to 123 bytes of whole characters, and survives a socket whose close throws', async () => {
     const long = fixture({ closeThrows: 'long reason' });
-    await long.negotiated();
-    await vi.waitFor(() => expect(long.hostWrites).toHaveLength(1));
+    const longToken = await long.controlled();
+    long.stream.receive(sendMessage(longToken));
+    await long.accepted();
+    await vi.waitFor(() => expect(long.hostWrites).toHaveLength(2));
     long.sink().ended(1012, '\u754c'.repeat(100));
     expect(long.closed).toHaveLength(1);
     expect(Buffer.byteLength(long.closed[0]![1]!)).toBe(123);
     expect(long.closed[0]![1]).toBe('\u754c'.repeat(41));
     const broken = fixture({ closeThrows: 'always' });
-    await broken.negotiated();
-    await vi.waitFor(() => expect(broken.hostWrites).toHaveLength(1));
+    const brokenToken = await broken.controlled();
+    broken.stream.receive(sendMessage(brokenToken));
+    await broken.accepted();
+    await vi.waitFor(() => expect(broken.hostWrites).toHaveLength(2));
     expect(() => broken.sink().ended(1012, 'Remote Host disconnected')).not.toThrow();
   });
 
-  it('answers an acquire with the pending state and the native owner, refuses the rest for good, and tries again on the next message', async () => {
-    const nativeOwner = { kind: 'native_cli', generation: 'g1' };
-    const f = fixture({ hostOpen: refusal('native_session_owned', 409, { nativeOwner }) });
-    await f.negotiated();
-    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
-    await new Promise(resolve => setTimeout(resolve, 0));
-    f.stream.receive(acquire('control-1'));
-    await vi.waitFor(() => expect(f.sent.at(-1)).toEqual({ protocolVersion: PROTOCOL_VERSION, type: 'session_control',
-      payload: { agentId: 'agent', revision: PENDING_CONTROL_REVISION, access: 'read_only', available: false, requestId: 'control-1', nativeOwner } }));
-    f.stream.receive(sendMessage);
-    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'native_session_owned', recoverable: false } }));
-    expect(f.calls.hostOpens).toBe(3);
-    f.stream.hostReturned();
-    expect(f.closed).toEqual([]);
-  });
-
-  it('refuses the held messages with a recoverable error for a server failure and for a timeout', async () => {
-    for (const status of [503, 408, undefined]) {
+  it('refuses a request that cannot succeed for good, and one that can for a retry', async () => {
+    for (const [status, recoverable] of [[503, true], [408, true], [undefined, true], [404, false], [409, false]] as const) {
       const f = fixture({ hostOpen: refusal('session_attach_failed', status) });
-      await f.negotiated();
-      f.stream.receive(acquire('control-1'));
-      f.stream.receive(sendMessage);
-      await vi.waitFor(() => expect(f.sent.filter(frame => frame.type === 'protocol_error').map(frame => frame.payload))
-        .toEqual(expect.arrayContaining([expect.objectContaining({ requestId: 'send-1', recoverable: true })])));
-      expect(f.sent.filter(frame => frame.type === 'session_control' && frame.payload.requestId)).toEqual([]);
+      const token = await f.controlled();
+      f.stream.receive(sendMessage(token));
+      await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', recoverable } }));
       expect(f.closed).toEqual([]);
     }
   });
@@ -525,20 +536,17 @@ describe('a journal-served stream under load', () => {
     f.stream.receive(negotiate);
     f.stream.receive(message({ type: 'timeline_subscription', payload: { requestId: 'sub-1', agentIds: ['agent'] } }));
     f.stream.receive(pageRequest('tail'));
-    f.stream.receive(sendMessage);
     await vi.waitFor(() => expect(f.types()).toContain('timeline_page'));
     expect(f.types().slice(0, 4)).toEqual(['negotiated', 'agent_snapshot', 'session_control', 'timeline_subscribed']);
     expect(f.types()).not.toContain('protocol_error');
-    await vi.waitFor(() => expect(f.hostWrites.map(frame => frame.type)).toEqual(['negotiate', 'send_message']));
   });
 
-  it('counts held control requests against the limit of held messages', async () => {
+  it('counts held messages against the limit of held messages', async () => {
     const f = fixture({ hostHang: true });
-    await f.negotiated();
-    const acquire = (id: number) => message({ type: 'session_control_request', payload: { agentId: 'agent', requestId: `control-${id}`, revision: PENDING_CONTROL_REVISION, action: 'acquire' } });
-    for (let index = 0; index < 16; index++) { f.stream.receive(sendMessage); f.stream.receive(acquire(index)); }
+    const token = await f.controlled();
+    for (let index = 0; index < 32; index++) f.stream.receive(sendMessage(token));
     expect(f.closed).toEqual([]);
-    f.stream.receive(acquire(99));
+    f.stream.receive(sendMessage(token));
     expect(f.closed).toEqual([[1013, 'Remote stream is not ready']]);
   });
 

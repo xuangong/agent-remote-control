@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { NativeSessionOwner, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
 import { sessionIdentityMessage, withoutItemKeysFlag } from './session-identity.js';
+import type { StreamControl } from './stream-control.js';
 import { RELAY_SOCKET_OPEN, type BrokerScheduler, type RelaySocket } from './transport.js';
 
 /** The messages and bytes a stream holds for the Controller before it accepts the stream. */
@@ -18,6 +19,8 @@ export interface HostStreamEntry {
   socket: RelaySocket;
   subject?: string;
   authorized?(): boolean;
+  /** A stream that passes through the Relay: it answers control itself, and says what the Controller's frames mean for it. */
+  control?: StreamControl;
   ready: boolean;
   buffered: string[];
   timer?: unknown;

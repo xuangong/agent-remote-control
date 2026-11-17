@@ -22,7 +22,7 @@ async function fixture(initialState?: RemoteHostBrokerState, afterPersist?: (sta
   const request = (path: string, body?: unknown) => fetch(url + '/v1/' + path, body === undefined ? undefined : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const pair = async () => (await (await request('remote/pairings', {})).json()).key as string;
   const connect = async (key: string, installationId = 'workstation') => {
-    const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     await once(ws, 'open'); const registered = once(ws, 'message');
     ws.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId, name: 'Workstation', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
     let message = JSON.parse((await registered)[0].toString());
@@ -59,7 +59,7 @@ it('rotates the credential for an installation and revokes its active connection
   const newKey = await f.pair(); const next = await f.connect(newKey); await oldClosed;
   expect(next.hostId).toBe(first.hostId);
   const denied = async (url: string, key: string) => new Promise<number>((resolve, reject) => {
-    const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const ws = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     ws.on('error', () => undefined); ws.once('open', () => { ws.terminate(); reject(Error('Accepted revoked key')); });
     ws.once('unexpected-response', (_, res) => { res.resume(); ws.terminate(); resolve(res.statusCode ?? 0); });
   });
@@ -72,7 +72,7 @@ it('rotates the credential for an installation and revokes its active connection
 }, 10000);
 it('rejects late registration on a revoked pending socket without restoring its credential', async () => {
   const f = await fixture(); const invitation = await f.pair(); const { key: oldKey } = await f.connect(invitation);
-  const pending = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${oldKey}` } });
+  const pending = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${oldKey}` } });
   await once(pending, 'open');
   // An uncooperative peer can send frames while the server is awaiting its close acknowledgement.
   const transport = (pending as unknown as { _socket: import('node:net').Socket })._socket;
@@ -90,7 +90,7 @@ it('consumes invitations, rotates only after durable acknowledgement, and restor
   const f = await fixture(); const invitation = await f.pair(); const host = await f.connect(invitation);
   expect(host.key).toMatch(/^arc_device_/); expect(host.key).not.toBe(invitation);
   const rejected = (key: string) => new Promise<number>((resolve, reject) => {
-    const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     socket.on('error', () => {}); socket.once('open', () => { socket.terminate(); reject(Error('Credential unexpectedly accepted')); });
     socket.once('unexpected-response', (_, response) => { response.resume(); socket.terminate(); resolve(response.statusCode ?? 0); });
   });
@@ -116,7 +116,7 @@ it('consumes invitations, rotates only after durable acknowledgement, and restor
 
 it('rejects obsolete clients for new invitations and forwards explicit stop outcomes without revoking the Host', async () => {
   const f = await fixture(); const invitation = await f.pair();
-  const obsolete = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
+  const obsolete = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${invitation}` } });
   await once(obsolete, 'open'); const closed = once(obsolete, 'close');
   obsolete.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'old', name: 'Old', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   expect((await closed)[0]).toBe(1008);
@@ -133,7 +133,7 @@ it('keeps a claimed invitation consumed after interrupted enrollment and recover
     if (state.hosts.length) throw Error('Registration interrupted after persistence');
   });
   const invitation = await first.pair(); const originalExpiry = first.saved()!.keys[0]![1].expires;
-  const socket = new WebSocket(first.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
+  const socket = new WebSocket(first.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${invitation}` } });
   await once(socket, 'open'); const closed = once(socket, 'close');
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'interrupted', name: 'Interrupted Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   expect((await closed)[0]).toBe(1011);
@@ -142,7 +142,7 @@ it('keeps a claimed invitation consumed after interrupted enrollment and recover
   await first.close();
   const restored = await fixture(saved);
   const denied = await new Promise<number>((resolve, reject) => {
-    const replay = new WebSocket(restored.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
+    const replay = new WebSocket(restored.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${invitation}` } });
     replay.on('error', () => undefined);
     replay.once('open', () => { replay.terminate(); reject(Error('Consumed invitation was accepted')); });
     replay.once('unexpected-response', (_, response) => { response.resume(); replay.terminate(); resolve(response.statusCode ?? 0); });
@@ -157,7 +157,7 @@ it('keeps a claimed invitation consumed after interrupted enrollment and recover
 
 it('keeps enrollment offline until credential acknowledgment while an existing Host stays online during rotation', async () => {
   const f = await fixture(); const invitation = await f.pair();
-  const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${invitation}` } });
+  const socket = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${invitation}` } });
   await once(socket, 'open'); const offered = once(socket, 'message');
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', credentialRotation: true, installationId: 'pending', name: 'Pending Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));
   expect(JSON.parse((await offered)[0].toString()).type).toBe('credential_issued');

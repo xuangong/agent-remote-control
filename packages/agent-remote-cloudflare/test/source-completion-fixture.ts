@@ -45,7 +45,7 @@ export async function sourceCompletionBroker(relay: RelayState, auth: GatewayAut
     onMessage(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     onClose(listener) { closers.add(listener); return () => { closers.delete(listener); }; }, onError() { return () => {}; },
   };
-  const upgrade = await broker.prepareUpgrade(new Request(auth.origin + '/ws/remote-host?successionEnrollment=2', { headers: { authorization: 'Bearer arc_fixture' } }));
+  const upgrade = await broker.prepareUpgrade(new Request(auth.origin + '/ws/remote-host?control=1&successionEnrollment=2', { headers: { authorization: 'Bearer arc_fixture' } }));
   if (!upgrade || upgrade instanceof Response) { broker.close(); throw new Error('Fixture Host registration rejected.'); }
   upgrade.accept(socket); send({ uplinkVersion: 2, type: 'register', installationId: 'installation', name: 'Fixture', providers: [{ providerId: 'fixture', displayName: 'Fixture' }] });
   await registration;

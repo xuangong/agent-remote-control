@@ -60,6 +60,12 @@ it('does not pass the flag to the Controller of a journal-served session, whose 
   const controller = await publishedController(r, { strictNegotiate: true });
   const browser = await r.openBrowser();
   await readThrough(browser, controller, { itemKeys: true });
+  // The Controller stream opens for the first message that needs it.
+  const token = (browser.frames.find(frame => frame.type === 'session_control')!.payload as { token?: string }).token;
+  void token;
+  browser.send({ type: 'session_control_request', payload: { agentId: PUBLIC_ID, requestId: 'acquire', revision: browser.frames.find(frame => frame.type === 'session_control')!.payload.revision, action: 'acquire' } });
+  const granted = await browser.take(message => message.type === 'session_control' && message.payload.requestId === 'acquire', 'control');
+  browser.send({ type: 'send_message', controlToken: granted.payload.token, payload: { requestId: 'send-1', operationId: '00000000-0000-4000-8000-000000000001', agentId: PUBLIC_ID, text: 'Hi' } });
   const stream = await until(() => controller.streams[0], 'the Controller stream');
   const negotiates = stream.received.filter(message => message.type === 'negotiate');
   expect(negotiates).toHaveLength(1);

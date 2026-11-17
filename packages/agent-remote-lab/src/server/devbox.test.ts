@@ -142,7 +142,7 @@ it('opens the hosted product without sign-in and retains its opaque browser sess
 it('bootstraps an ordinary Host invitation and preserves its registered identity across restart', async () => {
   const f = await fixture(); const connection = await f.server.getConnection();
   expect(connection.serverUrl).toBe(f.origin);
-  const socket = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${connection.remoteKey}` }, handshakeTimeout: 3000 });
+  const socket = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${connection.remoteKey}` }, handshakeTimeout: 3000 });
   cleanups.push(async () => { socket.terminate(); });
   await once(socket, 'open');
   const message = once(socket, 'message');
@@ -156,7 +156,7 @@ it('bootstraps an ordinary Host invitation and preserves its registered identity
   const first = await request(f.origin + '/auth/status'); const state = await first.json(); const headers = { cookie: cookies(first) };
   expect(await (await request(f.origin + state.basePath + 'v1/remote/hosts', { headers })).json()).toMatchObject({ hosts: [{ id: registration.hostId, online: true }] });
   socket.terminate(); await f.restart();
-  const recovered = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${initial.credential}` }, handshakeTimeout: 3000 });
+  const recovered = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${initial.credential}` }, handshakeTimeout: 3000 });
   cleanups.push(async () => { recovered.terminate(); });
   await once(recovered, 'open'); const next = once(recovered, 'message');
   recovered.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'devbox-native-host', name: 'Devbox Host', credentialRotation: true,
@@ -188,7 +188,7 @@ it('keeps permission changes available on the same Devbox WebSocket after eleven
   let runtime: ReturnType<typeof create> | undefined;
   vi.spyOn(hosted, 'createHostedRelay').mockImplementation(options => runtime = create(options));
   const f = await fixture(); const connection = await f.server.getConnection();
-  const host = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${connection.remoteKey}` }, handshakeTimeout: 3000 });
+  const host = new WebSocket(f.origin.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${connection.remoteKey}` }, handshakeTimeout: 3000 });
   cleanups.push(async () => { host.terminate(); });
   await once(host, 'open');
   const issued = once(host, 'message');

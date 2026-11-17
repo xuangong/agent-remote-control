@@ -18,6 +18,7 @@ import {
   type TimelineCursor,
   type ClientMessage,
   type HistoryPage,
+  type NativeSessionOwner,
   type ResourceResponse,
   type ResourceResolveResponse,
   type ServerMessage,
@@ -79,7 +80,10 @@ export type SessionWireFailure =
   | { kind: 'manager_event_delivery'; error: Error };
 
 export interface SessionWireOptions {
+  /** A transport that is its own Relay leases control here. A Host behind a Relay passes none: the Relay owns the lease. */
   sessionControls?: SessionControlRegistry;
+  /** Who holds the session natively; a mutation is refused while a terminal does, whatever lease the Relay granted. */
+  nativeOwner?: (agentId: string) => NativeSessionOwner | undefined;
   imageScope?: () => string;
   authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'resource_upload' | 'send_message') => boolean | Promise<boolean>;
   executeOperation?: SessionWireOperationExecutor;
@@ -255,7 +259,12 @@ export function createSessionWire(
       sendMessage(protocolError('agent_identity_mismatch', 'Client message identifies a different Agent.', true, requestId));
       return;
     }
-    const assertControl = () => { if (isSessionMutation(message)) control?.assert(message.controlToken); };
+    const assertControl = () => {
+      if (!isSessionMutation(message)) return;
+      if (closed) throw new SessionControlError('session_read_only', 'This connection is closed. Reconnect before operating this session.');
+      if (options.nativeOwner?.(boundAgent.agentId)) throw new SessionControlError('native_session_owned', 'The native client owns this session. Explicitly interrupt it before taking control.');
+      control?.assert(message.controlToken);
+    };
     const executeOperation: SessionWireOperationExecutor = async (agent, operation, work) => {
       assertControl();
       if (options.authorize && !await options.authorize('send_message')) {

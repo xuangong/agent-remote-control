@@ -49,7 +49,7 @@ async function connectedHost(options: { query?: string; journals?: JournalStore 
   const pairing = await (await broker.handleRequest(new Request('https://relay.example/v1/remote/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }), {}))!.json();
   /** One uplink connection of the Controller; calling it again replaces the previous connection. */
   async function attach() {
-    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${options.query ?? '?journal=1'}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
+    const prepared = await broker.prepareUpgrade(new Request(`https://relay.example/ws/remote-host${options.query ?? '?journal=1&control=1'}`, { headers: { authorization: `Bearer ${pairing.key}` } }));
     if (!prepared || prepared instanceof Response) throw new Error('Host upgrade rejected');
     const pair = transportPair();
     const inbox: Wire[] = [];

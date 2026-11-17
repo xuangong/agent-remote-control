@@ -19,7 +19,7 @@ async function fixture(initialState?: RemoteHostBrokerState, initialTime = Date.
     ...(method !== 'GET' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
   const pair = async (purpose = 'host-only') => { const response = await request('', 'POST', { purpose }); expect(response.status).toBe(201); return response.json(); };
   async function connect(key: string) {
-    const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     cleanups.push(async () => socket.terminate()); await event(socket, 'open'); return socket;
   }
   async function enroll(key: string, installationId = 'installation') {
@@ -31,7 +31,7 @@ async function fixture(initialState?: RemoteHostBrokerState, initialTime = Date.
     return { credential, ready: JSON.parse((await ready)[0].toString()), socket };
   }
   async function rejected(key: string) {
-    const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host', { headers: { authorization: `Bearer ${key}` } });
+    const socket = new WebSocket(url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${key}` } });
     cleanups.push(async () => socket.terminate());
     const status = await new Promise<number>(resolve => socket.once('unexpected-response', (_, response) => { response.resume(); resolve(response.statusCode!); }));
     socket.on('error', () => {}); socket.terminate(); expect(status).toBe(401);

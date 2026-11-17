@@ -49,6 +49,12 @@ export class SessionControlRegistry {
     if (!session.nativeOwner && !session.connections.size) this.sessions.delete(agentId);
   }
 
+  /** The terminal or Controller that holds the session natively, if any. */
+  nativeOwnerOf(agentId: string): NativeSessionOwner | undefined {
+    const owner = this.sessions.get(agentId)?.nativeOwner;
+    return owner && { ...owner };
+  }
+
   attach(agentId: string, listener: Listener): SessionControlLease {
     if (this.closed) throw denied('session_read_only', 'Session access is closed. Reconnect before operating this session.');
     let session = this.sessions.get(agentId);

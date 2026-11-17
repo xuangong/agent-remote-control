@@ -172,6 +172,10 @@ Compatibility cleanup was deliberately deferred. The reusable result is the stag
 sequence and preserved management path, not a guarantee that future protocol,
 authentication or launcher changes will be compatible without another audit.
 
+### Session control
+
+Session control is owned by the Relay and negotiated like the Team recipients, with one difference: no window runs both paths. Controllers offer `control=1` on their uplink URL and Relays acknowledge `control: 1` in `registered` only for that offer, per connection and never stored. The session protocol stays 1.8.0 and the uplink version stays 2. With the acknowledgement the Relay answers `session_control_request`, checks the token of every mutation and shows a native owner only from a refusal; the Controller keeps no lease behind a Relay and refuses a mutation while a terminal holds the session. Without it a Controller serves no session (`Update the Relay to open sessions.`), and a Relay answers a session open for that Host with 409 `controller_upgrade_required`. Registration, heartbeat, management and the Controller update request work in both pairs; that is the only compatibility kept. Deploy the Relay first, never roll it back below this release once Controllers are updated, and update every Controller from the Hosts page, where "Update required" marks the ones that cannot open sessions.
+
 ### Team recipient negotiation
 
 The recipient-aware Team contract is negotiated independently of succession enrollment and the compatibility fingerprint. Controllers offer `team=1&teamRecipients=1` on their uplink URL; Relays acknowledge `teamRecipients: 1` in `registered` only for that offer. The acknowledgement is connection-local and is cleared on disconnect. Without it, a current Controller refuses claims and recipient-bearing settlements locally with an upgrade requirement; registration, heartbeat, management RPCs and legacy-safe polling remain available.

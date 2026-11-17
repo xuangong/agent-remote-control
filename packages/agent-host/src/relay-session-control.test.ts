@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { startRelayAndController, TERMINAL, until, type Relay, type Wire } from './test-utils/relay-session-harness.js';
+import { connectLegacyController, SESSION, startRelayAndController, TERMINAL, until, type Relay, type Wire } from './test-utils/relay-session-harness.js';
 
 const started: Relay[] = [];
 afterEach(async () => { for (const relay of started.splice(0)) await relay.dispose(); });
@@ -164,5 +164,32 @@ describe.each([['journal-served', true], ['crude', false]] as const)('taking a %
     await first.take(frame => frame.type === 'session_control' && frame.payload.nativeOwner, 'the owner');
     expect(second.frames.some(frame => frame.type === 'session_control' && frame.payload.nativeOwner)).toBe(false);
     expect((await second.sendText(secondToken, 'also-raced')).payload.code).toBe('native_session_owned');
+  });
+});
+
+describe('a Controller from before session control moved to the Relay', () => {
+  it('registers, appears in the Hosts list and answers update requests, but cannot open sessions until it is updated', async () => {
+    const r = await startRelayAndController({ journalServed: false, withoutController: true });
+    started.push(r);
+    const legacy = await connectLegacyController(r);
+    try {
+      expect(legacy.reply.type).toBe('registered');
+      expect(legacy.reply).not.toHaveProperty('control');
+      const hosts = (await (await r.broker.handleRequest(new Request(`${r.origin}/v1/remote/hosts`)))!.json()) as { hosts: Array<Record<string, unknown>> };
+      expect(hosts.hosts).toHaveLength(1);
+      expect(hosts.hosts[0]).toMatchObject({ name: 'Legacy Host', online: true });
+      expect(hosts.hosts[0]).not.toHaveProperty('sessionControl');
+      const hostId = hosts.hosts[0]!.id as string;
+      // The update path: the Relay asks the Controller for its update state, which the website reads before an update.
+      const update = await r.broker.handleRequest(new Request(`${r.origin}/v1/remote/hosts/${hostId}/controller-update`, { headers: { origin: r.origin } }));
+      expect(update?.status).toBe(200);
+      expect(await update!.json()).toMatchObject({ status: 'idle' });
+      expect(legacy.requests).toContain('GET /remote/controller-update');
+      // Opening a session is refused with the words the page shows, and nothing reaches the Controller's session wire.
+      const attached = await r.broker.handleRequest(new Request(`${r.origin}/v1/remote/hosts/${hostId}/attach`, { method: 'POST', body: JSON.stringify({ providerId: 'fake', nativeSessionId: SESSION }) }));
+      expect(attached?.status).toBe(409);
+      expect(await attached!.json()).toMatchObject({ code: 'controller_upgrade_required', error: expect.stringContaining('Update required') });
+      expect(legacy.received.some(message => message.type === 'stream_open')).toBe(false);
+    } finally { legacy.close(); }
   });
 });

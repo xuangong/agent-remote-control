@@ -319,6 +319,14 @@ the old artifact for rollback, but do not assume an older build can read a newer
 state format. A tested state restore may be necessary. Changes requiring a newer
 Controller must follow the documented compatibility rollout before enabling them.
 
+**Upgrade the Relay before the Controllers, and never roll it back below the release that introduced Relay-owned
+session control.** From that release the Relay owns every session-control lease. A Controller offers `control=1` when it
+connects, the Relay acknowledges it, and a Controller opens sessions only on an acknowledged connection. An older
+Controller still registers, appears in the Hosts list and can be updated from the website, but it cannot open sessions
+until it is updated; the Hosts page says "Update required". An updated Controller connected to an older Relay shows
+"Update the Relay" and opens no session. Deploy the Relay first, then update each Controller. For a machine that cannot be
+updated from the website, run `agent-remote-controller update --check` on it, or follow [Controller install](controller-install.md).
+
 Local fixture tests can verify signed OAuth flow, cookies, allowlist behavior,
 pairing, persistence and UI. They do not verify your real Google account, consent
 screen, Cloudflare account, public DNS or TLS configuration.

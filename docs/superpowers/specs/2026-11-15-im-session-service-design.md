@@ -539,7 +539,7 @@ Against a Host without smart mode, the client keeps today's attach path. Its dev
   2. The owner is told explicitly to update every Controller, through owner-confirmed updates.
   3. Once the owner confirms, the next release removes the old path.
 
-  Mixed versions are not supported beyond that window.
+  Mixed versions are not supported beyond that window. For S5 (Relay-owned session control) the owner removed the window (2026-11-17): the Relay deploys first, the Controller update path is the only compatibility kept, and an old Controller cannot open sessions until it is updated.
 - **Protocol version.** The session protocol stays at `1.8.0` with opt-in flags for as long as possible. A version change follows `docs/protocol-upgrade-runbook.md`.
 - **Rollout order.**
   1. The Relay, writing journals in shadow. Journals are written alongside today's Controller-served reads, and sampled pages are compared. Smart reading turns on for a provider only after a soak period with no unexplained difference.

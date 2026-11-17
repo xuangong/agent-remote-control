@@ -39,7 +39,7 @@ export interface Page {
 }
 
 /** A Relay (the hosted broker on a real HTTP server), a Controller (a real Host with a scripted provider) and the pages of one session. */
-export async function startRelayAndController(options: { journalServed: boolean; /** Serves a page from the Relay's own origin, for a browser. */ page?: Record<string, { type: string; body: string | (() => string) }> }) {
+export async function startRelayAndController(options: { journalServed: boolean; /** Start no Controller; the test connects its own. */ withoutController?: true; /** Serves a page from the Relay's own origin, for a browser. */ page?: Record<string, { type: string; body: string | (() => string) }> }) {
   const closers: Array<() => Promise<void> | void> = [];
   const store = new MemoryJournalStore();
   const http: Server = createServer();
@@ -122,13 +122,13 @@ export async function startRelayAndController(options: { journalServed: boolean;
     closers.push(() => host?.close());
     return (await host.ready).hostId;
   }
-  const hostId = await startController();
+  const hostId = options.withoutController ? '' : await startController();
 
   const attach = async (takeOver?: string) => {
     const response = await broker.handleRequest(new Request(`${ORIGIN}/v1/remote/hosts/${hostId}/attach`, { method: 'POST', body: JSON.stringify({ providerId: 'fake', nativeSessionId: SESSION, ...(takeOver === undefined ? {} : { takeOver }) }) }));
     return { status: response!.status, body: await response!.json() as Wire };
   };
-  const first = await attach();
+  const first = options.withoutController ? { status: 200, body: {} as Wire } : await attach();
   if (first.status !== 200) throw new Error(`The session did not attach: ${JSON.stringify(first.body)}`);
   const agentId = first.body.agentId as string;
   if (options.journalServed) {
@@ -175,7 +175,7 @@ export async function startRelayAndController(options: { journalServed: boolean;
   }
 
   return {
-    broker, hostId, agentId, port, origin: ORIGIN, sessions, openPage, attach, toController, refusals, directory,
+    broker, hostId, agentId, port, origin: ORIGIN, pairingKey: key as string, sessions, openPage, attach, toController, refusals, directory,
     /** How many Controller streams the Relay opened for sessions, so far. */
     streamOpens: () => toController.filter(message => message.type === 'stream_open').length,
     /** A terminal takes the session: the Controller records the owner and lets the session go. */
@@ -196,3 +196,33 @@ export async function startRelayAndController(options: { journalServed: boolean;
   };
 }
 export type Relay = Awaited<ReturnType<typeof startRelayAndController>>;
+
+/**
+ * A Controller from before session control moved to the Relay, as the Relay sees it: it registers without offering `control`,
+ * answers heartbeats and the management requests of the Relay, and speaks the older session wire when it is given a stream.
+ */
+export async function connectLegacyController(relay: Relay) {
+  const ws = new WebSocket(`ws://127.0.0.1:${relay.port}/ws/remote-host`, { headers: { authorization: `Bearer ${relay.pairingKey}` } });
+  const received: Wire[] = [];
+  const requests: string[] = [];
+  const registered = new Promise<Wire>(resolve => {
+    ws.on('message', data => {
+      const message = JSON.parse(data.toString());
+      received.push(message);
+      if (message.type === 'registered') resolve(message);
+      if (message.type === 'heartbeat') ws.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: message.nonce }));
+      if (message.type === 'rpc_request') {
+        requests.push(`${message.method} ${message.path}`);
+        const body = message.path === '/remote/controller-update' ? { status: 'idle', current: '0.2.80' }
+          : message.path === '/remote/attach' ? { agentId: message.sessionId, nativeSessionId: JSON.parse(message.body).nativeSessionId } : {};
+        ws.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_response', requestId: message.requestId, status: 200, body: JSON.stringify(body) }));
+      }
+    });
+  });
+  await once(ws, 'open');
+  ws.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId: 'legacy-controller', name: 'Legacy Host',
+    controller: { version: '0.2.80', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true },
+    providers: [{ providerId: 'fake', displayName: 'Fake' }] }));
+  const reply = await registered;
+  return { reply, received, requests, close: () => ws.terminate() };
+}

@@ -12,7 +12,7 @@ afterEach(async () => { for (const relay of started.splice(0)) await relay.dispo
  * A session page over real transports: the product's composer and session client in a real browser, connected over a real
  * WebSocket to a Relay that serves the page, with a real Controller behind it and a scripted provider.
  */
-async function sessionPage(journalServed: boolean, options: { sendLater?: boolean } = {}) {
+async function sessionPage(journalServed: boolean) {
   const source = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
@@ -31,11 +31,10 @@ async function sessionPage(journalServed: boolean, options: { sendLater?: boolea
       client.start();
       return { client, replica, release: () => client.stop() };
     } };
-    window.queued = [];
     function View() {
       const view = useSessionView({ agentId: query.get('agent'), transport, source: connections });
       return <LabWorkbench state={view.state} sessionState={view.sessionState} sessionStatus={view.status} actions={view.actions}
-        ${options.sendLater ? "sendLater={{ label: 'Send when Host is back', afterRefusal: true, send: async text => { window.queued.push(text); } }}" : ''} />;
+        />;
     }
     createRoot(document.getElementById('root')).render(<View />);
   `;
@@ -94,18 +93,14 @@ for (const journalServed of [true, false]) {
   }, 60_000);
 }
 
-it('keeps the text in the composer when the Host is offline and offers to send it when the Host is back', async () => {
-  const view = await sessionPage(true, { sendLater: true });
+it('keeps the text in the composer and says why when the Host is offline', async () => {
+  const view = await sessionPage(true);
   try {
     await view.relay.stopController();
     await view.input.fill('while the Host is away');
     await view.input.press('Enter');
-    const later = view.page.getByRole('button', { name: 'Send when Host is back' });
-    await browserExpect(later).toBeVisible();
+    await browserExpect(view.page.getByText(/offline/i).first()).toBeVisible();
     await browserExpect(view.input).toHaveValue('while the Host is away');
-    await later.click();
-    await browserExpect(view.input).toHaveValue('');
-    expect(await view.page.evaluate(() => (window as unknown as { queued: string[] }).queued)).toEqual(['while the Host is away']);
     expect(view.errors).toEqual([]);
   } finally { await view.close(); }
 }, 60_000);

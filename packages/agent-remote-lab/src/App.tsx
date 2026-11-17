@@ -674,6 +674,10 @@ function AppContent({
 
   const { hosts: remoteHosts, loaded: hostsLoaded, error: hostError, retry: retryHosts } = useRemoteHosts(hostClient, accessReady && directory !== undefined, (compactLayout ? contextOpen : desktopContextVisible || pageOpen) || status !== 'ready' || creationLocked, selectedHost.id);
   const currentHost = remoteHosts.find((host) => host.id === selectedHost.id);
+  /** The Host a send was just refused for as offline; the Host list catches up later and then decides. */
+  const [refusedOffline, setRefusedOffline] = useState<string>();
+  const hostsOnline = remoteHosts.map(host => host.online).join();
+  useEffect(() => setRefusedOffline(undefined), [hostsOnline]);
   // A Host that comes back is asked again for the sessions it reported missing (see unavailableSessions), and the views
   // waiting on it try again at once instead of at their next backed-off retry.
   const offlineHosts = useRef(new Set<string>());
@@ -2745,7 +2749,7 @@ function AppContent({
     searchTimeline: submittedClient ? (query, options) => commandClient().searchTimeline(query, options) : undefined,
     loadSearchMatch: submittedClient ? (match, options) => commandClient().loadSearchMatch(match, options) : undefined,
     loadOlder: submittedClient ? () => commandClient().loadOlder() : undefined,
-    sendMessage: async (text, options) => { await commandClient().sendMessage(text, options); },
+    sendMessage: async (text, options) => { await commandClient().sendMessage(text, options).catch(error => { if ((error as { code?: unknown })?.code === 'host_offline') setRefusedOffline(selectedHost.id); throw error; }); },
     sendMessageContent: async (content, options) => { await commandClient().sendMessageContent(content, options); },
     uploadResource: (file, name, uploadId, options) => commandClient().uploadResource(file, name, uploadId, options),
     downloadResource: resourceId => commandClient().downloadResource(resourceId),
@@ -2972,7 +2976,6 @@ function AppContent({
     const writable = !!context.offline && !!host && host.access !== 'shared' && !source.parentNativeSessionId && !context.operationBinding.historical;
     const laterHost = writable && host!.outbox === 1 && transport.queueMessage ? host : undefined;
     const outdatedOffline = writable && host!.outbox !== 1 && !!transport.queueMessage;
-    const refusable = !context.offline && !!host && host.access !== 'shared' && host.outbox === 1 && !!transport.queueMessage && !source.parentNativeSessionId && !context.operationBinding.historical ? host : undefined;
     const forkReference = fork ? <ForkReference fork={fork} onOpen={revealSession} onUnlink={unlinkSide} onRecover={record => refreshRelations.reconcile(record)} /> : null;
     // Quoting happens between the session views of shared Windows.
     const quoteView = !botPresentation && sharedWindow && context.windowViewId && !source.parentNativeSessionId ? context.windowViewId : undefined;
@@ -3035,9 +3038,7 @@ function AppContent({
       timelineEnd: <>{transport.cancelQueuedMessage ? <SessionOutboxMessages session={outboxTarget} hostName={host?.name ?? source.hostId} hostOnline={host?.online === true}
           onCancel={async id => { await transport.cancelQueuedMessage!(id); }} onRetry={async id => { await transport.retryQueuedMessage!(id); }} /> : null}
         {botPresentation && botWorking(context.state) ? <TypingBubble name={source.title || source.nativeSessionId} /> : null}</>,
-      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } }
-        // A Host that looks online may have just gone away: a send it refuses as offline leaves its text in the composer, which then offers to wait for the Host.
-        : refusable ? { sendLater: { label: `Send when ${refusable.name} is back`, afterRefusal: true as const, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
+      ...(laterHost ? { sendLater: { label: `Send when ${laterHost.name} is back`, send: async (text: string) => { await transport.queueMessage!(outboxTarget, text); } } } : {}),
       ...(context.offline && host ? { loadingNotice: { title: `${host.name} is offline`,
         detail: laterHost ? 'The conversation appears here when it is back. Messages you send now wait for it.' : 'The conversation appears here when it is back.' } } : {}),
       // Window mode says where a bot's conversation came from; its links read the earlier session in the bot's own pane.
@@ -3152,7 +3153,7 @@ function AppContent({
       storageScope: baseUrl, baseUrl, target, viewId: slot.id, windowViewId: view?.id,
       hostLabel: host?.name ?? target.hostId, compact: compactLayout, active: !windowMode, visible: !windowMode,
       attachmentEnabled: accessReady && confirmed, mutationBlocked: !accessReady || !confirmed,
-      offline: host?.online === false, familyRoot: false, entries: [target], transport, replicaFor,
+      offline: host?.online === false || (refusedOffline !== undefined && host?.id === refusedOffline), familyRoot: false, entries: [target], transport, replicaFor,
       directoryFor: hostId => hostId === selectedHost.id ? directory : undefined,
       draftStore: messageDrafts, draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image,
       displayBinding: view ? { scope: baseUrl, key: view.id } : undefined,

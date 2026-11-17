@@ -107,7 +107,7 @@ function activityStatus(snapshot: AgentSnapshotPayload): AgentStatus {
  */
 export function createJournalSessionStream(options: JournalSessionStreamOptions): JournalSessionStream {
   const { publicAgentId, client, reads, hostStreams, scheduler } = options;
-  const control = createStreamControl({ agentId: publicAgentId, send: message => sendServer(message), readNativeOwner: options.readNativeOwner, revoked: dropHostStream });
+  const control = createStreamControl({ agentId: publicAgentId, send: message => sendServer(message), readNativeOwner: options.readNativeOwner });
   let phase: Phase = 'new';
   const isPhase = (expected: Phase): boolean => phase === expected;
   let activityOnly = false;
@@ -286,7 +286,8 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     if (hostState !== 'idle' || isPhase('closed')) return;
     hostState = 'opening';
     hostStreams.open({ frame: hostFrame, ready: hostIsReady, ended: hostEnded }).then(stream => {
-      if (isPhase('closed')) { stream.close(); return; }
+      // The open that finished is no longer the one wanted when the stream ended or closed meanwhile.
+      if (isPhase('closed') || hostState !== 'opening') { stream.close(); return; }
       hostStream = stream;
       hostState = 'open';
       try { stream.send(NEGOTIATE_FRAME); }
@@ -305,7 +306,11 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
   /** The Controller stream could not be opened or was not accepted: what waits is refused, and a terminal's ownership is shown. */
   function openFailed(error: unknown): void {
     dropHostStream();
-    refuse(held.splice(0).map(item => item.requestId), error);
+    refuseAll(held.splice(0).map(item => item.requestId), error);
+  }
+
+  function refuseAll(requestIds: ReadonlyArray<string | undefined>, error: unknown): void {
+    refuse(requestIds, error);
     const { code, nativeOwner } = refusalOf(error);
     control.controllerRefused(code, nativeOwner);
   }
@@ -324,13 +329,13 @@ export function createJournalSessionStream(options: JournalSessionStreamOptions)
     hostState = 'idle';
     hostStream = undefined;
     if (accepted) { shutdown(code, reason); return; }
-    // The Controller did not accept the stream. A terminal that holds the session is the reason a refusal at open would have named.
-    void options.readNativeOwner().catch(() => undefined).then(nativeOwner => {
-      if (isPhase('closed')) return;
-      openFailed(nativeOwner
-        ? Object.assign(new Error('A terminal holds this session. Take over to continue here.'), { code: 'native_session_owned', status: 409, nativeOwner })
-        : Object.assign(new Error(reason || 'The Controller could not open the session.'), { code: 'host_unavailable' }));
-    });
+    // The Controller did not accept the stream. What waited is taken now, so a newer send is not answered with this refusal.
+    // A terminal that holds the session is the reason a refusal at open would have named; an offline Host says so.
+    const requestIds = held.splice(0).map(item => item.requestId);
+    control.holder().then(nativeOwner => nativeOwner
+      ? Object.assign(new Error('A terminal holds this session. Take over to continue here.'), { code: 'native_session_owned', status: 409, nativeOwner })
+      : Object.assign(new Error(reason || 'The Controller could not open the session.'), { code: 'host_unavailable' }),
+    error => error).then(error => { if (!isPhase('closed')) refuseAll(requestIds, error); });
   }
 
   /** A frame from the Controller session: the read path belongs to the journal, the rest goes to the browser. */

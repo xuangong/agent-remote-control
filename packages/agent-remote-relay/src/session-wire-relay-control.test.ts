@@ -22,14 +22,12 @@ function agent(): SessionWireAgent {
 const send = (requestId: string) => frame({ type: 'send_message', payload: { requestId, operationId: OPERATION_ID, agentId: 'agent-1', text: 'Hi' } });
 
 describe('a session wire of a Host behind a Relay', () => {
-  it('sends no control state and holds no lease: the Relay owns them', async () => {
+  it('sends no control state, holds no lease, and says session control applies', async () => {
     const output: Array<Record<string, any>> = [];
-    const wire = createSessionWire(agent(), json => output.push(JSON.parse(json)));
+    const wire = createSessionWire(agent(), json => output.push(JSON.parse(json)), { nativeOwner: () => undefined });
     await wire.receive(frame({ type: 'negotiate' }));
     expect(output.map(message => message.type)).toEqual(['negotiated', 'agent_snapshot']);
-    expect(output[0]).not.toHaveProperty('sessionControl');
-    await wire.receive(frame({ type: 'session_control_request', payload: { agentId: 'agent-1', requestId: 'control', revision: 'any', action: 'acquire' } }));
-    expect(output.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'control', code: 'session_control_unavailable' } });
+    expect(output[0]).toMatchObject({ sessionControl: true });
     wire.close();
   });
 

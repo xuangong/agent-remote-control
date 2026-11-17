@@ -837,7 +837,8 @@ it('allows bounded image chunks without consuming the session control message bu
   browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'cancel', payload: { requestId: 'cancel', agentId: 'agent', operationId: operationOne } }));
   await Promise.resolve(); await Promise.resolve();
   expect(browser.native.readyState).toBe(1);
-  expect(received).toBe(321);
+  // Image chunks and the cancel are mutations without a grant: the Relay answers them and none reaches the Controller.
+  expect(received).toBe(0);
   browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'image_upload_chunk', payload: { contentBase64: 'a'.repeat(48 * 1024) } }));
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);
@@ -865,7 +866,8 @@ it('counts resource resolutions and reads in the resource budget, not the contro
   for (let index = 0; index < 120; index += 1) browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'cancel', payload: { requestId: `cancel-${index}`, agentId: 'agent', operationId: operationOne } }));
   await Promise.resolve(); await Promise.resolve();
   expect(browser.native.readyState).toBe(1);
-  expect(received).toBe(520);
+  // The 120 cancels are mutations without a grant: the Relay answers them and only the 400 reads reach the Controller.
+  expect(received).toBe(400);
   browser.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'cancel', payload: { requestId: 'cancel-over', agentId: 'agent', operationId: operationOne } }));
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);
@@ -1069,7 +1071,8 @@ it.each(['resource_upload_chunk', 'resource_download_request'])('allows bounded 
   browser.native.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'cancel', payload: { requestId: 'cancel', agentId: 'agent', operationId: operationOne } }));
   await Promise.resolve(); await Promise.resolve();
   expect(browser.native.readyState).toBe(1);
-  expect(received).toBe(321);
+  // Mutations without a grant are answered by the Relay and never reach the Controller; reads are forwarded.
+  expect(received).toBe(type === 'resource_upload_chunk' ? 0 : 320);
   browser.native.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type, payload: { contentBase64: 'a'.repeat(48 * 1024) } }));
   await Promise.resolve();
   expect(browser.native.closeCode).toBe(1008);

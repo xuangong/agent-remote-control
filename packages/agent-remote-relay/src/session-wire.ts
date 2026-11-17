@@ -217,7 +217,7 @@ export function createSessionWire(
         const boundAgent = requireBoundAgent();
         const snapshot = boundAgent.snapshot();
         const cursor = activityOnly ? boundAgent.timelineCursor?.() : undefined;
-        sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', ...(options.sessionControls ? { sessionControl: true as const } : {}) });
+        sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'negotiated', ...(options.sessionControls || options.nativeOwner ? { sessionControl: true as const } : {}) });
         if (!activityOnly && options.sessionControls) {
           control = options.sessionControls.attach(boundAgent.agentId, state => {
               if (!closed) {
@@ -285,9 +285,9 @@ export function createSessionWire(
             sendMessage(protocolError('forbidden', 'This connection may observe but cannot control the session.', true, requestId));
             return;
           }
-          if (!control) throw new SessionControlError('session_control_unavailable', 'Session control requires an updated Controller.');
-          const state = control.request(message.payload.revision);
-          sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { ...state, requestId: message.payload.requestId } });
+          // Behind a Relay the Relay answers control requests and none arrives here.
+          const state = control?.request(message.payload.revision);
+          if (state) sendMessage({ protocolVersion: PROTOCOL_VERSION, type: 'session_control', payload: { ...state, requestId: message.payload.requestId } });
           return;
         }
         case 'list_commands': {

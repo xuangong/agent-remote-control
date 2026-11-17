@@ -77,7 +77,7 @@ One addition, opt-in and on the Host uplink. No change to the browser-facing ses
 
 1. **Capability `control`.** The Controller offers `control=1` in its uplink URL; the Relay acknowledges `control: 1` in `registered` only for that offer (the Team-recipient pattern in the runbook). The acknowledgement is per connection, never stored.
    - With both sides at this release, the Relay owns the leases of every stream of that Host, crude and journal-served. The Controller's uplink streams attach no lease, ignore `controlToken`, and run the native-owner check at delivery.
-   - A Host that did not offer `control` registers and is managed, but a session open for it is answered 409 `controller_upgrade_required`; the Relay forwards no session frame for it.
+   - A Host that did not offer `control` registers and is managed. A crude session open and an attach for it are answered 409 `controller_upgrade_required`. A journal-served session still reads from its journal and is granted control by the Relay, and its first send is refused with the same code ("cannot send or open sessions from here until updated"); the Relay forwards no session frame for it.
    - A Controller whose `registered` has no `control` (an older Relay) serves no session on that connection and reports "Update the Relay"; management stays. There is no registry fallback on uplink streams.
 
 Rule 5 (protocol surface): one capability, no new message, no new refusal reason, no schema field. The Relay stops forwarding `session_control` frames, which is a behaviour change with no schema change. The refusal for a Host without `control` is the existing 409 refusal shape with a new `controller_upgrade_required` code in the Relay's error text, not a schema change.
@@ -113,7 +113,7 @@ Budget: about 80 lines and one flag per composer send; tests in Task 5.
 
 ### 3.6 Revocation and queued `next_turn` sends
 
-Today a lease revoked after a `next_turn` send is queued in the Controller stops that send at dispatch (`assertControl` in `dispatch`). With Relay-owned leases the Controller no longer holds the lease, so without a replacement a revoked stream's queued send would still dispatch. Decision: restore the check cheaply, with no new state. The Relay ends a stream's Controller stream whenever it revokes the lease or the browser stream ends (the share is revoked, access expires, the lease is replaced), and the Controller's dispatch check becomes "my uplink stream is still open", which the wire already tracks as its `closed` state. A native-owner change is the Controller's own check, as before. Task 4 confirms that the wire stops dispatch on a closed stream; if it does not, it adds that one check. Test: queue a `next_turn` send, revoke the lease, and assert the provider receives no call.
+The Relay revokes a lease only for a `native_session_owned` refusal, and the Controller has already refused the message that caused it. A send queued in the Controller before that stops at dispatch: the Controller checks the native owner there and answers it, and a stream that ended stops its own queued sends (the wire's `closed` state). So the Relay does not end the Controller stream when it revokes; doing so would drop the replies of messages already delivered. Tests: `session-wire-relay-control.test.ts` (a queued send of an ended stream is never dispatched; an owned session refuses without a native call).
 
 ## 4. Removed, replaced, and the state accounting
 
@@ -305,8 +305,9 @@ Recorded 2026-11-17. Production code is that of the commit named in each row; th
 **Departures from the plan.**
 - The Hosts list carries `sessionControl: true`, which the plan said it would not. The Hosts page needs the Relay's own fact to say "Update required".
 - Opening the Controller stream is two-state (`accepted`): a stream the Controller closes before accepting is a refusal at open, not a close of the browser stream, because the Relay's attach is cached per connection and the Controller refuses the open without naming the owner on the wire.
-- A take-over acquires at once, as planned, and the client then opens a new stream: the Controller session of a stream whose session a terminal took is closed. A journal-served stream also drops its Controller stream when its grant is revoked (3.6); a crude stream cannot, so the new stream is the client's.
-- "Send when back" after a refused send is offered for Hosts whose Controller delivers from the outbox; for other Hosts the composer shows the refusal text.
+- A take-over resumes the session natively and the client then opens a new stream, which acquires on its own: the Controller session of the old stream is the one the terminal closed. No acquire goes to the old stream.
+- "Send when back" after a refused send marks the Host offline in the page (cleared when the Host list changes) and reuses the existing outbox mode, for Hosts whose Controller delivers from the outbox; for other Hosts the composer shows the refusal text.
+- The wire of a Host behind a Relay states `sessionControl: true` itself; the Relay no longer rewrites `negotiated`. A control request that reaches a wire with no lease is ignored. The client keeps `controlSupported` for transports that offer no control (unit fakes); the `unsupported` access and its texts are deleted.
 - The old Controller of the update-path test is emulated on the wire (registers without the offer, answers heartbeats and update requests), not built from the pre-S5 commit.
 - The Host offline-and-return case is covered over real transports (suite C), not on the instance: `pnpm local` has no command that stops only the Controller. A terminal-owned session is covered the same way: its lease lives under `~/.copilot`, which the instance rules forbid touching.
 

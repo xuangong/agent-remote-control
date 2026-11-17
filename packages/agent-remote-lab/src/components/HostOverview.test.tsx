@@ -53,14 +53,14 @@ it('shows each Host with its sessions and machine figures, warning above 90%', a
 });
 
 it('marks a Controller that cannot open sessions as update required, with the manual steps, and tells a recipient to ask the owner', async () => {
-  const outdated: RemoteHost = { id: 'old', name: 'old-mac', online: true, hostStatus: true, access: 'owner' };
+  const outdated: RemoteHost = { id: 'old', name: 'old-mac', online: true, hostStatus: true, access: 'owner', controller: { version: '0.2.80', revision: 'a'.repeat(40), platform: 'darwin', arch: 'arm64', nodeMajor: 22, remoteUpdate: true } };
   const outdatedShared: RemoteHost = { id: 'old-shared', name: 'Shared old', online: true, hostStatus: true, access: 'shared' };
   const opened: string[] = [];
   const container = await render(<HostOverview hosts={[homelab, outdated, outdatedShared]} service={service(async () => status)} visible onOpenHost={id => opened.push(id)} />);
   await act(async () => {});
   expect(card(container, 'homelab').querySelector('[data-update-required]')).toBeNull();
   const owned = card(container, 'old').querySelector<HTMLElement>('[data-update-required]')!;
-  expect(owned.textContent).toContain('Update required: this Controller cannot open sessions until it is updated.');
+  expect(owned.textContent).toContain('Update required: this Controller cannot send or open sessions from here until it is updated.');
   expect(owned.textContent).toContain('agent-remote-controller update --check');
   await act(async () => { owned.querySelector('button')!.click(); });
   expect(opened).toEqual(['old']);

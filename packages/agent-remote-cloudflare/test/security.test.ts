@@ -15,7 +15,9 @@ it('rejects stale permission changes without closing the session and permits ret
       send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: '{"ready":true}' });
     }
     if (frame.type === 'stream_message') {
-      const request = JSON.parse(frame.message); forwarded.push(request);
+      const request = JSON.parse(frame.message);
+      if (request.type === 'negotiate') { send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {} }) }); return; }
+      forwarded.push(request);
       send(host.socket, { type: 'stream_message', streamId: frame.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'command_acknowledged', payload: { requestId: request.payload.requestId, agentId: 'permission-agent', command: 'set_session_setting', accepted: true } }) });
     }
   });
@@ -24,23 +26,35 @@ it('rejects stale permission changes without closing the session and permits ret
   expect((await f.json('/auth/refresh', alice.cookie, {})).status).toBe(200);
   const path = alice.basePath + 'v1/sessions/permission-agent/events';
   const stream = await f.upgrade(path, { cookie: alice.cookie, origin }); await event(stream, 'message');
-  const request = (settingId: string, requestId: string) => ({ protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', payload: { requestId, operationId: '00000000-0000-4000-8000-000000000001', agentId: 'permission-agent', settingId, value: 'next' } });
+  const request = (settingId: string, requestId: string, controlToken?: string) => ({ protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', ...(controlToken ? { controlToken } : {}), payload: { requestId, operationId: '00000000-0000-4000-8000-000000000001', agentId: 'permission-agent', settingId, value: 'next' } });
+  /** Negotiates and acquires control from the Relay, as a page does; the token that grants it. */
+  const controlled = async (socket: typeof stream): Promise<string> => {
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+    let announced = await event(socket, 'message');
+    while (announced.type !== 'session_control') announced = await event(socket, 'message');
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: { agentId: 'permission-agent', requestId: 'acquire', revision: announced.payload.revision, action: 'acquire' } }));
+    let granted = await event(socket, 'message');
+    while (granted.payload?.requestId !== 'acquire') granted = await event(socket, 'message');
+    return granted.payload.token;
+  };
+  const token = await controlled(stream);
   for (const setting of ['sandbox', 'approval', 'permissions']) {
-    const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting)));
+    const response = event(stream, 'message'); stream.send(JSON.stringify(request(setting, setting, token)));
     const denied = await response;
     expect(decodeServerMessage(JSON.stringify(denied)).status).toBe('ok');
     expect(denied).toMatchObject({ type: 'protocol_error', payload: { requestId: setting, code: 'reauthentication_required', recoverable: true } });
     expect(stream.readyState).toBe(1);
   }
   expect(forwarded).toEqual([]);
-  const model = event(stream, 'message'); stream.send(JSON.stringify(request('model', 'model')));
+  const model = event(stream, 'message'); stream.send(JSON.stringify(request('model', 'model', token)));
   expect((await model).type).toBe('command_acknowledged');
   expect(forwarded).toHaveLength(1);
   f.setAuthenticatedAt(Date.now());
   const renewed = await f.login('alice');
   const fresh = await f.upgrade(path, { cookie: renewed.cookie, origin }); await event(fresh, 'message');
+  const freshToken = await controlled(fresh);
   expect(forwarded).toHaveLength(1);
-  const changed = event(fresh, 'message'); fresh.send(JSON.stringify(request('sandbox', 'retry')));
+  const changed = event(fresh, 'message'); fresh.send(JSON.stringify(request('sandbox', 'retry', freshToken)));
   expect((await changed).payload.requestId).toBe('retry');
   expect(forwarded).toHaveLength(2);
   expect(host.socket.readyState).toBe(1);

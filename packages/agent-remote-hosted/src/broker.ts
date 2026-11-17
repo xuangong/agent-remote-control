@@ -42,7 +42,7 @@ import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { createHostJournals, type HostJournals, type JournalReadRequest } from './host-journals.js';
 import { createJournalConnection, isJournalHostMessage, type JournalConnection } from './journal-uplink.js';
 import { createHostStreamOpener, type HostStreamEntry } from './journal-host-stream.js';
-import { createStreamControl, relayMessageOf } from './stream-control.js';
+import { createStreamControl } from './stream-control.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
 
 type SharedCreation = { subject: string; operationId: string; fingerprint: string; reservation: ReturnType<HostSharing['reserve']> };
@@ -1158,7 +1158,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   async function recoverBinding(host: Host, binding: Binding, again = false): Promise<void> {
     assertHostCurrent(host);
     if (bindings.get(binding.agentId) !== binding) throw new BrokerError(404, 'session_unavailable', 'The session binding was revoked.');
-    if (host.ready && !host.control) throw new BrokerError(409, 'controller_upgrade_required', 'Update required: this Host\'s Controller must be updated before it can open sessions.');
+    if (host.ready && !host.control) throw new BrokerError(409, 'controller_upgrade_required', 'Update required: this Host\'s Controller must be updated before it can send or open sessions.');
     if (binding.generation === host.generation && !again) return;
     if (!binding.recovery) {
       const generation = host.generation;
@@ -2205,10 +2205,10 @@ export function createHostBroker(options: HostBrokerOptions) {
       throw error;
     }
   }
-  /** Asks the Controller to attach the session again, which refuses with the native owner when a terminal holds it. */
+  /** Asks the Controller to attach the session again, which refuses with the native owner when a terminal holds it; any other refusal is thrown. */
   async function readNativeOwner(host: Host, binding: Binding): Promise<NativeSessionOwner | undefined> {
     try { await recoverBinding(host, binding, true); return undefined; }
-    catch (error) { return error instanceof BrokerError ? error.nativeOwner : undefined; }
+    catch (error) { if (error instanceof BrokerError && error.nativeOwner) return error.nativeOwner; throw error; }
   }
   /**
    * A browser stream whose session is read from its journal. Reads and control never touch the Controller; the Controller
@@ -2284,7 +2284,8 @@ export function createHostBroker(options: HostBrokerOptions) {
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
       if (client.readyState !== RELAY_SOCKET_OPEN) return;
-      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [] };
+      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [],
+        control: createStreamControl({ agentId: binding.agentId, readNativeOwner: () => readNativeOwner(host, binding), send: frame => { if (client.readyState === RELAY_SOCKET_OPEN) client.send(JSON.stringify(frame)); } }) };
       host.streams.set(streamId, stream);
       diagnostic(host,{event:'stream_opening',streamId,agentId:binding.agentId});
       const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
@@ -2293,12 +2294,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const admit = admitClientMessages(client, context, subject, expiry);
       client.onMessage((raw, binary) => {
         if (!admit(raw, binary)) return;
-        const message = relayMessageOf(raw.toString());
-        if (message?.type === 'negotiate') {
-          // An observer of activity holds no session control.
-          if (message.observation !== 'activity') stream.control ??= createStreamControl({ agentId: binding.agentId, readNativeOwner: () => readNativeOwner(host, binding),
-            send: frame => { if (client.readyState === RELAY_SOCKET_OPEN) client.send(JSON.stringify(frame)); } });
-        } else if (message && stream.control?.admit(message)) return;
+        if (stream.control!.admitRaw(raw.toString())) return;
         let outgoing: string;
         try { outgoing = withoutItemKeysFlag(sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client')); }
         catch { return client.close(1008, 'Invalid session target'); }

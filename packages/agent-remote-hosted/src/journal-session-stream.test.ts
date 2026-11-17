@@ -42,6 +42,10 @@ interface FixtureOptions {
   closeThrows?: 'long reason' | 'always';
   /** What the Controller says when asked who holds the session natively. */
   nativeOwner?: { kind: 'native_cli' | 'controller'; generation: string };
+  /** Asking the Controller who holds the session answers only when this promise does. */
+  ownerGate?: Promise<void>;
+  /** Asking the Controller who holds the session fails with this. */
+  ownerFails?: Error;
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -103,7 +107,7 @@ function fixture(options: FixtureOptions = {}) {
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const scheduler = { setTimeout: (callback: () => void) => { timers.set(++nextTimer, callback); return nextTimer; }, clearTimeout: (timer: unknown) => { timers.delete(timer as number); } };
-  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler, readNativeOwner: async () => { calls.ownerReads += 1; return options.nativeOwner; } });
+  const stream = createJournalSessionStream({ publicAgentId: 'agent', client, reads, hostStreams, scheduler, readNativeOwner: async () => { calls.ownerReads += 1; await options.ownerGate; if (options.ownerFails) throw options.ownerFails; return options.nativeOwner; } });
   const published = (events: JournalPublished['events']): JournalPublished => ({ events, watermark: sequence, cursor: journal.cursor });
   return {
     journal, stream, client, sent, closed, calls, hostWrites, sink: () => sink!, hostClosed: () => hostClosed,
@@ -340,6 +344,35 @@ describe('a journal-served session stream', () => {
     await vi.waitFor(() => expect(unknown.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_unavailable', recoverable: true } }));
     expect(unknown.control().access).toBe('control');
     expect(unknown.closed).toEqual([]);
+  });
+
+  it('answers only the messages of a stream that was never accepted, and keeps the stream a newer message opened', async () => {
+    let answer!: () => void;
+    const f = fixture({ ownerGate: new Promise<void>(resolve => { answer = resolve; }) });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(1));
+    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
+    const first = f.sink();
+    first.ended(1011, 'Remote Session restoration failed.');
+    // A newer send arrives while the Controller is still being asked who holds the session.
+    f.stream.receive(message({ type: 'send_message', controlToken: token, payload: { requestId: 'send-2', operationId: OPERATION, agentId: 'agent', text: 'Newer' } }));
+    await vi.waitFor(() => expect(f.calls.hostOpens).toBe(2));
+    answer();
+    await vi.waitFor(() => expect(f.sent.some(frame => frame.type === 'protocol_error' && frame.payload.requestId === 'send-1')).toBe(true));
+    expect(f.sent.some(frame => frame.type === 'protocol_error' && frame.payload.requestId === 'send-2')).toBe(false);
+    expect(f.hostClosed()).toBe(false);
+    f.sink().ready();
+    await vi.waitFor(() => expect(f.hostWrites.some(frame => frame.type === 'send_message' && frame.payload.requestId === 'send-2')).toBe(true));
+  });
+
+  it('answers with the Host being offline when the Host goes away before the Controller accepted the stream', async () => {
+    const f = fixture({ ownerFails: Object.assign(new Error('The Remote Host is offline.'), { code: 'host_offline' }) });
+    const token = await f.controlled();
+    f.stream.receive(sendMessage(token));
+    await vi.waitFor(() => expect(f.hostWrites).toHaveLength(1));
+    f.sink().ended(1012, 'Remote Host disconnected');
+    await vi.waitFor(() => expect(f.sent.at(-1)).toMatchObject({ type: 'protocol_error', payload: { requestId: 'send-1', code: 'host_offline', recoverable: true } }));
   });
 
   it('keeps the stream open when the Host goes away and comes back with nothing in flight', async () => {

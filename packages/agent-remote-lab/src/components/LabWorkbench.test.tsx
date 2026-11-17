@@ -421,15 +421,6 @@ it.each(['shared', 'exclusive'] as const)('keeps the %s composer free of ownersh
   expect(container.textContent).not.toContain('You have control');
 });
 
-it('describes an unavailable control that no native client holds without assuming it is a native CLI', async () => {
-  const label = 'Another client has control';
-  const state = { ...replicaState, sessionControl: { access: 'read_only' as const, available: false, revision: 'one' } };
-  const container = await render(<LabWorkbench state={state} sessionStatus="ready" actions={{ takeControl: async () => {} }} />);
-  const composer = container.querySelector('[aria-label="Live provider controls"]')!;
-  expect(composer.textContent).toContain(label);
-  expect(composer.querySelector('.lab-session-control')?.textContent).not.toContain('Interrupt');
-});
-
 it('shows immediate native takeover in the chatbox and explains the interruption', async () => {
   const takeControl = vi.fn(async () => {});
   const state = {...replicaState,sessionControl:{access:'read_only' as const,available:false,revision:'r',nativeOwner:{kind:'native_cli' as const,generation:'native-generation'}}};

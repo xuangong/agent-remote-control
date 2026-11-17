@@ -454,3 +454,33 @@ it('refuses the message, not the stream, when the Host has no stream slot left',
   expect(last.pair.server.readyState).toBe(1);
   expect(controller.streams).toHaveLength(128);
 });
+
+it('serves a Controller from before session control from its journal, grants control, and refuses its first send with the update words', async () => {
+  const r = await relay();
+  const { controller } = await publishedController(r, { control: false });
+  const browser = await r.openBrowser();
+  await subscribed(browser);
+  const token = await browser.controlled(false);
+  expect(token).toEqual(expect.any(String));
+  browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
+  expect(await browser.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal'))
+    .toMatchObject({ payload: { code: 'controller_upgrade_required', message: expect.stringContaining('Update required'), recoverable: false } });
+  browser.send(tail('page-1'));
+  expect(texts(await browser.take(message => message.type === 'timeline_page', 'page'))).toEqual(['Hello', 'World']);
+  expect(controller.streams).toEqual([]);
+  expect(browser.pair.server.readyState).toBe(1);
+});
+
+it('refuses a mutation that does not decode, and one sent before negotiation, on a stream that passes through the Relay, without forwarding either', async () => {
+  const r = await relay({ seed: store => seedJournal(store, { head: false }) });
+  const controller = await r.connectController();
+  const browser = await r.openBrowser();
+  const valid = { protocolVersion: '1.8.0', type: 'send_message', payload: { requestId: 'early', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } };
+  browser.pair.native.send(JSON.stringify(valid));
+  expect(await browser.take(message => message.payload?.requestId === 'early', 'refusal before negotiation')).toMatchObject({ type: 'protocol_error', payload: { code: 'session_read_only' } });
+  browser.pair.native.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'send_message', controlToken: 'x', payload: { requestId: 'broken', agentId: PUBLIC_ID } }));
+  expect(await browser.take(message => message.payload?.requestId === 'broken', 'refusal of an undecodable frame')).toMatchObject({ type: 'protocol_error', payload: { code: 'invalid_shape' } });
+  await sleep(30);
+  const forwarded = controller.inbox.all.filter(message => message.type === 'stream_message').map(message => JSON.parse(message.message).type);
+  expect(forwarded).not.toContain('send_message');
+});

@@ -29,13 +29,11 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   };
   const label = phase === 'restoring' ? 'Restoring session…' : phase === 'checking' ? 'Checking session…'
     : phase === 'taking' ? 'Taking control…'
-    : control.access === 'unsupported' ? 'Controller update needed'
     : control.access === 'checking' ? 'Checking access…'
     : control.nativeOwner?.kind === 'native_cli' ? 'Native CLI has control'
     : control.nativeOwner ? 'Another Controller has control'
-    : control.available ? 'Ready to take control' : 'Another client has control';
-  const description = control.access === 'unsupported' ? 'Update this Host’s Controller to enable session control.'
-    : phase === 'restoring' ? 'Control will be available after synchronization.'
+    : 'Ready to take control';
+  const description = phase === 'restoring' ? 'Control will be available after synchronization.'
     : !phase && native ? 'Taking over interrupts its running work.'
     : !phase && !connected ? 'Reconnect to take control.' : undefined;
   return <div className="lab-session-control" data-read-only="true" data-native={native || undefined} aria-busy={!!phase}>

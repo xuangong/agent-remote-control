@@ -110,18 +110,12 @@ describe.each([['journal-served', true], ['crude', false]] as const)('taking a %
     const owned = await page.take(frame => frame.type === 'session_control' && frame.payload.nativeOwner, 'the owner');
     const takeOver = await r.attach(owned.payload.nativeOwner.generation);
     expect(takeOver.status).toBe(200);
-    // A page whose stream passes through the Relay reconnects, as the client does: its Controller session is the one the terminal closed.
-    const current = journalServed ? page : await r.openPage();
-    let granted: Wire;
-    if (journalServed) {
-      page.send({ type: 'session_control_request', payload: { agentId: r.agentId, requestId: 'take', revision: owned.payload.revision, action: 'acquire' } });
-      granted = await page.take(frame => frame.type === 'session_control' && frame.payload.requestId === 'take', 'control after take-over');
-    } else {
-      current.send({ type: 'negotiate' });
-      const announced = await current.take(frame => frame.type === 'session_control', 'the control state');
-      current.send({ type: 'session_control_request', payload: { agentId: r.agentId, requestId: 'take', revision: announced.payload.revision, action: 'acquire' } });
-      granted = await current.take(frame => frame.type === 'session_control' && frame.payload.requestId === 'take', 'control after take-over');
-    }
+    // The client opens a new stream after a take-over: the Controller session of the old one is the one the terminal closed.
+    const current = await r.openPage();
+    current.send({ type: 'negotiate' });
+    const announced = await current.take(frame => frame.type === 'session_control', 'the control state');
+    current.send({ type: 'session_control_request', payload: { agentId: r.agentId, requestId: 'take', revision: announced.payload.revision, action: 'acquire' } });
+    const granted = await current.take(frame => frame.type === 'session_control' && frame.payload.requestId === 'take', 'control after take-over');
     expect(granted.payload).toMatchObject({ access: 'control', available: true });
     expect(granted.payload.nativeOwner).toBeUndefined();
     expect((await current.sendText(granted.payload.token, 'after')).type).toBe('command_acknowledged');
@@ -191,5 +185,19 @@ describe('a Controller from before session control moved to the Relay', () => {
       expect(await attached!.json()).toMatchObject({ code: 'controller_upgrade_required', error: expect.stringContaining('Update required') });
       expect(legacy.received.some(message => message.type === 'stream_open')).toBe(false);
     } finally { legacy.close(); }
+  });
+});
+
+describe('a stream that passes through the Relay, over real transports', () => {
+  it('refuses a mutation sent before negotiation and one that does not decode, and delivers neither', async () => {
+    const r = await relay(false);
+    const page = await r.openPage();
+    page.send({ type: 'send_message', controlToken: 'forged', payload: { agentId: r.agentId, requestId: 'early', operationId: '00000000-0000-4000-8000-0000000000aa', text: 'early' } });
+    expect((await page.take(frame => frame.payload?.requestId === 'early', 'the early refusal')).payload.code).toBe('session_read_only');
+    page.send({ type: 'send_message', controlToken: 'forged', payload: { agentId: r.agentId, requestId: 'broken' } });
+    expect((await page.take(frame => frame.payload?.requestId === 'broken', 'the refusal')).payload.code).toBe('invalid_shape');
+    const token = await page.controlled();
+    expect((await page.sendText(token, 'fine')).type).toBe('command_acknowledged');
+    expect(r.sessions.flatMap(session => session.sent)).toEqual(['Hi']);
   });
 });

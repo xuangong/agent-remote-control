@@ -260,7 +260,7 @@ export class RemoteSessionClient {
   }
 
   async takeControl(options: SessionTakeControlOptions = {}): Promise<void> {
-    if (!this.control || !this.controlSupported) throw new RemoteOperationError('session_control_unavailable', 'Update the Controller to enable session control.', false);
+    if (!this.control) throw new RemoteOperationError('session_read_only', 'Session control is not available yet.', true);
     if (this.observeOnly) throw new RemoteOperationError('session_read_only', 'This client only observes the session.', false);
     const owner = this.control.nativeOwner;
     if (owner) {
@@ -274,6 +274,10 @@ export class RemoteSessionClient {
           await this.controlExtension!.resumeNative(owner, { checkOnly: handoff.checkOnly, signal: controller.signal });
           handoff.onRestoring();
         }, options);
+        // The stream's Controller session is the one the terminal closed: a new stream opens the resumed session and acquires on its own.
+        this.restartDisconnected(this.generation);
+        await this.waitForNativeControl(controller.signal);
+        return;
       } finally {
         clearTimeout(deadline);
         if (this.nativeTakeover === controller) this.nativeTakeover = undefined;
@@ -626,7 +630,6 @@ export class RemoteSessionClient {
           this.controlReady = new Promise(resolve => { this.resolveControlReady = resolve; });
           this.replica.setSessionControl({ access: 'checking', available: false });
         }
-        else if (this.requireSessionControl) this.replica.setSessionControl({ access: 'unsupported', available: false });
         this.setStatus('catching_up');
         return;
       case 'session_control': {

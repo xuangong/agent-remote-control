@@ -1895,8 +1895,8 @@ it('waits for initial control settlement after history, and attaches proof only 
   } finally { client.stop(); }
 });
 
-it('does not claim control for observers or silently write through an old Controller', async () => {
-  for (const supported of [true, false]) {
+it('does not claim control for observers', async () => {
+  for (const supported of [true]) {
     const transport = new FakeTransport();
     const replica = new AgentReplica();
     const client = new RemoteSessionClient('agent-one', transport, replica, { observeOnly: true, requireSessionControl: true });
@@ -1907,7 +1907,7 @@ it('does not claim control for observers or silently write through an old Contro
       expect(transport.sent.some(message => message.type === 'session_control_request')).toBe(false);
       await expect(client.sendMessage('not sent')).rejects.toMatchObject({ code: 'session_read_only' });
       expect(transport.sent.some(message => message.type === 'send_message')).toBe(false);
-      expect(replica.getState().sessionControl?.access).toBe(supported ? 'read_only' : 'unsupported');
+      expect(replica.getState().sessionControl?.access).toBe('read_only');
     } finally { client.stop(); }
   }
 });
@@ -2101,7 +2101,7 @@ it('exposes synchronized observation separately from native recovery and write a
   } finally { unsubscribe(); client.stop(); }
 });
 
-it('resumes the session natively, then acquires control from the Relay at once and opens a new stream for the resumed session', async () => {
+it('resumes the session natively, then opens a new stream that acquires control, without a wasted acquire on the old one', async () => {
   const transport = new FakeTransport();
   const replica = new AgentReplica();
   const resumeNative = vi.fn(async () => {});
@@ -2125,13 +2125,22 @@ it('resumes the session natively, then acquires control from the Relay at once a
     await transport.settle();
     expect(resumeNative).toHaveBeenCalledWith(nativeOwner, { checkOnly: false, signal: expect.any(AbortSignal) });
     expect(onRestoring).toHaveBeenCalledTimes(1);
-    const request = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
-    if (request.type !== 'session_control_request') throw new Error('Missing acquisition after the resume');
-    expect(request.payload).toEqual({ requestId: expect.any(String), agentId: 'agent-one', action: 'acquire', revision: 'native' });
-    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: request.payload.requestId, revision: 'native', access: 'control', available: true, token: 'private' } });
-    await taking;
-    // The stream's Controller session is the one the terminal closed, so the client opens a new stream, which grants control again.
+    // No acquire goes to the old stream: the client opens a new one, which acquires on its own.
+    expect(transport.sent.filter(message => message.type === 'session_control_request')).toHaveLength(1);
     await vi.waitFor(() => expect(transport.connections).toBe(2));
+    transport.open();
+    transport.emit({ protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true });
+    transport.emit(snapshot());
+    const resubscribe = transport.sent.filter(message => message.type === 'timeline_subscription').at(-1)!;
+    if (resubscribe.type !== 'timeline_subscription') throw new Error('Missing subscription');
+    transport.emit({ protocolVersion: '1.8.0', type: 'timeline_subscribed', payload: resubscribe.payload });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', revision: 'restored', access: 'read_only', available: true } });
+    const reacquire = transport.sent.filter(message => message.type === 'session_control_request').at(-1)!;
+    if (reacquire.type !== 'session_control_request') throw new Error('Missing reacquisition');
+    expect(reacquire.payload).toMatchObject({ action: 'acquire', revision: 'restored' });
+    transport.emit({ protocolVersion: '1.8.0', type: 'session_control', payload: { agentId: 'agent-one', requestId: reacquire.payload.requestId, revision: 'restored', access: 'control', available: true, token: 'private' } });
+    transport.resolveTimeline(page('after', []));
+    await taking;
   } finally { client.stop(); }
 });
 

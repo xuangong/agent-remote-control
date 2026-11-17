@@ -143,15 +143,27 @@ it('still requires recent authentication for production permission changes on a 
       host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_opened', streamId: message.streamId }));
       host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: 'connected' }));
     }
+    if (message.type === 'stream_message' && JSON.parse(message.message).type === 'negotiate') { host.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId: message.streamId, message: JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'agent_snapshot', payload: {} }) })); return; }
     if (message.type === 'stream_message') { const value = JSON.parse(message.message); forwarded.push(value); receive(value); }
   });
   expect((await alice.request(`v1/remote/hosts/${hostId}/attach`, { providerId: 'codex', nativeSessionId: 'native' })).status).toBe(200);
+  /** Negotiates and acquires control from the Relay, as a page does; the token that grants it. */
+  const acquire = async (socket: WebSocket, agentId: string): Promise<string> => {
+    const seen: any[] = [];
+    socket.on('message', raw => { try { seen.push(JSON.parse(raw.toString())); } catch { /* not a protocol frame */ } });
+    const next = async (match: (frame: any) => boolean) => { for (let attempt = 0; attempt < 400; attempt++) { const at = seen.findIndex(match); if (at >= 0) return seen.splice(at, 1)[0]; await new Promise(resolve => setTimeout(resolve, 10)); } throw new Error('No control frame.'); };
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
+    const announced = await next(frame => frame.type === 'session_control');
+    socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: { agentId, requestId: 'acquire', revision: announced.payload.revision, action: 'acquire' } }));
+    return (await next(frame => frame.payload?.requestId === 'acquire')).payload.token;
+  };
   const grant = ticket(f.url, 'alice', { authenticatedAt: Date.now() - 11 * 60_000 });
   const headers = { authorization: `Bearer ${grant}`, origin: f.url };
   expect((await (await fetch(f.url + '/auth/sessions', { headers })).json()).recentAuthentication).toBe(false);
   const stream = new WebSocket((f.url + alice.state.basePath + 'v1/sessions/production-agent/events').replace('http:', 'ws:'), { headers, handshakeTimeout: 3000 });
   expect((await once(stream, 'message'))[0].toString()).toBe('connected');
-  const setting = { protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', payload: { agentId: 'production-agent', settingId: 'sandbox', value: 'workspace-write',
+  const token = await acquire(stream, 'production-agent');
+  const setting = { protocolVersion: PROTOCOL_VERSION, type: 'set_session_setting', controlToken: token, payload: { agentId: 'production-agent', settingId: 'sandbox', value: 'workspace-write',
     requestId: 'permission-change', operationId: '00000000-0000-4000-8000-000000000001' } };
   const refused = once(stream, 'message'); stream.send(JSON.stringify(setting));
   expect(JSON.parse((await refused)[0].toString())).toMatchObject({ type: 'protocol_error', payload: { code: 'reauthentication_required', requestId: 'permission-change' } });

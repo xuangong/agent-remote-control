@@ -9,8 +9,6 @@ export interface StreamControlOptions {
   send(message: ServerMessage): void;
   /** Asks the Controller who holds the session natively; undefined when nobody does or it cannot say. */
   readNativeOwner(): Promise<NativeSessionOwner | undefined>;
-  /** The grant was revoked: whatever the Controller still queued for this stream must not run. */
-  revoked?(): void;
 }
 
 export interface StreamControl {
@@ -18,9 +16,13 @@ export interface StreamControl {
   announce(): void;
   /** Answers a control request, or refuses a mutation without a live grant. True when it did: the message goes no further. */
   admit(message: ClientMessage): boolean;
+  /** `admit` for a raw browser frame; a control request or mutation that does not decode is refused here, never forwarded. */
+  admitRaw(raw: string): boolean;
+  /** Who holds the session natively, asked of the Controller; rejects with the refusal when it cannot say. */
+  holder(): Promise<NativeSessionOwner | undefined>;
   /** The Controller refused a message of this stream; a refusal for a terminal's ownership revokes the grant. */
   controllerRefused(code: string, nativeOwner?: NativeSessionOwner): void;
-  /** A frame of the Controller session on a stream that passes through the Relay: marks the stream as controlled and announces it after the Snapshot. */
+  /** A frame of the Controller session on a stream that passes through the Relay: announces the grant after the Snapshot and reads refusals. */
   controllerFrame(raw: string, forward: (raw: string) => void): void;
 }
 
@@ -66,23 +68,32 @@ export function createStreamControl(options: StreamControlOptions): StreamContro
       token = undefined;
       revision = randomUUID();
       owner = nativeOwner && { ...nativeOwner };
-      options.revoked?.();
       if (nativeOwner) { sendState(); return; }
       // A refusal at delivery names no owner; asking the Controller to open the session again does.
       const current = revision;
-      void options.readNativeOwner().catch(() => undefined).then(found => {
+      void control.holder().catch(() => undefined).then(found => {
         if (revision !== current) return;
         owner = found && { ...found };
         sendState();
       });
     },
+    admitRaw(raw) {
+      let frame: { type?: unknown; payload?: { requestId?: unknown } };
+      try { frame = JSON.parse(raw); } catch { return false; }
+      const { type } = frame;
+      if (typeof type !== 'string' || (type !== 'session_control_request' && !isSessionMutation({ type }))) return false;
+      const decoded = decodeClientMessage(raw);
+      if (decoded.status === 'ok') return control.admit(decoded.value);
+      refuse(typeof frame.payload?.requestId === 'string' ? frame.payload.requestId : undefined, 'invalid_shape', 'Client message was rejected.');
+      return true;
+    },
+    holder: () => options.readNativeOwner(),
     controllerFrame(raw, forward) {
-      // Most frames carry none of these types; only these are read.
-      if (!raw.includes('"negotiated"') && !raw.includes('"agent_snapshot"') && !raw.includes('"native_session_owned"')) { forward(raw); return; }
-      let frame: { type?: unknown; payload?: { code?: unknown } };
-      try { frame = JSON.parse(raw); } catch { forward(raw); return; }
-      if (frame.type === 'negotiated') { forward(JSON.stringify({ ...frame, sessionControl: true })); return; }
       forward(raw);
+      // Most frames carry neither of these; only these are read.
+      if (!raw.includes('"agent_snapshot"') && !raw.includes('"native_session_owned"')) return;
+      let frame: { type?: unknown; payload?: { code?: unknown } };
+      try { frame = JSON.parse(raw); } catch { return; }
       if (frame.type === 'agent_snapshot' && !announced) announce();
       if (frame.type === 'protocol_error' && typeof frame.payload?.code === 'string') control.controllerRefused(frame.payload.code);
     },
@@ -95,13 +106,4 @@ export function requestIdOf(message: ClientMessage): string | undefined {
   if (message.type === 'interaction_response') return message.payload.submissionId;
   const payload = (message as unknown as { payload?: { requestId?: unknown } }).payload;
   return typeof payload?.requestId === 'string' ? payload.requestId : undefined;
-}
-
-/** What a raw browser frame decodes to when the Relay may answer it itself: negotiation, a control request or a mutation. */
-export function relayMessageOf(raw: string): ClientMessage | undefined {
-  let type: unknown;
-  try { type = JSON.parse(raw)?.type; } catch { return undefined; }
-  if (typeof type !== 'string' || (type !== 'negotiate' && type !== 'session_control_request' && !isSessionMutation({ type }))) return undefined;
-  const decoded = decodeClientMessage(raw);
-  return decoded.status === 'ok' ? decoded.value : undefined;
 }

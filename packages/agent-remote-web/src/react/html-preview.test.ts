@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { expect, it } from 'vitest';
 import { FILE_CONTENT_POLICY } from '@orchardworks/agent-remote-protocol';
 import { renderHtmlPreview, type HtmlPreviewResource } from './html-preview.js';

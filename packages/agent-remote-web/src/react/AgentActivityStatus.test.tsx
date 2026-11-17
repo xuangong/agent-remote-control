@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { expect, it } from 'vitest';
 import type { AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 import { remoteSessionState } from '../client/session-state.js';

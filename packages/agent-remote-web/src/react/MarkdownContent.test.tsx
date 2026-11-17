@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, useMemo, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 

@@ -4,6 +4,6 @@ import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
 export default defineConfig({
   plugins: [workspaceSource()],
   test: {
-    environment: 'jsdom',
+    environment: 'node',
   },
 });

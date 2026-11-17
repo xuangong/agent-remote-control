@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';

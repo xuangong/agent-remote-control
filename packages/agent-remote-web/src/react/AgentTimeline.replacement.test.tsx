@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import type { HistoryPage, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { applyHistoryPage, applyTimelineReplacement, createReplicaState } from '../replica/reducer.js';

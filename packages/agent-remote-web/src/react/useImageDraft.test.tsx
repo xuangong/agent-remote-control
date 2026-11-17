@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, StrictMode } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { ImageDraft } from '../image-drafts.js';

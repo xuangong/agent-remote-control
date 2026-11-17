@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';

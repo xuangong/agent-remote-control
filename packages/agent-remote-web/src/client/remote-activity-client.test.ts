@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteActivityClient, type RemoteActivityState } from './remote-activity-client.js';
 import type { RemoteAgentTransport, RemoteTransportListener } from './transport.js';

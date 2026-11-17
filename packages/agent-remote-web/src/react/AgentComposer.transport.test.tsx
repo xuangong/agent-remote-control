@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { act, useEffect, useState, useSyncExternalStore } from 'react';

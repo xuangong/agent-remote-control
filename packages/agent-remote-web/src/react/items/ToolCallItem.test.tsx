@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';

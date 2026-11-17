@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, useContext } from 'react';
 import { expect, it, vi } from 'vitest';
 

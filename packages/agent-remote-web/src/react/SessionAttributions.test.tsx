@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, useEffect, type ReactNode } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';

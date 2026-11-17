@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { appendSessionExcerpts, appendSessionReferences, createSessionExcerpt, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';

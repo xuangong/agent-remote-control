@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';

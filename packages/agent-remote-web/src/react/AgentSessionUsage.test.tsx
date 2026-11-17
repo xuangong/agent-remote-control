@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import type { AgentUsage } from '@orchardworks/agent-remote-protocol';
 import { expect, it } from 'vitest';
 import { render, rerender } from '../test/setup.js';

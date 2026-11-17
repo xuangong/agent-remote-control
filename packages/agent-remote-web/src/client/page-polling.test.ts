@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { watchPagePolling } from './page-polling.js';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });

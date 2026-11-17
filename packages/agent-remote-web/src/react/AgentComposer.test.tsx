@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { createReplicaState } from '../replica/reducer.js';

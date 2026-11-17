@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react';
 import { expect, it } from 'vitest';
 import type { AgentToolResultJson } from '@orchardworks/agent-remote-protocol';

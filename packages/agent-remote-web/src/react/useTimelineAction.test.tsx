@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
 import { useTimelineAction } from './useTimelineAction.js';

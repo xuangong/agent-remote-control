@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { notifyFeedReopened } from '../client/feed-reopen.js';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';

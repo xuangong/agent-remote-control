@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act, useSyncExternalStore } from 'react';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';

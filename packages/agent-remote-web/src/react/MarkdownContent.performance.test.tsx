@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { MarkdownContent } from './MarkdownContent.js';

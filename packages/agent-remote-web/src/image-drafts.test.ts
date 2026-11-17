@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import 'fake-indexeddb/auto';
 import { Blob as NativeBlob } from 'node:buffer';
 import { expect, it, vi } from 'vitest';

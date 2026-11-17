@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';

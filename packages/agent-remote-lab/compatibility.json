@@ -20,6 +20,11 @@
         "packages/agent-controller/tests",
         "packages/agent-controller/tsconfig.json",
         "packages/agent-controller/vitest.config.ts",
+        "packages/agent-e2e/faults",
+        "packages/agent-e2e/package.json",
+        "packages/agent-e2e/smoke",
+        "packages/agent-e2e/tsconfig.json",
+        "packages/agent-e2e/vitest.config.ts",
         "packages/agent-platform/README.md",
         "packages/agent-platform/package.json",
         "packages/agent-platform/src",
@@ -171,7 +176,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:c094a3662dd260a033dbd2d14439d751ac20de8f0fcddac4d1b6bf498eb1530d"
+      "digest": "sha256:35e305f3c335e6edb9d3f38ac1100f597603c843b586e932645c8a046dfce02d"
     }
   },
   "providers": [

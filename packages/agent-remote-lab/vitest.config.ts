@@ -17,6 +17,7 @@ export default defineConfig({
   plugins: [workspaceSource(), react()],
   test: {
     reporters: ['default', new SlowTestReporter()],
+    slowTestThreshold: 300,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],

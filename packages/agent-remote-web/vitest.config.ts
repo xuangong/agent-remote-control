@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [workspaceSource()],
   test: {
     reporters: ['default', new SlowTestReporter()],
+    slowTestThreshold: 300,
     environment: 'node',
   },
 });

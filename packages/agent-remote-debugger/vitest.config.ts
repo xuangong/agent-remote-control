@@ -10,4 +10,4 @@ import { join } from 'node:path';
 const home = mkdtempSync(join(tmpdir(), 'arc-debugger-test-home-'));
 process.on('exit', () => rmSync(home, { recursive: true, force: true }));
 
-export default defineConfig({ plugins: [workspaceSource()], test: { reporters: ['default', new SlowTestReporter()], fileParallelism: false, include: ['src/**/*.test.ts'], testTimeout: 10000, hookTimeout: 60000, env: { HOME: home, USERPROFILE: home } } });
+export default defineConfig({ plugins: [workspaceSource()], test: { reporters: ['default', new SlowTestReporter()], slowTestThreshold: 300, fileParallelism: false, include: ['src/**/*.test.ts'], testTimeout: 10000, hookTimeout: 60000, env: { HOME: home, USERPROFILE: home } } });

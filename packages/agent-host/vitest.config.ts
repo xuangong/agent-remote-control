@@ -11,6 +11,7 @@ export default defineConfig({
   plugins: [workspaceSource()],
   test: {
     reporters: ['default', new SlowTestReporter()],
+    slowTestThreshold: 300,
     projects: [
       { extends: true, test: { name: 'unit', exclude: [...excluded, ...processTests] } },
       { extends: true, test: { name: 'process', include: processTests, exclude: excluded } },

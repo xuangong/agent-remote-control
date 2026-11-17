@@ -18,6 +18,8 @@
     "verify:changed": "sh scripts/verify-changed.sh",
     "task:start": "sh scripts/task-start.sh",
     "test:unit": "node scripts/run-tests.mjs unit-package",
+    "test:inventory": "node scripts/test-inventory.mjs",
+    "arch:report": "node scripts/arch-check.mjs",
     "test:e2e": "node scripts/run-tests.mjs e2e",
     "test:conformance": "node scripts/run-tests.mjs conformance",
     "test:setup": "node scripts/run-tests.mjs setup",

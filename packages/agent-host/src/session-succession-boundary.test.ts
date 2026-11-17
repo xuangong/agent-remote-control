@@ -7,7 +7,7 @@ import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { createHash } from 'node:crypto';
 import { nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { createOperationCache, type MutationEntry } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, type MutationEntry } from '@orchardworks/agent-session-runtime';
 import type { AgentInputAcceptance, AgentPreparedTextInput, AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {recursive:true,force:true}))); });

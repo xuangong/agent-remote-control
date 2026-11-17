@@ -5,7 +5,7 @@ import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentCapabilities, AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, AgentSessionConfig,
   AgentSessionExtensions, AgentSessionResumeOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 import { createAgentHostRuntime, type AgentHostRuntime } from './host.js';
 import { createManagedStdioDirectory } from './stdio-directory.js';
 import { createCodexSessionDirectory } from './directory.js';

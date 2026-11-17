@@ -20,7 +20,7 @@ test('installed public ARDB contains its local service and recovers exact prefix
   const artifacts = join(directory, 'tarballs'), prefix = join(directory, 'installed');
   await mkdir(artifacts); await mkdir(prefix);
   try {
-    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'codex-daemon-client', 'agent-provider-codex', 'agent-remote-relay', 'agent-remote-web', 'agent-remote-debugger'];
+    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'codex-daemon-client', 'agent-provider-codex', 'agent-session-runtime', 'agent-remote-web', 'agent-remote-debugger'];
     const dependencies = {};
     for (const name of names) {
       const path = join(repository, 'packages', name), manifest = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
@@ -47,7 +47,7 @@ test('installed public ARDB contains its local service and recovers exact prefix
     assert.ok(graph.inputs.includes('local-session-runtime.js'));
     assert.ok(graph.inputs.includes('local-succession-replay.js'));
     assert.ok(graph.declarations.includes('local-succession-replay.d.ts'));
-    assert.ok(graph.imports.every(name => name.startsWith('node:') || ['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-remote-relay'].includes(name)));
+    assert.ok(graph.imports.every(name => name.startsWith('node:') || ['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-session-runtime'].includes(name)));
     for (const name of graph.declarations) {
       const declaration = await readFile(join(installed, 'dist/internal/local-succession', name), 'utf8');
       assert.ok(!declaration.includes('@orchardworks/agent-remote-controller')); assert.ok(!declaration.includes('sourceMappingURL'));

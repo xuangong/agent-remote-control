@@ -6,7 +6,7 @@ Agent Remote is the independent session-control and validation boundary that car
 
 ## Boundary
 
-This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-remote-relay`, `@orchardworks/agent-remote-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-remote-relay/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
+This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-session-runtime`, `@orchardworks/agent-remote-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-session-runtime/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
 
 The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-host/src/host.ts`, `packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 
@@ -37,7 +37,7 @@ flowchart LR
   lab --> broker
 ```
 
-The relay owns current Agent state, canonical Timeline rows, and resource ingestion; the Web package owns browser reconstruction; the lab composes public boundaries and routes paired Hosts without interpreting their public conversation content (`packages/agent-remote-relay/src/agent-manager.ts:97-115`, `packages/agent-remote-relay/src/timeline-store.ts:29-68`).
+The relay owns current Agent state, canonical Timeline rows, and resource ingestion; the Web package owns browser reconstruction; the lab composes public boundaries and routes paired Hosts without interpreting their public conversation content (`packages/agent-session-runtime/src/agent-manager.ts:97-115`, `packages/agent-timeline/src/timeline-store.ts:29-68`).
 
 ## Key Flows
 
@@ -93,7 +93,7 @@ flowchart LR
 
 - `packages/agent-provider-sdk/src/observation.ts:59-108`
 - `packages/agent-remote-protocol/src/messages.ts:150-176`
-- `packages/agent-remote-relay/src/agent-manager.ts:250-380`
+- `packages/agent-session-runtime/src/agent-manager.ts:250-380`
 - `packages/agent-remote-web/src/client/remote-session-client.ts:126-225`
 - `packages/agent-remote-debugger/src/runtime.ts:62-159`
 - `packages/agent-remote-lab/src/server.ts:11-23`

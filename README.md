@@ -875,7 +875,7 @@ The root test runner probes each selected native executable with a five-second `
 | `agent-provider-sdk` | Native-independent session and observation contract. |
 | `agent-provider-dsh`, `agent-provider-codex` | Native provider interpretation and runtime adapters. |
 | `agent-remote-protocol` | Public schemas, codecs, versioned uplink envelopes, and contract fixtures. |
-| `agent-remote-relay` | Session execution, ordered public state, transport, and uplink clients. |
+| `agent-session-runtime` | Session execution, ordered public state, transport, and uplink clients. |
 | `agent-remote-web` | Browser transport, recovery, replica, and reusable React DOM rendering. |
 | `agent-remote-debugger` | Headless Session View protocol/state debugging and scripted regression through `ardb`. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |

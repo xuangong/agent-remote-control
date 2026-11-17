@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { RemoteTeamClient } from '../../agent-remote-web/src/client/remote-team-client.js';
 import { isTeam as isLegacyTeam } from '../../agent-remote-protocol/test/fixtures/legacy-team/team.js';

@@ -1,7 +1,7 @@
 import { nativeSessionRefKey, type NativeSessionRef, type SourceBinding } from '@orchardworks/agent-remote-protocol';
 import type { TpmMainRouting } from './tpm.js';
 import type { SessionSuccessionService } from './session-succession-service.js';
-import type { RemoteHostSessionLease } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostSessionLease } from '@orchardworks/agent-session-runtime';
 
 /** TPM work identity stays fixed while future admissions resolve the durable primary role. */
 export function successionTpmRouting(service: SessionSuccessionService, controllerId: string,

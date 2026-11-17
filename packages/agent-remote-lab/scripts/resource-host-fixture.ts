@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { RESOURCE_INPUT_CAPABILITIES, type AgentInputPart, type ProviderStreamItem, type AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteRelay, createAgentRemoteHttpServer, InputResourceStore } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay, createAgentRemoteHttpServer, InputResourceStore } from '@orchardworks/agent-session-runtime';
 const directory = await mkdtemp(join(tmpdir(), 'remote-resource-browser-'));
 const evidence = resolve(process.env.RESOURCE_BROWSER_EVIDENCE ?? '../../.artifacts/resource-browser'); await mkdir(evidence, { recursive: true });
 const provider: AgentProviderAdapter = { descriptor: { providerId: 'resource-fixture', displayName: 'Resource fixture' }, async resumeSession() { throw new Error('Resume is not used.'); }, async createSession(config) {

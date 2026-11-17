@@ -23,7 +23,7 @@
     "@orchardworks/agent-remote-hosted": "workspace:*",
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
-    "@orchardworks/agent-remote-relay": "workspace:*"
+    "@orchardworks/agent-session-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

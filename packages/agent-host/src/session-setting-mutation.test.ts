@@ -6,7 +6,7 @@ import { expect, test, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AgentSession, AgentCapabilities, AgentRuntimeInfo, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer, type OperationCacheOptions } from '@orchardworks/agent-session-runtime';
 import { createAgentHostRuntime } from './host.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';

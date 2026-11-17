@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isCodexDaemonRestart, isCodexDaemonStatus, type CodexDaemonStatus } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 import { CodexDaemonRestartRejected } from './codex-daemon-restart-error.js';
 
 export class CodexDaemonControlError extends Error {

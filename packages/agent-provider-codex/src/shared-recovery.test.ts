@@ -11,8 +11,8 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { CodexAppServerProvider } from './provider.js';
 import { CodexAppServerSession } from './session.js';
 import { normalizeRecoverySettings } from './shared-recovery.js';
-import { AgentManager } from '../../agent-remote-relay/dist/agent-manager.js';
-import { createSessionWire } from '../../agent-remote-relay/dist/session-wire.js';
+import { AgentManager } from '../../agent-session-runtime/dist/agent-manager.js';
+import { createSessionWire } from '../../agent-session-runtime/dist/session-wire.js';
 import { decodeServerMessage } from '../../agent-remote-protocol/dist/index.js';
 
 interface NativeThread {

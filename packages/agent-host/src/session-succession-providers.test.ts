@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { expect, test } from 'vitest';
 import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentCapabilities, type AgentSession, type AgentSessionNativeEvidence, type AgentSessionConfig, type ProviderStreamItem, type AgentPreparedTextInput } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import { createAgentHostRuntime, type AgentHostProviderRegistration } from './host.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
 const hash = (text:string) => createHash('sha256').update(text).digest('hex');

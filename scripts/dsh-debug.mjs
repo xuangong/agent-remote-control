@@ -155,7 +155,7 @@ async function main() {
       console.log('Installing workbench dependencies...');
       await run(pnpm, ['install', '--frozen-lockfile']);
     }
-    if (!await exists(join(root, 'packages/agent-remote-relay/dist/index.js'))) {
+    if (!await exists(join(root, 'packages/agent-session-runtime/dist/index.js'))) {
       console.log('Building the workbench packages...');
       await run(pnpm, ['build']);
     }

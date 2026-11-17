@@ -24,7 +24,7 @@
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
-    "@orchardworks/agent-remote-relay": "workspace:*",
+    "@orchardworks/agent-session-runtime": "workspace:*",
     "@orchardworks/agent-remote-web": "workspace:*",
     "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
     "qrcode": "1.5.4",

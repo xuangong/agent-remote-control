@@ -8,7 +8,7 @@ import {
   createAgentRemoteHttpServer,
   createAgentRemoteRelay,
   createAgentRemoteUplinkClient,
-} from '../../../agent-remote-relay/src/index.js';
+} from '../../../agent-session-runtime/src/index.js';
 import {
   AgentReplica,
   HttpWebSocketTransport,

@@ -5,7 +5,7 @@ import { createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { SqlJournalStore } from '@orchardworks/agent-remote-journal-sqlite';
 import { openNodeJournalDatabase, type NodeJournalDatabase } from '@orchardworks/agent-remote-journal-sqlite/node';
-import { InputResourceStore } from '@orchardworks/agent-remote-relay';
+import { InputResourceStore } from '@orchardworks/agent-session-runtime';
 import { BROKER_MAX_FRAME_BYTES, createHostedRelay, createHostJournals, type HostJournals, hostedAuthStorageIdentity, hostedRecordEncodingCosts, isPreviewDomain, migrateLegacyNodeState, resolveHostedAuth, type HostedAuthOptions, type HostedRelayOptions } from '@orchardworks/agent-remote-hosted';
 import { openGatewayState } from './gateway-state.js';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';

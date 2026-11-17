@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Duplex } from 'node:stream';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@orchardworks/agent-remote-relay';
+import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@orchardworks/agent-session-runtime';
 import { BROKER_MAX_FRAME_BYTES, createHostBroker, type BrokerRequestContext, type HostBrokerOptions, type RelaySocket } from '@orchardworks/agent-remote-hosted';
 import { sessionSubscriptionRefusal } from '@orchardworks/agent-remote-protocol/model';
 import { acceptSessionChannel, SESSION_CHANNEL_MAX_PENDING_FRAMES, type SessionChannelSocket } from '@orchardworks/agent-remote-protocol';

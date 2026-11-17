@@ -16,7 +16,7 @@ import type { SessionSuccessionCoordinator } from './session-succession.js';
 import { nativeSessionRefKey, nativePrefixSegmentAncestors, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
-import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
+import { SessionBindings, SessionBindingError } from '@orchardworks/agent-session-runtime';
 import { createNativeStartBackoff, nativeStartTarget } from './native-start-backoff.js';
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
@@ -33,7 +33,7 @@ import { roleSessionConfig } from './role-session-creation.js';
 import { WorkerSupport } from './call-for-support-worker.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
-import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-session-runtime';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
@@ -54,7 +54,7 @@ import { runHostRequest } from './host-command.js';
 import { handleRoleRequest } from './role-routes.js';
 import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
   RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
-  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
+  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export interface AgentHostWorkspace { id: string; name: string; path: string }
 export interface AgentHostDirectory {

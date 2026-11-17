@@ -264,7 +264,7 @@ describe('Remote Host broker', () => {
 });
 
 it('carries native-host discovery, creation, snapshots, and chat through the production uplink client', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@orchardworks/agent-remote-relay');
+  const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@orchardworks/agent-session-runtime');
   const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless');
   const { createRecordedLabProvider } = await import('./recorded.js');
   const { vi } = await import('vitest');
@@ -337,7 +337,7 @@ it('carries native-host discovery, creation, snapshots, and chat through the pro
   for (const session of nativeSessions) delete session.capabilities.queueMessage;
   await expect(client.sendMessage('Unsupported queue', { delivery: 'next_turn' })).rejects.toMatchObject({ code: 'unsupported_command', recoverable: true });
   expect(deliveries).toHaveLength(2);
-  const imageBytes = await readFile(new URL('../../../agent-remote-relay/src/resources/fixtures/dimensions.png', import.meta.url));
+  const imageBytes = await readFile(new URL('../../../agent-session-runtime/src/resources/fixtures/dimensions.png', import.meta.url));
   const attachment = await client.uploadImage(new Blob([new Uint8Array(imageBytes)], { type: 'image/png' }), 'uplink-image');
   expect((await client.sendMessageContent([
     { type: 'text', text: 'before' }, { type: 'image', attachmentId: attachment.attachmentId, label: 'image #1' }, { type: 'text', text: 'after' },

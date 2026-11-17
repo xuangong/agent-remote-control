@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 import { SESSION_STATE_STALE_MS } from '@orchardworks/agent-remote-protocol';
 import { SessionListing, type SessionListingPage } from './session-listing.js';
 

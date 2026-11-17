@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { AgentRuntimeError, type AgentPersistenceHandle, type AgentSession, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
-import { createAgentRemoteRelay } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 import { LocalSessionSuccession } from './local-session-succession.js';
 // @ts-expect-error Test-only native fixture shared with installed-package smoke.
 import { createPrefixAdapter } from './fixtures/prefix-adapter.mjs';

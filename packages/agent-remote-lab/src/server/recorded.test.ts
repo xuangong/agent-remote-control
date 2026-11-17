@@ -1,4 +1,4 @@
-import { AgentManager } from '@orchardworks/agent-remote-relay';
+import { AgentManager } from '@orchardworks/agent-session-runtime';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createRecordedLabProvider } from './recorded.js';

@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { LocalSuccessionReplay, localSuccessionLocator } from './local-succession-replay.js';
 import type { AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { isNativePrefixSelection, isSuccessionRequest, nativePrefixSegmentAncestors, nativeSessionRefKey, PROTOCOL_VERSION, type NativeSessionRef, type PrimaryRole, type SuccessionRecord, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { createOperationCache, type AgentRemoteRelay, type OperationLifecycle, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, type AgentRemoteRelay, type OperationLifecycle, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import { nativePrefixResumeHandle, SuccessionPreparationRejected } from './local-succession-preparation.js';
 import { SessionSuccessionService } from './session-succession-service.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';

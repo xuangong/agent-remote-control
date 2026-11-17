@@ -1,8 +1,8 @@
 import {createHash} from 'node:crypto';
 import {writeMcpFormServer} from '../../agent-provider-claude/src/test-utils/mcp-elicitation.js';
 import {expect, it} from 'vitest';
-import {ResourceIngestor} from '../../agent-remote-relay/src/resources/resource-ingestor.js';
-import {InMemoryResourceStore} from '../../agent-remote-relay/src/resources/resource-store.js';
+import {ResourceIngestor} from '../../agent-session-runtime/src/resources/resource-ingestor.js';
+import {InMemoryResourceStore} from '../../agent-session-runtime/src/resources/resource-store.js';
 import {mkdir, writeFile, readFile, realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {homedir} from 'node:os';

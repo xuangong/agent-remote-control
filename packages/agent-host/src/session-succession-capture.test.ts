@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import type { SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import { captureSuccessionTimeline } from './session-succession-capture.js';
 function fixture() {
   let current = { epoch: 'epoch', seq: 2 };

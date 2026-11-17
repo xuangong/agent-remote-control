@@ -5,7 +5,7 @@ import {join,resolve} from 'node:path';
 import WebSocket from 'ws';
 import {expect,it,vi} from 'vitest';
 import {AgentReplica,HttpWebSocketTransport,RemoteSessionClient,type WebSocketLike} from '@orchardworks/agent-remote-web';
-import {createAgentRemoteHttpServer} from '@orchardworks/agent-remote-relay';
+import {createAgentRemoteHttpServer} from '@orchardworks/agent-session-runtime';
 import {createAgentHostRuntime} from '../../agent-host/src/host.js';
 import {createCopilotSessionDirectory} from '../../agent-host/src/copilot-directory.js';
 import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';

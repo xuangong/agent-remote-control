@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import type { OutboxDelivery, OutboxHostCall } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHostSessionLease } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostSessionLease } from '@orchardworks/agent-session-runtime';
 import { SessionOutbox, type OutboxAccess } from './session-outbox.js';
 
 const directories: string[] = [];

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 
 const providers = [
   { providerId: 'codex', displayName: 'Codex CLI' },

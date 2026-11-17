@@ -3,7 +3,7 @@ import { afterEach, expect, it } from 'vitest';
 import { freeze } from 'immer';
 import { acceptSessionChannel, PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createHostBroker, HostSharing, type RelaySocket, type RemoteHostBrokerState } from './index.js';
-import { createOperationCache, OperationCacheError } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
 
 const close: Array<() => void | Promise<void>> = [];
 const operationOne = '00000000-0000-4000-8000-000000000001';

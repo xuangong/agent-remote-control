@@ -4,7 +4,7 @@ import { realpath } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { successionAuthorityKey, successionFreezeKey, isNativePrefixSelection, isSuccessionAssociationFreeze, isNativeSessionRef, nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionContext, type SuccessionParticipant, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
-import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from './host.js';
 import { SuccessionCapacityError } from './succession-persistence.js';
 import type { TpmRecord } from './tpm-store.js';

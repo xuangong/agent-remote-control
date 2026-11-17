@@ -1,5 +1,5 @@
 import { MAX_NORMALIZED_CONTEXT_ENTRIES, type ProjectedTimelineEntry, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
 
 /** Capture one complete normalized history without executing or advancing the session. */
 export async function captureSuccessionTimeline(agent: SessionWireAgent) {

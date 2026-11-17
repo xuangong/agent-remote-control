@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import type { DurableResourceEntry, ResourceIdIndex } from '@orchardworks/agent-remote-relay';
+import type { DurableResourceEntry, ResourceIdIndex } from '@orchardworks/agent-session-runtime';
 
 export const RESOURCE_ID_INDEX_CAPACITY = 10_000;
 const FLUSH_DELAY_MS = 250;

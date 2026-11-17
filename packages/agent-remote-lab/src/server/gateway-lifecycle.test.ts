@@ -98,7 +98,7 @@ it('keeps browser access through a short authority outage when configured with g
 }, 10000);
 
 it('lets the production Host uplink reconnect after an authority outage without pairing again', async () => {
-  const { createAgentRemoteRelay, createRemoteHostUplinkClient } = await import('@orchardworks/agent-remote-relay');
+  const { createAgentRemoteRelay, createRemoteHostUplinkClient } = await import('@orchardworks/agent-session-runtime');
   const f = await fixture();
   const pair = await (await f.request(f.state.basePath + 'v1/remote/pairings', {})).json();
   const native = createAgentRemoteRelay({ providers: [] }); cleanups.push(() => native.close());

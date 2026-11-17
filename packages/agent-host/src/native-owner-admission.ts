@@ -1,4 +1,4 @@
-import type { OperationCache, NativeEffectHandle } from '@orchardworks/agent-remote-relay';
+import type { OperationCache, NativeEffectHandle } from '@orchardworks/agent-session-runtime';
 import { nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { NativeSessionOwnerError, type NativeHandoffGrant, type NativeOwnerIdentity } from './native-session-owner.js';
 import type { SessionSuccessionBoundary } from './session-succession-boundary.js';

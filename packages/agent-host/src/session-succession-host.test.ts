@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { expect, test } from 'vitest';
 import WebSocket from 'ws';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import type { AgentSession, AgentCapabilities, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createAgentHostRuntime } from './host.js';
 import { SessionSuccessionStore } from './session-succession-store.js';

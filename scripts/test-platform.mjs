@@ -75,7 +75,7 @@ try {
   await run('build', ...packageManager('pnpm', ['--filter', '@orchardworks/agent-remote-controller...', 'run', 'build']));
   await tests('filesystem', 'agent-platform', ['src/filesystem']);
   await tests('host-storage', 'agent-host', ['src/connection-config.test.ts', 'src/controller-package.test.ts', 'src/environment.test.ts', 'src/platform/services/services.test.ts']);
-  await tests('images', 'agent-remote-relay', ['src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts']);
+  await tests('images', 'agent-session-runtime', ['src/resources/input-image-store.test.ts', 'src/transport/image-input.test.ts']);
   await tests('transport', 'codex-daemon-client', ['src/app-server-transport.test.ts']);
   const services = requested === 'windows'
     ? ['src/windows.test.ts', 'src/windows-autostart.test.ts', 'src/windows-shared.test.ts']

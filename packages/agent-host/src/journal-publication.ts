@@ -5,7 +5,7 @@ import {
   type AgentSnapshot, type AgentSnapshotPayload, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRelayMessage,
   type RemoteHostUplinkMessage, type ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
-import type { AgentJournalSubscription, AgentJournalTap, AgentManagerEvent } from '@orchardworks/agent-remote-relay';
+import type { AgentJournalSubscription, AgentJournalTap, AgentManagerEvent } from '@orchardworks/agent-session-runtime';
 import { rowItemKey, type CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 
 import {

@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
-import type { MutationEntry } from '@orchardworks/agent-remote-relay';
+import type { MutationEntry } from '@orchardworks/agent-session-runtime';
 
 /** Directory implementations report native completion before local grant/publication work. */
 export interface DirectoryMutationEvidence { completed(): void }
 export async function directoryNativeEffect<T>(entry: MutationEntry | undefined, targets: readonly string[],
   work: (evidence: DirectoryMutationEvidence) => Promise<T>): Promise<T> {
-  const effects: import('@orchardworks/agent-remote-relay').NativeEffectHandle[] = [];
+  const effects: import('@orchardworks/agent-session-runtime').NativeEffectHandle[] = [];
   try { if (entry) for (const target of targets) effects.push(entry.startNativeEffect(target)); }
   catch (error) { for (const effect of effects) effect.settled(); throw error; }
   let completed = false;

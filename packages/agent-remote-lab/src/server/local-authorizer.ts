@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type {
   AgentRemoteHttpMutationPolicy,
   AgentRemoteWebSocketAuthorizer,
-} from '@orchardworks/agent-remote-relay';
+} from '@orchardworks/agent-session-runtime';
 
 const localSubject = 'local-lab';
 

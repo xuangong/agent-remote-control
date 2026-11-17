@@ -10,7 +10,7 @@ const hostDist = dirname(hostEntry);
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const allowedInputs = new Set(['local-session-succession', 'local-session-runtime', 'local-succession-replay', 'session-succession-service', 'session-succession', 'session-succession-store',
   'session-succession-context', 'local-succession-preparation', 'session-succession-boundary', 'session-source-binding', 'source-participant', 'succession-persistence', 'session-reference'].map(name => `${name}.js`));
-const publicPackages = new Set(['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-remote-relay']);
+const publicPackages = new Set(['@orchardworks/agent-provider-sdk', '@orchardworks/agent-remote-protocol', '@orchardworks/agent-session-runtime']);
 const isExternal = name => name.startsWith('node:') || builtinModules.includes(name) || publicPackages.has(name) && Object.hasOwn(manifest.dependencies, name);
 const result = await build({ absWorkingDir: root, entryPoints: ['src/local-session-succession.ts'], outfile: 'dist/local-session-succession.js',
   bundle: true, platform: 'node', format: 'esm', target: 'node22', metafile: true, external: [...publicPackages], sourcemap: false });

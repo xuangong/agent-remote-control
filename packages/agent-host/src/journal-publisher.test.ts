@@ -1,5 +1,5 @@
 import type { JournalRelayMessage } from '@orchardworks/agent-remote-protocol';
-import type { AgentJournalTap } from '@orchardworks/agent-remote-relay';
+import type { AgentJournalTap } from '@orchardworks/agent-session-runtime';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { MESSAGE_BUDGET_BYTES } from './journal-items.js';

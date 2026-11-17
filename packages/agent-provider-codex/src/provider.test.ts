@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { validateAgentSessionCapabilities } from '../../agent-provider-sdk/src/testing.js';
-import { AgentManager } from '../../agent-remote-relay/src/agent-manager.js';
-import type { AgentManagerEvent } from '../../agent-remote-relay/src/agent-manager-events.js';
+import { AgentManager } from '../../agent-session-runtime/src/agent-manager.js';
+import type { AgentManagerEvent } from '../../agent-session-runtime/src/agent-manager-events.js';
 import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 

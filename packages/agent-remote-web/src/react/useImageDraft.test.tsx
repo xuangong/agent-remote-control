@@ -442,9 +442,9 @@ it('fences same-key A and B held receipts before sending C through a real WebSoc
   const { default: WebSocket } = await import('ws');
   const { PROTOCOL_VERSION } = await import('@orchardworks/agent-remote-protocol');
   const { IMAGE_INPUT_CAPABILITIES } = await import('../../../agent-provider-sdk/src/index.js');
-  const { InputImageStore } = await import('../../../agent-remote-relay/src/resources/input-image-store.js');
-  const { createAgentRemoteRelay } = await import('../../../agent-remote-relay/src/relay.js');
-  const { createAgentRemoteHttpServer } = await import('../../../agent-remote-relay/src/transport/http-server.js');
+  const { InputImageStore } = await import('../../../agent-session-runtime/src/resources/input-image-store.js');
+  const { createAgentRemoteRelay } = await import('../../../agent-session-runtime/src/relay.js');
+  const { createAgentRemoteHttpServer } = await import('../../../agent-session-runtime/src/transport/http-server.js');
   type ServerMessage = import('@orchardworks/agent-remote-protocol').ServerMessage;
   type InputPart = import('../../../agent-provider-sdk/src/index.js').AgentInputPart;
   const directory = await mkdtemp(join(tmpdir(), 'draft-binding-wire-'));
@@ -495,7 +495,7 @@ it('fences same-key A and B held receipts before sending C through a real WebSoc
         return next(message => 'payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId);
       };
     }
-    const bytes = await readFile(new NodeURL('../../../agent-remote-relay/src/resources/fixtures/dimensions.png', import.meta.url));
+    const bytes = await readFile(new NodeURL('../../../agent-session-runtime/src/resources/fixtures/dimensions.png', import.meta.url));
     const file = new NodeBlob([new Uint8Array(bytes)], { type: 'image/png' });
     const requests = { A: await connect('A'), B: await connect('B'), C: await connect('C') };
     const receipts: Partial<Record<'A' | 'B' | 'C', typeof attachment>> = {};

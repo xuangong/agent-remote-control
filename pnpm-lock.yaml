@@ -67,12 +67,12 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-relay':
-        specifier: workspace:*
-        version: link:../agent-remote-relay
       '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
       '@orchardworks/agent-timeline':
         specifier: workspace:*
         version: link:../agent-timeline
@@ -318,12 +318,12 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-relay':
-        specifier: workspace:*
-        version: link:../agent-remote-relay
       '@orchardworks/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
       ws:
         specifier: ^8.21.0
         version: 8.21.1
@@ -394,9 +394,9 @@ importers:
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
-      '@orchardworks/agent-remote-relay':
+      '@orchardworks/agent-session-runtime':
         specifier: workspace:*
-        version: link:../agent-remote-relay
+        version: link:../agent-session-runtime
     devDependencies:
       '@types/node':
         specifier: 24.13.3
@@ -434,9 +434,9 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-relay':
+      '@orchardworks/agent-session-runtime':
         specifier: workspace:*
-        version: link:../agent-remote-relay
+        version: link:../agent-session-runtime
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
@@ -472,9 +472,9 @@ importers:
         specifier: ^8.5.24
         version: 8.5.24
     devDependencies:
-      '@orchardworks/agent-remote-relay':
+      '@orchardworks/agent-session-runtime':
         specifier: workspace:*
-        version: link:../agent-remote-relay
+        version: link:../agent-session-runtime
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
@@ -546,15 +546,15 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-relay':
-        specifier: workspace:*
-        version: link:../agent-remote-relay
       '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
       '@orchardworks/agent-remote-web':
         specifier: workspace:*
         version: link:../agent-remote-web
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
       '@orchardworks/dsh':
         specifier: workspace:*
         version: link:../agent-remote-dsh
@@ -626,40 +626,6 @@ importers:
         specifier: 0.34.52
         version: 0.34.52
     devDependencies:
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
-
-  packages/agent-remote-relay:
-    dependencies:
-      '@orchardworks/agent-platform':
-        specifier: workspace:*
-        version: link:../agent-platform
-      '@orchardworks/agent-provider-sdk':
-        specifier: workspace:*
-        version: link:../agent-provider-sdk
-      '@orchardworks/agent-remote-protocol':
-        specifier: workspace:*
-        version: link:../agent-remote-protocol
-      '@orchardworks/agent-timeline':
-        specifier: workspace:*
-        version: link:../agent-timeline
-      image-size:
-        specifier: 2.0.4
-        version: 2.0.4
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.1
-    devDependencies:
-      '@types/node':
-        specifier: ^24.3.0
-        version: 24.13.3
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
@@ -803,6 +769,40 @@ importers:
       ws:
         specifier: ^8.21.0
         version: 8.21.1
+
+  packages/agent-session-runtime:
+    dependencies:
+      '@orchardworks/agent-platform':
+        specifier: workspace:*
+        version: link:../agent-platform
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      '@orchardworks/agent-timeline':
+        specifier: workspace:*
+        version: link:../agent-timeline
+      image-size:
+        specifier: 2.0.4
+        version: 2.0.4
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
   packages/agent-timeline:
     dependencies:
@@ -2902,7 +2902,7 @@ packages:
     engines: {node: '>=0.10.0'}
 
   image-size@2.0.4:
-    resolution: {integrity: sha512-QRUkFFsRV/6fuESxb9Vkq+a0LkSrgKXuc2NEqfikiXxxN/G3tjWt5EVUlMaImRBZRZK/jRBEbYvpPYZL8t08Zw==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/image-size/-/image-size-2.0.4.tgz}
+    resolution: {integrity: sha512-QRUkFFsRV/6fuESxb9Vkq+a0LkSrgKXuc2NEqfikiXxxN/G3tjWt5EVUlMaImRBZRZK/jRBEbYvpPYZL8t08Zw==}
     engines: {node: '>=18'}
     hasBin: true
 

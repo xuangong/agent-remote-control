@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import type { AgentSession, AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
-import { createAgentRemoteRelay } from '../../agent-remote-relay/src/relay.js';
-import { attachAgentRemoteWebSocketStream } from '../../agent-remote-relay/src/transport/websocket-stream.js';
+import { createAgentRemoteRelay } from '../../agent-session-runtime/src/relay.js';
+import { attachAgentRemoteWebSocketStream } from '../../agent-session-runtime/src/transport/websocket-stream.js';
 import { createAgentHost } from '../../agent-host/src/host.js';
 import { startDshAgentRemote } from '../../agent-remote-dsh/src/agent-remote.js';
 

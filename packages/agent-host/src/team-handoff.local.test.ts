@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 import { PROTOCOL_VERSION, type NativeSessionRef, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
 // The real catalog runs its worker process from the build output.
 import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';

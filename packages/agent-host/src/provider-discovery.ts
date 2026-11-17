@@ -7,7 +7,7 @@ import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { isHostProviderChange, type HostProviderState, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { createHostRegistrations, hostProviderIds } from './registrations.js';
 import type { AgentHostProviderRegistration } from './host.js';
-import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import type { AgentRemoteHttpResult, RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 
 const names: Record<string, string> = { codex: 'Codex', claude: 'Claude Code', copilot: 'GitHub Copilot', opencode: 'OpenCode' };
 export interface HostProviderDiscovery {

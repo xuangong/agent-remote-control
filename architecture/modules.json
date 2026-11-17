@@ -35,8 +35,8 @@
       "dir": "packages/agent-remote-journal-sqlite",
       "entry": "src/index.ts"
     },
-    "@orchardworks/agent-remote-relay": {
-      "dir": "packages/agent-remote-relay",
+    "@orchardworks/agent-session-runtime": {
+      "dir": "packages/agent-session-runtime",
       "entry": "src/index.ts"
     },
     "@orchardworks/agent-remote-hosted": {
@@ -106,6 +106,10 @@
     "@orchardworks/agent-remote-seams": {
       "dir": "packages/agent-remote-seams",
       "entry": "tests/index.ts"
+    },
+    "@orchardworks/agent-timeline": {
+      "dir": "packages/agent-timeline",
+      "entry": "src/index.ts"
     }
   },
   "modules": [
@@ -211,8 +215,7 @@
       "name": "timeline",
       "layer": 1,
       "paths": [
-        "packages/agent-remote-relay/src/timeline-projector*.ts",
-        "packages/agent-remote-relay/src/timeline-store*.ts"
+        "packages/agent-timeline/src/**"
       ],
       "seams": [
         "S1",
@@ -261,7 +264,7 @@
       "name": "session-runtime",
       "layer": 2,
       "paths": [
-        "packages/agent-remote-relay/src/**"
+        "packages/agent-session-runtime/src/**"
       ],
       "seams": [
         "S1"

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
-import { createOperationCache } from '@orchardworks/agent-remote-relay';
+import { createOperationCache } from '@orchardworks/agent-session-runtime';
 import type { AgentSession, AgentInputAcceptance } from '@orchardworks/agent-provider-sdk';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { SessionSuccessionContextStore } from './session-succession-context.js';

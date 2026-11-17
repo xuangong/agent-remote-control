@@ -9,7 +9,7 @@ import { LocalSessionSuccession, type LocalSuccessionProvider } from '@orchardwo
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { RemoteHostCatalog, RemoteHostCatalogError, type RemoteSessionSummary } from '@orchardworks/dsh';
 import type { AgentProviderAdapter, AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
-import type { AgentRemoteRelay } from '@orchardworks/agent-remote-relay';
+import type { AgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 import { createLocalLabMutationPolicy } from './local-authorizer.js';
 
 export interface SessionDirectorySource {

@@ -1,5 +1,5 @@
 {
-  "name": "@orchardworks/agent-remote-relay",
+  "name": "@orchardworks/agent-session-runtime",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {

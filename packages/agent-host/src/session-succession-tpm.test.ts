@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { NativeSessionRef, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
-import type { RemoteHostSessionLease } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostSessionLease } from '@orchardworks/agent-session-runtime';
 import { SessionSuccessionService } from './session-succession-service.js';
 import { successionTpmRouting } from './session-succession-tpm.js';
 const roots: string[] = [];

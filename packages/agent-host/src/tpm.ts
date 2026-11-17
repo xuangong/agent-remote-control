@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { AgentInputAcceptance, AgentSessionExtensions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { AgentOperationRejectedError, bindAgentSessionTools } from '@orchardworks/agent-provider-sdk';
 import { isTpmAction, isTpmCreate, sessionOperationAvailability, type TpmAction, type TpmCreate, type TpmIntent, type TpmWork, type TpmList, type NativeSessionRef, type SourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-remote-relay';
+import { OperationCacheError, type AgentManagerEvent, type RemoteHostSessionLease, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 import { sessionHeartbeatInterval, sessionHeartbeatInstructions, sessionHeartbeatTools } from './session-heartbeat.js';
 import { TpmStore, isTpmIntentSettled, type TpmRecord } from './tpm-store.js';
 import { initialTpmTodo, tpmInstructions, tpmReviewPrompt, tpmPlaceholderTitle } from './tpm-role.js';

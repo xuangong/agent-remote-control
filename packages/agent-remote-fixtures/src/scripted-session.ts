@@ -1,5 +1,5 @@
 import type { AgentCapabilities, AgentRuntimeInfo, AgentSession, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { AgentManager } from '@orchardworks/agent-remote-relay';
+import { AgentManager } from '@orchardworks/agent-session-runtime';
 
 const capabilities: AgentCapabilities = {
   history: true, sendMessage: true, steer: false, cancel: false, readResource: false, interactions: { question: true, planApproval: true, toolApproval: true },

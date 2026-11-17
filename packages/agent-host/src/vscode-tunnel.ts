@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { vscodeTunnelLink, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
-import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { vscodeTunnelSupervisorSource } from './vscode-tunnel-supervisor.js';
 import { parseTunnelOutput, tunnelOutputLines } from './vscode-tunnel-output.js';

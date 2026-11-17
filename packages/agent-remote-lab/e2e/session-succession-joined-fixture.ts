@@ -10,7 +10,7 @@ import type { BrowserContext } from '@playwright/test';
 import type { AgentSession, AgentCapabilities, AgentSessionNativeEvidence, ProviderStreamItem, AgentInputAcceptance } from '@orchardworks/agent-provider-sdk';
 import { serializeAgentPreparedTextInput, parseAgentPreparedTextInput } from '@orchardworks/agent-provider-sdk';
 import { createHostedRelay, emptyRelayState, gatewayCookieName, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
-import { createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
+import { createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { createAgentHostRuntime } from '../../agent-host/src/host.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-remote-cloudflare/src/storage-codec.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';

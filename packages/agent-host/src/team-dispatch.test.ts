@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { AgentMessageOptions } from '@orchardworks/agent-provider-sdk';
 import type { AgentSnapshotPayload, NativeSessionRef, Team, TeamMessage } from '@orchardworks/agent-remote-protocol';
-import { createOperationCache, createOperationExecutor, type SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import { createOperationCache, createOperationExecutor, type SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
 import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
 import { TeamRuntime, type TeamRuntimeAccess } from './team.js';

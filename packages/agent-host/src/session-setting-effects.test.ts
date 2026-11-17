@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import { AgentOperationRejectedError, type AgentSession, type AgentRuntimeInfo, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { AgentManager, createOperationCache, createOperationExecutor, type OperationCacheOptions, type SessionWireOperation } from '@orchardworks/agent-remote-relay';
+import { AgentManager, createOperationCache, createOperationExecutor, type OperationCacheOptions, type SessionWireOperation } from '@orchardworks/agent-session-runtime';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
 

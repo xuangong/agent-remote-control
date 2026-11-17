@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
-import { createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
 import { expect, test } from 'vitest';
 import type { AgentPersistenceHandle, AgentSession, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';

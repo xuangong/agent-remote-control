@@ -29,7 +29,7 @@ import { createLoginStartup, systemdUnavailable } from './platform/services/inde
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
 import { serveWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
 import { spawnWindowsJob } from './platform/processes/windows-job.js';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { configureGatewayProviders } from './gateway-setup.js';
 import { runControllerUpdate } from './update-command.js';
 import { renderSessionQr } from './share-qr.js';

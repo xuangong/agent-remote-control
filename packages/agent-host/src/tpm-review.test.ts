@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import type { AgentSession, AgentSessionExtensions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import type { SessionWireAgent, AgentManagerEvent } from '@orchardworks/agent-remote-relay';
+import type { SessionWireAgent, AgentManagerEvent } from '@orchardworks/agent-session-runtime';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import type { TpmRecord } from './tpm-store.js';
 import { backgroundInputHash } from './session-background.js';

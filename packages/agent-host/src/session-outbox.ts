@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { AgentOperationRejectedError } from '@orchardworks/agent-provider-sdk';
 import { isOutboxPoll, type OutboxDelivery, type OutboxHostCall } from '@orchardworks/agent-remote-protocol';
-import { OperationCacheError, type RemoteHostSessionLease } from '@orchardworks/agent-remote-relay';
+import { OperationCacheError, type RemoteHostSessionLease } from '@orchardworks/agent-session-runtime';
 import { availableDelivery } from './team.js';
 
 /** A native session on this Host. */

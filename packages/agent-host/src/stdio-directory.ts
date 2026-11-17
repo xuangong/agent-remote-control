@@ -2,7 +2,7 @@ import { nativePrefixResumeHandle, successionResumeHandle } from './local-succes
 import { resolveAgentNativePrefixCapability, serializeAgentEmptyCreationResult, type AgentNativePrefixTarget } from '@orchardworks/agent-provider-sdk';
 import {acquireNativeSession, inspectNativeOwner, NativeSessionOwnerError, type NativeSessionLease, type NativeOwnerDiagnostic, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { randomUUID } from 'node:crypto';
-import type {RemoteSessionSummary} from '@orchardworks/agent-remote-relay';
+import type {RemoteSessionSummary} from '@orchardworks/agent-session-runtime';
 import type { AgentHistoryQuery, AgentPersistenceHandle, AgentProviderAdapter, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';

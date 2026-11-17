@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { createTunnelPeer, type PreviewSnapshot, type TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { createPreviewRegistry, createLoopbackTunnelHandlers, type PreviewRegistry } from '@orchardworks/agent-remote-tunnel/node';
-import type { RemoteHostControlRequest } from '@orchardworks/agent-remote-relay';
+import type { RemoteHostControlRequest } from '@orchardworks/agent-session-runtime';
 
 export function createControllerPreviews(options: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void }) {
   let registry: PreviewRegistry | undefined;

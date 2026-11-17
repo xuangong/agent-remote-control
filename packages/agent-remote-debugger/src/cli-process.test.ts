@@ -64,7 +64,7 @@ beforeAll(async () => {
   for (const packageDirectory of [
     'packages/agent-remote-protocol',
     'packages/agent-provider-sdk',
-    'packages/agent-remote-relay',
+    'packages/agent-session-runtime',
     'packages/agent-remote-web',
     'packages/agent-remote-debugger',
   ]) {

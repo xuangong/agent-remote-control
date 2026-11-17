@@ -26,7 +26,7 @@ if (mode === 'pnpm') {
     const copilot = join(root, 'packages/agent-provider-copilot/dist/index.js');
     mkdirSync(dirname(copilot), { recursive: true });
     writeFileSync(copilot, `export function resolveCopilotExecutable() { return ${JSON.stringify(join(root, 'bin/copilot'))}; }`);
-    const relay = join(root, 'packages/agent-remote-relay/dist/index.js');
+    const relay = join(root, 'packages/agent-session-runtime/dist/index.js');
     mkdirSync(dirname(relay), { recursive: true }); writeFileSync(relay, '');
     writeFileSync(join(root, 'built'), 'yes');
   } else if (args.includes('tsx')) {

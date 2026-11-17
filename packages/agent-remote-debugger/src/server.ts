@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AgentPersistenceHandle, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
-import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, InputResourceStore } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, InputResourceStore } from '@orchardworks/agent-session-runtime';
 
 import { localRequestAllowed, serveAssets } from './local-web.js';
 import { ownAdapter } from './owned-adapter.js';

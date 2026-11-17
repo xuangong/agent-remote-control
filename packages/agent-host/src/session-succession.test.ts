@@ -154,7 +154,7 @@ test.each(['source', 'source-error', 'supports', 'candidate', 'verify'] as const
   const f = await fixture(); await f.coordinator.prepare(request);
   const store = new SessionSuccessionStore(join(f.root, 'state')); await store.ready;
   const coordinator = new SessionSuccessionCoordinator(store, f.preparation);
-  const { createOperationCache } = await import('@orchardworks/agent-remote-relay');
+  const { createOperationCache } = await import('@orchardworks/agent-session-runtime');
   const { SessionSuccessionBoundary } = await import('./session-succession-boundary.js');
   const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
   const contexts = new SessionSuccessionContextStore(join(f.root, 'contexts')); await contexts.ready;
@@ -250,7 +250,7 @@ test('retains actual candidate identity before rejecting a wrong provider result
 
 test('final synchronous Host check rejects facts changed after asynchronous verification', async () => {
   const f = await fixture();
-  const { createOperationCache } = await import('@orchardworks/agent-remote-relay');
+  const { createOperationCache } = await import('@orchardworks/agent-session-runtime');
   const { SessionSuccessionBoundary } = await import('./session-succession-boundary.js');
   const { SessionSuccessionContextStore } = await import('./session-succession-context.js');
   const contexts = new SessionSuccessionContextStore(join(f.root, 'contexts')); await contexts.ready;

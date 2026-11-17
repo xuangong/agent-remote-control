@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { SESSION_STATE_STALE_MS } from '@orchardworks/agent-remote-protocol';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 
 import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 export type HostListingStatus = SessionListingStatus;

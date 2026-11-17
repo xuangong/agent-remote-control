@@ -1,6 +1,6 @@
 import type { AgentHistoryPage, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import { quotedSessionContextPrefix, type AgentInteractionRequest, type AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import { changeSessionRef, describeSessionRefs, SessionRefError, type SessionRefContext, type SessionRefs } from './session-refs.js';
 

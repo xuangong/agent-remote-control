@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { expect, it } from 'vitest';
 import { AgentOperationRejectedError, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import type { SessionWireAgent } from '@orchardworks/agent-remote-relay';
+import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import { TeamBroker } from '../../agent-remote-hosted/src/teams.js';
 import type { SavedTeam } from '../../agent-remote-hosted/src/team-delivery.js';
 import { TeamRuntime, type TeamRuntimeAccess } from './team.js';

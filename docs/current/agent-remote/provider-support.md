@@ -179,7 +179,7 @@ When behavior changes: update the affected row IDs, the Provider audit and tests
 [A-child-view]: ../../../packages/agent-provider-claude/src/child-session.ts
 [A-children-tests]: ../../../packages/agent-provider-claude/src/children.test.ts
 [Wire]: ../../../packages/agent-remote-protocol/src/messages.ts
-[Relay]: ../../../packages/agent-remote-relay/src/agent-manager.ts
+[Relay]: ../../../packages/agent-session-runtime/src/agent-manager.ts
 [Host]: ../../../packages/agent-host/src/host.ts
 [Broker]: ../../../packages/agent-remote-lab/src/server/remote-host-broker.ts
 [Client]: ../../../packages/agent-remote-web/src/client/remote-session-client.ts

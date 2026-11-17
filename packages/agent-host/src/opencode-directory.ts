@@ -3,7 +3,7 @@ import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferen
 import { randomUUID } from 'node:crypto';
 import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
 import type { AgentProviderAdapter, AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
-import type { RemoteSessionSummary } from '@orchardworks/agent-remote-relay';
+import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { nativePrefixResumeHandle, successionCreationHandle } from './local-succession-preparation.js';
 import { serializeAgentEmptyCreationResult, resolveAgentNativePrefixCapability } from '@orchardworks/agent-provider-sdk';

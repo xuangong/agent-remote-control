@@ -2,7 +2,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, test } from 'vitest';
-import { createOperationCache } from '@orchardworks/agent-remote-relay';
+import { createOperationCache } from '@orchardworks/agent-session-runtime';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { SessionSuccessionContextStore } from './session-succession-context.js';
 import { admitNativeOwnerTransfer } from './native-owner-admission.js';

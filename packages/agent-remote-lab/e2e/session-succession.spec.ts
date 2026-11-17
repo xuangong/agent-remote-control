@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { createHostedRelay, emptyRelayState, gatewayCookieName, validateRelayState, stageRelayState, type HostedRelayState } from '@orchardworks/agent-remote-hosted';
-import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-remote-relay';
+import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { PROTOCOL_VERSION, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import { createRecordedLabProvider } from '../src/server/recorded.js';
 import { createGatewayStaticPages } from '../src/server/gateway-static.js';

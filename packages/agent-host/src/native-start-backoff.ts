@@ -1,4 +1,4 @@
-import type { AgentRemoteHttpResult } from '@orchardworks/agent-remote-relay';
+import type { AgentRemoteHttpResult } from '@orchardworks/agent-session-runtime';
 
 const initialDelayMs = 5_000;
 const maxDelayMs = 60_000;

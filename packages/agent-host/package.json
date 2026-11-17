@@ -37,7 +37,7 @@
     "@orchardworks/agent-remote-hosted": "workspace:*",
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
-    "@orchardworks/agent-remote-relay": "workspace:*",
+    "@orchardworks/agent-session-runtime": "workspace:*",
     "@orchardworks/agent-remote-tunnel": "workspace:*",
     "qrcode": "1.5.4",
     "ws": "^8.21.0",

@@ -1,4 +1,4 @@
-import { SessionBindings, SessionBindingError } from '@orchardworks/agent-remote-relay';
+import { SessionBindings, SessionBindingError } from '@orchardworks/agent-session-runtime';
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -8,7 +8,7 @@ import { isAbsolute, join } from 'node:path';
 import { DshChildSessions, createDshWebInteractionAdapter, type DshWebInteractionAdapter } from '@orchardworks/agent-provider-dsh';
 import {
   createAgentRemoteRelay, createRemoteHostUplinkClient, type RemoteHostControlRequest,
-} from '@orchardworks/agent-remote-relay';
+} from '@orchardworks/agent-session-runtime';
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
 import Schema from '@deepseek-ai/schemastery';

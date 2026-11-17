@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { AgentOperationRejectedError, type AgentSession, type AgentInputAcceptance, type AgentInputPart, type AgentMessageOptions, type AgentSessionNativeEvidence, type AgentRuntimeInfo } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { SessionWireOperation, OperationCache, MutationEntry, NativeEffectHandle, NativeEffectReservation, SessionSettingIntentLifecycle } from '@orchardworks/agent-remote-relay';
+import type { SessionWireOperation, OperationCache, MutationEntry, NativeEffectHandle, NativeEffectReservation, SessionSettingIntentLifecycle } from '@orchardworks/agent-session-runtime';
 import { isSuccessionDeliveryUnresolved, SessionSuccessionContextStore, SessionSuccessionInputDispatcher } from './session-succession-context.js';
 
 const mutations = new Set(['sendMessage', 'sendMessageContent', 'steer', 'cancel', 'respondToInteraction', 'setPlanning', 'setSessionSetting', 'executeCommand']);

@@ -8,7 +8,7 @@ import { expect, test, vi } from 'vitest';
 import WebSocket, { WebSocketServer } from 'ws';
 import { createHostBroker, type RemoteHostBrokerState } from '../../agent-remote-hosted/src/broker.js';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
-import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-remote-relay';
+import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import type { AgentSession, AgentSessionConfig, AgentCapabilities, AgentInputAcceptance, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { serializeAgentPreparedTextInput, parseAgentPreparedTextInput, AGENT_NATIVE_EVIDENCE_REASONS, type AgentPreparedTextInput, type AgentSessionNativeEvidence, type AgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
 import { directoryOperationId } from './directory-mutation.js';

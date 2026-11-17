@@ -2,7 +2,7 @@
 
 ## Role
 
-`@orchardworks/agent-remote-protocol` defines the versioned public messages exchanged by a Remote client and Relay; it is neither a Provider-native event model nor the Relay's internal manager bus (`packages/agent-remote-protocol/src/messages.ts:150-176`, `packages/agent-remote-relay/src/agent-manager-events.ts:14-39`).
+`@orchardworks/agent-remote-protocol` defines the versioned public messages exchanged by a Remote client and Relay; it is neither a Provider-native event model nor the Relay's internal manager bus (`packages/agent-remote-protocol/src/messages.ts:150-176`, `packages/agent-session-runtime/src/agent-manager-events.ts:14-39`).
 
 ## Boundary
 
@@ -48,7 +48,7 @@ flowchart LR
   gap -->|"no"| render["Render replica state"]
 ```
 
-The wire requires negotiation before an attached session sends its Snapshot, and it serializes Timeline subscription acknowledgement before queued Timeline delivery (`packages/agent-remote-relay/src/session-wire.ts:74-109`, `packages/agent-remote-relay/src/session-wire.ts:142-153`).
+The wire requires negotiation before an attached session sends its Snapshot, and it serializes Timeline subscription acknowledgement before queued Timeline delivery (`packages/agent-session-runtime/src/session-wire.ts:74-109`, `packages/agent-session-runtime/src/session-wire.ts:142-153`).
 
 ## Invariants
 
@@ -56,7 +56,7 @@ The wire requires negotiation before an attached session sends its Snapshot, and
 - Planning is an optional capability with an explicit creation preference and authoritative runtime state; clients cannot infer planning support or activity from permission settings or a command acknowledgement (`packages/agent-remote-protocol/src/snapshot.ts:19-55`, `packages/agent-remote-protocol/src/messages.ts:71-87`, `packages/agent-remote-protocol/src/messages.ts:124-135`).
 - `AgentSnapshot` contains current Agent state and pending interactions, not Timeline entries (`packages/agent-remote-protocol/src/snapshot.ts:47-72`).
 - **Item keys.** `negotiate` may carry `itemKeys: true`; a Relay that serves the session from a journal echoes it in `negotiated`, and then every `timeline_page` entry and every `timeline` event of an `agent_stream` frame carries `itemKey` (1 to 4096 characters), the key of its item for the life of the session. A client identifies a row by it across epochs. The Relay removes the flag before a Controller sees it, because Controllers built before it decode `negotiate` strictly; a Controller-answered stream never echoes it, and its entries carry no keys. Without the flag a journal-served stream sends the frames it always sent.
-- Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-remote-relay/src/timeline-projector.ts:50-88`).
+- Timeline recovery uses `timeline_page` with an epoch and cursors; a stale or forward cursor is represented explicitly rather than inferred from Snapshot (`packages/agent-remote-protocol/src/history.ts:13-48`, `packages/agent-timeline/src/timeline-projector.ts:50-88`).
 - Interaction requests and responses have closed, kind-specific structures (`packages/agent-remote-protocol/src/interactions.ts:22-134`).
 - Every mutating public request carries a UUID `operationId` that identifies user intent independently of the transport `requestId`. Interaction responses retain the native interaction `requestId` and use a separate `submissionId` for the current response envelope (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-protocol/src/commands.ts`, `packages/agent-remote-protocol/src/interactions.ts`, `packages/agent-remote-protocol/src/operations.ts`).
 
@@ -75,7 +75,7 @@ The bounded in-memory cache never evicts in-flight work; terminal outcomes expir
 
 ## Non-Goals
 
-- The package does not interpret Provider-native values or own Relay-internal manager events; those values enter only through Relay mapping into the declared public message union (`packages/agent-remote-protocol/src/messages.ts:150-176`, `packages/agent-remote-relay/src/session-wire.ts:208-311`).
+- The package does not interpret Provider-native values or own Relay-internal manager events; those values enter only through Relay mapping into the declared public message union (`packages/agent-remote-protocol/src/messages.ts:150-176`, `packages/agent-session-runtime/src/session-wire.ts:208-311`).
 
 ## See also
 
@@ -97,7 +97,7 @@ Generic tool details may carry one inline `sessionReference` or a list of `sessi
 
 ## Tool results
 
-Protocol `1.2.0` adds optional `tool_call.result`. A result contains ordered text or JSON content blocks, optional `exitCode` and `durationMs`, and an explicit `truncated` flag. Text may identify `stdout`, `stderr`, or combined output; absent stream metadata stays unspecified. Missing results mean the Provider supplied no result, while an empty content array explicitly represents an available result with no body. Results are complete snapshots attached to the existing `callId`, not append-only output chunks. Relay and client lifecycle projection replace the result along with the call state, and history/replay use the same representation (`packages/agent-provider-sdk/src/tool-result.ts`, `packages/agent-remote-protocol/src/tool-result.ts`, `packages/agent-remote-relay/src/timeline-projector.ts`).
+Protocol `1.2.0` adds optional `tool_call.result`. A result contains ordered text or JSON content blocks, optional `exitCode` and `durationMs`, and an explicit `truncated` flag. Text may identify `stdout`, `stderr`, or combined output; absent stream metadata stays unspecified. Missing results mean the Provider supplied no result, while an empty content array explicitly represents an available result with no body. Results are complete snapshots attached to the existing `callId`, not append-only output chunks. Relay and client lifecycle projection replace the result along with the call state, and history/replay use the same representation (`packages/agent-provider-sdk/src/tool-result.ts`, `packages/agent-remote-protocol/src/tool-result.ts`, `packages/agent-timeline/src/timeline-projector.ts`).
 
 Adapters bound result bodies to 65,536 characters across at most 128 blocks. Oversized JSON becomes a text preview and marks the result truncated. This preview does not expose a full-result download endpoint. Protocol negotiation remains exact: clients and Hosts using earlier protocol versions must update together with the Relay; transport uplink versions are unchanged.
 
@@ -105,7 +105,7 @@ Adapters bound result bodies to 65,536 characters across at most 128 blocks. Ove
 
 Protocol `1.3.0` adds `form`, `permission_approval`, and `external_action`. Forms carry typed fields and stable field IDs; permission requests carry the exact resources and allowed durations; external actions separate opening an HTTP(S) link from explicitly confirming completion. Tool approvals can declare native cancellation and named policy choices. Capability flags are optional and absent flags mean unsupported (`packages/agent-remote-protocol/src/interactions.ts`, `packages/agent-remote-protocol/src/snapshot.ts`).
 
-Sensitive question answers and form fields travel to the Provider only in the response command. Completed events and history carry `redacted` or `redactedFields` markers instead of those values. Sensitive field defaults are removed from public requests. Historical redaction markers are not valid new responses. Form `required` means property presence; nonempty strings and arrays require explicit minimum constraints. SDK request-aware validation additionally enforces choices, required values, form constraints, and exact permission scopes; structural wire decoding alone cannot authorize a response (`packages/agent-provider-sdk/src/interactions.ts`, `packages/agent-remote-relay/src/agent-manager.ts`). All endpoints must upgrade together because negotiation remains exact; uplink envelope versions do not change.
+Sensitive question answers and form fields travel to the Provider only in the response command. Completed events and history carry `redacted` or `redactedFields` markers instead of those values. Sensitive field defaults are removed from public requests. Historical redaction markers are not valid new responses. Form `required` means property presence; nonempty strings and arrays require explicit minimum constraints. SDK request-aware validation additionally enforces choices, required values, form constraints, and exact permission scopes; structural wire decoding alone cannot authorize a response (`packages/agent-provider-sdk/src/interactions.ts`, `packages/agent-session-runtime/src/agent-manager.ts`). All endpoints must upgrade together because negotiation remains exact; uplink envelope versions do not change.
 
 ## Session settings
 
@@ -117,7 +117,7 @@ The relay gives each intent 30 seconds. Native rejection ends Pending immediatel
 
 Snapshots and updates share these outcomes across pages and reconnects. The renderer displays pending targets in amber, then restores normal text for the actual or last confirmed value. Terminal outcomes remain in the relevant panel; an unread dot clears when that panel is opened. Read markers are local presentation state. No timeout toast or automatic retry is generated. Settings default choices describe native selection semantics, not an inferred effective model or effort.
 
-All strict-schema public participants must upgrade together to `1.8.0`. Independent uplink envelope versions stay unchanged (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-remote-relay/src/session-setting-changes.ts`).
+All strict-schema public participants must upgrade together to `1.8.0`. Independent uplink envelope versions stay unchanged (`packages/agent-remote-protocol/src/session-settings.ts`, `packages/agent-session-runtime/src/session-setting-changes.ts`).
 
 ## Provider commands
 
@@ -128,7 +128,7 @@ The same unshipped `1.5.0` contract adds optional `commands` capability and Prov
 | `list_commands` | `command_list` | Request: `requestId`, `agentId`. Reply: the same IDs and `commands`. |
 | `execute_command` | `command_result` | Request: `requestId`, `operationId`, `agentId`, `commandId`, `args`. Reply: `requestId`, `agentId`, and `result`. |
 
-Each pair has one correlated reply and no additional `command_acknowledged`. Native failures use the existing error response. `result` contains optional `text`; an empty result can mean a native menu was opened and does not assert completion of its remaining interactions. Existing `question` and `form` requests, interaction responses, and resolved events carry subsequent selections. No public message type is added per menu level. Session-setting toolbar writes still use their existing acknowledgement and confirmed runtime state. Exact version negotiation and independent uplink envelope versions remain unchanged (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-remote-relay/src/session-wire.ts`).
+Each pair has one correlated reply and no additional `command_acknowledged`. Native failures use the existing error response. `result` contains optional `text`; an empty result can mean a native menu was opened and does not assert completion of its remaining interactions. Existing `question` and `form` requests, interaction responses, and resolved events carry subsequent selections. No public message type is added per menu level. Session-setting toolbar writes still use their existing acknowledgement and confirmed runtime state. Exact version negotiation and independent uplink envelope versions remain unchanged (`packages/agent-remote-protocol/src/messages.ts`, `packages/agent-session-runtime/src/session-wire.ts`).
 
 ## Message delivery
 
@@ -139,7 +139,7 @@ Command documentation reuses `ResourceBinding` and `resource_request` / `resourc
 
 ## Active turn reconciliation
 
-The unshipped `1.5.0` `runtime_updated` event accepts optional `activeTurnId: string | null` as authoritative turn reconciliation. Omission leaves the previous active turn unchanged; `null` clears it; a different nonempty ID replaces it using the event timestamp as its first observed start. Repeating the same ID preserves its known start timestamp. This field belongs to the event rather than `runtimeInfo` and does not assert completion, failure, or cancellation. Snapshot `activeTurn` remains the resulting public state. Strict-schema participants must update together (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/envelope.ts`, `packages/agent-remote-relay/src/agent-manager.ts`).
+The unshipped `1.5.0` `runtime_updated` event accepts optional `activeTurnId: string | null` as authoritative turn reconciliation. Omission leaves the previous active turn unchanged; `null` clears it; a different nonempty ID replaces it using the event timestamp as its first observed start. Repeating the same ID preserves its known start timestamp. This field belongs to the event rather than `runtimeInfo` and does not assert completion, failure, or cancellation. Snapshot `activeTurn` remains the resulting public state. Strict-schema participants must update together (`packages/agent-provider-sdk/src/observation.ts`, `packages/agent-remote-protocol/src/envelope.ts`, `packages/agent-session-runtime/src/agent-manager.ts`).
 
 ## Native child relationships
 

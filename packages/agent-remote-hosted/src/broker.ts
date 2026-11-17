@@ -20,19 +20,19 @@ import { validBrokerAssociations, migrateBrokerAssociations, type BrokerAssociat
 import { isNativeSessionRef, nativePrefixSegmentAncestors, resolveNativePrefix, resolveRoleSuccession, isNativePrefixSelection, nativePrefixSelectionKey, isPrimaryRole, isSuccessionRecord, isSuccessionDescription, isSuccessionActionResult, nativeSessionRefKey, successionFreezeKey, successionAuthorityKey, type NativeSessionRef, type SuccessionAssociationFreeze, type BoundedSuccessionAssociationFreeze, type NativePrefixSuccessionAssociationFreeze, type PrimaryRole, type SuccessionRecord, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
 import { type SuccessionAssociationAuthority, isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
-import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from './session-relations.js';
+import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
-import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from './relay-diagnostics.js';
+import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { controllerReleases } from './controller-releases.js';
 import { decodeClientMessage, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerIdentity } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, type HostEnvironment, isPairingPurpose, type PairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { SESSION_STATE_LIMIT, type HostSessionState } from '@orchardworks/agent-remote-protocol';
-import { sessionAttachFailure } from './session-errors.js';
+import { sessionAttachFailure } from '@orchardworks/agent-remote-protocol/model';
 import { HostSharing, SharingError, type HostSharingState } from './host-sharing.js';
 import { createHostPreviews, type HostPreviewState } from './host-previews.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
@@ -624,7 +624,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     })();
     relationContinuations.set(key, running); void running.finally(() => relationContinuations.delete(key)).catch(() => undefined); return running;
   }
-  function relationIntent(subject: string, input: import('./session-relations.js').SessionRelationUpdate): RelationChangeReset['intent'] {
+  function relationIntent(subject: string, input: import('@orchardworks/agent-remote-protocol').SessionRelationUpdate): RelationChangeReset['intent'] {
     requireOwner(subject);
     input = canonicalRelationInput(subject, input);
     if (!input.operationId || input.expectedRoleRevision === undefined) throw new SharingError(409, 'relation_operation_required', 'Retain an operation identity and current role revision for this edit.');
@@ -650,7 +650,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const reset = state.relationResets.find(row => row.intent.operationId === intent.operationId);
     if (reset) { assertExactRelationIntent(intent, reset.intent); throw new SharingError(409, 'relation_change_reset', 'This exact relationship edit was safely reset before any effect.'); }
   }
-  async function reserveRelationUpdate(subject: string, input: import('./session-relations.js').SessionRelationUpdate, host: Host, projection: PrimaryRole) {
+  async function reserveRelationUpdate(subject: string, input: import('@orchardworks/agent-remote-protocol').SessionRelationUpdate, host: Host, projection: PrimaryRole) {
     requireOwner(subject);
     const generation = host.generation; assertHostCurrent(host);
     if (!input.operationId || input.expectedRoleRevision === undefined) throw new SharingError(409, 'relation_operation_required', 'Retain an operation identity and current role revision for this edit.');

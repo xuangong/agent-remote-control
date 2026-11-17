@@ -6,11 +6,16 @@
     "access": "public"
   },
   "type": "module",
+  "sideEffects": false,
   "description": "Serialized relay protocol for provider-neutral agent observation.",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./model": {
+      "types": "./dist/model/index.d.ts",
+      "import": "./dist/model/index.js"
     }
   },
   "types": "./dist/index.d.ts",

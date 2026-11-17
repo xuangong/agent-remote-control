@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isRelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
+import { isRelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { DEFAULT_DIAGNOSTIC_LOG_ARCHIVES, DEFAULT_DIAGNOSTIC_LOG_MAX_BYTES, DEFAULT_DIAGNOSTIC_LINE_MAX_BYTES } from './diagnostic-log.js';
 
 type Source = 'controller' | 'server' | 'daemon';

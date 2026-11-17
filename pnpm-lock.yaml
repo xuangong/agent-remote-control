@@ -266,6 +266,9 @@ importers:
       '@orchardworks/agent-remote-journal-sqlite':
         specifier: workspace:*
         version: link:../agent-remote-journal-sqlite
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
       '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel

@@ -4,23 +4,8 @@ import { committedSuccessionRows } from './session-successions.js';
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { createHash, randomUUID } from 'node:crypto';
 import type { HostedRelayState, RelayState } from './state.js';
-import { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type SavedSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from './session-star-schema.js';
+import { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, MAX_FAVORITE_DEPTH, MAX_FAVORITE_FOLDERS, type FavoriteCommand, type FavoritesSuccessionCheckpoint, type FavoritesSnapshot, type Folder, type OrganizedSessionStar, type SavedFavoritesTree, type SavedSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-protocol/model';
 
-export interface Folder { id: string; parentId: string | null; title: string; order: number }
-export type OrganizedSessionStar = VisibleSessionStar & { favoriteId: string; folderId: string | null; order: number };
-export interface FavoritesSuccessionCheckpoint { hostId: string; controllerId: string; roleId: string; roleRevision: number; operationId: string; status: 'pending' | 'applied' }
-export interface FavoritesSnapshot { revision: number; folders: Folder[]; stars: OrganizedSessionStar[]; successionProgress?: { version: 1; roles: FavoritesSuccessionCheckpoint[] } }
-export interface SavedFavoritesTree { subject: string; revision: number; folders: Folder[] }
-export type FavoriteCommand = { revision: number } & (
-  | { type: 'create-folder'; id: string; parentId: string | null; title: string }
-  | { type: 'rename-folder'; id: string; title: string }
-  | { type: 'move'; id: string; parentId: string | null; beforeId: string | null }
-  | { type: 'delete-folder'; id: string }
-  | { type: 'save-session'; session: Omit<SessionStar, 'starredAt'>; folderId: string | null }
-  | { type: 'remove-session'; session: StarIdentity }
-);
-export const MAX_FAVORITE_FOLDERS = 128;
-export const MAX_FAVORITE_DEPTH = 8;
 const MAX_TREES = 1024;
 type OrganizedSavedStar = SavedSessionStar & { favoriteId: string; folderId: string | null; order: number };
 type Access = (subject: string, item: StarIdentity) => { online: boolean; hostName: string; canRename?: boolean } | undefined;

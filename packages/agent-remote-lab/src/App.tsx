@@ -105,7 +105,7 @@ import { TrackedSessionViews, unlinkSideView, type TrackedSessionView } from './
 import { ToastActivity, ToastProvider, useFeedbackToast, useToast } from './components/Toast.js';
 import { MissingSessionNote, SessionConnectionNotice, sessionConnectionFailure, type SessionConnectionMessage } from './components/SessionConnectionNotice.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
+import { readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { MobileDisplaySettings } from './components/MobileDisplaySettings.js';
 import type { ScannedSession } from './session-transfer.js';
 import { SessionLink, SessionTransferDialog } from './components/SessionLink.js';

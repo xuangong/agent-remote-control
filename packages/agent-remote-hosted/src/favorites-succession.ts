@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { successionFreezeKey } from '@orchardworks/agent-remote-protocol';
 import { advanceFavorites, organizeFavorites } from './favorites.js';
 import { committedSuccessionRows, validSuccessionAuthorities } from './session-successions.js';
-import { StarError, starKey, type StarIdentity } from './session-star-schema.js';
+import { StarError, starKey, type StarIdentity } from '@orchardworks/agent-remote-protocol/model';
 import type { HostedRelayState } from './state.js';
 import { plain } from './drafts.js';
 

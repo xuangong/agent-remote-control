@@ -47,7 +47,8 @@ async function fixture() {
     export default { fetch(request, env) { return env.RELAY.get(env.RELAY.idFromName('diagnostics')).fetch(request); } };
   `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'],
-    alias: { '@orchardworks/agent-remote-hosted/relay-diagnostics': resolve('../agent-remote-hosted/src/relay-diagnostics.ts'),
+    alias: { '@orchardworks/agent-remote-protocol/model': resolve('../agent-remote-protocol/src/model/index.ts'),
+      '@orchardworks/agent-remote-protocol': resolve('../agent-remote-protocol/src/index.ts'),
       '@orchardworks/agent-remote-hosted/host-recovery': resolve('../agent-remote-hosted/src/host-recovery.ts'),
       '@orchardworks/agent-remote-hosted': resolve('../agent-remote-hosted/src/index.ts') } });
   let mf: Miniflare;

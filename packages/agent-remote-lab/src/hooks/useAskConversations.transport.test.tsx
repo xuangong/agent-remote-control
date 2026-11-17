@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { act } from 'react';
 import { afterEach, expect, it } from 'vitest';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { render, unmount } from '../test/setup.js';

@@ -17,7 +17,6 @@ export * from './scheduler.js';
 export * from './preview-domain.js';
 export * from './file-frame.js';
 export * from './controller-releases.js';
-export * from './relay-diagnostics.js';
 export * from './team-resources.js';
 
 export * from './hosted-auth.js';

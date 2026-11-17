@@ -1,6 +1,6 @@
 import { appendFileSync, chmodSync, closeSync, existsSync, lstatSync, openSync, readSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { isRelayDiagnostic, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
+import { isRelayDiagnostic, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { DEFAULT_DIAGNOSTIC_LOG_ARCHIVES, DEFAULT_DIAGNOSTIC_LOG_MAX_BYTES } from './diagnostic-log.js';
 
 export interface RelayDiagnosticSinkOptions { path: string; maxBytes?: number; archiveCount?: number }

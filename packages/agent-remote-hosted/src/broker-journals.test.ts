@@ -3,7 +3,7 @@ import type { JournalStore } from '@orchardworks/agent-remote-journal';
 import { afterEach, expect, it } from 'vitest';
 import { createHostBroker, type RelaySocket } from './index.js';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
-import type { RelayDiagnostic } from './relay-diagnostics.js';
+import type { RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 
 const close: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); });

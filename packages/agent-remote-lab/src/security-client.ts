@@ -1,4 +1,4 @@
-import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
+import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { signInReturnKey } from '@orchardworks/agent-remote-hosted/access-page';
 
 export interface BrowserSession { id: string; label: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean; identified?: boolean; sessionCount?: number; activity?: number[] }

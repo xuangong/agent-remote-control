@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { captureForkContext, ForkStore, contextPrefix, referenceForkContext, sideNavigationSource, sideNavigationTarget } from './session-forks.js';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { RemoteOperationError } from '@orchardworks/agent-remote-web';
 
 const source = { agentId: 'parent', nativeSessionId: 'native-parent', providerId: 'codex', title: 'Parent', hostId: 'local' };

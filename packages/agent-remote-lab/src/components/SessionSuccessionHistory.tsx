@@ -1,5 +1,5 @@
 import { useRef, useState, type MouseEvent } from 'react';
-import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
+import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { SessionSuccessionHistoryNavigation } from '../hooks/useSessionSuccession.js';
 import { knownTitle, sessionKey, type SessionEntry } from '../session-tree.js';
 import './SessionSuccessionHistory.css';

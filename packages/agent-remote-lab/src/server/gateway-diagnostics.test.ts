@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, wr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import type { RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
+import type { RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { openGatewayDiagnostics } from './gateway-diagnostics.js';
 import { openGatewayState } from './gateway-state.js';
 import { createGatewayRelay } from './gateway-relay.js';

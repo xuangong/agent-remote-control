@@ -1,6 +1,6 @@
 import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-remote-web';
 import { deviceStore, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-remote-web/device-store';
-import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
+import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { storedRowsRelay } from './workspace-access.js';
 
 /** What the device store calls a conversation: where it runs, with which Provider, and its native id. */

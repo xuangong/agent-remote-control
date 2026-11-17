@@ -1,7 +1,8 @@
 import { expect, it, vi } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { createSessionStars } from './session-stars.js';
-import { createFavorites, MAX_FAVORITE_DEPTH, type FavoriteCommand } from './favorites.js';
+import { MAX_FAVORITE_DEPTH, type FavoriteCommand } from '@orchardworks/agent-remote-protocol/model';
+import { createFavorites } from './favorites.js';
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'Session' };
 const access = () => ({ online: true, hostName: 'Mac' });
@@ -92,7 +93,7 @@ it('rejects descendant cycles, nonexistent drop positions and folder capacity wi
   await expect(f.command({ type: 'save-session', session: { ...session, nativeSessionId: 'new' }, folderId: 'foreign' })).rejects.toMatchObject({ status: 404 });
   await expect(f.command({ type: 'remove-session', session: { hostId: 'foreign', providerId: 'codex', nativeSessionId: 'missing' } })).rejects.toMatchObject({ status: 404 });
   expect(f.favorites.list('alice')).toEqual(snapshot);
-  const { MAX_FAVORITE_FOLDERS } = await import('./favorites.js');
+  const { MAX_FAVORITE_FOLDERS } = await import('@orchardworks/agent-remote-protocol');
   const initial = emptyRelayState(auth);
   initial.favoritesTrees = [{ subject: 'alice', revision: 0, folders: Array.from({ length: MAX_FAVORITE_FOLDERS }, (_, order) => ({ id: `folder-${order}`, parentId: null, title: 'Folder', order })) }];
   await expect(fixture(initial).command({ type: 'create-folder', id: 'overflow', parentId: null, title: 'Overflow' })).rejects.toMatchObject({ status: 409 });

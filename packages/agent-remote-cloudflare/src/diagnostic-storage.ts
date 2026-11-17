@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { pruneRelayDiagnostics, type GatewayAuthOptions, type RelayDiagnostic, type RelayDiagnosticStore } from '@orchardworks/agent-remote-hosted';
+import type { GatewayAuthOptions } from '@orchardworks/agent-remote-hosted';
+import { pruneRelayDiagnostics, type RelayDiagnostic, type RelayDiagnosticStore } from '@orchardworks/agent-remote-protocol/model';
 
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;

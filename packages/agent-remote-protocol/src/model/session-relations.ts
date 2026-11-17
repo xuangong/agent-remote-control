@@ -1,5 +1,7 @@
-import { isNativeSessionRef, type NativeSessionRef, type SourceBinding } from '@orchardworks/agent-remote-protocol';
+import { isNativeSessionRef, type NativeSessionRef, type SourceBinding } from '../session-succession.js';
 /** Product navigation metadata. This is not native ancestry or a Session View event. */
+/** How far a relation change has progressed on the Relay. */
+export type SessionRelationPhase = 'reserved' | 'metadata_committed' | 'overlay_applied' | 'committed';
 export interface SourceRelation {
   id: string;
   kind: 'side' | 'ask';
@@ -22,7 +24,7 @@ export interface SessionRelation extends Omit<SourceRelation, 'sourceNativeSessi
   sourceBinding?: SourceBinding;
   roleRevision?: number;
   hostLocator?: { hostId: string; controllerId: string };
-  operation?: { operationId: string; phase: import('./relation-changes.js').BrokerRelationChange['phase'] };
+  operation?: { operationId: string; phase: SessionRelationPhase };
   /** Prior role location for pending Side management; never source-read authorization. */
   navigationSource?: RelatedSession;
   source: RelatedSession;

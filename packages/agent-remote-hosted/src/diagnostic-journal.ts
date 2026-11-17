@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { isRelayDiagnostic, MAX_DIAGNOSTIC_BATCH, pruneRelayDiagnostics, type RelayDiagnostic, type RelayDiagnosticStore, type RelayDiagnosticContext } from './relay-diagnostics.js';
+import { isRelayDiagnostic, MAX_DIAGNOSTIC_BATCH, pruneRelayDiagnostics, type RelayDiagnostic, type RelayDiagnosticStore, type RelayDiagnosticContext } from '@orchardworks/agent-remote-protocol/model';
 
 type Details = Omit<RelayDiagnostic, 'id' | 'timestamp' | 'source' | 'hostId' | 'relayInstanceId'>;
 type Sender = (entries: RelayDiagnostic[]) => Promise<{status: number}>;

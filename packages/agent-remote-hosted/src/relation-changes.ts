@@ -1,7 +1,8 @@
+import type { SessionRelationPhase } from '@orchardworks/agent-remote-protocol/model';
 import { isNativeSessionRef, isSuccessionAssociationAuthority, isRelationChangeReceipt, isRelationChangeReservation, relationChangeKey, type RelationChangeReceipt, type RelationChangeReservation } from '@orchardworks/agent-remote-protocol';
 export interface BrokerRelationChange {
   reservation: RelationChangeReservation;
-  phase: 'reserved' | 'metadata_committed' | 'overlay_applied' | 'committed';
+  phase: SessionRelationPhase;
   hostReceipt?: RelationChangeReceipt;
 }
 export function validBrokerRelationChange(value: unknown): value is BrokerRelationChange {

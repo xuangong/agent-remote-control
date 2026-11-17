@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { act } from 'react';
 import { afterEach, expect, it } from 'vitest';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { ForkEntries } from '../components/ForkReference.js';
 import { useState, useEffect } from 'react';
 import { render, unmount } from '../test/setup.js';

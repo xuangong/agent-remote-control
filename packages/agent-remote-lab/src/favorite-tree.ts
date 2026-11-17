@@ -1,4 +1,4 @@
-import type { Folder, FavoritesSnapshot } from '@orchardworks/agent-remote-hosted/favorites';
+import type { Folder, FavoritesSnapshot } from '@orchardworks/agent-remote-protocol/model';
 export type FavoriteNode = { id: string; parentId: string | null; title: string; order: number; folder?: Folder; session?: FavoritesSnapshot['stars'][number] };
 export function favoriteNodes(folders: readonly Folder[], stars: FavoritesSnapshot['stars']): FavoriteNode[] {
   return [...folders.map(folder => ({ ...folder, folder })), ...stars.map(session => ({ id: session.favoriteId, parentId: session.folderId, title: session.title, order: session.order, session }))];

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
-import { pruneRelayDiagnostics, type RelayDiagnostic } from './relay-diagnostics.js';
+import { pruneRelayDiagnostics, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 afterEach(()=>vi.useRealTimers());
 it.each(['flush', 'close'] as const)('drains a record queued between save completion and %s', async operation => {
  let release!: () => void;

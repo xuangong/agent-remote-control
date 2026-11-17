@@ -21,7 +21,7 @@ import { createNativeStartBackoff, nativeStartTarget } from './native-start-back
 import type { HostProviderDiscovery } from './provider-discovery.js';
 import {NativeSessionOwnerError, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
-import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-hosted/relay-diagnostics';
+import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';

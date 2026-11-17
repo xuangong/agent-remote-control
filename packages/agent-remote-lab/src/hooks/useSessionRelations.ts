@@ -2,7 +2,7 @@ import { relationEditScope, RelationEditStore } from '../relation-edit-store.js'
 import { isNativeSessionRef, isSourceBinding, nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useMemo, useRef } from 'react';
 import { watchList } from '@orchardworks/agent-remote-web';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import type { ForkStore, SessionFork } from '../session-forks.js';
 import { workspaceFetch } from '../workspace-access.js';
 import { sessionKey } from '../session-tree.js';

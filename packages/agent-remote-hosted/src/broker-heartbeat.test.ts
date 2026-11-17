@@ -277,7 +277,7 @@ it('closes virtual browser streams and clears their opening deadline when the Ho
 
 it('retains exact server heartbeat cause and startup/connection identity for later Host delivery', async()=>{
  const {createDiagnosticJournal}=await import('./diagnostic-journal.js');
- let saved:import('./relay-diagnostics.js').RelayDiagnostic[]=[];
+ let saved:import('@orchardworks/agent-remote-protocol').RelayDiagnostic[]=[];
  const journal=createDiagnosticJournal({storage:{save:async events=>{saved=structuredClone(events);}}});
  const b=await fixture({diagnostics:journal});const socket=await b.connect();
  b.clock.advance(40);await journal.flush();

@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom';
 import { NativeSessionCommand, nativeOpenCommand } from './NativeSessionCommands.js';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { controllerPath } from '@orchardworks/agent-remote-hosted/controller-location';
+import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { OpenedSession } from '../directory-client.js';
 import { readSessionCode, type ScannedSession } from '../session-transfer.js';
 import { SessionScanner } from './SessionScanner.js';

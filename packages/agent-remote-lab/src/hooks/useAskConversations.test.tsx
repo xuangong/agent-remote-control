@@ -1103,7 +1103,7 @@ it('routes discovered Ask relations to explicit role and fixed owners of the sam
   let ask!: ReturnType<typeof useAskConversations>;
   function Harness() { ask = useAskConversations(document, {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport); return null; }
   await render(<Harness />);
-  const relations: import('@orchardworks/agent-remote-hosted/session-relations').SessionRelation[] = [
+  const relations: import('@orchardworks/agent-remote-protocol').SessionRelation[] = [
     { id: 'role-ask', kind: 'ask', createdAt: '2026-10-11T00:00:00.000Z', source, target: { ...source, nativeSessionId: 'role-ask', agentId: 'role-agent' },
       sourceBinding: { kind: 'primary_role', roleId: 'primary', origin }, hostLocator: { hostId: 'local', controllerId: 'installation' } },
     { id: 'fixed-ask', kind: 'ask', createdAt: '2026-10-11T00:00:00.000Z', source, target: { ...source, nativeSessionId: 'fixed-ask', agentId: 'fixed-agent' },

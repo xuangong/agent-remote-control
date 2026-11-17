@@ -2,8 +2,9 @@ import { assertOrdinaryFavoriteAddress } from './favorites-succession.js';
 import type { RelayState } from './state.js';
 import { organizeFavorites, advanceFavorites, newFavoriteIdentity, confirmedFavoriteTitle } from './favorites.js';
 
-import { MAX_USER_STARS, StarError, record, starKey, validSessionStar, validStarIdentity, type StarIdentity, type VisibleSessionStar } from './session-star-schema.js';
-export { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type StarIdentity, type SessionStar, type SavedSessionStar, type VisibleSessionStar } from './session-star-schema.js';
+import { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-protocol/model';
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export { MAX_USER_STARS, StarError, starKey, validSessionStar, validStarIdentity, type StarIdentity, type SessionStar, type SavedSessionStar, type VisibleSessionStar } from '@orchardworks/agent-remote-protocol/model';
 export function createSessionStars(state: RelayState, access: (subject: string, item: StarIdentity) => { online: boolean; hostName: string } | undefined) {
   return {
     list(subject: string): VisibleSessionStar[] {

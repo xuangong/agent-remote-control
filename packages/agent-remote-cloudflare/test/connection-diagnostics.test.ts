@@ -1,6 +1,6 @@
 import type { WebSocket } from 'miniflare';
 import { expect, it } from 'vitest';
-import { parseRelayDiagnosticBatch, type RelayDiagnostic } from '../../agent-remote-hosted/src/relay-diagnostics.js';
+import { parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { event, fixture, send } from './fixture.js';
 
 function collect(socket: WebSocket, diagnosticVersion = 3) {

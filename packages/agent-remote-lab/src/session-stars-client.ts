@@ -1,5 +1,5 @@
 import { workspaceFetch } from './workspace-access.js';
-import { validSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-hosted/session-star-schema';
+import { validSessionStar, type SessionStar, type StarIdentity, type VisibleSessionStar } from '@orchardworks/agent-remote-protocol/model';
 export type { SessionStar, StarIdentity, VisibleSessionStar };
 export type StarInput = Omit<SessionStar, 'starredAt'>;
 function validSuccessionProgress(value: unknown): boolean {
@@ -55,8 +55,8 @@ export class SessionStarsClient {
   remove(item: StarIdentity, signal?: AbortSignal) { return this.request('DELETE', { hostId: item.hostId, providerId: item.providerId, nativeSessionId: item.nativeSessionId }, signal); }
 }
 
-export type { Folder, FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-hosted/favorites';
-import type { FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-hosted/favorites';
+export type { Folder, FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-protocol/model';
+import type { FavoritesSnapshot, FavoriteCommand } from '@orchardworks/agent-remote-protocol/model';
 type WithoutRevision<T> = T extends unknown ? Omit<T, 'revision'> : never;
 export type FavoriteChange = WithoutRevision<FavoriteCommand>;
 export class FavoritesConflict extends Error {}

@@ -58,7 +58,8 @@ function subpathSource(root, dir, subpath, fileSet) {
   if (typeof target !== 'string') return undefined;
   const source = `${dir}/${target.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '')}`;
   // A declared export that is not a TypeScript module (a stylesheet) has no source file to check.
-  return ['.ts', '.tsx', '/index.ts'].map(extension => `${source}${extension}`).find(candidate => fileSet.has(candidate)) ?? null;
+  const file = ['.ts', '.tsx', '/index.ts'].map(extension => `${source}${extension}`).find(candidate => fileSet.has(candidate)) ?? null;
+  return { file, wildcard: !exact };
 }
 
 function resolvePackage(root, specifier, packages, fileSet) {
@@ -67,8 +68,8 @@ function resolvePackage(root, specifier, packages, fileSet) {
   const { dir, entry } = packages[name];
   const subpath = specifier.slice(name.length + 1);
   if (!subpath) return { name, file: `${dir}/${entry}`, subpath };
-  const file = subpathSource(root, dir, subpath, fileSet);
-  return { name, file: file ?? undefined, subpath, declared: file !== undefined };
+  const found = subpathSource(root, dir, subpath, fileSet);
+  return { name, file: found?.file ?? undefined, subpath, declared: found !== undefined, wildcard: found?.wildcard === true };
 }
 
 /** Finds the wire message type names the protocol declares, so tests that hand-write one can be counted. */
@@ -81,10 +82,17 @@ function wireTypeNames(root, protocolFiles) {
   return names;
 }
 
+const matchesAny = (name, patterns) => patterns.some(pattern => globToRegExp(pattern).test(name));
+
+/** Source text without comments and string literals' contents, so a pattern is matched against code only. */
+const codeOf = text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+
 /**
  * Reports how the files under a repository follow the layer rules (section 1.2 of the target architecture) and the module map:
- * unassigned and overlapping files, imports that run up the layers, imports across packages by path, test support used by
- * production code, node built-ins in the domain, and wire messages written inline in tests. It changes nothing.
+ * unassigned and overlapping files, imports that run up the layers, contracts that import the workspace, imports across packages
+ * by path or through a wildcard export, test support used by production code, impure domain code, edges the module map forbids
+ * (`edges`, `bans`), composition roots over their line budget (`roots`), and wire messages written inline in tests.
+ * It changes nothing; `evaluate` compares the result with the documented exceptions.
  */
 export function analyze({ root, config }) {
   const globs = config.scan.map(globToRegExp);
@@ -93,33 +101,56 @@ export function analyze({ root, config }) {
   const fileSet = new Set(files);
   const { assigned, unassigned, overlapping } = assignModules(files, config.modules);
   const violations = [];
-  const record = (kind, file, imported, detail) => violations.push({ kind, file, imported, detail });
+  const record = (kind, file, imported, detail, targetModule) => violations.push({ kind, file, imported, detail, module: assigned.get(file)?.name, targetModule });
   const packageOf = file => /^packages\/[^/]+/.exec(file)?.[0];
+  const packageNames = Object.fromEntries(Object.entries(config.packages).map(([name, { dir }]) => [dir, name]));
+  const texts = new Map(files.map(file => [file, readFileSync(join(root, file), 'utf8')]));
 
   for (const file of files) {
     const module = assigned.get(file);
     if (!module) continue;
     const testFile = isTestFile(file) || module.layer === TEST_SUPPORT_LAYER;
-    for (const specifier of importsOf(readFileSync(join(root, file), 'utf8'))) {
+    const text = texts.get(file);
+    const specifiers = importsOf(text);
+    if (!testFile) {
+      for (const ban of config.bans ?? []) {
+        if (!matchesAny(module.name, ban.modules)) continue;
+        for (const specifier of specifiers) if (matchesAny(specifier, ban.imports ?? [])) record(ban.id, file, specifier, `${module.name} imports ${specifier} (rule ${ban.rule})`);
+        const code = codeOf(text);
+        for (const pattern of ban.code ?? []) if (new RegExp(pattern).test(code)) record(ban.id, file, pattern, `${module.name} uses ${pattern} (rule ${ban.rule})`);
+      }
+      for (const root of config.roots ?? []) {
+        const lines = text.split('\n').length;
+        if (file === root.file && lines > root.maxLines) record('root-too-large', file, `${lines} lines`, `${file} has ${lines} lines; a composition root stays under ${root.maxLines} (rule 10)`);
+      }
+    }
+    for (const specifier of specifiers) {
       if (!testFile && module.layer <= 1 && specifier.startsWith('node:')) record('domain-impurity', file, specifier, `${module.name} (layer ${module.layer}) imports a Node built-in`);
       if (/\/dist(\/|$)/.test(specifier)) record('dist-import', file, specifier, 'imports a build artifact');
       let target;
       if (specifier.startsWith('.')) {
         const resolved = resolveRelative(file, specifier, fileSet);
         const targetPath = resolved ?? posix.normalize(posix.join(posix.dirname(file), specifier));
-        if (packageOf(targetPath) && packageOf(targetPath) !== packageOf(file)) record('cross-package-relative', file, specifier, `reaches into ${packageOf(targetPath)} by path`);
+        if (packageOf(targetPath) && packageOf(targetPath) !== packageOf(file)) record('cross-package-relative', file, specifier, `reaches into ${packageOf(targetPath)} by path`, assigned.get(resolved)?.name);
         target = resolved;
       } else {
         const resolved = resolvePackage(root, specifier, config.packages, fileSet);
         target = resolved?.file;
         if (resolved && resolved.subpath && !resolved.declared) record('deep-import', file, specifier, `${resolved.name} exports no such subpath`);
+        else if (resolved?.wildcard) { record('deep-import', file, specifier, `${resolved.name} reaches this file only through its wildcard export`, assigned.get(target)?.name); }
+        if (!testFile && module.layer === 0 && resolved && resolved.name !== packageNames[packageOf(file)]) record('contract-imports-workspace', file, specifier, `${module.name} (layer 0) imports ${resolved.name}`);
       }
       const targetModule = target && assigned.get(target);
       if (!targetModule || targetModule === module) continue;
       if (testFile) continue;
-      if (targetModule.layer === TEST_SUPPORT_LAYER) record('test-support-in-production', file, specifier, `${module.name} imports ${targetModule.name}`);
-      else if (targetModule.layer > module.layer && module.layer < 4) record('layer', file, specifier, `${module.name} (layer ${module.layer}) imports ${targetModule.name} (layer ${targetModule.layer})`);
-      else if (module.layer === 3 && targetModule.layer === 3 && packageOf(file) !== packageOf(target)) record('adapter-imports-adapter', file, specifier, `${module.name} imports ${targetModule.name}`);
+      for (const edge of config.edges ?? []) {
+        if (matchesAny(module.name, edge.from) && matchesAny(targetModule.name, edge.to) && !matchesAny(file, edge.exceptFiles ?? [])) {
+          record(edge.id, file, specifier, `${module.name} imports ${targetModule.name} (rule ${edge.rule})`, targetModule.name);
+        }
+      }
+      if (targetModule.layer === TEST_SUPPORT_LAYER) record('test-support-in-production', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);
+      else if (targetModule.layer > module.layer && module.layer < 4) record('layer', file, specifier, `${module.name} (layer ${module.layer}) imports ${targetModule.name} (layer ${targetModule.layer})`, targetModule.name);
+      else if (module.layer === 3 && targetModule.layer === 3 && packageOf(file) !== packageOf(target)) record('adapter-imports-adapter', file, specifier, `${module.name} imports ${targetModule.name}`, targetModule.name);
     }
   }
 
@@ -128,8 +159,7 @@ export function analyze({ root, config }) {
   for (const file of files) {
     const module = assigned.get(file);
     if (!module || !isTestFile(file) || config.wireTestExempt.includes(module.name)) continue;
-    const text = readFileSync(join(root, file), 'utf8');
-    const count = [...text.matchAll(/\btype:\s*'([a-z][a-z0-9_]*)'/g)].filter(match => wireTypes.has(match[1])).length;
+    const count = [...texts.get(file).matchAll(/\btype:\s*'([a-z][a-z0-9_]*)'/g)].filter(match => wireTypes.has(match[1])).length;
     if (count === 0) continue;
     wireLiterals.files += 1;
     wireLiterals.occurrences += count;
@@ -142,11 +172,40 @@ export function analyze({ root, config }) {
     const size = modules[module.name] ??= { layer: module.layer, files: 0, lines: 0, testFiles: 0 };
     if (isTestFile(file)) { size.testFiles += 1; continue; }
     size.files += 1;
-    size.lines += readFileSync(join(root, file), 'utf8').split('\n').length;
+    size.lines += texts.get(file).split('\n').length;
   }
   const counts = {};
   for (const violation of violations) counts[violation.kind] = (counts[violation.kind] ?? 0) + 1;
   return { files: files.length, unassigned, overlapping, violations, violationCounts: counts, wireLiterals, modules };
+}
+
+const exceptionOwner = /^M(?:[3-9]|1[0-4])$/;
+
+/**
+ * Compares a report with the documented exceptions. An exception names a rule, the importing files (`from`), what they
+ * import (`to`, a module name or a specifier pattern) and the migration step that removes it (`owner`, M3 to M14), and
+ * allows at most `max` occurrences. Anything beyond that is a new violation; fewer occurrences than `max` means the
+ * exception must be lowered, so a fixed violation can never come back unnoticed.
+ */
+export function evaluate(report, exceptions = []) {
+  const failures = [];
+  const invalid = exceptions.filter(entry => !exceptionOwner.test(entry.owner ?? '') || !entry.reason || !Number.isInteger(entry.max) || entry.max < 1);
+  for (const entry of invalid) failures.push({ kind: 'invalid-exception', detail: `exception ${JSON.stringify(entry.rule)} ${JSON.stringify(entry.from)} needs an owner step M3 to M14, a reason and a max of at least 1` });
+  const used = exceptions.map(() => 0);
+  for (const violation of report.violations) {
+    const covers = (entry, index) => entry.rule === violation.kind && used[index] < entry.max && matchesAny(violation.file, entry.from ?? ['**'])
+      && (entry.to === undefined && entry.toImport === undefined
+        || entry.to !== undefined && matchesAny(violation.targetModule ?? '', entry.to)
+        || entry.toImport !== undefined && matchesAny(violation.imported, entry.toImport));
+    const at = exceptions.findIndex(covers);
+    if (at === -1) failures.push({ kind: violation.kind, detail: `${violation.file}: ${violation.detail} (${violation.imported})` });
+    else used[at] += 1;
+  }
+  for (const file of report.unassigned) failures.push({ kind: 'unassigned', detail: `${file} belongs to no module in architecture/modules.json` });
+  for (const { file, modules } of report.overlapping) failures.push({ kind: 'overlapping', detail: `${file} belongs equally to ${modules.join(' and ')}` });
+  const stale = exceptions.flatMap((entry, index) => used[index] < entry.max
+    ? [{ kind: 'stale-exception', detail: `exception ${entry.rule} ${JSON.stringify(entry.from)} allows ${entry.max} but ${used[index]} remain; lower max to ${used[index]}${used[index] === 0 ? ' (or delete it)' : ''} (owner ${entry.owner})` }] : []);
+  return { failures: [...failures, ...stale], allowed: used.reduce((sum, count) => sum + count, 0) };
 }
 
 export function readModuleMap(path) {

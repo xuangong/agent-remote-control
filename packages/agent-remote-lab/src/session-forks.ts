@@ -1,5 +1,5 @@
 import { nativeSessionRefKey, serializeNormalizedHistory, quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { conversationLocalStorage, storageKeys } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web';

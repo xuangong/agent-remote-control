@@ -1,4 +1,5 @@
-import {SESSION_CAPACITY_CLOSE_CODE, type NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
+import {SESSION_CAPACITY_CLOSE_CODE} from '../session-channel-wire.js';
+import type {NativeSessionOwner} from '../session-control.js';
 /** Public attach failures use fixed copy rather than arbitrary native error text. */
 const sessionErrors: Readonly<Record<string, string>> = {
   native_file_limit: 'The shared Codex daemon reached its file descriptor limit. Review active work before restarting it on the Host computer.',

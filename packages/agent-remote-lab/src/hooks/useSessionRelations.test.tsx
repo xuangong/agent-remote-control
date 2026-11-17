@@ -8,7 +8,7 @@ import { sessionKey } from '../session-tree.js';
 import { createCompositionDocument, createCompositionSlot, createAskOwner } from '../session-composition.js';
 import { useAskConversations } from './useAskConversations.js';
 import { useSessionRelations } from './useSessionRelations.js';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 
 const source = { hostId: 'host', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
 const relation = (kind: 'side' | 'ask'): SessionRelation => ({ id: kind, kind, createdAt: '2026-09-29T00:00:00.000Z', source,

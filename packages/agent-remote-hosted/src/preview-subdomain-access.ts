@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { controllerPath } from './controller-location.js';
+import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import { readJson } from './request.js';
 import type { PreviewSession } from './preview-access.js';
 

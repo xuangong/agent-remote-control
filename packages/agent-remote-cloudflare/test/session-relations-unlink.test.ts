@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { SessionRelation } from '@orchardworks/agent-remote-hosted/session-relations';
+import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { fixture, send } from './fixture.js';
 
 async function setup() {

@@ -5,7 +5,7 @@ import {
   type JournalRefusalReason, type RemoteHostUplinkMessage,
 } from '@orchardworks/agent-remote-protocol';
 
-import type { RelayDiagnostic } from './relay-diagnostics.js';
+import type { RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import type { HostJournals, JournalFilled, JournalPublished, JournalReadRequest } from './host-journals.js';
 
 /** The most requests one connection has open to its Host at a time. */

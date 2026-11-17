@@ -66,3 +66,5 @@ export * from './window-workspace-operations.js';
 export * from './window-groups.js';
 
 export { SessionListingStatus, isSessionListingStatus } from './session-listing.js';
+
+export * from './model/index.js';

@@ -1,2 +1,3 @@
 import { defineConfig } from 'vitest/config';
-export default defineConfig({ test: { hookTimeout: 30_000 } });
+import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
+export default defineConfig({ plugins: [workspaceSource()], test: { hookTimeout: 30_000 } });

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,4 +9,4 @@ import { join } from 'node:path';
 const home = mkdtempSync(join(tmpdir(), 'arc-debugger-test-home-'));
 process.on('exit', () => rmSync(home, { recursive: true, force: true }));
 
-export default defineConfig({ test: { fileParallelism: false, include: ['src/**/*.test.ts'], testTimeout: 10000, hookTimeout: 60000, env: { HOME: home, USERPROFILE: home } } });
+export default defineConfig({ plugins: [workspaceSource()], test: { fileParallelism: false, include: ['src/**/*.test.ts'], testTimeout: 10000, hookTimeout: 60000, env: { HOME: home, USERPROFILE: home } } });

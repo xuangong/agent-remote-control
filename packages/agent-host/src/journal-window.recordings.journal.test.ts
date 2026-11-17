@@ -30,7 +30,8 @@ const SCENARIOS: Record<RecordedProvider, Scenarios> = {
     toolAway: { name: 'settled', key: key => key === 'tool:c1' },
   },
   claude: {
-    unchanged: [],
+    unchanged: [{ name: 'approval', liveOnly: true }, { name: 'plan-approval', liveOnly: true }, { name: 'todos', liveOnly: false }, { name: 'thinking', liveOnly: false }, { name: 'steer', liveOnly: false }, { name: 'queued', liveOnly: false },
+      { name: 'parallel-tools', liveOnly: false }, { name: 'images', liveOnly: false }, { name: 'hook', liveOnly: false }, { name: 'slash-command', liveOnly: true }, { name: 'subagent', liveOnly: false }, { name: 'after-reopen', liveOnly: false }],
     interrupted: { name: 'interrupted', open: [], first: 'unchanged' },
     toolAway: { name: 'settled', key: key => key.startsWith('tool:') },
   },
@@ -116,7 +117,8 @@ describe.each(['copilot', 'codex', 'claude'] as const)('a recorded %s session th
 
     it('sends a scroll past the window as an older request, lands the page below the oldest item, and reports one older request', async () => {
       const run = recording(provider, 'settled');
-      const secondTurn = run.reread.findIndex(({ event }) => event.type === 'timeline' && event.item.type === 'user_message' && event.item.text === 'Second');
+      const users = run.reread.flatMap(({ event }, at) => event.type === 'timeline' && event.item.type === 'user_message' ? [at] : []);
+      const secondTurn = users[1] ?? -1;
       expect(secondTurn).toBeGreaterThan(0);
       const relay = h.relay();
       const publisher = h.start(relay);

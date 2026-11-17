@@ -19,6 +19,8 @@ export interface ClaudeSessionSummary {
 export interface ClaudeAgentProviderOptions extends ClaudeSessionOptions { catalog?: ClaudeCatalog }
 
 export class ClaudeAgentProvider implements AgentProviderAdapter {
+  /** Every timeline observation carries an item identity equal live and in a reread (`src/journal-recording.local.test.ts` records it against the real CLI). */
+  readonly journal = { itemIdentity: 1 as const };
   /** Ordinary create supplies a nonempty UUID; this does not bound resume, fork, or history. */
   readonly createdSessionIdMaxLength: number = 36;
   readonly descriptor = { providerId: 'claude', displayName: 'Claude Code', sessionExtensions: { instructions: true, tools: true, toolNamespaces: 'live' as const }, sessionAccess: { readOnly: true as const },

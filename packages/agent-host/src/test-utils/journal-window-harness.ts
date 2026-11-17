@@ -8,6 +8,9 @@ import { attachScripted, boundary, driver, ScriptedSession, virtualClock } from 
 
 export type Relay = ReturnType<typeof relayLoopback>;
 
+/** A one-pixel PNG: the bytes behind every image a recording names. */
+const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=', 'base64');
+
 const limits = { batchWindowMs: 5, backoffBaseMs: 5, backoffMaxMs: 20, responseTimeoutMs: 10_000 };
 
 /**
@@ -32,8 +35,11 @@ export function windowHarness(provider: RecordedProvider) {
 
   /** A native session of the Controller: its history, older pages and the live observations received since, under one manager. */
   async function follow(publisher: JournalPublisher, history: readonly ProviderObservation[], options: { live?: readonly ProviderObservation[]; older?: Array<{ observations: ProviderObservation[]; nextCursor?: string }> } = {}) {
-    const session = new ScriptedSession(provider, 'public', [...history, boundary(options.older ? 'older-1' : undefined)], options.older);
-    const manager = await attachScripted(session, 'agent-1');
+    // The files the session's images name can be read, so each settles to a resource id that does not change from one reopen to the next, as in a real session.
+    const images = Object.fromEntries([...history, ...(options.live ?? []), ...(options.older ?? []).flatMap(page => page.observations)].flatMap(observation => observation.resourceReferences ?? []).map(({ readLocator }) => [readLocator, PIXEL] as const));
+    const session = new ScriptedSession(provider, 'public', [...history, boundary(options.older ? 'older-1' : undefined)], options.older, Object.keys(images).length > 0 ? images : undefined);
+    // A Controller keeps its resource id key with its state, so a file a tool row names keeps its resource id across a reopen and a restart.
+    const manager = await attachScripted(session, 'agent-1', { resourceIdKey: 'journal-window-harness' });
     closers.push(() => { void manager.close(); });
     for (const observation of options.live ?? []) session.push(observation);
     if ((options.live ?? []).length > 0) await settle(20);

@@ -61,10 +61,6 @@
         "packages/agent-provider-sdk/src",
         "packages/agent-provider-sdk/tsconfig.json",
         "packages/agent-provider-sdk/vitest.config.ts",
-        "packages/agent-relay-core/package.json",
-        "packages/agent-relay-core/src",
-        "packages/agent-relay-core/tsconfig.json",
-        "packages/agent-relay-core/vitest.config.ts",
         "packages/agent-relay-cloudflare/.dev.vars.example",
         "packages/agent-relay-cloudflare/README.md",
         "packages/agent-relay-cloudflare/package.json",
@@ -76,6 +72,10 @@
         "packages/agent-relay-cloudflare/wrangler.journals-enabled.jsonc",
         "packages/agent-relay-cloudflare/wrangler.journals.jsonc",
         "packages/agent-relay-cloudflare/wrangler.jsonc",
+        "packages/agent-relay-core/package.json",
+        "packages/agent-relay-core/src",
+        "packages/agent-relay-core/tsconfig.json",
+        "packages/agent-relay-core/vitest.config.ts",
         "packages/agent-remote-debugger/README.md",
         "packages/agent-remote-debugger/docs",
         "packages/agent-remote-debugger/e2e",
@@ -139,9 +139,11 @@
         "packages/agent-remote-protocol/tsconfig.json",
         "packages/agent-remote-protocol/vitest.config.ts",
         "packages/agent-remote-seams/package.json",
+        "packages/agent-remote-seams/record",
         "packages/agent-remote-seams/tests",
         "packages/agent-remote-seams/tsconfig.json",
         "packages/agent-remote-seams/vitest.config.ts",
+        "packages/agent-remote-seams/vitest.record.config.ts",
         "packages/agent-remote-tunnel/package.json",
         "packages/agent-remote-tunnel/src",
         "packages/agent-remote-tunnel/tsconfig.json",
@@ -169,7 +171,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:d8c1be95e07815b712d3c22b62fc2f553c1079afa6f52f9a80bbbe59aa511b61"
+      "digest": "sha256:c094a3662dd260a033dbd2d14439d751ac20de8f0fcddac4d1b6bf498eb1530d"
     }
   },
   "providers": [

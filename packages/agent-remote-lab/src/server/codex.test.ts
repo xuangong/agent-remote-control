@@ -2,13 +2,17 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createCodexValidationServer } from './codex.js';
 
 describe('Codex Lab composition', () => {
   const roots: string[] = [];
   const originalManifest = process.env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST;
+  // The repository's own manifest carries the source digest, which changes with every commit; these tests pin only the provider matrix.
+  beforeEach(() => {
+    process.env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST = compatibilityManifest({});
+  });
   afterEach(() => {
     roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
     if (originalManifest === undefined) delete process.env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST;

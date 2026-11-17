@@ -322,6 +322,8 @@ describe('live DSH launcher', () => {
         BORGEE_TEST_PNPM_LOG: pnpmLog,
         DSH_REPO: dshRepo,
         TMPDIR: testRoot,
+        // The repository's own manifest carries the source digest, which changes with every commit.
+        BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: overrides.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST ?? writeSelectedManifest({}),
         ...overrides,
       },
     });

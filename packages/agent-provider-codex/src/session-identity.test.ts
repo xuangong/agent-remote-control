@@ -122,14 +122,14 @@ describe('Codex interaction identity', () => {
 });
 
 describe('Codex timeline identity through a session', () => {
-  it('sends a failing MCP server to the diagnostic sink and nothing to the timeline', async () => {
+  it('sends a failing MCP server to the diagnostic sink and shows it once as a live-only item', async () => {
     const lines: string[] = [];
     const f = await open(false, [{ id: 'turn-1', status: 'completed', startedAt: 1, items: [{ type: 'userMessage', id: 'u1', content: [{ type: 'text', text: 'hi' }], startedAtMs: 1 }] }], lines);
     try {
       f.notify('mcpServer/startupStatus/updated', { name: 'docs', status: 'failed', error: 'spawn ENOENT' });
       f.notify('turn/started', { turn: { id: 'turn-2' } });
       const seen = await f.until(({ event }) => event.type === 'turn_started');
-      expect(seen.filter(({ event }) => event.type === 'timeline')).toEqual([]);
+      expect(seen.filter(({ event }) => event.type === 'timeline').map(({ itemIdentity }) => itemIdentity)).toEqual([{ key: 'startup:docs', completes: true, liveOnly: true }]);
       expect(lines.map(line => { try { return JSON.parse(line) as { event?: string }; } catch { return {}; } }).filter(entry => entry.event === 'codex_startup_notice')).toHaveLength(1);
     } finally { await f.session.dispose(); }
   });

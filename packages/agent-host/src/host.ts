@@ -389,6 +389,10 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
 /** Browsers poll catalog revisions every few seconds; a full native listing can take seconds, so checks reuse one this recent. */
 const catalogRevisionMaxAgeMs = 15_000;
+/** A refresh of terminal-written sessions reads at most this many sessions at once, from at most this many released most recently, and waits for a quiet session. */
+const JOURNAL_REFRESH_READS = 4;
+const JOURNAL_REFRESH_SESSIONS = 20;
+const JOURNAL_REFRESH_QUIET_MS = 30_000;
 
 function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | AgentSession, 'nativeEvidence'>): boolean {
   const evidence = owner.nativeEvidence?.availability(); return evidence?.status === 'configured' && evidence.version === 2;
@@ -890,7 +894,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     if (!await journals.release(binding.agentId)) return;
     const key = `${binding.providerId}:${binding.nativeSessionId}`;
     // Never earlier than what a listing already told: a clock behind the native one must not make the same write look new again.
-    journalWindowAt.set(key, Math.max(journalWindowAt.get(key) ?? 0, startedAt));
+    const covered = Math.max(journalWindowAt.get(key) ?? 0, startedAt);
+    // Re-inserted so the map keeps the sessions released most recently, and no more of them than a refresh may read.
+    journalWindowAt.delete(key);
+    journalWindowAt.set(key, covered);
+    while (journalWindowAt.size > JOURNAL_REFRESH_SESSIONS) journalWindowAt.delete(journalWindowAt.keys().next().value!);
   }
   /**
    * A summary newer than the window the journal covers says a session was written by something else (a terminal CLI that has exited). The
@@ -911,13 +919,20 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return binding && !liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) ? [binding] : [];
     });
     if (!unheld.length) return;
-    const summaries = directory.listing && directory.sessionSummary
-      ? (await Promise.all(unheld.map(binding => directory.sessionSummary!(binding.nativeSessionId).catch(() => undefined)))).flatMap(summary => summary ? [summary] : [])
-      : listedSummaries;
+    let summaries: readonly RemoteSessionSummary[] = listedSummaries;
+    if (directory.listing && directory.sessionSummary) {
+      const read: RemoteSessionSummary[] = [];
+      for (let at = 0; at < unheld.length; at += JOURNAL_REFRESH_READS) {
+        const batch = await Promise.all(unheld.slice(at, at + JOURNAL_REFRESH_READS).map(binding => directory.sessionSummary!(binding.nativeSessionId).catch(() => undefined)));
+        for (const summary of batch) if (summary) read.push(summary);
+      }
+      summaries = read;
+    }
     const due = summaries.flatMap(summary => {
       const updatedAt = Date.parse(summary.updatedAt), key = `${providerId}:${summary.nativeSessionId}`, known = journalWindowAt.get(key);
       const binding = unheld.find(candidate => candidate.nativeSessionId === summary.nativeSessionId);
-      return known !== undefined && binding && Number.isFinite(updatedAt) && updatedAt > known ? [{ binding, key, known, updatedAt }] : [];
+      // A terminal that is still writing is left alone until it has been quiet for a while, so a session is not attached between its turns.
+      return known !== undefined && binding && Number.isFinite(updatedAt) && updatedAt > known && Date.now() - updatedAt >= JOURNAL_REFRESH_QUIET_MS ? [{ binding, key, known, updatedAt }] : [];
     }).sort((a, b) => b.updatedAt - a.updatedAt);
     for (const { binding, key, known, updatedAt } of due) {
       if (closed || draining) return;

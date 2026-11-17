@@ -1,5 +1,5 @@
 import type { AgentProviderAdapter, ProviderObservation } from '@orchardworks/agent-provider-sdk';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentHostDirectory } from './host.js';
 import { NativeSessionOwnerError } from './native-session-owner.js';
@@ -11,11 +11,11 @@ import { closeHosts, startRelayHost } from './test-utils/relay-host-harness.js';
  * outside any session, as a terminal writes it, and its directory reports the newer update time. Everything else is real: the uplink
  * socket, the hosted Relay, the Controller's host runtime, the publisher, the Relay's journal and its store.
  */
-afterEach(closeHosts);
+afterEach(async () => { vi.useRealTimers(); await closeHosts(); });
 
 async function start(options: { capable?: boolean; idleGraceMs?: number; onRequestListing?: boolean } = {}) {
   /** What the native runtime holds, which a terminal appends to without any session. */
-  const native = { rows: [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')] as ProviderObservation[], updatedAt: Date.now() - 60_000 };
+  const native = { rows: [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')] as ProviderObservation[], updatedAt: Date.now() - 120_000 };
   const listedAt = native.updatedAt;
   const behavior: { open?: () => Error | undefined; refused: number } = { refused: 0 };
   const opened: ScriptedSession[] = [];
@@ -55,8 +55,15 @@ async function start(options: { capable?: boolean; idleGraceMs?: number; onReque
     await until(() => relay.released() === 1, 'the idle release');
   };
   /** A terminal writes a turn to the native history, and the directory reports the newer time. */
-  const terminalWrites = (...rows: ProviderObservation[]) => { native.rows.push(...rows); native.updatedAt = Math.max(native.updatedAt, Date.now()) + 1000; };
-  return { store: relay.store, attach, listing, journal, keys, windows: relay.windows, released: relay.released, published, terminalWrites, native, behavior, opened, lifecycle: relay.lifecycle, restart: relay.restart };
+  const terminalWrites = (...rows: ProviderObservation[]) => {
+    // The terminal wrote a minute ago, after the journal's window: the clock is moved on, as a minute goes by.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 120_000 });
+    native.rows.push(...rows); native.updatedAt = Date.now() - 60_000;
+  };
+  /** A terminal that wrote only seconds ago, and may write again. */
+  const terminalWritesJustNow = (...rows: ProviderObservation[]) => { vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 120_000 }); native.rows.push(...rows); native.updatedAt = Date.now() - 5_000; };
+  const clockMovesOn = (ms: number) => { vi.setSystemTime(Date.now() + ms); };
+  return { terminalWritesJustNow, clockMovesOn, store: relay.store, attach, listing, journal, keys, windows: relay.windows, released: relay.released, published, terminalWrites, native, behavior, opened, lifecycle: relay.lifecycle, restart: relay.restart };
 }
 
 const GRACE = 60;
@@ -119,6 +126,18 @@ describe('a session a terminal wrote while the Controller held no runtime of it'
     run.behavior.open = undefined;
     await run.listing();
     await until(async () => (await run.keys()).includes('a2'), 'the turn once the owner is gone');
+  });
+
+  it('leaves a session a terminal wrote to only seconds ago, and attaches it once the terminal has been quiet for a while', async () => {
+    const run = await start({ idleGraceMs: GRACE });
+    await run.published();
+    run.terminalWritesJustNow(...turn());
+    await run.listing();
+    await new Promise<void>(resolve => setTimeout(resolve, 200));
+    expect(run.opened).toHaveLength(1);
+    run.clockMovesOn(40_000);
+    await run.listing();
+    await until(async () => (await run.keys()).includes('a2'), 'the turn once the terminal was quiet');
   });
 
   it('reads the sessions it published one by one when the directory\'s listing is read only on request, since that listing does not move', async () => {

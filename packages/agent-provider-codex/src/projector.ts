@@ -176,11 +176,15 @@ export class CodexEventProjector {
       if (!isRecord(params)) return this.invalidNotification(method, params, turnId);
       const status = method === 'mcpServer/startupStatus/updated' ? params.status : isRecord(params.run) ? params.run.status : undefined;
       if (typeof status !== 'string') return this.invalidNotification(method, params, turnId);
-      // The native runtime announces its start-up again for every thread it loads and history never holds it, so it is not conversation.
+      // The native runtime announces its start-up again at every start and history never holds it.
       if (status === 'failed') {
         const name = readString(params.name) ?? (isRecord(params.run) ? readString(params.run.eventName) : undefined) ?? method;
         const detail = readErrorMessage(params.error) ?? readString(params.failureReason) ?? (isRecord(params.run) ? readString(params.run.statusMessage) : undefined);
         this.diagnostic?.(JSON.stringify({ event: 'codex_startup_notice', method, name, status, ...(detail ? { message: detail.slice(0, 200) } : {}) }));
+        // A failing MCP server is shown once per session, whatever number of starts announce it; history never holds it, so the journal keeps it.
+        if (method === 'mcpServer/startupStatus/updated') {
+          return this.observation(`startup:${name}`, { type: 'timeline', provider: PROVIDER_ID, turnId, item: { type: 'error', message: `${name} failed${detail ? `: ${detail}` : '.'}` } }, undefined, identity(`startup:${name}`, true, true));
+        }
       }
       return null;
     }

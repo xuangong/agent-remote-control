@@ -234,13 +234,13 @@ describe('the recordings of the real Codex CLI', () => {
     expect(run.recording.live.some(({ delivery }) => delivery === 'live')).toBe(true);
   }, 90_000);
 
-  it('errors: a model failure that fails a turn, and a failing MCP server that reaches no timeline', async () => {
+  it('errors: a model failure that fails a turn, and a failing MCP server shown once', async () => {
     const run = await recorded('errors', (request, index) => index === 0 ? message('m1', 'ONE') : { status: 500, body: JSON.stringify({ error: { message: 'model exploded' } }) },
       async (session, seen) => {
         await session.sendMessage('First'); await turnsDone(seen, 1);
         await session.sendMessage('Second'); await turnsDone(seen, 2);
       }, { config: '\n[mcp_servers.broken]\ncommand = "/nonexistent/arc-broken-mcp"\n' });
-    // The failure is announced by the error notification and again by the turn's end: one item, and the start-up failure of the MCP server is none.
-    expect(new Set(run.live.flatMap(({ event, itemIdentity }) => event.type === 'timeline' && event.item.type === 'error' ? [itemIdentity?.key] : []))).toEqual(new Set([expect.stringMatching(/^turn-error:/)]));
+    // The failure is announced by the error notification and again by the turn's end: one item, and the failing MCP server another, live-only.
+    expect(new Set(run.live.flatMap(({ event, itemIdentity }) => event.type === 'timeline' && event.item.type === 'error' ? [itemIdentity?.key] : []))).toEqual(new Set(['startup:broken', expect.stringMatching(/^turn-error:/)]));
   }, 90_000);
 });

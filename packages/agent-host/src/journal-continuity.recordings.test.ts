@@ -115,12 +115,12 @@ function codexScenarios(present: (...wanted: string[]) => string[]): void {
       expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
     });
 
-    it('errors: a failed turn is one error item in both, and a failing MCP server is no item', async () => {
+    it('errors: a failed turn is one error item in both, and a failing MCP server is one live-only item', async () => {
       const run = use('codex', 'errors');
       const journal = await journalOfRun(run.live);
       expect(journal.keys().filter(key => key.startsWith('turn-error:'))).toHaveLength(1);
       expect(journal.keys().filter(key => key.startsWith('error:'))).toEqual([]);
-      expect(journal.liveOnlyKeys()).toEqual([]);
+      expect(journal.liveOnlyKeys()).toEqual(['startup:broken']);
     });
 
     it('correction: a final that does not continue the stream replaces the journal once, as a changed item, and the correction item is gone', async () => {
@@ -171,7 +171,7 @@ function codexScenarios(present: (...wanted: string[]) => string[]): void {
     });
 
     it('the live-only items of the recordings are the plan board and the interactions, and an error that history does not hold', async () => {
-      expect(await liveOnlyKinds('codex', present('settled', 'reasoning', 'approval', 'todos', 'plan-mode', 'compaction', 'interrupted', 'correction', 'steer', 'errors'))).toEqual(['interaction', 'todo']);
+      expect(await liveOnlyKinds('codex', present('settled', 'reasoning', 'approval', 'todos', 'plan-mode', 'compaction', 'interrupted', 'correction', 'steer', 'errors'))).toEqual(['interaction', 'startup', 'todo']);
     });
   });
 }

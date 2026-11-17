@@ -25,7 +25,7 @@ const SCENARIOS: Record<RecordedProvider, Scenarios> = {
     toolAway: { name: 'partial-tool', key: key => key.startsWith('tool:') },
   },
   codex: {
-    unchanged: [{ name: 'approval', liveOnly: true }, { name: 'todos', liveOnly: true }, { name: 'plan-mode', liveOnly: true }, { name: 'reasoning', liveOnly: false }, { name: 'steer', liveOnly: false }, { name: 'compaction', liveOnly: false }, { name: 'after-reopen', liveOnly: false }, { name: 'errors', liveOnly: false }],
+    unchanged: [{ name: 'approval', liveOnly: true }, { name: 'todos', liveOnly: true }, { name: 'plan-mode', liveOnly: true }, { name: 'reasoning', liveOnly: false }, { name: 'steer', liveOnly: false }, { name: 'compaction', liveOnly: false }, { name: 'after-reopen', liveOnly: false }, { name: 'errors', liveOnly: true }],
     interrupted: { name: 'interrupted', open: ['tool:c1'], first: 'changed' },
     toolAway: { name: 'settled', key: key => key === 'tool:c1' },
   },

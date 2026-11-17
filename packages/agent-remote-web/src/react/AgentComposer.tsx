@@ -586,7 +586,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
           <AgentActionToolbar actions={toolbarActions} overflowOpen={currentDraft.view === 'actions'}
             onOverflow={open => { currentDraft.view = open ? 'actions' : undefined; refresh(value => value + 1); }} />
         </div>}
-      <AgentActivityStatus quiet={draftOnly} sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
+      <AgentActivityStatus sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}

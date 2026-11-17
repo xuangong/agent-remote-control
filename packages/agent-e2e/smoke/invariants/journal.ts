@@ -46,18 +46,18 @@ export function oneReplacementPerRestart(transcript: Transcript): InvariantResul
 }
 
 /**
- * M2: after the last return, every turn the scenario sent shows its user message followed by an assistant message before the
- * next user message, and no tool call is still running.
+ * M2: after the last return, every turn the scenario sent shows its user message and, unless the turn was cut off on purpose
+ * (`requireReply: false`), an assistant message before the next user message; no tool call is still running.
  */
-export function turnRowsCompleteAfterReturn(page: PageReport, turns: Array<{ prompt: string }>): InvariantResult {
+export function turnRowsCompleteAfterReturn(page: PageReport, turns: Array<{ prompt: string; requireReply?: boolean }>): InvariantResult {
   const violations: Violation[] = [];
   const rows = page.finalRows;
-  turns.forEach(({ prompt }, at) => {
+  turns.forEach(({ prompt, requireReply = true }, at) => {
     const start = rows.findIndex(row => row.kind === 'user_message' && row.text.includes(prompt));
     if (start === -1) { violations.push({ message: `the user message of turn ${at + 1} is missing` }); return; }
     const next = rows.findIndex((row, index) => index > start && row.kind === 'user_message');
     const turnRows = rows.slice(start + 1, next === -1 ? undefined : next);
-    if (!turnRows.some(row => row.kind === 'assistant_message' && row.text.trim() !== '')) violations.push({ message: `turn ${at + 1} has no assistant reply` });
+    if (requireReply && !turnRows.some(row => row.kind === 'assistant_message' && row.text.trim() !== '')) violations.push({ message: `turn ${at + 1} has no assistant reply` });
     const running = turnRows.find(row => row.kind === 'tool_call' && row.status === 'running');
     if (running) violations.push({ message: `turn ${at + 1} still shows a running tool call (${running.key})` });
   });

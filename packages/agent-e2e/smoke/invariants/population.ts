@@ -1,6 +1,6 @@
 import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
 
-/** M5: the live subscriptions open at one time never exceed the budget. A subscription ends with a `closed` frame or a closed socket. */
+/** M5: the live subscriptions open at one time never exceed the budget. A subscription ends with `closed`, `unsubscribe` or a closed socket. */
 export function subscriptionsWithinBudget(transcript: Transcript, budget: number): InvariantResult {
   const open = new Map<number, Set<number>>();
   let peak = 0;
@@ -13,7 +13,7 @@ export function subscriptionsWithinBudget(transcript: Transcript, budget: number
     const set = open.get(entry.connection) ?? new Set<number>();
     open.set(entry.connection, set);
     if (entry.direction === 'browser->relay' && entry.message.type === 'subscribe') { set.add(subscription); checked += 1; }
-    if (entry.direction === 'relay->browser' && entry.message.type === 'closed') set.delete(subscription);
+    if ((entry.direction === 'relay->browser' && entry.message.type === 'closed') || (entry.direction === 'browser->relay' && entry.message.type === 'unsubscribe')) set.delete(subscription);
     const live = [...open.values()].reduce((sum, one) => sum + one.size, 0);
     if (live > peak) {
       peak = live;

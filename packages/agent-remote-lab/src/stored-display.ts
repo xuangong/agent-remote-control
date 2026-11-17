@@ -1,7 +1,7 @@
 import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-remote-web';
 import { deviceStore, type DeviceScope, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-remote-web/device-store';
 import type { ControllerLocation } from '@orchardworks/agent-remote-hosted/controller-location';
-import { storedRowsScope } from './workspace-access.js';
+import { cachedRowsScope, storedRowsScope } from './workspace-access.js';
 
 /** What the device store calls a conversation: where it runs, with which Provider, and its native id. */
 export function sessionIdentity(target: Pick<ControllerLocation, 'hostId' | 'providerId' | 'nativeSessionId'>): SessionIdentity | undefined {
@@ -97,4 +97,13 @@ export function forgetStoredSession(baseUrl: string, target: ControllerLocation)
 export function pinStoredSession(baseUrl: string, target: ControllerLocation): () => void {
   const scope = storedRowsScope(baseUrl), identity = sessionIdentity(target);
   return scope && identity ? deviceStore.pin(scope, identity) : () => {};
+}
+
+/**
+ * Whether this device holds rows for the conversation that stay hidden only until the Relay confirms the lease. While that is so the page shows a quiet shell,
+ * with no opening word and no placeholder, instead of words that the rows are about to replace.
+ */
+export function storedRowsPending(baseUrl: string, target?: ControllerLocation): boolean {
+  const identity = target && sessionIdentity(target);
+  return !!identity && !storedRowsScope(baseUrl) && !!deviceStore.read(cachedRowsScope(baseUrl), identity);
 }

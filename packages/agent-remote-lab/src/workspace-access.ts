@@ -188,3 +188,9 @@ export function subscribeStoredRows(baseUrl: string, listener: () => void): () =
   gate.listeners.add(listener);
   return () => { gate.listeners.delete(listener); };
 }
+
+/** The scope the cached access names, whether or not the lease is confirmed. It only says whose records to look for; it never allows reading their rows. */
+export function cachedRowsScope(baseUrl: string): DeviceScope {
+  const relayUrl = scopeFor(baseUrl);
+  return { relayUrl, principalId: gates.get(relayUrl)?.principalId ?? WORKSPACE_PRINCIPAL };
+}

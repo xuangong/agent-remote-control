@@ -127,7 +127,8 @@ export function summarize(dir, p0Dir = join(dirname(fileURLToPath(import.meta.ur
         ...fresh.map(({ entry, used: own }) => [entry.arm, entry.name, sampleCount(own), figure(own.kept.map(sample => sample.contentMs), 20), figure(own.kept.map(sample => sample.contentSinceAttachMs), 20)])]);
   }
 
-  const returns = valid.flatMap(entry => ['hidden-short', 'hidden-long', 'hidden-dead'].map(name => ({ entry, name, used: used(entry, name) }))).filter(item => item.used);
+  // A return opens no new stream, so every sample counts whatever served the session.
+  const returns = valid.flatMap(entry => ['hidden-short', 'hidden-long', 'hidden-dead'].map(name => ({ entry, name, used: scenario(entry, name)?.samples ? { all: scenario(entry, name).samples, kept: scenario(entry, name).samples } : undefined }))).filter(item => item.used);
   if (returns.length) {
     const p0Return = p0('p0-local-1x-a.json')?.scenarios?.['hidden-short']?.summary;
     table('Return: hidden, then shown again (criterion at most 2 HTTP requests while the sockets are alive, 0 opening-label states, current within 1 s p95; a dead socket is recorded without a budget)', ['Arm', 'Condition', 'Scenario', 'Samples used', 'HTTP API requests (min / max)', 'Requests by endpoint (largest sample)', 'Opening-label / word / row-less states (max)', 'Current, ms (p50 / p95)', 'Verdict'],

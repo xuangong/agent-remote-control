@@ -260,6 +260,13 @@ describe('LabWorkbench', () => {
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Reconnecting');
   });
 
+  it('shows a quiet shell, with no opening word or placeholder, while stored rows wait for the lease', async () => {
+    const { QuietShell } = await import('./SessionWorkbench.js');
+    const container = await render(<QuietShell.Provider value><LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} /></QuietShell.Provider>);
+    expect(container.textContent).not.toMatch(/Opening session|Awaiting Agent|Start with a Provider|Loading conversation/);
+    expect(container.querySelector('.lab-empty-state')).toBeNull();
+  });
+
   it('alerts with a generic connection failure before readiness and preserves the diagnostic', async () => {
     const state = {
       ...replicaState,

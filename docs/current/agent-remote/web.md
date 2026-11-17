@@ -302,3 +302,21 @@ storage writes coalesced over 200 milliseconds and flushed on pagehide or visibi
 loss. Restore reads flush pending values first; signout cancels them. Image drafts
 start saving immediately and retain only the latest pending snapshot while a previous
 IndexedDB write is in flight. They do not add an intentional persistence delay.
+
+## Device store
+
+The browser keeps the conversations it has read in the same IndexedDB database as drafts and images (`agent-remote-image-drafts`, version 3; the upgrade only creates the `sessions` and `session_index` stores and never touches drafts or images). The store is the subpath `@orchardworks/agent-remote-web/device-store`; `session-record.ts` builds and validates records.
+
+- **Record.** One per public session: agent id, the journal `epoch` and `nextSeq` of the last applied page, `hasOlder`, the newest entries (at most 200 and 1 MiB of JSON, each with its `itemKey`), the display Snapshot without `activeTurn`, `pendingInteractions` and `runtimeInfo.connection`, and the update time. A window whose newest entry alone exceeds the limit is not stored.
+- **Key.** `[relayUrl, principalId, [hostId, providerId, nativeSessionId]]`. A record of another principal on the same Relay is never read, written or listed; at start the preload deletes the records of other principals on the page's Relay.
+- **A display cache, validated by the first page.** A new replica for the session is seeded from the record (`restoredFromDevice`) and asks for `after {epoch, nextSeq - 1}`. A cursor the Relay does not hold (another epoch, a sequence beyond its head) gets a page with `staleCursor` or `gap`; the replica turns it into a replacement and merges the tail by key, never through an empty state. The first page that reads forward clears `restoredFromDevice`. Rows that came from the device, or wait for a replacement's tail, are never written back.
+- **Privacy.** Stored rows are read only while the Relay has confirmed the access lease (`storedRowsScope`): not before `GET /auth/status` answers, not while an expired lease is being confirmed again, not after the workspace was retired. Sign-out, a lost lease (401 or 403), a principal change and a lost access to one session purge or forget the records. "Clear cache on close" keeps memory copies only and clears the disk copies.
+- **Limits.** One byte cap on disk (whole records, oldest update first, mounted sessions are pinned and never evicted) and one preload budget in bytes that also bounds the memory copies. A quota error evicts the oldest unpinned records and retries once; a second failure keeps the content in memory. A blocked or unavailable store changes nothing the person sees.
+- **Writes** are in memory at once and on disk after 50 ms; the lab's observer saves a session at most every two seconds and when the page hides.
+- **Labels.** While rows are held and not yet confirmed (from the device, or `pendingEpoch` set), `Opening session`, `Synchronizing` and `Checking access` give way to the session's last business label. `Reconnecting` and `Unavailable` are never hidden. A conversation with no rows keeps its opening words (P2 owns them).
+
+Older history and search read through the session wire when the transport recovers over it, so a journal-served session scrolls back without its Controller; the Relay gives `timeline_request` its own admission budget (600 a minute) beside the 120 control messages.
+
+### List loaders on return
+
+A list loader refetches on mount, on its own interval while the page is visible (`watchList`, five minutes unless the list moves faster) and when the shared feed socket reopens after a loss (`watchFeedReopen`). Becoming visible refetches nothing. `watchPageResume` keeps two jobs: the access check and the probe that finds a dead socket. A return with live sockets makes the access check and the read mark.

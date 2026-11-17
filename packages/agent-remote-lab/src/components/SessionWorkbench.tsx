@@ -5,7 +5,7 @@ import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
-import { memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { createContext, memo, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   AgentInteractionResponse,
@@ -32,6 +32,7 @@ import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
+export const QuietShell = createContext(false);
 export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice }: { entrySelection?: TimelineEntrySelection;
   /** Said in place of Opening session while the conversation cannot load yet, for example because its Host is offline. */
   loadingNotice?: { title: string; detail: string };
@@ -92,6 +93,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const toastToggleAnchor = useToastAnchor<HTMLButtonElement>(visible && !!state?.agent);
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
+  const quiet = useContext(QuietShell) && state === undefined;
   const hasReplica = state !== undefined;
   const isAttaching = !hasReplica && attachingAgentId !== undefined;
   const loadingLabel = sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session';
@@ -152,9 +154,9 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
     <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
-      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
+      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{quiet ? '' : hasReplica ? activityLabel : isAttaching ? loadingLabel : 'Awaiting Agent'}</span></> : undefined}>
         {conversationPath}
-        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
+        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{quiet ? 'Conversation' : hasReplica ? 'Conversation' : isAttaching ? `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId}` : 'Ready for a session'}</h2>
         {headingMode === 'inline' ? toggle : null}
     </SessionHeading>
     {details}
@@ -186,7 +188,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
           </svg>
         </button>
         <div id={composerId} className="lab-composer-body" hidden={composerHidden && !controlReadOnly}>
-          <DraftComposer
+          <DraftComposer quietStatus={quiet}
             keyboardDismissBoundaryRef={composerTouchBoundary}
             sessionState={session}
             draftOnly={draftOnly}
@@ -284,6 +286,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     searchTriggerTarget?: HTMLElement | null;
     connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
+  const quietShell = useContext(QuietShell);
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const [openSearchScope, setOpenSearchScope] = useState<string>();
   const [searchSelection, setSearchSelection] = useState<{ scope: string; key: string; request: number }>();
@@ -398,7 +401,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
               timelineStart={timelineStart}
               timelineEnd={timelineEnd}
             />
-          </> : nativeTakeover ? null : isAttaching ? <>
+          </> : nativeTakeover || quietShell ? null : isAttaching ? <>
             <div className="lab-empty-state">
               <span className="lab-empty-icon" aria-hidden="true">↗</span>
               <h3>{loadingNotice ? loadingNotice.title : `${sessionStatus === 'catching_up' ? 'Loading conversation' : 'Opening session'} ${attachingAgentId ?? ''}`.trim()}</h3>

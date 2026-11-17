@@ -1,8 +1,7 @@
 import { createHash } from 'node:crypto';
-import { createHostBroker } from '../../agent-relay-core/src/broker.js';
-import type { RelaySocket } from '../../agent-relay-core/src/transport.js';
-import { emptyRelayState, type HostedRelayState, type RelayState } from '../../agent-relay-core/src/state.js';
-import type { GatewayAuthOptions } from '../../agent-relay-core/src/auth.js';
+import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
+import { emptyRelayState, type HostedRelayState, type RelayState } from '@orchardworks/agent-relay-core/state';
+import type { GatewayAuthOptions } from '@orchardworks/agent-relay-core/auth';
 
 export function sourceCompletionState(auth: GatewayAuthOptions): HostedRelayState {
   const state = emptyRelayState(auth); state.version = 9;

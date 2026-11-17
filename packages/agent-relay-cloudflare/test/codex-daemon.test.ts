@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { decodeRemoteHostUplinkMessage } from '../../agent-remote-protocol/src/index.js';
+import { decodeRemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 import { fixture, send } from './fixture.js';
 
 it('forwards validated daemon control only for the owner and an advertising Host', async () => {

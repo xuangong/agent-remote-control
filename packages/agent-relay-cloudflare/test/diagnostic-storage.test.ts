@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { build } from 'esbuild';
+import { workspaceSourceEsbuild } from '../../../scripts/lib/workspace-source.mjs';
 import { Miniflare } from 'miniflare';
 import { afterEach, expect, it } from 'vitest';
 
@@ -47,10 +48,7 @@ async function fixture() {
     export default { fetch(request, env) { return env.RELAY.get(env.RELAY.idFromName('diagnostics')).fetch(request); } };
   `, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
     conditions: ['workerd', 'worker', 'import'], external: ['node:*', 'cloudflare:*'],
-    alias: { '@orchardworks/agent-remote-protocol/model': resolve('../agent-remote-protocol/src/model/index.ts'),
-      '@orchardworks/agent-remote-protocol': resolve('../agent-remote-protocol/src/index.ts'),
-      '@orchardworks/agent-relay-core/host-recovery': resolve('../agent-relay-core/src/host-recovery.ts'),
-      '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts') } });
+    plugins: [workspaceSourceEsbuild()] });
   let mf: Miniflare;
   const start = () => { mf = new Miniflare({ modules: true, script: result.outputFiles[0]!.text, compatibilityDate: '2026-06-01', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { RELAY: { className: 'DiagnosticObject', useSQLite: true } }, durableObjectsPersist: join(directory, 'state') }); };

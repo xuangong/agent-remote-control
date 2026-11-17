@@ -209,15 +209,15 @@
     "reply": {
       "events": [],
       "watermark": 4,
+      "window": {
+        "outcome": "unchanged",
+        "bytes": 237
+      },
       "cursor": {
         "epoch": "<epoch>",
         "seq": 1
       },
-      "hasHead": true,
-      "window": {
-        "outcome": "unchanged",
-        "bytes": 237
-      }
+      "hasHead": true
     }
   },
   {
@@ -236,7 +236,7 @@
     "reply": {
       "kind": "page",
       "page": {
-        "protocolVersion": "1.8.0",
+        "protocolVersion": "<version>",
         "type": "timeline_page",
         "payload": {
           "requestId": "p",
@@ -372,7 +372,7 @@
       "page": {
         "kind": "page",
         "page": {
-          "protocolVersion": "1.8.0",
+          "protocolVersion": "<version>",
           "type": "timeline_page",
           "payload": {
             "requestId": "p",

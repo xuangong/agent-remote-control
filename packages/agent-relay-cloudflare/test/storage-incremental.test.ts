@@ -5,7 +5,7 @@ import { deriveSuccessionCapacity } from '@orchardworks/agent-relay-core/success
 import { SqliteRelayStore } from '../src/storage.js';
 import { encodeSqlSnapshot } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
-import { codecState } from './storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { operatingEncoding, prepareOperatingDatasets } from './storage-operating-fixture.js';
 
 const databases: DatabaseSync[] = [];

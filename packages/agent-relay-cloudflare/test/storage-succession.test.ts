@@ -1,11 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
-import { createRelayState } from '../../agent-relay-core/src/state.js';
+import { createRelayState } from '@orchardworks/agent-relay-core/state';
 import { createHostBroker, emptyRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { SqliteRelayStore } from '../src/storage.js';
 import { decodeSqlSnapshot, encodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT, type SqlChunk, type SqlManifest, type SqlSnapshotFormat } from '../src/storage-codec.js';
-import { codecState } from './storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 's'.repeat(32) };
 test('quotes the actual record envelope and manifest without allocating a payload', () => {
@@ -224,7 +224,7 @@ test('retains large actual freeze relations and repeated relation receipt bytes;
   const change = associations.relationChanges[1]!; change.reservation.relations.push(...relations);
   change.hostReceipt!.reservation = structuredClone(change.reservation);
   // Full freeze relations participate in Favorites identity, so update the owning hash in this fixture.
-  const { successionFreezeKey } = await import('../../agent-remote-protocol/src/index.js');
+  const { successionFreezeKey } = await import('@orchardworks/agent-remote-protocol');
   const freeze = associations.freezes[0]!;
   state.tenants[0]!.favoritesSuccession!.receipts[0]!.receiptHash = createHash('sha256').update(JSON.stringify([successionFreezeKey(freeze.receipt), freeze.projection])).digest('hex');
   const encoded = encodeSqlSnapshot(state, auth);
@@ -489,7 +489,7 @@ for (const consumer of ['terminal', 'favorites', 'invitation', 'registration', '
 
 test('full recovery registration construction fits the saved claim and ends only future Host growth', async () => {
   const { retentionState, retentionPeer } = await import('./retention-consumption-fixture.js');
-  const { deriveSuccessionCapacity } = await import('../../agent-relay-core/src/succession-capacity.js');
+  const { deriveSuccessionCapacity } = await import('@orchardworks/agent-relay-core/succession-capacity');
   const initial = retentionState(auth, true), broker = initial.tenants[0]!.broker;
   broker.hosts = []; broker.keys = []; broker.revokedHosts![0]!.revocationId = '00000000-0000-4000-8000-000000000002';
   const f = fixture(); await f.store.commit(initial);

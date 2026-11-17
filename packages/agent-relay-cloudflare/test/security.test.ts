@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { PROTOCOL_VERSION, decodeServerMessage } from '../../agent-remote-protocol/src/index.js';
+import { PROTOCOL_VERSION, decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 import { event, fixture, origin, send } from './fixture.js';
 
 it('rejects stale permission changes without closing the session and permits retry after sign-in', async () => {

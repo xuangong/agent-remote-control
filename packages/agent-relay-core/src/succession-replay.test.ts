@@ -13,7 +13,7 @@ import { createHostBroker, type HostBrokerOptions } from './broker.js';
 import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession-capacity.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createFavorites } from './favorites.js';
-import { codecState } from '../../agent-relay-cloudflare/test/storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from './complete-relay-state.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';

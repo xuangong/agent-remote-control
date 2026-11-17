@@ -73,3 +73,20 @@ export function workspaceSource() {
     },
   };
 }
+
+/**
+ * The same resolution as an esbuild plugin, for tests that bundle a Worker from workspace source: every workspace
+ * package and package subpath imported by name resolves to its TypeScript source, as in Vitest.
+ */
+export function workspaceSourceEsbuild() {
+  const resolver = workspaceSource();
+  return {
+    name: 'arc-workspace-source',
+    setup(build) {
+      build.onResolve({ filter: /^@orchardworks\// }, args => {
+        const path = resolver.resolveId(args.path, args.importer);
+        return path ? { path } : undefined;
+      });
+    },
+  };
+}

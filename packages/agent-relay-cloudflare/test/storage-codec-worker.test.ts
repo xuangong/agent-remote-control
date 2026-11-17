@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
-import { codecState } from './storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { fixture, origin, issuer, secret } from './fixture.js';
 import { SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 

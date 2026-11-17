@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
-import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '../../agent-relay-core/src/state.js';
-import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '../../agent-relay-core/src/succession-capacity.js';
+import { validateRelayState, emptyRelayState, stageRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core/state';
+import { deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from '@orchardworks/agent-relay-core/succession-capacity';
 import { encodeSqlSnapshot, decodeSqlSnapshot, quoteSqlRecord, SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
-import { codecState } from './storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { retentionState } from './retention-consumption-fixture.js';
-import { successionFreezeKey } from '../../agent-remote-protocol/src/index.js';
+import { successionFreezeKey } from '@orchardworks/agent-remote-protocol';
 
 export const operatingCases = ['S', 'M', 'B0', 'B1', 'L', 'O'] as const;
 export type OperatingCase = typeof operatingCases[number];

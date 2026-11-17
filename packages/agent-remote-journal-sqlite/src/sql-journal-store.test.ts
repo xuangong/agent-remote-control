@@ -3,7 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { bodyFromRow, MemoryJournalStore, SessionJournal, type JournalCatalog, type JournalRowInput, type JournalStore } from '@orchardworks/agent-remote-journal';
+import { SessionJournal, type JournalRowInput } from '@orchardworks/agent-remote-journal';
+import { journalStoreCases, type JournalStoreUnderTest } from '@orchardworks/agent-remote-journal/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openNodeJournalDatabase } from './node-sqlite.js';
@@ -15,11 +16,6 @@ afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) awai
 const row = (itemKey: string, text: string, turnId = 'turn-1'): JournalRowInput => ({
   itemKey, providerId: 'codex', sourceKey: `${itemKey}:${text.length}`, occurredAt: 1_725_000_000_000, turnId,
   item: { type: 'assistant_message', text, messageId: itemKey },
-});
-const snapshot = () => ({
-  id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle' as const, activeTurn: null,
-  capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } },
-  pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const },
 });
 
 /** A journal claimed by one publisher, with a function that numbers its publications. */
@@ -36,113 +32,19 @@ async function memoryDatabase() {
   return database;
 }
 
-type CatalogedStore = JournalStore & { catalog: JournalCatalog };
-const stores: Array<[string, () => Promise<CatalogedStore>]> = [
-  ['the memory store', async () => new MemoryJournalStore()],
-  ['the SQLite store', async () => new SqlJournalStore(await memoryDatabase())],
-  ['the SQLite store with 64-byte chunks', async () => new SqlJournalStore(await memoryDatabase(), { chunkBytes: 64 })],
+const stores: Array<[string, (chunkBytes?: number) => Promise<JournalStoreUnderTest>]> = [
+  ['the SQLite store', async () => sqliteUnderTest()],
+  ['the SQLite store with 64-byte chunks', async () => sqliteUnderTest(64)],
 ];
 
+async function sqliteUnderTest(chunkBytes?: number): Promise<JournalStoreUnderTest> {
+  const database = await memoryDatabase();
+  const options = chunkBytes === undefined ? undefined : { chunkBytes };
+  return { store: new SqlJournalStore(database, options), reopen: async () => new SqlJournalStore(database, options), ...(chunkBytes === undefined ? {} : { chunkBytes }) };
+}
+
 describe.each(stores)('%s', (_name, create) => {
-  it('restores a journal from the changes it applied', async () => {
-    const store = await create();
-    const { journal, at } = openJournal();
-    journal.append(at(), row('m1', 'Hel'));
-    await store.apply(journal.takeChanges()!);
-    journal.append(at(), row('m1', 'lo'));
-    journal.append(at(), row('m2', 'Next'));
-    await store.apply(journal.takeChanges()!);
-    const restored = new SessionJournal((await store.load(journal.sessionKey))!);
-    expect(restored.state()).toEqual(journal.state());
-    expect(restored.cursor).toEqual(journal.cursor);
-    const request = { requestId: 'r', agentId: 'a', direction: 'tail' as const, limit: 10 };
-    expect(restored.page(request, { olderBeyondJournal: false })).toEqual(journal.page(request, { olderBeyondJournal: false }));
-  });
-
-  it('knows nothing of a journal it never stored', async () => {
-    expect(await (await create()).load('host-1:codex:never')).toBeUndefined();
-  });
-
-  it('drops the old items after a replacement and deletes a journal', async () => {
-    const store = await create();
-    const { journal, at } = openJournal();
-    journal.append(at(), row('m1', 'Old'));
-    journal.complete(at(), 'm1', 'digest-1');
-    await store.apply(journal.takeChanges()!);
-    journal.sync(at(), [{ row: row('m2', 'Fresh'), digest: 'digest-2' }], { roomBytes: Number.MAX_SAFE_INTEGER });
-    await store.apply(journal.takeChanges()!);
-    expect((await store.load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m2']);
-    await store.delete(journal.sessionKey);
-    expect(await store.load(journal.sessionKey)).toBeUndefined();
-  });
-
-  it('restores an equivalent journal after evict, fill and prepend', async () => {
-    const store = await create();
-    const { journal, at } = openJournal();
-    journal.append(at(), row('m1', 'first', 'turn-1'));
-    journal.complete(at(), 'm1', 'digest-1');
-    journal.append(at(), row('m2', 'second', 'turn-2'));
-    journal.setHead(at(), { snapshot: snapshot(), observedAt: 5 });
-    await store.apply(journal.takeChanges()!);
-    journal.evict(1);
-    journal.prepend(at(), [{ row: row('m0', 'zeroth', 'turn-0'), digest: 'digest-0' }]);
-    await store.apply(journal.takeChanges()!);
-    journal.fill('m1', bodyFromRow(row('m1', 'first', 'turn-1')), 'digest-1');
-    await store.apply(journal.takeChanges()!);
-    expect(new SessionJournal((await store.load(journal.sessionKey))!).state()).toEqual(journal.state());
-  });
-
-  it('deletes the items a journal removed', async () => {
-    const store = await create();
-    const { journal, at } = openJournal();
-    journal.append(at(), { ...row('l1', 'live'), liveOnly: true });
-    journal.complete(at(), 'l1', 'digest-l1');
-    journal.append(at(), row('m1', 'kept'));
-    await store.apply(journal.takeChanges()!);
-    journal.dropOldestLiveOnly(0);
-    await store.apply(journal.takeChanges()!);
-    expect((await store.load(journal.sessionKey))?.items.map(({ itemKey }) => itemKey)).toEqual(['m1']);
-  });
-
-  it('keeps an item far larger than a chunk, with characters that span chunk boundaries', async () => {
-    const store = await create();
-    const { journal, at } = openJournal();
-    const text = '😀é'.repeat(100_000);
-    journal.append(at(), row('big', text));
-    await store.apply(journal.takeChanges()!);
-    const restored = (await store.load(journal.sessionKey))!;
-    expect(restored.items[0]?.body?.item).toMatchObject({ text });
-  });
-
-  it('lists journals by key prefix with their head flag and size, and deletes them by prefix', async () => {
-    const store = await create();
-    const first = openJournal('host-1:codex:session-1');
-    const second = openJournal('host-2:codex:session-1');
-    first.journal.append(first.at(), row('m1', 'Hello'));
-    first.journal.setHead(first.at(), { snapshot: snapshot(), observedAt: 5 });
-    second.journal.append(second.at(), row('m1', 'Hello'));
-    await store.apply(first.journal.takeChanges()!);
-    await store.apply(second.journal.takeChanges()!);
-    expect(await store.catalog.list('host-1:')).toEqual([{ sessionKey: 'host-1:codex:session-1', hasHead: true, bytes: first.journal.residentBytes() }]);
-    expect((await store.catalog.list('')).map(({ sessionKey, hasHead }) => [sessionKey, hasHead])).toEqual([['host-1:codex:session-1', true], ['host-2:codex:session-1', false]]);
-    await store.catalog.deletePrefix('host-2:');
-    expect((await store.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual(['host-1:codex:session-1']);
-    expect(await store.load('host-2:codex:session-1')).toBeUndefined();
-    expect(await store.load('host-1:codex:session-1')).toBeDefined();
-  });
-
-  it('does not take a key that merely starts like another Host\'s prefix', async () => {
-    const store = await create();
-    const first = openJournal('host-1:codex:session-1');
-    const second = openJournal('host-10:codex:session-1');
-    first.journal.append(first.at(), row('m1', 'Hello'));
-    second.journal.append(second.at(), row('m1', 'Hello'));
-    await store.apply(first.journal.takeChanges()!);
-    await store.apply(second.journal.takeChanges()!);
-    expect((await store.catalog.list('host-1:')).map(({ sessionKey }) => sessionKey)).toEqual(['host-1:codex:session-1']);
-    await store.catalog.deletePrefix('host-1:');
-    expect((await store.catalog.list('')).map(({ sessionKey }) => sessionKey)).toEqual(['host-10:codex:session-1']);
-  });
+  for (const { name, run } of journalStoreCases) it(name, () => run(() => create()));
 });
 
 describe('the SQLite store over its file', () => {

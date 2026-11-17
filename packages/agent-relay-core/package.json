@@ -56,7 +56,20 @@
     "./succession-capacity": {
       "types": "./dist/succession-capacity.d.ts",
       "import": "./dist/succession-capacity.js"
-    }
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./favorites-succession": {
+      "types": "./dist/favorites-succession.d.ts",
+      "import": "./dist/favorites-succession.js"
+    },
+    "./session-titles": {
+      "types": "./dist/session-titles.d.ts",
+      "import": "./dist/session-titles.js"
+    },
+    "./journal-partition.contract.json": "./src/journal-partition.contract.json"
   },
   "types": "./dist/index.d.ts",
   "files": [

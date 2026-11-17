@@ -1,4 +1,4 @@
-import { codecState } from '../../agent-relay-cloudflare/test/storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from './complete-relay-state.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';

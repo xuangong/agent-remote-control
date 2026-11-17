@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
+import { workspaceSourceEsbuild } from '../../../scripts/lib/workspace-source.mjs';
 import { Miniflare, type WebSocket } from 'miniflare';
-import { afterEach, expect } from 'vitest';
+import { afterAll, afterEach, expect } from 'vitest';
 
 export const origin = 'https://relay.example';
 export const previewOrigin = origin;
@@ -12,6 +13,9 @@ export const issuer = 'https://gateway.example';
 export const secret = 'workers-fixture-secret-01234567890123456789';
 const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); }, 30000);
+/** Closers of fixtures that live as long as their file. */
+const fileClosers: Array<() => Promise<void>> = [];
+afterAll(async () => { for (const close of fileClosers.splice(0).reverse()) await close(); }, 30000);
 export function sign(type: string, claims: Record<string, unknown>) {
   const input = [{ alg: 'HS256', typ: type }, claims].map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.');
   return input + '.' + createHmac('sha256', secret).update(input).digest('base64url');
@@ -25,15 +29,18 @@ export function event(socket: WebSocket, type: 'message' | 'close'): Promise<any
 }
 export const send = (socket: WebSocket, data: object) => socket.send(JSON.stringify({ uplinkVersion: 2, ...data }));
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true } } = {}) {
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
+  /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file' } = {}) {
+  const owned = options.lifetime === 'file' ? fileClosers : closers;
   const directory = await mkdtemp(join(tmpdir(), 'arc-workers-'));
-  closers.push(() => rm(directory, { recursive: true, force: true }));
+  owned.push(() => rm(directory, { recursive: true, force: true }));
     const result = await build({ stdin: { contents: options.actualEntry ? `export { default, RelayObject } from './src/worker.ts';` : `
       import { createHash } from 'node:crypto';
       import worker, { RelayObject } from './src/worker.ts';
       import { SqliteRelayStore } from './src/storage.ts';
       import { createHostedRelay } from '@orchardworks/agent-relay-core';
       import { WorkerRelaySocket } from './src/socket.ts';
+      ${options.conformance ? "import { runRelayStateStoreCase } from './test/relay-state-store-case.ts';" : ''}
       export class TestRelayObject extends RelayObject {
         constructor(ctx, env) { super(ctx, env); this.fixtureContext = ctx; this.fixtureEnv = env;
           this.completeCodec = ${options.completeCodec === true};
@@ -63,6 +70,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
               .map(row => ({ kind: row.kind, identity: row.identity, ordinal: row.ordinal, digest: createHash('sha256').update(new Uint8Array(row.bytes)).digest('hex') })),
             blob: this.fixtureContext.storage.sql.exec('SELECT bytes FROM relay_snapshot_chunks LIMIT 1').toArray().map(row => ({ arrayBuffer: row.bytes instanceof ArrayBuffer, size: row.bytes.byteLength, prefix: Array.from(new Uint8Array(row.bytes).slice(0, 16)) }))
           });
+          if (path.startsWith('/_fixture/conformance/state/')) return Response.json(await runRelayStateStoreCase(this.fixtureContext.storage, Number(path.split('/').at(-1))));
           if (path === '/_fixture/alarm') { await this.alarm(); return new Response('ok'); }
           if (path === '/_fixture/journal-tables') return Response.json(this.fixtureContext.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'journal%'").toArray());
           if (path.startsWith('/_fixture/partition/')) {
@@ -92,9 +100,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
       }
       export default worker;
     `, resolveDir: process.cwd(), sourcefile: 'test-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
-      conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
-        '@orchardworks/agent-relay-core/host-recovery': resolve('../agent-relay-core/src/host-recovery.ts'),
-        '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts') } });
+      conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], plugins: [workspaceSourceEsbuild()] });
   const script = result.outputFiles[0]!.text;
   // The partitions run in a Worker of their own, as in a deployment, so they never share an isolate with `primary`.
   const journalsResult = await build({ stdin: { contents: options.actualEntry ? `export { JournalPartition, default } from './src/journal-worker.ts';` : `
@@ -108,6 +114,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
           return { ...database, all: (sql, ...params) => { if (sql.startsWith('SELECT meta_chunks FROM journal_sessions WHERE session_key')) this.loads++; return database.all(sql, ...params); } };
         }
         async journalLoads() { return this.loads; }
+        async runConformance(index) { return runJournalStoreCase(this.ctx.storage, index); }
         async inspect(sql) { return this.ctx.storage.sql.exec(sql).toArray(); }
         async transactionProbe() {
           const database = durableObjectJournalDatabase(this.ctx.storage);
@@ -117,13 +124,13 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
         }
       }
       import { durableObjectJournalDatabase } from './src/journal-sql-database.ts';
+      ${options.conformance ? "import { runJournalStoreCase } from './test/journal-store-case.ts';" : ''}
       import { DurableObject } from 'cloudflare:workers';
       // A partition of an earlier version: it has no \`capabilities\` method.
       export class OlderJournalPartition extends DurableObject { async servedSessions() { return []; } }
       export default { fetch() { return new Response(null, { status: 404 }); } };
     `, resolveDir: process.cwd(), sourcefile: 'journals-entry.ts', loader: 'ts' }, bundle: true, write: false, format: 'esm', platform: 'browser',
-    conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], alias: {
-      '@orchardworks/agent-relay-core': resolve('../agent-relay-core/src/index.ts') } });
+    conditions: ['workerd', 'worker', 'import'], mainFields: ['browser', 'module', 'main'], external: ['node:*', 'cloudflare:*'], plugins: [workspaceSourceEsbuild()] });
   const journalsScript = journalsResult.outputFiles[0]!.text;
   let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   let ownerFailures = 0;
@@ -194,7 +201,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
     await mf.ready;
   }
   await start();
-  closers.push(async () => { for (const socket of sockets) { try { socket.close(); } catch { /* Socket was already closed during restart. */ } } await mf.dispose(); });
+  owned.push(async () => { for (const socket of sockets) { try { socket.close(); } catch { /* Socket was already closed during restart. */ } } await mf.dispose(); });
   const requestAt = (requestOrigin: string, path: string, init: RequestInit = {}) => mf.dispatchFetch(requestOrigin + path, { ...init, redirect: 'manual', signal: AbortSignal.timeout(5000) } as any);
   const request = (path: string, init: RequestInit = {}) => requestAt(origin, path, init);
   const previewRequest = (path: string, init: RequestInit = {}) => requestAt(options.previewOrigin ?? previewOrigin, path, init);

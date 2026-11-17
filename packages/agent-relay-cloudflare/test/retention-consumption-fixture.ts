@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
-import { createHostBroker } from '../../agent-relay-core/src/broker.js';
-import { projectSuccessionFavorites } from '../../agent-relay-core/src/favorites-succession.js';
-import { pruneSessionTitles } from '../../agent-relay-core/src/session-titles.js';
-import type { GatewayAuthOptions } from '../../agent-relay-core/src/auth.js';
-import type { RelayState } from '../../agent-relay-core/src/state.js';
-import type { RelaySocket } from '../../agent-relay-core/src/transport.js';
-import { codecState } from './storage-codec-fixture.js';
+import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
+import { projectSuccessionFavorites } from '@orchardworks/agent-relay-core/favorites-succession';
+import { pruneSessionTitles } from '@orchardworks/agent-relay-core/session-titles';
+import type { GatewayAuthOptions } from '@orchardworks/agent-relay-core/auth';
+import type { RelayState } from '@orchardworks/agent-relay-core/state';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 
 export function retentionState(auth: GatewayAuthOptions, recovery = false) {
   const state = codecState(auth), tenant = state.tenants[0]!, broker = tenant.broker;

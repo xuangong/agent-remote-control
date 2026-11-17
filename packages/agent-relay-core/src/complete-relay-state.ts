@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto';
-import { emptyRelayState, validateRelayState, type GatewayAuthOptions, type HostedRelayState } from '@orchardworks/agent-relay-core';
-import { successionFreezeKey } from '../../agent-remote-protocol/src/index.js';
+import { successionFreezeKey } from '@orchardworks/agent-remote-protocol';
 
-/** Complete A -> B -> C evidence follows the hosted immutable replay fixture. */
-export function codecState(auth: GatewayAuthOptions): HostedRelayState {
+import type { GatewayAuthOptions } from './auth.js';
+import { emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
+
+/** A time far past any test clock, so the records of the state never expire. */
+const FAR_FUTURE = 4_102_444_800_000;
+
+/** A Relay state that holds every kind of record: succession evidence A to B to C, Favorites, Teams, previews, sharing, sessions and security events. */
+export function buildCompleteRelayState(auth: GatewayAuthOptions): HostedRelayState {
   const namespace = (subject: string) => createHash('sha256').update(JSON.stringify([auth.issuer, subject])).digest('hex');
   const ref = (nativeSessionId: string, controllerId = 'installation') => ({ controllerId, providerId: 'fixture', nativeSessionId });
   const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
@@ -39,12 +44,12 @@ export function codecState(auth: GatewayAuthOptions): HostedRelayState {
   const recovery = { hostId: 'historic-host', installationId: 'historic-installation', revocationId: '00000000-0000-4000-8000-000000000001' };
   const state: any = emptyRelayState(auth); state.version = 9; state.extraRelay = { data: '\ud800😀' };
   state.tenants = [{ subject: 'owner', namespace: namespace('owner'), extraTenant: { kept: true }, broker: {
-    keys: [['a'.repeat(64), { expires: Date.now() + 600000, installationId: 'historic-installation', purpose: 'host-only', requiresRotation: true, recovery, extraCredential: 'retained' }]],
+    keys: [['a'.repeat(64), { expires: FAR_FUTURE, installationId: 'historic-installation', purpose: 'host-only', requiresRotation: true, recovery, extraCredential: 'retained' }]],
     hosts: [{ id: 'mapped-host', installationId: 'installation', name: 'Host', legacyDsh: false, providers: [{ providerId: 'fixture', displayName: 'Fixture' }], extraHost: 'retained' }],
     bindings: [{ agentId: 'agent-C', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'C', creatorSubject: 'owner', parentNativeSessionId: 'A',
       sourceRelation: { id: 'source-relation', kind: 'side', sourceNativeSessionId: 'A', nativeSourceRef: ref('A'), createdAt: '2026-10-10T00:00:00.000Z', linked: true, revision: 1 } }],
     creations: [['create-C', { agentId: 'agent-C', fingerprint: 'full-fingerprint', extraCreation: 'retained' }]],
-    previews: [{ hostId: 'mapped-host', snapshot: { epoch: 'preview-epoch', revision: 1, registrations: [{ id: 'preview', target: 'http://127.0.0.1:5173', status: 'active', createdAt: 1, expiresAt: Date.now() + 600000, revision: 1, pathMode: 'strip', sources: [{ sessionId: 'C', itemId: 'item' }] }] },
+    previews: [{ hostId: 'mapped-host', snapshot: { epoch: 'preview-epoch', revision: 1, registrations: [{ id: 'preview', target: 'http://127.0.0.1:5173', status: 'active', createdAt: 1, expiresAt: FAR_FUTURE, revision: 1, pathMode: 'strip', sources: [{ sessionId: 'C', itemId: 'item' }] }] },
       pendingRemovals: ['pending'], pins: [{ target: 'http://127.0.0.1:5173', nameId: 'pinned' }], names: [{ id: 'preview', nameId: 'pinned' }], extraPreview: true }],
     sharing: { grants: [{ hostId: 'historic-host', subject: 'viewer', label: 'Retained grant', sessionLimit: 3, revoked: true }], reservations: [{ key: 'quota', hostId: 'historic-host', subject: 'viewer', fingerprint: 'quota-fingerprint', nativeRequestId: 'request', agentId: 'historic-agent' }], extraSharing: true },
     pairings: [{ id: 'unused', purpose: 'host-only', createdAt: 1, expiresAt: 10, recovery },
@@ -63,8 +68,8 @@ export function codecState(auth: GatewayAuthOptions): HostedRelayState {
   state.sessionStars = [{ subject: 'owner', hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'C', title: 'Saved', starredAt: 1, favoriteId: 'favorite', folderId: 'folder', order: 0 }];
   state.favoritesTrees = [{ subject: 'owner', revision: 1, folders: [{ id: 'folder', parentId: null, title: 'Work', order: 0 }] }];
   state.sessionTitles = [{ hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'C', title: 'Current C', revision: 1 }]; state.sessionTitleRevision = 1;
-  state.sessions = [{ hash: 'b'.repeat(64), sessionExpiresAt: Date.now() + 600000, id: 'session', label: 'Browser', createdAt: 1, lastSeenAt: 2, activity: [1, 2],
-    grant: { subject: 'owner', namespace: namespace('owner'), authenticatedAt: 1, expiresAt: Date.now() + 600000, ticket: 'complete-ticket', nonce: 'nonce', continuation: 'owner', sessionExpiresAt: Date.now() + 600000, profile: { name: 'Owner', email: 'owner@example.test' } } }];
+  state.sessions = [{ hash: 'b'.repeat(64), sessionExpiresAt: FAR_FUTURE, id: 'session', label: 'Browser', createdAt: 1, lastSeenAt: 2, activity: [1, 2],
+    grant: { subject: 'owner', namespace: namespace('owner'), authenticatedAt: 1, expiresAt: FAR_FUTURE, ticket: 'complete-ticket', nonce: 'nonce', continuation: 'owner', sessionExpiresAt: FAR_FUTURE, profile: { name: 'Owner', email: 'owner@example.test' } } }];
   state.loginChallenges = [['c'.repeat(43), { expiresAt: 10, hostId: 'mapped-host' }]];
   state.consumedProofs = [['proof-identity-01', 20]];
   state.sessionMigrations = [{ subject: 'owner', id: 'migration', from: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'old', agentId: 'old-agent' }, to: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'branch', agentId: 'branch-agent' }, createdAt: 1 }];

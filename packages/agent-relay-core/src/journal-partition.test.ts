@@ -4,9 +4,12 @@ import { serialize } from 'node:v8';
 
 import { describe, expect, it } from 'vitest';
 
-import recorded from './journal-partition.contract.json' with { type: 'json' };
 import { createHostJournals, type HostJournalsOptions, type JournalOpened } from './host-journals.js';
 import { createPartitionJournals, estimateCloneBytes, serveJournalPartition, type JournalPartitionApi } from './journal-partition.js';
+import contract from './journal-partition.contract.json' with { type: 'json' };
+import { overStructuredClone as overRpc, replayPartitionContract, type PartitionContractStep } from './journal-partition-contract.js';
+
+const partitionContract = contract as PartitionContractStep[];
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -23,15 +26,6 @@ const snapshot = {
   pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'session-1', status: 'idle' as const },
 };
 const head = (sequence: number): JournalPublishEntry => ({ sequence, op: 'head', head: { snapshot, observedAt: 5 } });
-
-/** What a Durable Object does to every call: arguments and results cross as structured clones. */
-function overRpc(api: JournalPartitionApi): JournalPartitionApi {
-  const wrap = <A extends unknown[], R>(call: (...args: A) => Promise<R>) => async (...args: A): Promise<R> => structuredClone(await call(...structuredClone(args)));
-  return {
-    open: wrap(api.open), publish: wrap(api.publish), fill: wrap(api.fill), page: wrap(api.page), status: wrap(api.status), unserveHead: wrap(api.unserveHead),
-    servedSessions: wrap(api.servedSessions), deleteHost: wrap(api.deleteHost), capabilities: wrap(api.capabilities),
-  };
-}
 
 /** One partition per Host, each over its own store, reached the way `primary` reaches a Durable Object. */
 function cluster(options: Partial<Omit<HostJournalsOptions, 'store' | 'now'>> = {}) {
@@ -270,26 +264,13 @@ describe('the journals of primary over journal partitions', () => {
 });
 
 describe('the partition contract across a rollout', () => {
-  type Step = { method: keyof JournalPartitionApi; args: unknown[]; reply: unknown };
-  const steps = recorded as Step[];
-  const masked = (value: unknown, epoch: string) => JSON.parse(JSON.stringify(value ?? null).replaceAll(epoch || '\u0000', '<epoch>').replace(/"protocolVersion":"[^"]*"/g, '"protocolVersion":"<version>"'));
-
-  it('answers every recorded call with the recorded reply shape, so a change to an argument or a result fails here', async () => {
-    const api = overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() })));
-    const methods = new Set(steps.map(step => step.method));
-    expect([...methods].sort()).toEqual(['capabilities', 'deleteHost', 'fill', 'open', 'page', 'publish', 'servedSessions', 'status', 'unserveHead']);
-    let epoch = '';
-    for (const step of steps) {
-      const args = step.args.map(arg => (arg === '<epoch>' ? epoch : arg === null ? undefined : arg));
-      const reply = await (api[step.method] as (...call: unknown[]) => Promise<unknown>)(...args);
-      epoch = (reply as { cursor?: { epoch: string } } | undefined)?.cursor?.epoch ?? epoch;
-      expect(masked(reply, epoch), `${step.method} ${JSON.stringify(step.args).slice(0, 80)}`).toEqual(masked(step.reply, '<epoch>'));
-    }
+  it('answers every recorded call with the recorded reply, so a change to an argument or a result fails here', async () => {
+    await replayPartitionContract(overRpc(serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }))), partitionContract);
   });
 
   it('covers every method of the contract', () => {
     const api = serveJournalPartition(createHostJournals({ store: new MemoryJournalStore() }));
-    expect(Object.keys(api).sort()).toEqual([...new Set(steps.map(step => step.method))].sort());
+    expect(Object.keys(api).sort()).toEqual([...new Set(partitionContract.map(step => step.method))].sort());
   });
 
   it('asks the partition for its version once per Host, however many opens follow', async () => {

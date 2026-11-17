@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { codecState } from './storage-codec-fixture.js';
+import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
 import { sourceCompletionState, relationCompletionState } from './source-completion-fixture.js';
 import { retentionState } from './retention-consumption-fixture.js';

@@ -27,15 +27,6 @@
       "reason": "The update commands read Controller releases through the helper in relay-core; M10 moves release lookup to a module both sides import."
     },
     {
-      "rule": "root-too-large",
-      "from": [
-        "packages/agent-remote-lab/src/App.tsx"
-      ],
-      "max": 1,
-      "owner": "M13",
-      "reason": "App.tsx is 3,649 lines of hook wiring and render. M13 moved the rules out into src/state (nine modules, each with a written contract and a unit table); the state hooks and JSX still sit in AppContent. Open item O15 splits them."
-    },
-    {
       "rule": "cross-package-relative",
       "from": [
         "packages/agent-controller/**"

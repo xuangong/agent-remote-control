@@ -1,0 +1,64 @@
+// The Workbench mode, page visibility, access readiness and the Relay transport.
+import { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
+import { stopLayoutDiagnostics } from '../layout-diagnostics.js';
+import { WorkspaceReady, workspaceFetch, workspaceSocket } from '../workspace-access.js';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
+import { ReadingPositions } from '../conversation-recovery.js';
+import { useVisualViewport } from '../hooks/useVisualViewport.js';
+import { arrangeFloatingEntries } from '../hooks/useTrackingPosition.js';
+import type { LabTransport } from './types.js';
+import type { AppInputs } from './types.js';
+
+export function useWorkbenchShell(scope: Pick<AppInputs, 'baseUrl' | 'injectedTransport'>) {
+  const { baseUrl, injectedTransport } = scope;
+
+  const navigation = useWorkbenchMode(baseUrl);
+
+  const windowMode = navigation.mode === 'window';
+
+  const windowModeRef = useRef(windowMode);
+ windowModeRef.current = windowMode;
+
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== 'hidden');
+
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+
+  const accessReady = useContext(WorkspaceReady);
+
+  const [activated, setActivated] = useState(accessReady);
+
+  useEffect(() => { if (accessReady) setActivated(true); }, [accessReady]);
+
+  const accessReadyRef = useRef(accessReady);
+ accessReadyRef.current = accessReady;
+
+  const shellRef = useVisualViewport(arrangeFloatingEntries);
+
+  useEffect(() => () => stopLayoutDiagnostics('unmount'), []);
+
+  const readingPositions = useMemo(() => new ReadingPositions(baseUrl), [baseUrl]);
+
+  const transport = useMemo<LabTransport>(() => injectedTransport
+    ?? new HttpWebSocketTransport(baseUrl, { sessionChannels: true, sessionSuccessions: true, fetch: workspaceFetch, webSocketFactory: workspaceSocket }) as LabTransport, [baseUrl, injectedTransport]);
+
+  const mountedTransport = useRef<LabTransport>();
+
+  useEffect(() => {
+    mountedTransport.current = transport;
+    return () => {
+      mountedTransport.current = undefined;
+      // StrictMode immediately reuses this transport after its effect cleanup probe.
+      if (!injectedTransport) queueMicrotask(() => {
+        if (mountedTransport.current !== transport) (transport as HttpWebSocketTransport).dispose();
+      });
+    };
+  }, [transport, injectedTransport]);
+  return { navigation, windowMode, windowModeRef, pageVisible, accessReady, activated, accessReadyRef, shellRef, readingPositions, transport, mountedTransport };
+}
+
+export type WorkbenchShellSlice = ReturnType<typeof useWorkbenchShell>;

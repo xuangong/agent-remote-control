@@ -1,0 +1,315 @@
+// Focus, communications and forks.
+import { createWindowView, type WindowEdit, type ProjectedTimelineEntry, type AgentCommandResult } from '@orchardworks/agent-remote-protocol';
+import { windowSessionBinding } from '../window-workspace.js';
+import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from '../session-communication.js';
+import type { CommunicationNavigation } from '@orchardworks/agent-client-web/react';
+import { type SessionEntry, sessionKey } from '../session-tree.js';
+import { sessionViewNavigation, type SessionViewNavigationActions } from '../session-view-navigation.js';
+import { ConversationConnections } from '../conversation-connections.js';
+import { useEffect } from 'react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import { SessionDirectoryClient, type CreateSessionOptions, type OpenedSession } from '../directory-client.js';
+import { sideNavigationSource, sideNavigationTarget, sideLinkVisible, referenceForkContext, captureForkContext, type SessionFork } from '../session-forks.js';
+import { configureFork, sendForkInput } from '../fork-actions.js';
+import { message, viewKey } from './helpers.js';
+import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
+import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
+import type { ViewSessionStateSlice } from './useViewSessionState.js';
+import type { FocusedAskSlice } from './useFocusedAsk.js';
+import type { HostAndStackSlice } from './useHostAndStack.js';
+import type { SideSelectionSlice } from './useSideSelection.js';
+import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
+import type { ViewTargetsSlice } from './useViewTargets.js';
+import type { ActiveSessionSlice } from './useActiveSession.js';
+import type { SideNavigationSlice } from './useSideNavigation.js';
+import type { ConversationConnectionsSlice } from './useConversationConnections.js';
+import type { RequestedSessionSlice } from './useRequestedSession.js';
+import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
+import type { ProviderCreationSlice } from './useProviderCreation.js';
+import type { WindowViewActionsSlice } from './useWindowViewActions.js';
+import type { SessionOpeningSlice } from './useSessionOpening.js';
+import type { RemoteHostStateSlice } from './useRemoteHostState.js';
+import type { WindowModeActionsSlice } from './useWindowModeActions.js';
+import type { AppInputs } from './types.js';
+
+export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShellSlice & SessionSuccessionBindingSlice & ViewSessionStateSlice & FocusedAskSlice & HostAndStackSlice & SideSelectionSlice & PanelsAndShortcutsSlice & ViewTargetsSlice & ActiveSessionSlice & SideNavigationSlice & ConversationConnectionsSlice & RequestedSessionSlice & WorkbenchRecordsSlice & ProviderCreationSlice & WindowViewActionsSlice & SessionOpeningSlice & RemoteHostStateSlice & WindowModeActionsSlice, 'accessReady' | 'activeView' | 'ask' | 'askView' | 'assertSourceCurrent' | 'baseUrl' | 'compactLayout' | 'compactLayoutRef' | 'compositionProtected' | 'connections' | 'directory' | 'draftBindingFor' | 'editWindow' | 'favorites' | 'forkBusy' | 'forkReservation' | 'forkStore' | 'letterRequest' | 'letterReveals' | 'navigationGeneration' | 'nextSideRequest' | 'openChildSession' | 'openSession' | 'openWindows' | 'openedSessionsRef' | 'primaryExpanded' | 'refreshRelations' | 'rememberSession' | 'remoteHosts' | 'replicaFor' | 'replicas' | 'retryHosts' | 'selectSide' | 'selectedHost' | 'sessionEntries' | 'sessionWindows' | 'setDirectoryRevision' | 'setFailure' | 'setForkInputStatus' | 'setLetterReveals' | 'setSideAnchor' | 'setSideFocus' | 'sharedSlots' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideFocus' | 'sideRequestKey' | 'sideRequests' | 'sourceCurrent' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'succession' | 'traceRequestCounter' | 'transitioning' | 'transport' | 'viewSession' | 'windowMode' | 'windowWorkspace' | 'workbenchPanelRef'>) {
+  const { accessReady, activeView, ask, askView, assertSourceCurrent, baseUrl, compactLayout, compactLayoutRef, compositionProtected, connections, directory, draftBindingFor, editWindow, favorites, forkBusy, forkReservation, forkStore, letterRequest, letterReveals, navigationGeneration, nextSideRequest, openChildSession, openSession, openWindows, openedSessionsRef, primaryExpanded, refreshRelations, rememberSession, remoteHosts, replicaFor, replicas, retryHosts, selectSide, selectedHost, sessionEntries, sessionWindows, setDirectoryRevision, setFailure, setForkInputStatus, setLetterReveals, setSideAnchor, setSideFocus, sharedSlots, sharedViewForSlot, sharedWindow, showView, sideFocus, sideRequestKey, sideRequests, sourceCurrent, stackPath, stackRange, stackRoot, state, status, succession, traceRequestCounter, transitioning, transport, viewSession, windowMode, windowWorkspace, workbenchPanelRef } = scope;
+
+  useEffect(() => {
+    if (windowMode && !sharedWindow && !compositionProtected && primaryExpanded && stackRoot && sideFocus === viewKey(stackRoot) && activeView === 'workbench') {
+      const primary = workbenchPanelRef.current?.querySelector('.lab-primary-conversation');
+      if (primary?.contains(document.activeElement)) return;
+      primary?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true });
+    }
+  }, [compositionProtected, sideFocus, primaryExpanded, stackRoot?.agentId, activeView]);
+
+  function focusSession(session: OpenedSession): void {
+    sessionWindows.focus();
+    setSideFocus(viewKey(session));
+  }
+
+  function focusPrimaryContent(target: EventTarget): void {
+    if (!windowMode) return;
+    // Navigation and layout controls must not create a visit before performing their action.
+    if (target instanceof Element && target.closest('.lab-conversation-history, .lab-session-heading-actions-trigger, .lab-timeline-tools-toggle, .lab-session-main-minimize')) return;
+    sessionWindows.focus();
+    if (stackRoot) focusSession(stackRoot);
+  }
+
+
+  function communicationSnapshots(source: OpenedSession, sourceState?: AgentReplicaState): CommunicationSnapshot[] {
+    const snapshots = openWindows.map(session => ({ session, state: session.agentId === state?.agent?.id ? state : replicas.get(session.agentId)?.getState() }));
+    return [...snapshots.filter(snapshot => sessionKey(snapshot.session) !== sessionKey(source)), { session: source, state: sourceState }];
+  }
+
+  function communicationFamily(source: OpenedSession) {
+    if (!sharedWindow) return [];
+    let root = sharedViewForSlot(viewKey(source));
+    while (root?.attachedTo) root = sharedWindow.views.find(view => view.id === root!.attachedTo);
+    if (!root) return [];
+    // Attached views follow their source in Window order, including several per source.
+    const family = [root], ids = new Set([root.id]);
+    for (const view of sharedWindow.views) if (view.attachedTo && ids.has(view.attachedTo)) { ids.add(view.id); family.push(view); }
+    return family;
+  }
+
+  async function openCommunication(entry: ProjectedTimelineEntry, source: OpenedSession, sourceState?: AgentReplicaState): Promise<void> {
+    if (!directory || entry.item.type !== 'agent_communication') throw new Error('Session navigation is unavailable in this view.');
+    letterRequest.current?.abort();
+    const controller = new AbortController(); letterRequest.current = controller;
+    const deadline = setTimeout(() => controller.abort(new Error('Opening the letter timed out. Retry when the Host is connected.')), 60000);
+    assertSourceCurrent(source);
+    const originView = sharedViewForSlot(viewKey(source));
+    const originWindowId = sharedWindow?.id;
+    const generation = navigationGeneration.current;
+    const check = () => { assertSourceCurrent(source); controller.signal.throwIfAborted(); if (generation !== navigationGeneration.current) throw new Error('The workspace changed. Open the letter again.'); };
+    const leases = new Map<string, ReturnType<ConversationConnections['acquire']>>();
+    const snapshots = communicationSnapshots(source, sourceState);
+    const attachParticipant = async (identity: SessionEntry): Promise<OpenedSession> => {
+      check();
+      const known = [...openWindows, ...openedSessionsRef.current].find(session => sessionKey(session) === sessionKey(identity));
+      // Native agent addresses identify letter endpoints; they must not rename a saved conversation.
+      const title = favorites.stars.find(session => sessionKey(session) === sessionKey(identity))?.title ?? known?.title ?? identity.title;
+      const active = connections.find(identity);
+      if (active) return { ...known, ...identity, title, agentId: active.agentId };
+      if (known && known.agentId === state?.agent?.id && status === 'ready') return { ...known, title };
+      const target = (identity.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, identity.hostId);
+      const result = identity.parentNativeSessionId
+        ? await target.attachChild(identity.providerId, identity.parentNativeSessionId, identity.nativeSessionId, controller.signal)
+        : await target.attach(identity.providerId, identity.nativeSessionId, controller.signal);
+      check();
+      const opened = { ...known, ...identity, title, agentId: result.agentId };
+      rememberSession(opened); return opened;
+    };
+    const observe = async (session: OpenedSession) => {
+      let lease = leases.get(session.agentId);
+      if (!lease) { lease = connections.acquire(session.agentId, replicaFor(session.agentId), session); leases.set(session.agentId, lease); }
+      await waitForCommunicationSession(lease.client, controller.signal); check(); return lease;
+    };
+    try {
+      let pair = communicationResolver(source, snapshots)(entry);
+      // A child opened directly may not have its parent's native reference in view yet.
+      if ((!pair.sender || !pair.recipient) && source.parentNativeSessionId) {
+        const parent = await attachParticipant({ hostId: source.hostId, providerId: source.providerId, nativeSessionId: source.parentNativeSessionId, title: 'Parent conversation' });
+        const lease = await observe(parent);
+        for (;;) {
+          check();
+          const parentState = lease.replica.getState();
+          pair = communicationResolver(source, [...snapshots, { session: parent, state: parentState }])(entry);
+          if (pair.sender && pair.recipient || !parentState.timeline.hasOlder) break;
+          const before = parentState.timeline.entries[0]?.seqStart;
+          await lease.client.loadOlder();
+          if (before === lease.replica.getState().timeline.entries[0]?.seqStart) break;
+        }
+      }
+      if (!pair.sender || !pair.recipient || sessionKey(pair.sender) === sessionKey(pair.recipient)) {
+        throw new Error('This history does not identify both sessions unambiguously. Load their agent activity and retry.');
+      }
+      if (originView && originWindowId) {
+        const sourceKey = sessionKey(source);
+        const endpoint = sourceKey === sessionKey(pair.sender) ? 'recipient' : sourceKey === sessionKey(pair.recipient) ? 'sender' : undefined;
+        if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
+        const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
+        const recipient = endpoint === 'sender' ? source : destination;
+        const revealSession = compactLayoutRef.current ? destination : recipient;
+        const observation = await observe(revealSession);
+        const target = await loadSessionCommunication(observation, entry, controller.signal, compactLayoutRef.current ? endpoint : 'recipient');
+        check();
+        const current = windowWorkspace.readWindow();
+        const origin = current?.views.find(view => view.id === originView.id);
+        if (current?.id !== originWindowId || !origin?.binding || sessionKey(origin.binding) !== sourceKey) throw new Error('The source view changed. Open the letter again.');
+        const family = communicationFamily(source);
+        const existing = family.find(view => view.binding && sessionKey(view.binding) === sessionKey(destination));
+        const operations: WindowEdit[] = [];
+        let destinationId = existing?.id;
+        if (!destinationId) {
+          const child = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(destination), 'attached'), attachedTo: origin.id };
+          destinationId = child.id;
+          operations.push({ type: 'view.create', view: child });
+        }
+        operations.push({ type: 'view.select', viewId: compactLayoutRef.current || endpoint === 'recipient' ? destinationId : origin.id });
+        editWindow({ type: 'batch', operations });
+        setLetterReveals(values => ({ ...values, [revealSession.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+        return;
+      }
+      if (compactLayoutRef.current) {
+        const sourceKey = sessionKey(source);
+        const endpoint = sourceKey === sessionKey(pair.sender) ? 'recipient' : sourceKey === sessionKey(pair.recipient) ? 'sender' : undefined;
+        if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
+        const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
+        const observation = await observe(destination);
+        const target = await loadSessionCommunication(observation, entry, controller.signal, endpoint);
+        check();
+        if (!await openSession(destination, undefined, undefined, true)) throw new Error('The linked session could not be opened.');
+        // Opening the other endpoint intentionally advances the navigation generation.
+        controller.signal.throwIfAborted();
+        setLetterReveals(values => ({ ...values, [destination.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        return;
+      }
+      const recipient = await attachParticipant(pair.recipient);
+      const receiver = await observe(recipient);
+      const sender = await attachParticipant(pair.sender);
+      const target = await loadSessionCommunication(receiver, entry, controller.signal);
+      check();
+      const present = [sender, recipient].every(session => stackPath.slice(stackRange.start, stackRange.end + 1).some(visible => sessionKey(visible) === sessionKey(session)));
+      if (!present) {
+        const root = stackRoot && [sender, recipient].find(session => sessionKey(session) === sessionKey(stackRoot));
+        if (root) selectSide(root, sessionKey(root) === sessionKey(sender) ? recipient : sender);
+        else if ([sender, recipient].every(session => stackPath.some(visible => sessionKey(visible) === sessionKey(session)))) {
+          const last = Math.max(...[sender, recipient].map(session => stackPath.findIndex(visible => sessionKey(visible) === sessionKey(session))));
+          setSideAnchor(viewKey(stackPath[last]!));
+        } else {
+          const origin = sessionKey(source) === sessionKey(recipient) ? recipient : sender;
+          if (!await openSession(origin, undefined, undefined, true)) throw new Error('The sending session could not be opened.');
+          selectSide(origin, sessionKey(origin) === sessionKey(sender) ? recipient : sender);
+        }
+      }
+      setSideFocus(viewKey(viewSession(recipient))); showView('workbench');
+      setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
+      // Mounted panes acquire their own leases before this temporary navigation lease is released.
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } finally {
+      clearTimeout(deadline); for (const lease of leases.values()) lease.release();
+      if (letterRequest.current === controller) letterRequest.current = undefined;
+    }
+  }
+
+  function letterNavigation(source: OpenedSession, sourceState?: AgentReplicaState): CommunicationNavigation {
+    const participants = communicationResolver(source, communicationSnapshots(source, sourceState));
+    const visible = compactLayout ? [] : sharedWindow ? communicationFamily(source).flatMap(view => {
+      if (!view.binding || view.collapsed) return [];
+      return [{ ...view.binding, agentId: connections.find(view.binding)?.agentId ?? '', viewId: sharedSlots?.get(view.id)?.id }];
+    }) : stackPath.slice(stackRange.start, stackRange.end + 1);
+    return {
+      direction: entry => communicationDirection(participants(entry).recipient, source, visible),
+      open: entry => openCommunication(entry, source, sourceState),
+    };
+  }
+
+
+  function viewNavigation(rawSource: OpenedSession, sourceState?: AgentReplicaState, actions?: SessionViewNavigationActions) {
+    const source = actions ? rawSource : viewSession(rawSource);
+    const available = directory && accessReady && sourceCurrent(source) && !transitioning && remoteHosts.find(host => host.id === source.hostId)?.online !== false;
+    return sessionViewNavigation({ source, state: sourceState, entries: sessionEntries,
+      openSession: actions?.openSession ?? (available ? (session, intent) => openSession(session, undefined, undefined, false, undefined, intent) : undefined),
+      openChildSession: actions?.openChildSession ?? (available ? child => openChildSession(child, source, sourceState) : undefined),
+      communication: available ? letterNavigation(source, sourceState) : undefined,
+      revealEntry: letterReveals[source.agentId],
+    });
+  }
+
+
+  async function openFork(record: SessionFork): Promise<void> {
+    letterRequest.current?.abort();
+    if (!record.target || !directory || !sideLinkVisible(forkStore.get(record.id))) return;
+    const saved = sideNavigationTarget(record)!;
+    const source = sideNavigationSource(record);
+    const request = nextSideRequest(source);
+    const target = (saved.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, saved.hostId);
+    try {
+      const result = await target.attach(saved.providerId, saved.nativeSessionId);
+      const session = { ...saved, agentId: result.agentId };
+      if (sessionKey(saved) === sessionKey(record.target)) {
+        forkStore.bind(record.id, session);
+        await configureFork(transport, forkStore, forkStore.get(record.id));
+      } else forkStore.followEditedSide(record.id, saved, session);
+      rememberSession(session);
+      if (sideRequests.current.get(sideRequestKey(source)) === request && sideLinkVisible(forkStore.get(record.id)) && sessionKey(session) !== sessionKey(source)) selectSide(source, session);
+    } catch (error) {
+      if (sideRequests.current.get(sideRequestKey(source)) === request) setFailure(message(error, 'Forked session could not be opened.'));
+    }
+  }
+
+
+  async function createFork(sourceState: AgentReplicaState, saved: OpenedSession | undefined, id: string, args: string): Promise<AgentCommandResult> {
+    letterRequest.current?.abort();
+    const agent = sourceState.agent;
+    if (!directory || !agent?.runtimeInfo.sessionId) throw new Error('This session cannot be forked.');
+    const source = viewSession(saved ?? { agentId: agent.id, nativeSessionId: agent.runtimeInfo.sessionId, providerId: agent.providerId, title: 'Conversation', hostId: 'local' });
+    assertSourceCurrent(source);
+    const associationOwner = succession.ownerFor(viewKey(source));
+    if (id === 'console:ask' && ['', 'on', 'off', 'enable', 'disable'].includes(args.trim().toLowerCase())) return askView.execute(args);
+    if (id === 'console:ask') {
+      askView.setVisible(true);
+      return ask.open(sourceState, source, args, false, { associationOwner, synchronize: async () => { assertSourceCurrent(source); await refreshRelations(); assertSourceCurrent(source); } });
+    }
+    if (forkBusy.current) throw new Error('A session fork is already being created.');
+    forkBusy.current = true;
+    try {
+      const target = (source.hostId ?? 'local') === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, source.hostId);
+      const key = JSON.stringify([sessionKey(source), id, args]);
+      let record = forkReservation.current?.key === key ? forkStore.get(forkReservation.current.record.id) : forkStore.all().find((fork) => fork.creationKey === key);
+      if (!record) {
+        const quota = remoteHosts.find((host) => host.id === source.hostId)?.sessionQuota;
+        if (quota && quota.used >= quota.limit) throw new Error('Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.');
+        const context = id === 'console:side' ? referenceForkContext(source) : await captureForkContext(transport, source);
+        const settings = (agent.runtimeInfo.settings ?? []).filter((setting) => setting.mutable && setting.scope === 'session' && setting.value !== null).map(({ id, value }) => ({ id, value }));
+        let options: CreateSessionOptions;
+        if ((source.hostId ?? 'local') !== 'local' && source.providerId === 'dsh') {
+          const workspaces = (await target.workspaces(source.providerId)).workspaces;
+          const workspace = workspaces.find(({ path }) => path === agent.cwd);
+          if (agent.cwd && !workspace) throw new Error('The source workspace is no longer registered on this Host.');
+          options = workspace ? { workspaceId: workspace.id } : {};
+        } else options = { ...(agent.cwd ? { cwd: agent.cwd } : {}), ...(agent.model && source.providerId !== 'dsh' ? { model: agent.model } : {}),
+          ...(agent.capabilities.planning && source.providerId !== 'dsh' ? { planning: agent.runtimeInfo.planning?.active === true } : {}) };
+        if (context.mode === 'reference') { options.sourceNativeSessionId = source.nativeSessionId; options.conversationKind = 'side'; }
+        else options.creationSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId };
+        record = forkStore.prepare(context, options, settings, key);
+        forkReservation.current = { key, record };
+      }
+      assertSourceCurrent(source);
+      let result: { agentId: string; nativeSessionId?: string };
+      if (record.target) result = await target.attach(record.target.providerId, record.target.nativeSessionId);
+      else {
+        try { result = await target.create(source.providerId, record.id, record.options); }
+        finally { if (source.hostId && source.hostId !== 'local') retryHosts(); }
+      }
+      const session = viewSession({ agentId: result.agentId, nativeSessionId: result.nativeSessionId ?? result.agentId, providerId: source.providerId,
+        hostId: source.hostId ?? 'local', title: `Fork of ${source.title}`, createdAt: record.capturedAt });
+      forkStore.bind(record.id, session);
+      assertSourceCurrent(source);
+      await configureFork(transport, forkStore, forkStore.get(record.id));
+      assertSourceCurrent(source);
+      rememberSession(source); rememberSession(session);
+      setDirectoryRevision((value) => value + 1);
+      const draft = draftBindingFor(session);
+      if (args.trim()) draft.store.set(draft.key, args.trim());
+      if (id === 'console:side' && sideLinkVisible(forkStore.get(record.id))) selectSide(source, session);
+      assertSourceCurrent(source);
+      if (args.trim() && forkStore.get(record.id).delivery !== 'sent') {
+        setForkInputStatus({ agentId: session.agentId, pending: true });
+        try { await sendForkInput(transport, forkStore, forkStore.get(record.id), args.trim()); }
+        catch (error) { setForkInputStatus({ agentId: session.agentId, pending: false, error: message(error, 'The first fork input failed.') }); throw error; }
+        setForkInputStatus(undefined);
+        if (draft.store.get(draft.key) === args.trim()) draft.store.set(draft.key, '');
+      }
+      forkStore.finishCreation(record.id);
+      forkReservation.current = undefined;
+      return {};
+    } finally { forkBusy.current = false; }
+  }
+  return { focusSession, focusPrimaryContent, viewNavigation, openFork, createFork };
+}
+
+export type CommunicationsAndForksSlice = ReturnType<typeof useCommunicationsAndForks>;

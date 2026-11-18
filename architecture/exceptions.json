@@ -95,15 +95,6 @@
     {
       "rule": "root-too-large",
       "from": [
-        "packages/agent-controller/src/host.ts"
-      ],
-      "max": 1,
-      "owner": "M10",
-      "reason": "host.ts holds createAgentHostRuntime; M10 extracts session-core and the publisher."
-    },
-    {
-      "rule": "root-too-large",
-      "from": [
         "packages/agent-remote-lab/src/App.tsx"
       ],
       "max": 1,

@@ -292,7 +292,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     } catch (error) { release(); throw error; }
   }
   async function acquireNative(target: NativeSessionRef): Promise<RemoteHostSessionLease> {
-    const { acquireSession, options, project, succession, successionConfig, tracked } = ctx;
+    const { acquireSession, options, project, successionConfig, tracked } = ctx;
     if (target.controllerId !== successionConfig?.controllerId || options.providerEnabled?.(target.providerId) === false) throw new Error('Succession target is unavailable.');
     await authorizeSuccessionRead(target, target);
     const binding = await tracked(project(target.providerId, randomUUID(), target.nativeSessionId));

@@ -13,7 +13,6 @@ import { nativeSessionRefKey, type NativeSessionRef, type TrustedSuccessionConte
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import { SessionBindings } from '@orchardworks/agent-session-runtime';
 import type { HostProviderDiscovery } from './provider-discovery.js';
-import { NativeSessionOwnerError } from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
@@ -29,9 +28,8 @@ import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tu
 import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { AgentSession, AgentSessionConfig, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, bindAgentSessionTools, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
-import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
+import type { AgentSession, AgentSessionConfig } from '@orchardworks/agent-provider-sdk';
+import { type HostEnvironment } from '@orchardworks/agent-remote-protocol';
 import { createSessionStatePublisher, liveSessionState } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
 import { SessionOutbox } from './session-outbox.js';
@@ -39,25 +37,24 @@ import { createTerminalRefresh } from './publisher/terminal-refresh.js';
 import { createAdmission } from './session-core/admission.js';
 import { createSessionCatalog, catalogSessionStates } from './session-core/catalog.js';
 import { handoffRefusal, nativeFamily as familyOf } from './session-core/family.js';
-import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './session-core/idle-release.js';
 import * as lineage from './session-core/lineage.js';
-import { bounded, HostRequestError, json, boundedSourceIdentity, positiveTimeout } from './session-core/requests.js';
+import { bounded, HostRequestError, json, positiveTimeout } from './session-core/requests.js';
 import type { AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
 import { createUplinkFence } from './session-core/uplink-fence.js';
+import { createAttachment } from './session-core/attachment.js';
 import { createControlRoutes } from './session-core/control-routes.js';
+import { createSessionCommands } from './session-core/session-commands.js';
 import type { SessionCoreContext } from './session-core/context.js';
 import { createSuccessionWiring } from './session-core/succession-wiring.js';
 import { createJournalPublisher } from './publisher/journal-publisher.js';
 import { loadResourceIdKey } from './resource-id-key.js';
 import { FileResourceIdIndex } from './resource-id-index-file.js';
 import { type SessionCallerCatalog } from './session-callers.js';
-import { pendingReferenceNote, type SessionRefContext } from './session-refs.js';
-import { withReferenceNotes } from './session-reference-notes.js';
-import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
-import { CliError, operationUuid } from './cli-output.js';
+import { type SessionRefContext } from './session-refs.js';
+import { type SessionCaller, type SessionCallResult } from './session-routes.js';
+import { CliError } from './cli-output.js';
 import { runHostRequest } from './host-command.js';
-import { handleRoleRequest } from './role-routes.js';
-import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, RemoteHostCatalog, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
+import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, RemoteHostCatalog, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRequestDiagnostic, AgentHostRuntime, AgentHostRuntimeOptions, AgentHostWorkspace } from './session-core/types.js';
 
@@ -417,156 +414,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   function executeOperation(scope: string): SessionWireOperationExecutor {
     return relay.executeOperation(scope);
   }
-  function lifecycle(event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled', binding: Binding) {
-    try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
-    catch { /* Diagnostics cannot change session lifetime. */ }
-  }
-  function watch(binding: Binding) {
-    const childHeld = () => hasHeldChild(bindings.values(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
-    idle.watch(binding.agentId, () => mayReleaseIdle({
-      closed: admission.closed, uncertain: uncertainAgents.has(binding.agentId), pending: bindings.isPending(binding.providerId, binding.nativeSessionId),
-      directoryCanRelease: !!registration(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
-      childHeld: childHeld(),
-    }), async () => {
-      await terminalRefresh.releaseJournal(binding);
-      await relay.closeAgent(binding.agentId);
-      await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
-      lifecycle('session_idle_released', binding);
-    }, async isCurrent => {
-      const source = registration(binding.providerId).directory;
-      const agent = liveAgent(binding.agentId);
-      if (!source.reconcileIdleSession || !mayReconcileIdle({ directoryCanReconcile: true, runtimeCanReleaseIdle: !!agent?.canReleaseIdle(), childHeld: childHeld() }) || !agent) return false;
-      // Discovery can resolve a child before the complete family check finishes.
-      // Keep that partial progress protected if the check fails or becomes stale.
-      uncertainAgents.add(binding.agentId);
-      if (!await source.reconcileIdleSession(binding.nativeSessionId) || !isCurrent()
-        || liveAgent(binding.agentId) !== agent || !agent.canReleaseIdle()
-        || !source.canReleaseSession?.(binding.nativeSessionId)) return false;
-      // Native quiescence permits detachment, but does not settle or replay an unknown operation.
-      uncertainAgents.delete(binding.agentId);
-      lifecycle('session_idle_reconciled', binding);
-      return true;
-    });
-  }
-  async function releaseIfDiverged(binding: Binding): Promise<void> {
-    const directory = registration(binding.providerId).directory;
-    if (!directory.checkDivergence || binding.parentNativeSessionId || !liveAgent(binding.agentId) || !await directory.checkDivergence(binding.nativeSessionId)) return;
-    const agent = liveAgent(binding.agentId);
-    if (!agent?.canReleaseIdle()) return;
-    await terminalRefresh.releaseJournal(binding);
-    await relay.closeAgent(binding.agentId);
-    await directory.sessionReleased?.(binding.nativeSessionId);
-  }
-  async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
-    const binding = bindings.getByAgent(agentId);
-    if (admission.closed || !binding) return undefined;
-    const release = idle.retain(agentId);
-    let parent: RemoteHostSessionLease | undefined;
-    try {
-      if (binding.parentNativeSessionId) {
-        const parentBinding = bindings.getByNative(binding.providerId, binding.parentNativeSessionId);
-        if (parentBinding) {
-          parent = await acquireSession(parentBinding.agentId);
-          if (!parent) throw new Error('Native parent session is unavailable.');
-        }
-      }
-      await idle.wait(agentId);
-      // A send must not continue from a conversation a terminal has moved on: a diverged, quiet session is released and read again first.
-      await releaseIfDiverged(binding);
-      await tracked(project(binding.providerId, agentId, binding.nativeSessionId, binding.parentNativeSessionId));
-      const agent = admission.closed ? undefined : liveAgent(agentId);
-      if (!agent) { release(); parent?.release(); return undefined; }
-      let released = false;
-      return { agent, release() { if (released) return; released = true; release(); parent?.release(); } };
-    } catch (error) { release(); parent?.release(); throw error; }
-  }
-  async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover', qualifiedResult = false): Promise<Binding> {
-    await successionReady;
-    const nativeCreation = originalCreation(nativeRef({ providerId, nativeSessionId }));
-    const creationIdentity = nativeCreation ? serializeAgentEmptyCreationResult(nativeCreation) : undefined;
-    const nativePrefix = originalNativePrefix(nativeRef({ providerId, nativeSessionId }));
-    const prefixIdentity = nativePrefix ? JSON.stringify(nativePrefix.handle) : undefined;
-    const assertAttachment = (agent: SessionWireAgent | undefined) => {
-      if (prefixIdentity && (!agent || nativeAttachments.get(agent)?.nativePrefix !== prefixIdentity)) throw new Error('Existing Host attachment does not match the original native prefix handle.');
-      if (creationIdentity && (!agent || nativeAttachments.get(agent)?.nativeCreation !== creationIdentity)) throw new Error('Existing Host attachment does not match the original native creation evidence.');
-    };
-    const existing = bindings.getByNative(providerId, nativeSessionId);
-    if (takeOver && !takeoverAdmitted) {
-      const target = nativeRef({ providerId, nativeSessionId });
-      return directoryOperation(takeoverScope, JSON.stringify([proposedAgentId, takeOver]), 'native_owner_takeover', [target], { takeOver },
-        () => project(providerId, proposedAgentId, nativeSessionId, parentNativeSessionId, takeOver, true, takeoverScope));
-    }
-    const bound = await bindings.bind({ providerId, agentId: proposedAgentId, nativeSessionId, ...(parentNativeSessionId ? { parentNativeSessionId } : {}) }, {
-      ...(qualifiedResult ? { validateResult(binding: Binding) {
-        if (![binding.agentId, binding.nativeSessionId].every(boundedSourceIdentity)) throw new Error('Qualified source projection selected an unbounded canonical identity after native creation; the full Host witness remains available for reconciliation.');
-      } } : {}),
-      discard: binding => relay.closeAgent(binding.agentId),
-      attach: async binding => {
-      proposedAgentId = binding.agentId;
-      if (existing) {
-        await idle.wait(proposedAgentId);
-        const agent = liveAgent(proposedAgentId);
-        if (agent) { assertAttachment(agent); idle.touch(proposedAgentId); return; }
-      }
-      const source = registration(providerId).directory;
-      let parent: RemoteHostSessionLease | undefined;
-      try {
-        if (parentNativeSessionId) {
-          const parentBinding = bindings.getByNative(providerId, parentNativeSessionId);
-          if (parentBinding?.agentId === proposedAgentId) throw new Error('Native parent binding is invalid.');
-          if (parentBinding) {
-            parent = await acquireSession(parentBinding.agentId);
-            if (!parent) throw new Error('Native parent session is unavailable.');
-          }
-        }
-        const attached = nativeRef({ providerId, nativeSessionId });
-        // A generic successor holds the role of its source, so every attachment of it gets the same extensions.
-        const extensions = nativePrefix ? await successionWiring.nativePrefixExtensions(nativePrefix.source, () => nativeSessionId)
-          : await roles.extensions(genericSuccessionSource(attached) ?? attached, () => attached) ?? successionWiring.workerExtensions(providerId, attached, () => attached);
-        workerToolsApplied.set(proposedAgentId, !!extensions?.toolNamespaces?.some(namespace => namespace.name === 'agent_remote' && !namespace.deferred));
-        const open = () => source.open(nativeSessionId, { ...(takeOver ? { takeOver } : {}), ...(extensions ? { extensions } : {}), ...(nativePrefix ? { nativePrefix: nativePrefix.handle } : {}), ...(nativeCreation ? { nativeCreation, resumeHandle: succession?.contexts.forTarget(nativeRef({ providerId, nativeSessionId }))?.resumeHandle, resumeOptions: { initializeEmpty: succession?.contexts.canInitializeEmpty(nativeRef({ providerId, nativeSessionId })) === true } } : {}) });
-        const nativeSession = parentNativeSessionId === undefined ? await (takeOver
-          ? directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => {
-            try { return await open(); } catch (error) {
-              if (error instanceof NativeSessionOwnerError && ['native_owner_changed', 'native_session_owned', 'succession_admission_closed'].includes(error.code)) throw new AgentOperationRejectedError(error.code, error.message);
-              throw error;
-            }
-          }) : open())
-          : source.openChild ? await source.openChild(parentNativeSessionId, nativeSessionId)
-          : (() => { throw new HostRequestError(400, 'child_attachment_unavailable', 'This provider does not support native child attachment.'); })();
-        const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(nativeSession, {
-          pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
-          delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),
-        }) : nativeSession;
-        const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, noted) : noted;
-        const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
-        if (admission.closed) {
-          await session.dispose().catch(() => undefined);
-          throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
-        }
-        prepared.set(proposedAgentId, session);
-        const response = await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: {
-          requestId: `host:${proposedAgentId}`, operationId: randomUUID(), agentId: proposedAgentId, providerId, config: { sessionId: proposedAgentId },
-        } }).catch(async (error: unknown) => {
-          if (prepared.get(proposedAgentId) === session) {
-            prepared.delete(proposedAgentId);
-            await session.dispose().catch(() => undefined);
-          }
-          throw error;
-        });
-        if (response.payload.sessionId !== nativeSessionId) { await relay.closeAgent(proposedAgentId); throw new Error('Provider returned a different native session identity.'); }
-        nativeAttachments.set(relay.requireAgent(proposedAgentId), { session: nativeSession, ...(creationIdentity ? { nativeCreation: creationIdentity } : {}), ...(prefixIdentity ? { nativePrefix: prefixIdentity } : {}) });
-        for (const relative of nativeFamily(providerId, nativeSessionId)) relay.sessionControls?.setNativeOwner(relative.agentId, undefined);
-        watch(binding);
-        journals.attach({ agentId: proposedAgentId, providerId, nativeSessionId, source: relay.requireAgent(proposedAgentId) });
-        if (existing) lifecycle('session_idle_restored', binding);
-      } catch (error) { prepared.delete(proposedAgentId); throw error; }
-      finally { parent?.release(); }
-      },
-    });
-    assertAttachment(liveAgent(bound.agentId));
-    return bound;
-  }
+  const { project, acquireSession } = createAttachment(ctx);
   const { create, control, controlRequest } = createControlRoutes(ctx);
   function addRegistration(value: AgentHostProviderRegistration): void {
     if (admission.stopped) throw new Error('Host cannot register a provider while stopping.');
@@ -596,104 +444,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return live?.handoffAdmissionState();
     },
   });
-  /** A command line's operation identity as the operation cache takes it: a UUID, derived when the caller chose another form. */
-  const cliOperation = operationUuid;
-  async function holding<T>(ref: SessionCallerRef, work: (agent: SessionWireAgent) => Promise<T>): Promise<T> {
-    const held = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
-    try { return await work(held.agent); } finally { held.release(); }
-  }
-  const cliExecute = (agent: SessionWireAgent, operationId: string, kind: SessionWireOperation['kind'], parameters: unknown, dispatch: () => Promise<unknown>, validate?: () => Promise<void> | void) =>
-    executeOperation('host:cli')(agent, { operationId: cliOperation(operationId), kind, parameters, maximumResultBytes: 1024 }, { dispatch, ...(validate ? { validate } : {}) });
-  /** The session commands' changes, run like the website's: through the operation cache, once per operation identity. */
-  const sessionActions: SessionActions = {
-    async create(input, operationId) {
-      const result = await create({ requestId: randomUUID(), method: 'POST', path: '/remote/create', sessionId: randomUUID(), operationScope: 'host:cli',
-        body: JSON.stringify({ ...input, operationId: cliOperation(operationId) }) }, { ...input, operationId: cliOperation(operationId) });
-      const created = JSON.parse(result.body) as { nativeSessionId?: string };
-      if (result.status >= 400 || !created.nativeSessionId) throw new Error('The session could not be created.');
-      return { providerId: input.providerId, nativeSessionId: created.nativeSessionId };
-    },
-    send: (ref, input, operationId) => holding(ref, async agent => {
-      if (input.steer && !agent.steer) throw Object.assign(new Error('This session cannot be steered.'), { code: 'unsupported_configuration' });
-      const result = await cliExecute(agent, operationId, input.steer ? 'steer' : 'send_message', input.steer ? { text: input.text } : { text: input.text, delivery: null }, async () => {
-        const acceptance = input.steer ? await agent.steer!(input.text) : await agent.sendMessage(input.text);
-        return acceptance ? { disposition: acceptance.disposition } : {};
-      }) as { disposition?: string };
-      return result;
-    }),
-    cancel: (ref, operationId) => holding(ref, async agent => {
-      if (!agent.cancel) throw Object.assign(new Error('This session cannot be canceled.'), { code: 'unsupported_configuration' });
-      await cliExecute(agent, operationId, 'cancel', {}, async () => { await agent.cancel!(); return { accepted: true }; });
-    }),
-    inspect: ref => holding(ref, async agent => {
-      const payload = agent.snapshot().payload;
-      return { status: payload.status, ...(payload.runtimeInfo.planning ? { planning: payload.runtimeInfo.planning.active } : {}),
-        settings: (payload.runtimeInfo.settings ?? []).map(setting => ({ id: setting.id, label: setting.label, value: setting.value, ...(setting.mutable !== undefined ? { mutable: setting.mutable } : {}),
-          ...(setting.options ? { options: setting.options.map(option => ({ value: option.value, label: option.label })) } : {}) })),
-        pendingInteractions: payload.pendingInteractions };
-    }),
-    answer: (ref, requestId, response, operationId) => holding(ref, async agent => {
-      await cliExecute(agent, operationId, 'interaction_response', { requestId, response }, async () => { await agent.respondToInteraction(requestId, response); return { accepted: true }; },
-        agent.validateInteractionResponse ? () => agent.validateInteractionResponse!(requestId, response) : undefined);
-    }),
-    setting: (ref, id, value, operationId) => holding(ref, async agent => {
-      if (!agent.setSessionSetting) throw Object.assign(new Error('This session has no settings to change.'), { code: 'unsupported_configuration' });
-      await cliExecute(agent, operationId, 'set_session_setting', { settingId: id, value }, async () => { await agent.setSessionSetting!(id, value); return { accepted: true }; });
-    }),
-    planning: (ref, active, operationId) => holding(ref, async agent => {
-      if (!agent.setPlanning) throw Object.assign(new Error('This session has no planning mode.'), { code: 'unsupported_configuration' });
-      await cliExecute(agent, operationId, 'set_planning', { active }, async () => { await agent.setPlanning!(active); return { accepted: true }; });
-    }),
-    async rename(ref, title, operationId) {
-      const result = await controlRequest({ requestId: randomUUID(), method: 'POST', path: '/remote/session/rename', operationScope: 'host:cli',
-        body: JSON.stringify({ ...ref, title, operationId: cliOperation(operationId) }) });
-      const renamed = JSON.parse(result.body) as { title?: string; error?: string; code?: string };
-      if (result.status >= 400 || typeof renamed.title !== 'string') throw Object.assign(new Error(renamed.error ?? 'The session could not be renamed.'), { code: renamed.code ?? 'rename_failed' });
-      return renamed.title;
-    },
-    async release(ref) {
-      const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && liveAgent(binding.agentId);
-      if (!binding || !agent) return true;
-      if (idle.hasDemand(binding.agentId) || !registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
-      await terminalRefresh.releaseJournal(binding);
-      await relay.closeAgent(binding.agentId);
-      await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
-      return true;
-    },
-  };
-  /** One session command; forward reaches other Hosts, for commands that came from this Host's own sockets. */
-  /** The tools of the role a session holds, or its worker tools, which role commands run from its shell. */
-  async function roleTools(ref: SessionCallerRef): Promise<readonly AgentSessionTool[]> {
-    const holder = nativeRef(ref);
-    const extensions = await roles.extensions(genericSuccessionSource(holder) ?? holder, () => holder);
-    const worker = !extensions && workerSupport?.enabled(holder) ? [workerSupport.namespace(() => holder, false)] : [];
-    return bindAgentSessionTools([...(extensions?.tools ?? []), ...[...(extensions?.toolNamespaces ?? []), ...worker].flatMap(namespace => namespace.tools)]);
-  }
-  function callRole(request: unknown, caller: SessionCaller): Promise<SessionCallResult> {
-    return handleRoleRequest(request, caller, session => roleTools(session.ref));
-  }
-  function callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult> {
-    return handleSessionRequest(request, caller, { hostId: async () => options.hostId?.(), catalog: sessionCatalog, ...(sessionRefs ? { refs: sessionRefs } : {}), actions: sessionActions,
-      isShared: ref => options.sessionCallers?.store.isShared(ref) ?? false, siteOrigin: () => options.siteOrigin?.(), ...(forward ? { forward } : {}) });
-  }
-  const sessionRefs: SessionRefContext | undefined = options.sessionRefs ? {
-    store: options.sessionRefs,
-    hostId: async () => options.hostId?.(),
-    async grantedSource(holder) {
-      if (options.providerEnabled?.(holder.providerId) === false) return undefined;
-      return registrations.get(holder.providerId)?.directory.sourceReference?.(holder.nativeSessionId);
-    },
-    async setGrantRemoved(holder, removed) {
-      const directory = registrations.get(holder.providerId)?.directory;
-      if (!await directory?.sourceReference?.(holder.nativeSessionId).catch(() => undefined)) return;
-      await directory!.setSourceReferenceRemoved?.(holder.nativeSessionId, removed);
-    },
-    async title(target) {
-      if (options.providerEnabled?.(target.providerId) === false) return undefined;
-      const summary = await catalogs.get(target.providerId)?.session(target.nativeSessionId);
-      return summary ? summary.title ?? '' : undefined;
-    },
-  } : undefined;
+  const { callSession, callRole, sessionRefs } = createSessionCommands(ctx, options);
   const automationAccess: TpmSessionAccess = {
     controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
     sessionRouting: successionService?.executionRouting ?? {
@@ -764,6 +515,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   Object.assign(ctx, {
     options, admission, relay, bindings, idle, operationCache, catalogs, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
     tpm, team, enrollment, sessionRefs, roles, workerSupport, workerToolsApplied, nativeAttachments, successionConfig, nativeSuccession,
+    registrations, prepared, uncertainAgents, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
+    nativePrefixExtensions: successionWiring.nativePrefixExtensions,
     registration, liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
     workerExtensions: successionWiring.workerExtensions, markShared: successionWiring.markShared, nativeFamily, originalCreation, originalNativePrefix, assertHandoffState, acquireSession,
   } satisfies SessionCoreContext);

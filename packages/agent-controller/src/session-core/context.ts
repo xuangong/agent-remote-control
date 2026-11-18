@@ -1,6 +1,6 @@
 import type { AgentEmptyCreationResult, AgentPersistenceHandle, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
-import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
-import type { AgentRemoteRelay, OperationCache, RemoteHostCatalog, RemoteHostSessionLease, SessionBindings, SessionWireAgent } from '@orchardworks/agent-session-runtime';
+import type { NativeSessionRef, TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
+import type { AgentRemoteHttpResult, AgentRemoteRelay, OperationCache, RemoteHostControlRequest, RemoteHostCatalog, RemoteHostSessionLease, SessionBindings, SessionWireAgent } from '@orchardworks/agent-session-runtime';
 
 import type { createHostStatusReader } from '../host-status.js';
 import type { createIdleSessions } from '../idle-sessions.js';
@@ -13,8 +13,11 @@ import type { SessionSuccessionCoordinator } from '../session-succession.js';
 import type { WorkerSupport } from '../call-for-support-worker.js';
 import type { SessionRoles } from '../session-role-succession.js';
 import type { TeamRuntime } from '../team.js';
-import type { TpmCoordinator } from '../tpm.js';
+import type { TpmCoordinator, TpmSessionAccess } from '../tpm.js';
+import type { JournalPublisher } from '../publisher/journal-publisher.js';
+import type { TerminalRefresh } from '../publisher/terminal-refresh.js';
 import type { SessionRefContext } from '../session-refs.js';
+import type { SessionCallerCatalog } from '../session-callers.js';
 import type { SessionCaller, SessionCallResult } from '../session-routes.js';
 import type { Admission } from './admission.js';
 import type { AgentHostProviderRegistration, AgentHostRuntimeOptions, SessionBinding } from './types.js';
@@ -60,6 +63,13 @@ export interface SessionCoreContext {
   readonly enrollment: SessionSuccessionEnrollment | undefined;
   readonly sessionRefs: SessionRefContext | undefined;
   readonly roles: SessionRoles;
+  readonly registrations: Map<string, AgentHostProviderRegistration>;
+  readonly prepared: Map<string, AgentSession>;
+  readonly uncertainAgents: Set<string>;
+  readonly journals: JournalPublisher;
+  readonly terminalRefresh: TerminalRefresh;
+  readonly automationAccess: TpmSessionAccess;
+  readonly sessionCatalog: SessionCallerCatalog;
   readonly workerSupport: WorkerSupport | undefined;
   readonly workerToolsApplied: Map<string, boolean>;
   readonly nativeAttachments: WeakMap<SessionWireAgent, NativeAttachment>;
@@ -76,6 +86,10 @@ export interface SessionCoreContext {
   originalNativePrefix(target: NativeSessionRef): { handle: AgentPersistenceHandle; source: NativeSessionRef } | undefined;
   assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing?: boolean): void;
   acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
+  nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions>;
+  genericSuccessionSource(target: NativeSessionRef): NativeSessionRef | undefined;
+  create(request: RemoteHostControlRequest, payload: Record<string, unknown>, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
+  controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
   tracked<T>(operation: Promise<T>): Promise<T>;
   project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted?: boolean,
     takeoverScope?: string, qualifiedResult?: boolean): Promise<SessionBinding>;

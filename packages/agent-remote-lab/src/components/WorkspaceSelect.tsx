@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { SessionDirectoryClient, SessionWorkspace } from '../directory-client.js';
 import { useFeedbackToast } from './Toast.js';
 import { WorkspaceFolderPicker } from './WorkspaceFolderPicker.js';
@@ -16,6 +16,7 @@ export function WorkspaceSelect({ directory, providerId, disabled, value, onChan
   const [browsing, setBrowsing] = useState<Scope>();
   const [catalog, setCatalog] = useState<WorkspaceCatalog>();
   const [retry, setRetry] = useState(0);
+  const browseButton = useRef<HTMLButtonElement>(null);
   const current = catalog?.directory === directory && catalog.providerId === providerId ? catalog : undefined;
   const workspaces = current?.workspaces ?? [], loading = current?.loading ?? !!providerId, failure = current?.failure;
   useFeedbackToast('Workspace list', failure);
@@ -44,10 +45,10 @@ export function WorkspaceSelect({ directory, providerId, disabled, value, onChan
         {!value.workspaceId && value.path ? <option value="__custom_folder">{value.path}</option> : null}
         {workspaces.map(workspace => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.path}</option>)}
       </select>
-      {canBrowse && providerId !== 'dsh' ? <button type="button" disabled={disabled || loading || !providerId} onClick={() => setBrowsing({ directory, providerId })}>Browse…</button> : null}
+      {canBrowse && providerId !== 'dsh' ? <button ref={browseButton} type="button" disabled={disabled || loading || !providerId} onClick={() => setBrowsing({ directory, providerId })}>Browse…</button> : null}
     </div>
     {browsing?.directory === directory && browsing.providerId === providerId && canBrowse && !disabled
-      ? <WorkspaceFolderPicker directory={directory} providerId={providerId} workspaces={workspaces}
+      ? <WorkspaceFolderPicker directory={directory} providerId={providerId} workspaces={workspaces} opener={browseButton}
           initialPath={value.path ?? workspaces.find(workspace => workspace.id === value.workspaceId)?.path}
           onClose={() => setBrowsing(undefined)} onSelect={path => { onChange({ path }); setBrowsing(undefined); }} /> : null}
     {failure ? <p className="lab-control-note" role="alert">{failure} <button type="button" disabled={disabled} onClick={() => setRetry(value => value + 1)}>Retry workspaces</button></p> : null}

@@ -47,8 +47,8 @@ function stylesheetPlacement(element: HTMLElement): Position | undefined {
 
 /** The first top, in CSS pixels, of the stylesheet's default column, which sits just under a one-row app bar. */
 const defaultColumnTop = 60;
-/** What a default placement stays clear of: the app bar and the toolbar of a session's timeline, which carry controls at the right edge. */
-const keepClearSelector = '.lab-app-bar, .lab-timeline-tools';
+/** What a default placement stays clear of: the app bar, the toolbar of a session's timeline and the heading of a full-screen Ask or TPM window, which carry controls at the right edge. */
+const keepClearSelector = '.lab-app-bar, .lab-timeline-tools, .lab-ask-viewport[data-presentation="overlay"] :is(.lab-ask-heading, .lab-workbench-heading-group)';
 
 /**
  * How far a default placement moves down so that it starts below the controls it would otherwise cover. At phone and tablet

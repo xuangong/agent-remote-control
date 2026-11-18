@@ -136,3 +136,16 @@ describe('WorkspaceFolderPicker', () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+it('returns focus to the control that opened it even when that control was never focused, as in Safari', async () => {
+  const opener = document.createElement('button');
+  document.body.append(opener);
+  const controller = fakeController({ '/root': { folders: [] } });
+  const container = await render(<WorkspaceFolderPicker directory={controller.directory} providerId="recorded" initialPath="/root" workspaces={[]}
+    onSelect={vi.fn()} onClose={vi.fn()} opener={{ current: opener }} />);
+  await settle();
+  expect(document.activeElement).not.toBe(opener);
+  await unmount(container);
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
+});

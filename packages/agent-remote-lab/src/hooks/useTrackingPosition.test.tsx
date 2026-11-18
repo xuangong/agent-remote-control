@@ -4,11 +4,11 @@ import { render } from '../test/setup.js';
 import { arrangeFloatingEntries, useTrackingPosition } from './useTrackingPosition.js';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
-let appBarBottom = 0, toolsBottom = 0;
+let appBarBottom = 0, toolsBottom = 0, askHeadingBottom = 0;
 let viewport: EventTarget & { offsetLeft: number; offsetTop: number; width: number; height: number };
 beforeEach(() => {
   localStorage.clear();
-  appBarBottom = 0; toolsBottom = 0;
+  appBarBottom = 0; toolsBottom = 0; askHeadingBottom = 0;
   vi.stubGlobal('innerWidth', 400);
   vi.stubGlobal('innerHeight', 800);
   viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 400, height: 800 });
@@ -17,6 +17,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.matches('.lab-app-bar')) return rect(0, 0, 400, appBarBottom);
     if (this.matches('.lab-timeline-tools')) return rect(10, 57, 390, toolsBottom - 57);
+    if (this.matches('.lab-workbench-heading-group')) return rect(0, 49, 400, askHeadingBottom - 49);
     const root = this.closest<HTMLElement>('.lab-tracking-floating');
     return root ? rect(parseFloat(root.style.left || '0'), parseFloat(root.style.top || '0'), 80, 44) : rect(0, 0, 400, 800);
   });
@@ -216,4 +217,22 @@ it('moves the default placement below a timeline toolbar that mounts after the e
     expect(observed.length).toBeGreaterThan(0);
     expect(top(container, 'a')).toBe(107 + 8);
   } finally { document.querySelector('.lab-timeline-tools')?.remove(); remove(); }
+});
+
+it('starts a default placement below the heading of a full-screen Ask', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    askHeadingBottom = 310;
+    const container = await render(<><div className="lab-ask-viewport" data-presentation="overlay"><div className="lab-workbench-heading-group" /></div><Entry name="a" /></>);
+    expect(top(container, 'a')).toBe(114 + 310 + 8 - 60);
+  } finally { remove(); }
+});
+
+it('ignores the heading of a floating Ask', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    askHeadingBottom = 310;
+    const container = await render(<><div className="lab-ask-viewport" data-presentation="floating"><div className="lab-workbench-heading-group" /></div><Entry name="b" /></>);
+    expect(top(container, 'b')).toBe(114);
+  } finally { remove(); }
 });

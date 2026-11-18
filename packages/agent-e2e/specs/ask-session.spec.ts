@@ -304,6 +304,7 @@ test('Ask uses the same independent display controls as the source Session View'
 });
 
 test('the global Ask launcher stays within the viewport across resizing and reload', async ({ page }) => {
+  test.skip(test.info().project.name.includes('mobile'), 'Resizes to desktop widths, where the Ask launcher docks into the sidebar Shortcuts at the left edge; under phone emulation the floating-margin assertion does not describe it.');
   await start(page);
   await floatAsk(page);
   const button = page.getByRole('button', { name: 'Ask about this session', exact: true });

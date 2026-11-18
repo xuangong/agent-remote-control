@@ -688,6 +688,8 @@ textarea {
   :is(.lab-shell, .lab-session-view) .agent-question-options > label { min-height: 44px; }
   :is(.lab-shell, .lab-session-view) a[href] { display: inline-flex; align-items: center; }
   :is(.lab-shell, .lab-session-view) .agent-session-attributions button { min-width: 0; min-height: 28px; }
+  /* Interrupt stops a running turn; the compact composer row's 30 px would otherwise win over the touch minimum above. */
+  :is(.lab-shell, .lab-session-view) .lab-composer-dock .agent-activity button { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

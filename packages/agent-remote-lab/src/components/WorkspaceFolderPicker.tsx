@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { SessionDirectoryClient, SessionWorkspace, WorkspaceFolderPage } from '../directory-client.js';
 
-export function WorkspaceFolderPicker({ directory, providerId, initialPath, workspaces, onSelect, onClose }: {
+/** `opener` is the control that opened the picker and gets focus back; Safari does not focus a button on click, so the focused element is no answer. */
+export function WorkspaceFolderPicker({ directory, providerId, initialPath, workspaces, onSelect, onClose, opener }: {
   directory: SessionDirectoryClient; providerId: string; initialPath?: string; workspaces: SessionWorkspace[];
-  onSelect(path: string): void; onClose(): void;
+  onSelect(path: string): void; onClose(): void; opener?: RefObject<HTMLElement | null>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [path, setPath] = useState(initialPath);
@@ -27,7 +28,7 @@ export function WorkspaceFolderPicker({ directory, providerId, initialPath, work
   useEffect(() => { if (adding) nameInput.current?.focus(); }, [adding]);
   useEffect(() => () => { creation.current?.abort(); creation.current = undefined; }, []);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
+    const previous = opener?.current ?? document.activeElement as HTMLElement | null;
     const modal = dialog.current!;
     modal.showModal();
     return () => { modal.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };

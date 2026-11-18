@@ -41,14 +41,14 @@ export default defineConfig({
   },
   projects: [
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
-    // The Relay-backed specs run on desktop. A phone viewport runs only the specs written for it; the layout rules of the other views have
-    // their phone and Safari projects in the component tier of the Workbench. `provider-layout` is skipped inside the spec (open item O32).
-    { name: 'chromium-mobile', testMatch: ['mobile.spec.ts', 'mobile-keyboard-controls.spec.ts', 'mobile-viewport.spec.ts', 'mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['Pixel 7'] } },
+    // A phone runs the specs that pass on it. Not yet catalogued or failing on a phone (open item O32): claude-discovery, directory-relations,
+    // modernization (3 tests), recorded (1), session-forks and every spec from session-scanner on in alphabetical order, which no phone run reached.
+    { name: 'chromium-mobile', testMatch: ['ask-*.spec.ts', 'mobile*.spec.ts', 'provider-layout.spec.ts', 'composer-initial-draft.spec.ts', 'cross-host.spec.ts', 'directory.spec.ts', 'pending-send.spec.ts', 'session-channels.spec.ts', 'session-connection-errors.spec.ts'], use: { ...devices['Pixel 7'] } },
     { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'mobile-keyboard-controls.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-ask-desktop', testMatch: ['composer-initial-draft.spec.ts', 'session-view-binding.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    // Never green on the iPhone profile: ask-dock, ask-composer, session-view-ownership and team (open item O32); the Ask layout on a phone is in the component tier.
-    { name: 'webkit-ask-mobile', testMatch: ['composer-initial-draft.spec.ts', 'workspace-layout.spec.ts'], use: { ...devices['iPhone 13'] } },
+    // team.spec.ts fails on the iPhone profile in 5 tests that no run has diagnosed (open item O32); it runs on desktop Safari.
+    { name: 'webkit-ask-mobile', testMatch: ['composer-initial-draft.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['iPhone 13'] } },
   ],
   webServer: [
     {

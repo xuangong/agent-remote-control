@@ -6,7 +6,6 @@ const providers = [
   { providerId: 'claude', displayName: 'Claude Code' },
   { providerId: 'copilot', displayName: 'GitHub Copilot CLI' },
 ];
-test.skip(true, 'The Browse list at phone width finds no providers on a recorded uplink: stale, not repaired (open item O32).');
 
 const longValue = 'Workstation0123456789'.repeat(12);
 
@@ -65,6 +64,8 @@ for (const width of [320, 390, 844]) {
       await page.goto('/');
       const drawer = page.getByRole('dialog', { name: 'Context', exact: true });
       await expect(drawer).toBeVisible();
+      // The page starts on the lab server's Host; the uplink of this test is another Host of the same account.
+      await drawer.locator('#remote-host').selectOption(hostId);
       for (const provider of providers) await test.step(provider.displayName, async () => {
         const selection = JSON.stringify([hostId, provider.providerId]);
         await expect(drawer.getByRole('combobox', { name: 'Browse provider' }).locator(`option[value='${selection}']`)).toHaveCount(1);

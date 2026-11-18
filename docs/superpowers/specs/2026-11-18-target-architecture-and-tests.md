@@ -718,7 +718,7 @@ Every shortfall of a finished step is tracked here with the step that owns it an
 | O4 | The teams and Call For Support wiring is still in `broker.ts` (about 130 lines) | M11 | M12 | open |
 | O5 | The browser socket edge (`upgrade`, `admitClientMessages`, `acceptJournalServed`, about 180 lines) is still in `broker.ts` | M11 | M12 | open |
 | O6 | 46 `session-succession-runtime` tests still start a real `createHostBroker`; they move to the seams package once the Controller exports `session-succession-*` | M11 | M12 | open |
-| O7 | Four relay-core `cross-package-relative` exceptions: two protocol Team fixtures (need a protocol `./testing` entry) and two Cloudflare storage codec imports (the tests move to the seams package) | M11 | M12 | open |
+| O7 | Four relay-core `cross-package-relative` exceptions: two protocol Team fixtures (need a protocol `./testing` entry) and two Cloudflare storage codec imports (the tests move to the seams package) | M11 | M12 | closed in M12: the frozen Team codecs are the protocol `./testing` entry; the codec names the tests used are aliases of `record-codec`, which relay-core owns, so the tests import it from there and nothing moved to seams; the exception is deleted |
 | O8 | Smoke scenarios M4, M5 and M8 need journal limits and a separately stoppable Controller; they wait for the Node host | M4 | M12 | open |
 | O9 | The Worker tier still has 157 tests against a target of about 20. Security, controller updates, authority renewal and connection diagnostics are not ported to lower tiers | M3 | M12 or later | open |
 | O10 | Far fewer duplicates were deleted than estimated in M5 to M9. The `App.succession` composition tests wait for the Workbench state module | M5 to M9 | M13 | open |

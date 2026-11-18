@@ -54,6 +54,7 @@ export function createHostBroker(options: HostBrokerOptions) {
   const origin = new URL(options.origin).origin;
   if (options.successionEnrollment && (!accountBacked || !options.onStateChange || !isSuccessionAssociationAuthority(options.successionEnrollment) || options.successionEnrollment.origin !== origin || options.successionEnrollment.ownerSubject !== options.ownerSubject)) throw new Error('Succession enrollment requires a durable authenticated tenant authority.');
   const now = options.now ?? Date.now;
+  const hostStreamLimit = options.hostStreamLimit ?? HOST_STREAM_LIMIT;
   const ids = options.ids ?? systemIds;
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
@@ -314,7 +315,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
           authorized: () => { const end = expiry(); return end === undefined || end > now(); },
           recover: () => recoverForJournalStream(host, binding),
-          capacity: () => host.streams.size >= HOST_STREAM_LIMIT ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
+          capacity: () => host.streams.size >= hostStreamLimit ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
           write: message => send(host, message), scheduler, openTimeoutMs: options.rpcTimeoutMs ?? 30_000,
           diagnostic: details => diagnostic(host, details),
         }),
@@ -361,10 +362,10 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     const subject = principal(context);
     const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
-    if (host.streams.size >= HOST_STREAM_LIMIT || userStreams() >= USER_STREAM_LIMIT) return capacityRefusal(host.streams.size >= HOST_STREAM_LIMIT);
+    if (host.streams.size >= hostStreamLimit || userStreams() >= USER_STREAM_LIMIT) return capacityRefusal(host.streams.size >= hostStreamLimit, hostStreamLimit);
     return { accept(client: RelaySocket) {
       if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
-      if (host.streams.size >= HOST_STREAM_LIMIT || userStreams() >= USER_STREAM_LIMIT) { client.close(1013, 'Remote stream capacity reached'); return; }
+      if (host.streams.size >= hostStreamLimit || userStreams() >= USER_STREAM_LIMIT) { client.close(1013, 'Remote stream capacity reached'); return; }
       track(client);
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       credentialExpiry.expire(client, expiry);

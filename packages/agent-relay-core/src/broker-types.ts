@@ -107,6 +107,8 @@ export interface HostBrokerOptions {
   diagnostics?: DiagnosticJournal;
   ownerSubject?: string;
   userStreamCount?(subject: string): number;
+  /** The most browser streams one Host serves; the default is `HOST_STREAM_LIMIT`. */
+  hostStreamLimit?: number;
   controllerReleases?: Pick<typeof controllerReleases, 'latest'> & Partial<Pick<typeof controllerReleases, 'version'>>;
   origin: string;
   rpcTimeoutMs?: number;

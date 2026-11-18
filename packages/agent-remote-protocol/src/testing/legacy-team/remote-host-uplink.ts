@@ -3,12 +3,12 @@ import { TeamHostCall } from './team.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 
-import { SuccessionAssociationAuthority } from '../../../src/succession-enrollment.js';
-import { PairingPurpose } from '../../../src/pairing.js';
-import { ControllerIdentity } from '../../../src/controller-release.js';
-import { HostEnvironment } from '../../../src/host-environment.js';
+import { SuccessionAssociationAuthority } from '../../succession-enrollment.js';
+import { PairingPurpose } from '../../pairing.js';
+import { ControllerIdentity } from '../../controller-release.js';
+import { HostEnvironment } from '../../host-environment.js';
 
-import type { WireDecodeResult, WireEncodeResult } from '../../../src/codec.js';
+import type { WireDecodeResult, WireEncodeResult } from '../../codec.js';
 
 export const REMOTE_HOST_UPLINK_VERSION = 2;
 

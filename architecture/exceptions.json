@@ -65,15 +65,6 @@
     {
       "rule": "cross-package-relative",
       "from": [
-        "packages/agent-relay-core/**"
-      ],
-      "max": 4,
-      "owner": "M12",
-      "reason": "Four test imports of relay-core reach other packages by path: the frozen legacy Team fixtures of the protocol package (2, team-negotiation.test.ts) and the Cloudflare storage codec (2, succession-capacity.test.ts and succession-replay.test.ts). The legacy fixtures need a protocol testing entry and the codec tests belong in the S4 seam suite; both are M12 work with the Node host."
-    },
-    {
-      "rule": "cross-package-relative",
-      "from": [
         "packages/agent-remote-debugger/**"
       ],
       "max": 8,

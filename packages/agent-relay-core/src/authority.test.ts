@@ -71,7 +71,7 @@ it('distinguishes an authority deadline from HTTP errors without changing denial
     const address = server.address(); if (!address || typeof address === 'string') throw Error('Missing listener');
     const diagnostics: unknown[] = [];
     const result = await queryGatewayAuthority({ origin: 'https://relay.example', issuer: `http://127.0.0.1:${address.port}`, secret: 'authority-timeout-secret-0123456789012345' },
-      'user-status', { subject: 'private-user' }, value => diagnostics.push(value));
+      'user-status', { subject: 'private-user' }, value => diagnostics.push(value), 50);
     expect(result).toEqual({ status: 'unavailable' });
     expect(diagnostics).toEqual([{ reason: 'authority_timeout', durationMs: expect.any(Number) }]);
   } finally {

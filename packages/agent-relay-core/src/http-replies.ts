@@ -13,9 +13,9 @@ export function rejectUpgrade(status: number) { return new Response(null, { stat
 export const HOST_STREAM_LIMIT = 128;
 export const USER_STREAM_LIMIT = 64;
 /** Open views of every browser and device share these limits, so the refusal says what frees a slot. */
-export function capacityRefusal(host: boolean) {
+export function capacityRefusal(host: boolean, hostLimit = HOST_STREAM_LIMIT) {
   return new Response(JSON.stringify({ code: 'session_stream_capacity', error: host
-    ? `This Host has too many sessions open in browsers (limit ${HOST_STREAM_LIMIT}). Close session views you no longer use; this session connects again automatically.`
+    ? `This Host has too many sessions open in browsers (limit ${hostLimit}). Close session views you no longer use; this session connects again automatically.`
     : `Too many sessions are open across your browsers and devices (limit ${USER_STREAM_LIMIT}). Close tabs, windows or session views you no longer use; this session connects again automatically.` }),
   { status: 429, headers: { 'content-type': 'application/json' } });
 }

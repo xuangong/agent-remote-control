@@ -435,24 +435,25 @@ it('refuses a held operation as retryable when the Controller connection is repl
 });
 
 it('refuses the message, not the stream, when the Host has no stream slot left', async () => {
-  const r = await relay({ seed: store => seedJournal(store) });
+  const limit = 3;
+  const r = await relay({ seed: store => seedJournal(store), broker: { hostStreamLimit: limit } });
   const controller = await r.connectController();
   const browsers = [];
-  for (let at = 0; at < 128; at++) {
+  for (let at = 0; at < limit; at++) {
     const browser = await r.openBrowser();
     await subscribed(browser);
     const token = await browser.controlled(false);
     browser.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
     browsers.push(browser);
   }
-  await until(() => controller.streams.length === 128 ? true : undefined, '128 Controller streams');
+  await until(() => controller.streams.length === limit ? true : undefined, `${limit} Controller streams`);
   const last = await r.openBrowser();
   await subscribed(last);
   const token = await last.controlled(false);
   last.send({ type: 'send_message', controlToken: token, payload: { requestId: 'send-1', operationId: OPERATION, agentId: PUBLIC_ID, text: 'Hi' } });
   expect(await last.take(message => message.type === 'protocol_error' && message.payload.requestId === 'send-1', 'refusal')).toMatchObject({ payload: { code: 'session_stream_capacity', recoverable: true } });
   expect(last.pair.server.readyState).toBe(1);
-  expect(controller.streams).toHaveLength(128);
+  expect(controller.streams).toHaveLength(limit);
 });
 
 it('serves a Controller from before session control from its journal, grants control, and refuses its first send with the update words', async () => {

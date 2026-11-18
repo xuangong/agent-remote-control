@@ -14,7 +14,7 @@ import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createFavorites } from './favorites.js';
 import { buildCompleteRelayState as codecState } from './complete-relay-state.js';
-import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
+import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { RelaySocket } from './transport.js';

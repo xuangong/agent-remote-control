@@ -5,7 +5,7 @@ import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
-import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
+import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 's'.repeat(32) };
 const costs: SuccessionEncodingCosts = {

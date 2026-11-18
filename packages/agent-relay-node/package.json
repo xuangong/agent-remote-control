@@ -17,7 +17,7 @@
     "prepare:dsh-release": "node --import tsx/esm scripts/prepare-dsh-release.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run --testTimeout=10000 --maxWorkers=50% --exclude '**/*.local.test.ts'",
-    "test:conformance": "node scripts/run-relay-conformance.mjs",
+    "test:conformance": "node scripts/run-relay-conformance.mjs && pnpm --filter @orchardworks/agent-remote-debugger exec vitest run src/local-prefix-succession.test.ts --testTimeout=20000",
     "benchmark:journals": "node scripts/journal-benchmark.mjs"
   },
   "dependencies": {

@@ -32,6 +32,8 @@ export default defineConfig({
   globalSetup: './e2e/dev-server-warmup.ts',
   fullyParallel: false,
   workers: 1,
+  // The specs share one Relay user and run in order; a test that fails once and passes on its retry is reported as flaky, not hidden.
+  retries: 1,
   use: {
     baseURL: `http://127.0.0.1:${webPort}`,
     launchOptions: browserExecutable ? { executablePath: browserExecutable } : undefined,

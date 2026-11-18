@@ -705,3 +705,24 @@ Everything is measured by two commands: `pnpm test:inventory` and `pnpm arch:rep
 - Which relay-core concerns the edge (`gateway.ts`) shares with `agent-relay-node` and the Workers host needs a per-file pass in M11 and M12.
 - The refusal reason list in S2 follows the code before the S2 simplification finished; the contract document written in M1 replaces it with the current list.
 - `agent-relay-node` may need to keep the DSH and devbox helpers of `lab/src/server`; a per-file pass in M12 decides which move to `agent-e2e`.
+
+## 10. Open items
+
+Every shortfall of a finished step is tracked here with the step that owns it and its status. Update this table in the commit that closes or moves an item.
+
+| # | Item | Found in | Owner step | Status |
+|---|---|---|---|---|
+| O1 | The relay-core package run did not get faster (8.7 s, 1,105 tests, 22 over 300 ms, 3 over 1 s). Identify each slow file and cause; fix with a clock, a store port or an extracted rule | M11 | M12 | open |
+| O2 | The Controller's slowest files are disk and fsync bound, not Relay bound: `session-succession-capacity` 18.7 s, `session-source-witness` 16.8 s, `tpm.test` 12.1 s. An in-memory `StateFileWriter`, one real-disk test per store | M11 | M12 | open |
+| O3 | Only 10 duplicate tests were deleted in M11. Decide for each remaining succession and gateway group: main flow (e2e, lower duplicates go), seam behaviour (seams package with mock data, slower copy goes), or unique wiring (kept, reason recorded) | M11 | M12 | open |
+| O4 | The teams and Call For Support wiring is still in `broker.ts` (about 130 lines) | M11 | M12 | open |
+| O5 | The browser socket edge (`upgrade`, `admitClientMessages`, `acceptJournalServed`, about 180 lines) is still in `broker.ts` | M11 | M12 | open |
+| O6 | 46 `session-succession-runtime` tests still start a real `createHostBroker`; they move to the seams package once the Controller exports `session-succession-*` | M11 | M12 | open |
+| O7 | Four relay-core `cross-package-relative` exceptions: two protocol Team fixtures (need a protocol `./testing` entry) and two Cloudflare storage codec imports (the tests move to the seams package) | M11 | M12 | open |
+| O8 | Smoke scenarios M4, M5 and M8 need journal limits and a separately stoppable Controller; they wait for the Node host | M4 | M12 | open |
+| O9 | The Worker tier still has 157 tests against a target of about 20. Security, controller updates, authority renewal and connection diagnostics are not ported to lower tiers | M3 | M12 or later | open |
+| O10 | Far fewer duplicates were deleted than estimated in M5 to M9. The `App.succession` composition tests wait for the Workbench state module | M5 to M9 | M13 | open |
+| O11 | The Controller's session-core modules read shared state through a typed context, which renames the coupling rather than removing it. The bindings, the idle sessions and the operation cache need one owner module each | M10 | later | open |
+| O12 | Slow-test enforcement is opt-in (`ARC_SLOW_TEST_ENFORCE`). It becomes the default once the allowlist is justified entry by entry | M0 | M12 | open |
+| O13 | Privacy display-lease decision: a longer display lease would let a returning person see rows at once, but it changes the privacy rule. The owner decides | M8 | owner | open |
+| O14 | The transport tier in the seams package is 108 tests against a target of about 30 | M8 to M11 | M12 | open |

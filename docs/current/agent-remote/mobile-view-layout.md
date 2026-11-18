@@ -115,4 +115,4 @@ when its native result provides the required fields. A Host update is needed for
 new Codex change labels; the client can render existing path/diff history before
 that update. Deterministic rendering coverage lives in `e2e/file-changes.spec.ts`,
 with native adapter tests and real WebSocket/reconnect/history coverage in
-`src/tool-result-transport.test.ts`.
+`src/tool-result.transport.test.ts`.

@@ -60,7 +60,7 @@ session, and child suite passes 71 tests; the transport suite passes four cases.
   already covered by a concurrent history read.
 - `child-sessions.test.ts`: history advances from `e` to `ee`; buffered `ee`, `e`
   retain exactly two uncovered `e` occurrences, and final `eeee` adds no text.
-- `codex-delta-transport.test.ts`: actual HTTP/WebSocket server, Relay, remote
+- `codex-delta.transport.test.ts`: actual HTTP/WebSocket server, Relay, remote
   client, and replica. Equal native occurrences survive, replayed observation
   identities and public sequences are consumed once, and reconnect/history
   produce the same single message.

@@ -13,6 +13,16 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "scripts",
+        "packages/agent-client-web/package.json",
+        "packages/agent-client-web/scripts",
+        "packages/agent-client-web/src",
+        "packages/agent-client-web/tsconfig.json",
+        "packages/agent-client-web/vitest.config.ts",
+        "packages/agent-client/package.json",
+        "packages/agent-client/scripts",
+        "packages/agent-client/src",
+        "packages/agent-client/tsconfig.json",
+        "packages/agent-client/vitest.config.ts",
         "packages/agent-controller/README.md",
         "packages/agent-controller/package.json",
         "packages/agent-controller/skills",
@@ -149,15 +159,11 @@
         "packages/agent-remote-seams/tsconfig.json",
         "packages/agent-remote-seams/vitest.config.ts",
         "packages/agent-remote-seams/vitest.record.config.ts",
+        "packages/agent-remote-seams/vitest.transport.config.ts",
         "packages/agent-remote-tunnel/package.json",
         "packages/agent-remote-tunnel/src",
         "packages/agent-remote-tunnel/tsconfig.json",
         "packages/agent-remote-tunnel/vitest.config.ts",
-        "packages/agent-remote-web/package.json",
-        "packages/agent-remote-web/scripts",
-        "packages/agent-remote-web/src",
-        "packages/agent-remote-web/tsconfig.json",
-        "packages/agent-remote-web/vitest.config.ts",
         "packages/agent-session-runtime/package.json",
         "packages/agent-session-runtime/src",
         "packages/agent-session-runtime/tsconfig.json",
@@ -176,7 +182,7 @@
         "packages/codex-daemon-client/tsconfig.test.json",
         "packages/codex-daemon-client/vitest.config.ts"
       ],
-      "digest": "sha256:7ad960857bfeceb6261c7316ca52b113fd9f5860a28326ac0cc7c59985b03638"
+      "digest": "sha256:6b475d9a800cf0ead4f923d8963dbacb2965f71f8b2e3798fd895544c119733e"
     }
   },
   "providers": [

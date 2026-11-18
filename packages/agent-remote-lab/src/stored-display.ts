@@ -1,3 +1,4 @@
+import '@orchardworks/agent-client-web/browser';
 import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-client';
 import { deviceStore, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-client/device-store';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';

@@ -1,3 +1,4 @@
+import '@orchardworks/agent-client-web/browser';
 import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { configureDeviceStorePersistence, deviceStore } from '@orchardworks/agent-client/device-store';
 

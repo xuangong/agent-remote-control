@@ -95,6 +95,6 @@ function nativeExtension(tail: WindowTail, window: readonly JournalItemInput[]):
 /** Whether the journal's item is the window's item: the same key and live-only mark, and the same digest when complete or the same resident content when open. */
 function sameItem(held: JournalItem, wanted: JournalItemInput): boolean {
   if (held.liveOnly !== (wanted.row.liveOnly === true)) return false;
-  if (wanted.digest !== undefined) return held.state === 'complete' && held.digest === wanted.digest;
+  if (wanted.digest !== undefined) return held.digest === wanted.digest;
   return held.state === 'open' && held.body !== null && canonicalContent(held.body.item) === canonicalContent(wanted.row.item);
 }

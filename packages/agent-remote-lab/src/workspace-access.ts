@@ -1,3 +1,4 @@
+import { displayLeaseValid } from '@orchardworks/agent-client';
 import { createContext } from 'react';
 
 export type WorkspaceAccess = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
@@ -184,11 +185,7 @@ export function workspaceSocket(url: string) {
  */
 export function storedRowsRelay(baseUrl: string): string | undefined {
   const relayUrl = scopeFor(baseUrl);
-  const gate = gates.get(relayUrl);
-  if (!gate) return relayUrl;
-  if (gate.retired) return undefined;
-  if (gate.ready) return gate.confirming ? undefined : relayUrl;
-  return gate.optimisticUntil !== undefined && Date.now() < gate.optimisticUntil ? relayUrl : undefined;
+  return displayLeaseValid(gates.get(relayUrl), Date.now()) ? relayUrl : undefined;
 }
 /** The Relay refused the lease (401 or 403): nothing stored shows until a confirmation, and every subscriber learns at once. */
 export function revokeStoredRows(basePath: string): void {

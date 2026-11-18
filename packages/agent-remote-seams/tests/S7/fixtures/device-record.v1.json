@@ -1,0 +1,79 @@
+{
+  "key": "[\"https://relay.example/u/a/\",[\"local\",\"codex\",\"native-1\"]]",
+  "relayUrl": "https://relay.example/u/a/",
+  "version": 1,
+  "agentId": "agent-1",
+  "epoch": "e1",
+  "nextSeq": 3,
+  "hasOlder": false,
+  "entries": [
+    {
+      "providerId": "codex",
+      "itemKey": "m1",
+      "item": {
+        "type": "assistant_message",
+        "text": "row 1",
+        "messageId": "m1"
+      },
+      "timestamp": "2026-11-15T00:00:00.000Z",
+      "seqStart": 1,
+      "seqEnd": 1,
+      "sourceSeqRanges": [
+        {
+          "startSeq": 1,
+          "endSeq": 1
+        }
+      ],
+      "collapsed": [],
+      "resources": []
+    },
+    {
+      "providerId": "codex",
+      "itemKey": "m2",
+      "item": {
+        "type": "assistant_message",
+        "text": "row 2",
+        "messageId": "m2"
+      },
+      "timestamp": "2026-11-15T00:00:00.000Z",
+      "seqStart": 2,
+      "seqEnd": 2,
+      "sourceSeqRanges": [
+        {
+          "startSeq": 2,
+          "endSeq": 2
+        }
+      ],
+      "collapsed": [],
+      "resources": []
+    }
+  ],
+  "snapshot": {
+    "id": "agent-1",
+    "providerId": "codex",
+    "createdAt": "2026-11-15T00:00:00.000Z",
+    "updatedAt": "2026-11-15T00:00:01.000Z",
+    "status": "idle",
+    "activeTurn": null,
+    "capabilities": {
+      "history": true,
+      "sendMessage": true,
+      "steer": true,
+      "cancel": true,
+      "readResource": true,
+      "interactions": {
+        "question": true,
+        "planApproval": true,
+        "toolApproval": true
+      }
+    },
+    "pendingInteractions": [],
+    "runtimeInfo": {
+      "providerId": "codex",
+      "sessionId": "native-1",
+      "status": "idle"
+    }
+  },
+  "updatedAt": 1794960000000,
+  "bytes": 1165
+}

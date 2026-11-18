@@ -39,3 +39,4 @@ export { notifyFeedReopened, watchFeedReopen, watchFeedRefresh, watchList } from
 export * from './device-store.js';
 export type { ResourceTransferOptions } from './client/resource-upload.js';
 export * from './client/image-upload.js';
+export * from './display-lease.js';

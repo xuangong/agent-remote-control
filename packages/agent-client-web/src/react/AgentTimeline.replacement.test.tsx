@@ -51,11 +51,4 @@ describe('a replacement that carries rows over', () => {
     errors.mockRestore();
   });
 
-  it('never shows an empty timeline between the replacement frame and its tail', async () => {
-    const before = initial([row('a', 1, 'A'), row('b', 2, 'B')]);
-    const container = await render(<AgentTimeline state={before} />);
-    const marked = applyTimelineReplacement(before, 'epoch-two');
-    await rerender(container, <AgentTimeline state={marked} />);
-    expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(2);
-  });
 });

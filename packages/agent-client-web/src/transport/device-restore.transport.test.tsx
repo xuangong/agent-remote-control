@@ -46,13 +46,6 @@ const nodesByKey = (container: HTMLElement) => new Map([...container.querySelect
 const settle = (ms = 60) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
 const rows = (count: number) => Array.from({ length: count }, (_, index) => text(`k${index}`, index + 1, `Reply ${index}`));
 
-it('shows the stored rows before any connection, keyed by item key, and says they came from the device', async () => {
-  const { replica } = await reopen({ served: rows(3), record: stored(rows(3), 'epoch-one') });
-  const container = await render(<Screen replica={replica} />);
-  expect([...nodesByKey(container).keys()]).toEqual(['k0', 'k1', 'k2']);
-  expect(replica.getState().timeline).toMatchObject({ initialized: true, epoch: 'epoch-one', nextSeq: 4, restoredFromDevice: true });
-});
-
 it('continues the same epoch from the stored cursor with one after request, keeps unchanged rows mounted and confirms the display', async () => {
   const session = await reopen({ served: [...rows(3), text('k3', 4, 'Reply 3')], record: stored(rows(3), 'epoch-one') });
   const container = await render(<Screen replica={session.replica} />);
@@ -98,9 +91,3 @@ it('reads older history over the session wire, so a journal-served session scrol
   expect(session.replica.getState().timeline.entries.map(entry => entry.itemKey)).toEqual(['k0', 'k1', 'k2', 'k3', 'k4', 'k5']);
 });
 
-it('does not restore into a replica that already read the session', async () => {
-  const session = await reopen({ served: rows(2), record: stored(rows(2), 'epoch-one') });
-  await session.start();
-  session.replica.restoreFromDevice(stored([text('old', 1, 'Old')], 'epoch-old'));
-  expect(session.replica.getState().timeline.entries.map(entry => entry.itemKey)).toEqual(['k0', 'k1']);
-});

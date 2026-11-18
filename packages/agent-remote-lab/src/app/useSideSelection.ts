@@ -8,6 +8,7 @@ import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useAskConversations } from '../hooks/useAskConversations.js';
 import type { SideSelections } from '../side-tree.js';
+import { localEdges, mergeSides, openSideKeys as openSideKeysOf, sameEdges, selectedEdges, selectionSteps, sharedFamilySides as sharedFamilySidesOf } from '../state/side-layout.js';
 import { viewKey } from './helpers.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { WorkbenchShellSlice } from './useWorkbenchShell.js';
@@ -25,33 +26,36 @@ export function useSideSelection(scope: Pick<SessionSuccessionBindingSlice & Wor
 
   const projectedLayout = succession.layoutView();
 
-  const availableSides = projectedLayout ? [...storedSideSessions.filter(session => !projectedLayout.sides.some(side => viewKey(side) === viewKey(session))), ...projectedLayout.sides] : storedSideSessions;
+  const availableSides = mergeSides(storedSideSessions, projectedLayout?.sides, viewKey) as OpenedSession[];
 
   /** Every view attached in the selected primary family, in Window order, once its session is known. */
   function sharedFamilySides(): OpenedSession[] {
     const known = new Map(availableSides.map(session => [viewKey(session), session]));
-    return (sharedWindow?.views ?? []).flatMap(view => {
-      const slot = view.attachedTo && sharedFamily?.has(view.id) ? sharedSlots?.get(view.id) : undefined;
-      const mounted = mountedViewSessions[view.id];
-      const session = slot && (known.get(slot.id) ?? (mounted?.viewId === slot.id ? mounted : compositionSession(slot)));
-      return session && view.binding && sessionKey(session) === sessionKey(view.binding) ? [session] : [];
+    return sharedFamilySidesOf(sharedWindow?.views ?? [], {
+      inFamily: viewId => !!sharedFamily?.has(viewId), slotOf: viewId => sharedSlots?.get(viewId), known: slotId => known.get(slotId),
+      mounted: viewId => mountedViewSessions[viewId], sessionOfSlot: compositionSession, sessionKey, bindingKey: sessionKey,
     });
   }
 
   const sideSessions = windowSession.empty ? [] : sharedWindow ? sharedFamilySides() : availableSides;
 
-  const sideSelections = useMemo<SideSelections>(() => Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target])), [succession.document, succession.document.editRevision]);
+  const sideSelections = useMemo<SideSelections>(() => selectedEdges(succession.document.edges), [succession.document, succession.document.editRevision]);
 
   const sideFocus = succession.document.focus, sideAnchor = succession.document.anchor;
 
   /** Sessions shown beside a source: each view attached to it in a shared Window, otherwise its selected Side. */
   function openSideKeys(sourceId: string): string[] {
-    if (sharedWindow) {
-      const source = sharedViewForSlot(sourceId);
-      return source ? sharedWindow.views.flatMap(view => view.attachedTo === source.id && view.binding ? [sessionKey(view.binding)] : []) : [];
-    }
-    const slot = succession.document.slots.find(slot => slot.id === sideSelections[sourceId]);
-    return slot ? [sessionKey(compositionSelection(slot))] : [];
+    return openSideKeysOf(sourceId, {
+      shared: !!sharedWindow,
+      attachedKeys: id => {
+        const source = sharedViewForSlot(id);
+        return source ? sharedWindow!.views.flatMap(view => view.attachedTo === source.id && view.binding ? [sessionKey(view.binding)] : []) : [];
+      },
+      selectedKey: id => {
+        const slot = succession.document.slots.find(slot => slot.id === sideSelections[id]);
+        return slot ? sessionKey(compositionSelection(slot)) : undefined;
+      },
+    });
   }
 
   /**
@@ -66,33 +70,29 @@ export function useSideSelection(scope: Pick<SessionSuccessionBindingSlice & Wor
   }
 
   function setSideSelections(change: SideSelections | ((current: SideSelections) => SideSelections)) {
-    const current = Object.fromEntries(succession.document.edges.filter(edge => edge.selected).map(edge => [edge.source, edge.target]));
+    const current = selectedEdges(succession.document.edges);
     const next = typeof change === 'function' ? change(current) : change;
     if (sharedWindow) {
       const operations: WindowEdit[] = [];
-      for (const [sourceId, targetId] of Object.entries(next)) {
-        if (current[sourceId] === targetId) continue;
-        const source = sharedViewOf(sourceId); if (!source) continue;
-        const existing = targetId ? sharedViewForSlot(targetId) : undefined;
-        if (existing?.attachedTo === source.id) {
-          operations.push({ type: 'view.select', viewId: existing.id });
-          continue;
-        }
+      const steps = selectionSteps(current, next, {
+        sourceView: sharedViewOf, viewOfSlot: sharedViewForSlot,
+        slotExists: slotId => succession.document.slots.some(slot => slot.id === slotId),
+        slotOwned: slotId => !!succession.document.windowBindings?.some(entry => entry.slotId === slotId),
+      });
+      for (const step of steps) {
+        if (step.type === 'select') { operations.push({ type: 'view.select', viewId: step.viewId }); continue; }
         // The source keeps the views already attached to it; the selection only adds or focuses one.
-        const target = targetId && succession.document.slots.find(slot => slot.id === targetId);
-        if (target) {
-          const view = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(compositionSelection(target)), 'attached'), attachedTo: source.id };
-          const alreadyOwned = succession.document.windowBindings?.some(entry => entry.slotId === target.id);
-          if (alreadyOwned) succession.ensureWindowView(sharedWindow.id, view.id, view.binding!);
-          else succession.bindWindowView(sharedWindow.id, view.id, view.binding!, target.id);
-          operations.push({ type: 'view.create', view }, { type: 'view.select', viewId: view.id });
-        } else operations.push({ type: 'view.select', viewId: source.id });
+        const target = succession.document.slots.find(slot => slot.id === step.slotId)!;
+        const view = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(compositionSelection(target)), 'attached'), attachedTo: step.sourceViewId };
+        if (step.owned) succession.ensureWindowView(sharedWindow.id, view.id, view.binding!);
+        else succession.bindWindowView(sharedWindow.id, view.id, view.binding!, target.id);
+        operations.push({ type: 'view.create', view }, { type: 'view.select', viewId: view.id });
       }
       if (operations.length) windowWorkspace.authority?.operate({ type: 'batch', operations });
       return;
     }
-    const edges = Object.entries(next).flatMap(([source, target]) => target ? [{ source, target, selected: true }] : []);
-    if (JSON.stringify(edges) === JSON.stringify(succession.document.edges)) return;
+    const edges = localEdges(next);
+    if (sameEdges(edges, succession.document.edges)) return;
     succession.document.edges = edges; succession.document.editRevision++; succession.save();
   }
 

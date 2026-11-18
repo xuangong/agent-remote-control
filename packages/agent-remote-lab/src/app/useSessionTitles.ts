@@ -1,4 +1,6 @@
 // Title projection, native titles, prompt edit migrations and favorites recovery.
+import { confirmTitle, groupProjectionTitles, retitleSessions, titledSessions as titledSessionsOf, windowProjectionTitles } from '../state/session-titles.js';
+import { rekeySelections, swapKey } from '../state/side-layout.js';
 import { windowTitleEdits } from '../window-titles.js';
 import type { Team } from '@orchardworks/agent-remote-protocol';
 import { readPromptEditReservation, finishPromptEditReservation, type PromptEditReservation } from '../prompt-edit-intent.js';
@@ -33,15 +35,8 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
   useEffect(() => { if (succession.observerReady) trackedViews.retain(tracking.sessions.map(trackEntryId)); }, [trackedViews, tracking.sessions, succession.observerReady]);
 
   const applySessionTitle = useCallback((session: StarInput) => {
-    setConfirmedTitleState(current => {
-      const titles = current?.scope === baseUrl ? current.titles : undefined;
-      if (titles?.get(sessionKey(session)) === session.title) return current;
-      return { scope: baseUrl, titles: new Map(titles).set(sessionKey(session), session.title) };
-    });
-    const update = (items: OpenedSession[]) => {
-      if (!items.some(item => sessionKey(item) === sessionKey(session) && item.title !== session.title)) return items;
-      return items.map(item => sessionKey(item) === sessionKey(session) ? { ...item, title: session.title } : item);
-    };
+    setConfirmedTitleState(current => confirmTitle(current, baseUrl, sessionKey(session), session.title));
+    const update = (items: OpenedSession[]) => retitleSessions(items, sessionKey, sessionKey(session), session.title) as OpenedSession[];
     succession.updateTitles([session]);
     setOpenedSessions(update); setSideSessions(update); tracking.rename(session);
   }, [baseUrl, tracking.rename, succession.document]);
@@ -50,8 +45,7 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
   const titledBotGroup = !windowMode ? selectedBot.group : undefined;
 
   // Window views name sessions that need not be open on this page; Ask, Team and TPM views name their own.
-  const titledSessions = useMemo(() => [...sessionEntries, ...[...sharedWindow?.views ?? [], ...titledBotGroup?.window.views ?? []].flatMap(({ binding, bindingPolicy }) => binding && bindingPolicy !== 'managed'
-    ? [{ hostId: binding.hostId, providerId: binding.providerId, nativeSessionId: binding.nativeSessionId, title: binding.title }] : [])],
+  const titledSessions = useMemo(() => titledSessionsOf(sessionEntries, [...sharedWindow?.views ?? [], ...titledBotGroup?.window.views ?? []]),
     [sessionEntries, sharedWindow?.views, titledBotGroup?.window.views]);
 
   useNativeTitles({ entries: titledSessions, confirmed: confirmedTitles, apply: applySessionTitle,
@@ -63,10 +57,11 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
 
   useEffect(() => {
     // A cached Window is renamed only once the service confirms it.
-    if (!sharedWindow || windowWorkspace.provisional || !confirmedTitles?.size || titleProjection.current === confirmedTitles) return;
-    titleProjection.current = confirmedTitles;
+    const titles = windowProjectionTitles({ hasWindow: !!sharedWindow, provisional: windowWorkspace.provisional, confirmed: confirmedTitles, applied: titleProjection.current });
+    if (!sharedWindow || !titles) return;
+    titleProjection.current = titles;
     try {
-      for (const edit of windowTitleEdits(sharedWindow, confirmedTitles)) {
+      for (const edit of windowTitleEdits(sharedWindow, titles)) {
         // A view given another session meanwhile keeps it; that is not a failure to report.
         if (edit.type === 'view.bind') void windowWorkspace.operate(edit).catch(() => {});
         else editWindow(edit);
@@ -77,11 +72,11 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
   const botTitleProjection = useRef<{ titles?: ReadonlyMap<string, string>; revision?: string }>({});
 
   useEffect(() => {
-    if (!titledBotGroup || !confirmedTitles?.size) return;
-    const revision = JSON.stringify([titledBotGroup.window.id, titledBotGroup.window.revision]);
-    if (botTitleProjection.current.titles === confirmedTitles && botTitleProjection.current.revision === revision) return;
-    botTitleProjection.current = { titles: confirmedTitles, revision };
-    const edits = windowTitleEdits(titledBotGroup.window, confirmedTitles);
+    const revision = JSON.stringify([titledBotGroup?.window.id, titledBotGroup?.window.revision]);
+    const titles = groupProjectionTitles({ hasGroup: !!titledBotGroup, confirmed: confirmedTitles, revision, last: botTitleProjection.current });
+    if (!titledBotGroup || !titles) return;
+    botTitleProjection.current = { titles, revision };
+    const edits = windowTitleEdits(titledBotGroup.window, titles);
     // A view given another session meanwhile keeps it, and a newer title wins: neither is a failure to report.
     if (edits.length) void windowWorkspace.operateGroup(titledBotGroup.window.id, edits.length === 1 ? edits[0]! : { type: 'batch', operations: edits }).catch(() => {});
   }, [titledBotGroup?.window.id, titledBotGroup?.window.revision, confirmedTitles]);
@@ -117,10 +112,10 @@ export function useSessionTitles(scope: Pick<AppInputs & SessionSuccessionBindin
       if (fork) forkStore.followEditedSide(fork.id, source, target);
       rememberSession(target);
       setSideSessions(values => values.map(item => sessionKey(item) === sessionKey(source) ? target : item));
-      setSideSelections(values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === fromId ? toId : value])));
-      setSideFocus(value => value === fromId ? toId : value);
-      setSideAnchor(value => value === fromId ? toId : value);
-      setDetachedSideRoot(value => value === fromId ? toId : value);
+      setSideSelections(values => rekeySelections(values, fromId, toId));
+      setSideFocus(value => swapKey(value, fromId, toId));
+      setSideAnchor(value => swapKey(value, fromId, toId));
+      setDetachedSideRoot(value => swapKey(value, fromId, toId));
       return true;
     },
   });

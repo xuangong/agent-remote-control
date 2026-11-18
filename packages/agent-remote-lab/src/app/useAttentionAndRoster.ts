@@ -1,4 +1,5 @@
 // Attention, tracking and the bot roster.
+import { attentionDestination, attentionSets, botDirectorySources as botDirectorySourcesOf, keySignature, readableSessions as readableSessionsOf } from '../state/attention-targets.js';
 import { windowPrimaryViewId } from '@orchardworks/agent-remote-protocol';
 import { useOtherSessions, type OtherSessionSource } from '../hooks/useOtherSessions.js';
 import { botActivityLabel, projectBotRoster } from '../bot-roster.js';
@@ -40,21 +41,20 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
   const { accessReady, activated, addressSession, ask, askActivitySessions, baseUrl, beginCatchUp, bindDirectorySession, botBinding, botTargets, closeContext, closeInspector, compactLayoutRef, connections, currentBotSession, directory, directoryDestination, earlierBotSessions, latestEligible, letterRequest, navigation, openAsk, openSession, openWindows, pageVisible, providers, rememberTrackedView, remoteHosts, replicaFor, revealSession, selectedBot, selectedHost, setDetachedSideRoot, setFailure, setNativeTakeover, setSessionNotice, sharedFeeds, showView, sourceStateFor, succession, teamRoster, trackEntryId, trackedViews, transitionRef, transport, userScoped, visibleBots, visibleWindows, windowMode, windowModeRef, windowWorkspace } = scope;
 
   const attention = useSessionAttention(baseUrl, userScoped && accessReady, item => {
-    if (!windowMode) {
-      if (!latestEligible.current.has(sessionKey(item))) return;
+    const destination = attentionDestination(sessionKey(item), {
+      windowMode, eligibleKeys: latestEligible.current, openWindows, keyOf: sessionKey,
+      askTargetKey: session => { const target = ask.entryFor(session, succession.ownerFor(viewKey(session))).record?.target; return target ? sessionKey(target) : undefined; },
+    });
+    if (destination.kind === 'ignore') return;
+    if (destination.kind === 'bot-row') {
       const row = projectBotRoster(windowWorkspace.groups, [], { status: () => 'unknown', current: currentBotSession }).sections
         .flatMap(section => section.rows).find(row => sessionKey(row.session) === sessionKey(item));
       if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
       return;
     }
     showView('workbench'); closeContext(); closeInspector();
-    const target = openWindows.find(session => sessionKey(session) === sessionKey(item));
-    if (target) { revealSession(target); return; }
-    const source = openWindows.find(session => {
-      const entry = ask.entryFor(session, succession.ownerFor(viewKey(session)));
-      return entry.record?.target && sessionKey(entry.record.target) === sessionKey(item);
-    });
-    if (source) { revealSession(source); openAsk(source, sourceStateFor(source)); }
+    if (destination.kind === 'reveal') revealSession(destination.session);
+    else if (destination.kind === 'ask') { revealSession(destination.source); openAsk(destination.source, sourceStateFor(destination.source)); }
     else void openSession(item, undefined, undefined, false, undefined, 'history');
   }, navigation.mode);
 
@@ -104,15 +104,13 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); }
   }
 
-  const eligible = attention.enabled ? windowMode ? [...tracking.sessions, ...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
+  const { eligible, displayed } = attentionSets({ enabled: attention.enabled, windowMode, tracked: tracking.sessions, openWindows, askSessions: askActivitySessions.map(entry => entry.session), botTargets });
 
   latestEligible.current = new Set(eligible.map(sessionKey));
 
-  const displayed = attention.enabled ? windowMode ? [...openWindows, ...askActivitySessions.map(entry => entry.session)] : botTargets : [];
+  const eligibleKeys = keySignature(eligible, sessionKey);
 
-  const eligibleKeys = JSON.stringify([...latestEligible.current].sort());
-
-  const displayedKeys = JSON.stringify([...new Set(displayed.map(sessionKey))].sort());
+  const displayedKeys = keySignature(displayed, sessionKey);
 
   useLayoutEffect(() => {
     attention.notifier.setEligible(eligible);
@@ -146,15 +144,10 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
     return sharedFeeds.subscribe(remind);
   }, [sharedFeeds, windowMode, attention.enabled, attention.notifier, botTargetKeys, onScreenBots]);
 
-  const botDirectorySources = useMemo<OtherSessionSource[]>(() => {
-    const sources: OtherSessionSource[] = [];
-    if (providers.length && directory && selectedHost.id === 'local') for (const provider of providers) sources.push({ id: `local/${provider.providerId}`, hostId: 'local', providerId: provider.providerId, directory, online: true });
-    for (const host of remoteHosts) {
-      const client = host.id === selectedHost.id && directory ? directory : new SessionDirectoryClient(baseUrl, undefined, host.id);
-      for (const provider of host.providers ?? []) sources.push({ id: `${host.id}/${provider.providerId}`, hostId: host.id, providerId: provider.providerId, directory: client, online: host.online });
-    }
-    return [...new Map(sources.map(source => [source.id, source])).values()];
-  }, [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
+  const botDirectorySources = useMemo<OtherSessionSource[]>(() => botDirectorySourcesOf({
+    localProviders: providers, selectedHostId: selectedHost.id, selectedDirectory: directory, hosts: remoteHosts,
+    directoryFor: hostId => new SessionDirectoryClient(baseUrl, undefined, hostId),
+  }), [baseUrl, providers, remoteHosts, directory, selectedHost.id]);
 
   const otherSessions = useOtherSessions(botDirectorySources, !windowMode && activated && accessReady);
 
@@ -171,9 +164,10 @@ export function useAttentionAndRoster(scope: Pick<AppInputs & WorkbenchShellSlic
 
   // A conversation on screen, with the page visible, is read up to its latest reply on every device. In Bot mode it
   // continues into the session before a handoff, whose last reply may still be the latest.
-  const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = windowMode ? visibleWindows
-    : visibleBots.length && botBinding && selectedBot.group && selectedBot.view
-      ? [...visibleBots, botBinding, ...earlierBotSessions(selectedBot.group.window.id, selectedBot.view.id, botBinding)] : [];
+  const readableSessions: Array<Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>> = readableSessionsOf({
+    windowMode, visibleWindows, visibleBots, botSession: selectedBot.group && selectedBot.view ? botBinding : undefined,
+    earlier: () => earlierBotSessions(selectedBot.group!.window.id, selectedBot.view!.id, botBinding!),
+  });
 
   const readableKeys = readableSessions.map(sessionKey).join('\n');
 

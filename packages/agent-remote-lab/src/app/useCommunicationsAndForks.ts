@@ -1,4 +1,5 @@
 // Focus, communications and forks.
+import { otherEndpoint, participantTitle, stackPlan, windowLetterPlan } from '../state/letter-navigation.js';
 import { createWindowView, type WindowEdit, type ProjectedTimelineEntry, type AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
 import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from '../session-communication.js';
@@ -89,7 +90,7 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
       check();
       const known = [...openWindows, ...openedSessionsRef.current].find(session => sessionKey(session) === sessionKey(identity));
       // Native agent addresses identify letter endpoints; they must not rename a saved conversation.
-      const title = favorites.stars.find(session => sessionKey(session) === sessionKey(identity))?.title ?? known?.title ?? identity.title;
+      const title = participantTitle({ favorite: favorites.stars.find(session => sessionKey(session) === sessionKey(identity))?.title, known: known?.title, identity: identity.title });
       const active = connections.find(identity);
       if (active) return { ...known, ...identity, title, agentId: active.agentId };
       if (known && known.agentId === state?.agent?.id && status === 'ready') return { ...known, title };
@@ -127,7 +128,7 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
       }
       if (originView && originWindowId) {
         const sourceKey = sessionKey(source);
-        const endpoint = sourceKey === sessionKey(pair.sender) ? 'recipient' : sourceKey === sessionKey(pair.recipient) ? 'sender' : undefined;
+        const endpoint = otherEndpoint(sourceKey, sessionKey(pair.sender), sessionKey(pair.recipient));
         if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
         const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
         const recipient = endpoint === 'sender' ? source : destination;
@@ -141,20 +142,21 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
         const family = communicationFamily(source);
         const existing = family.find(view => view.binding && sessionKey(view.binding) === sessionKey(destination));
         const operations: WindowEdit[] = [];
+        const letterPlan = windowLetterPlan({ existingDestinationId: existing?.id, endpoint, compact: !!compactLayoutRef.current });
         let destinationId = existing?.id;
-        if (!destinationId) {
+        if (letterPlan.create) {
           const child = { ...createWindowView(crypto.randomUUID(), windowSessionBinding(destination), 'attached'), attachedTo: origin.id };
           destinationId = child.id;
           operations.push({ type: 'view.create', view: child });
         }
-        operations.push({ type: 'view.select', viewId: compactLayoutRef.current || endpoint === 'recipient' ? destinationId : origin.id });
+        operations.push({ type: 'view.select', viewId: letterPlan.select === 'destination' ? destinationId! : origin.id });
         editWindow({ type: 'batch', operations });
         setLetterReveals(values => ({ ...values, [revealSession.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
         return;
       }
       if (compactLayoutRef.current) {
         const sourceKey = sessionKey(source);
-        const endpoint = sourceKey === sessionKey(pair.sender) ? 'recipient' : sourceKey === sessionKey(pair.recipient) ? 'sender' : undefined;
+        const endpoint = otherEndpoint(sourceKey, sessionKey(pair.sender), sessionKey(pair.recipient));
         if (!endpoint) throw new Error('This conversation is not an endpoint of the letter.');
         const destination = await attachParticipant(endpoint === 'sender' ? pair.sender : pair.recipient);
         const observation = await observe(destination);
@@ -172,18 +174,15 @@ export function useCommunicationsAndForks(scope: Pick<AppInputs & WorkbenchShell
       const sender = await attachParticipant(pair.sender);
       const target = await loadSessionCommunication(receiver, entry, controller.signal);
       check();
-      const present = [sender, recipient].every(session => stackPath.slice(stackRange.start, stackRange.end + 1).some(visible => sessionKey(visible) === sessionKey(session)));
-      if (!present) {
-        const root = stackRoot && [sender, recipient].find(session => sessionKey(session) === sessionKey(stackRoot));
-        if (root) selectSide(root, sessionKey(root) === sessionKey(sender) ? recipient : sender);
-        else if ([sender, recipient].every(session => stackPath.some(visible => sessionKey(visible) === sessionKey(session)))) {
-          const last = Math.max(...[sender, recipient].map(session => stackPath.findIndex(visible => sessionKey(visible) === sessionKey(session))));
-          setSideAnchor(viewKey(stackPath[last]!));
-        } else {
-          const origin = sessionKey(source) === sessionKey(recipient) ? recipient : sender;
-          if (!await openSession(origin, undefined, undefined, true)) throw new Error('The sending session could not be opened.');
-          selectSide(origin, sessionKey(origin) === sessionKey(sender) ? recipient : sender);
-        }
+      const plan = stackPlan({ senderKey: sessionKey(sender), recipientKey: sessionKey(recipient), sourceKey: sessionKey(source), rootKey: stackRoot ? sessionKey(stackRoot) : undefined,
+        path: stackPath.map(sessionKey), expanded: stackRange });
+      const participant = (key: string) => sessionKey(sender) === key ? sender : recipient;
+      if (plan.kind === 'select-side') selectSide(participant(plan.from), participant(plan.to));
+      else if (plan.kind === 'anchor') setSideAnchor(viewKey(stackPath[plan.index]!));
+      else if (plan.kind === 'open-origin') {
+        const origin = participant(plan.from);
+        if (!await openSession(origin, undefined, undefined, true)) throw new Error('The sending session could not be opened.');
+        selectSide(origin, participant(plan.to));
       }
       setSideFocus(viewKey(viewSession(recipient))); showView('workbench');
       setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));

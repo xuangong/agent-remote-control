@@ -1,4 +1,5 @@
 // Opening, creating and binding sessions.
+import { bindPlan, focusesVisibleSession, returnsToParent } from '../state/session-binding.js';
 import { parseWindowFeature } from '../window-feature-views.js';
 import { createWindowView, hasBotAppearance, isBotView, rebindsBot, type Team, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import { windowSessionBinding } from '../window-workspace.js';
@@ -60,7 +61,7 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
     if (!directory || transitionRef.current) return false;
     rememberTrackedView();
     const selection = { ...item, hostId: item.hostId ?? selectedHost.id };
-    if (!targetPrimaryViewId && placement !== 'primary' && !primarySlot && sessionIntent !== 'history' && keepOriginal === undefined && !restoreView && !takeOver && !onRestoring) {
+    if (focusesVisibleSession({ targetPrimaryViewId, placement, primarySlot, sessionIntent, keepOriginal, restoreView: !!restoreView, takeOver, onRestoring: !!onRestoring })) {
       const visible = familyPath.find(entry => sessionKey(entry) === sessionKey(selection));
       if (visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner) {
         setSideFocus(viewKey(visible));
@@ -70,8 +71,7 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
     }
     // Returning to a native parent remains inside the tracked family. Other
     // primary navigation must not save its layout over the Track we just left.
-    const returningToParent = sessionIntent !== 'history' && !primarySlot && !restoreView
-      && ancestors.some(ancestor => sessionKey(ancestor) === sessionKey(selection));
+    const returningToParent = returnsToParent({ sessionIntent, primarySlot, restoreView: !!restoreView, isAncestor: ancestors.some(ancestor => sessionKey(ancestor) === sessionKey(selection)) });
     if (!returningToParent) trackedViews.select();
     pendingViewRestore.current = primarySlot && restoreView ? { scope: baseUrl, transport, slotId: primarySlot, read: restoreView } : undefined;
     setDetachedSideRoot(undefined);
@@ -112,20 +112,20 @@ export function useSessionOpening(scope: Pick<AppInputs & HostAndStackSlice & Vi
     const shownGroup = windowWorkspace.readGroup(current.id);
     // Opening another session over a bot opens it beside (rule 6), and always where the group would refuse the edit (rule 1):
     // in a group with bot details, a bot takes neither another session nor a history or subagent view of one.
-    if (shownGroup && isBotView(view) && (rebindsBot(shownGroup, view, windowSessionBinding(session))
-      || hasBotAppearance(shownGroup) && session.sessionIntent !== 'history' && windowBindingKey(view.binding) !== windowBindingKey(windowSessionBinding(session)))) {
-      const binding = windowSessionBinding(session);
-      const existing = current.views.find(candidate => isBotView(candidate) && windowBindingKey(candidate.binding) === windowBindingKey(binding));
-      if (existing) {
-        await windowWorkspace.operate({ type: 'view.select', viewId: existing.id });
-        return existing.placement === 'primary'
-          ? windowSession.openPrimary(session, session.agentId ? session as OpenedSession : undefined, false, undefined, undefined, existing.id, session.sessionIntent) : true;
-      }
+    const plan = bindPlan({ hasGroup: !!shownGroup, targetIsBot: isBotView(view), targetId: view.id, targetPlacement: view.placement,
+      rebindsBot: !!shownGroup && rebindsBot(shownGroup, view, windowSessionBinding(session)), botAppearance: !!shownGroup && hasBotAppearance(shownGroup),
+      sessionIntent: session.sessionIntent, sameSession: isBotView(view) && windowBindingKey(view.binding) === windowBindingKey(windowSessionBinding(session)),
+      existingBot: current.views.find(candidate => isBotView(candidate) && windowBindingKey(candidate.binding) === windowBindingKey(windowSessionBinding(session))) });
+    if (plan.kind === 'select-existing') {
+      await windowWorkspace.operate({ type: 'view.select', viewId: plan.viewId });
+      return plan.primary
+        ? windowSession.openPrimary(session, session.agentId ? session as OpenedSession : undefined, false, undefined, undefined, plan.viewId, session.sessionIntent) : true;
+    }
+    if (plan.kind === 'open-beside') {
       // A Side's place holds sessions of its source, so another session takes a primary group.
-      const placement = view.placement === 'dock' || view.placement === 'float' ? view.placement : 'primary';
-      const beside = createWindowView(crypto.randomUUID(), undefined, placement);
+      const beside = createWindowView(crypto.randomUUID(), undefined, plan.placement);
       await windowWorkspace.operate({ type: 'batch', operations: [{ type: 'view.create', view: beside },
-        ...(placement === 'dock' ? [{ type: 'view.move' as const, viewId: beside.id, afterId: view.id }] : []), { type: 'view.select', viewId: beside.id }] });
+        ...(plan.afterId ? [{ type: 'view.move' as const, viewId: beside.id, afterId: plan.afterId }] : []), { type: 'view.select', viewId: beside.id }] });
       target = beside; expected = null;
     }
 

@@ -9,6 +9,7 @@ import { PROTOCOL_VERSION, type CommittedSuccessionProjection, type SuccessionAs
 import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
 import { relaySocket, webRequest, writeResponse } from '@orchardworks/agent-relay-node/remote-host-broker';
+import { WORKBENCH_DIST } from './workbench-dist';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const native = (nativeSessionId: string) => ({ controllerId: 'browser-installation', providerId: 'recorded', nativeSessionId });
@@ -50,7 +51,7 @@ async function fixture(options: { materializedContext?: boolean } = {}) {
   expect(initial.tenants[0]!.broker.associations?.version).toBe(6);
   let saved: HostedRelayState = initial;
   const gateway = createHostedRelay({ ...auth, ...(options.materializedContext ? { successionEnrollment: true as const } : {}), storage: { initial, async commit(value) { saved = value; } }, scheduler: { schedule() {}, cancel() {} } });
-  const serve = await createGatewayStaticPages(resolve('dist'), { origin });
+  const serve = await createGatewayStaticPages(WORKBENCH_DIST, { origin });
   const reads: string[] = [];
   server.on('request', (incoming, outgoing) => { void (async () => {
     reads.push(incoming.url!);

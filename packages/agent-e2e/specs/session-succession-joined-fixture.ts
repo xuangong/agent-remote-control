@@ -15,6 +15,7 @@ import { createAgentHostRuntime } from '@orchardworks/agent-remote-controller';
 import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from '@orchardworks/agent-relay-core';
 import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
 import { relaySocket, webRequest, writeResponse } from '@orchardworks/agent-relay-node/remote-host-broker';
+import { WORKBENCH_DIST } from './workbench-dist';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 class JoinedNative implements AgentSession {
@@ -110,7 +111,7 @@ export async function joinedFixture(options: { omitDispatchAcceptance?: boolean;
       costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord },
     storage: { initial: saved, async commit(value) { saved = structuredClone(value); } }, scheduler: { schedule() {}, cancel() {} } });
   let gateway = makeGateway();
-  const serve = await createGatewayStaticPages(resolve('dist'), { origin });
+  const serve = await createGatewayStaticPages(WORKBENCH_DIST, { origin });
   const actions: Array<{ action: string; body: Record<string, unknown>; result?: unknown }> = [];
   const enrollmentActions: Array<{ action: string; operationId?: string }> = [];
   server.on('request', (incoming, outgoing) => { void (async () => {

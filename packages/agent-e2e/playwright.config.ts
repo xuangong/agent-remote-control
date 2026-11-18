@@ -7,6 +7,9 @@ delete process.env.NO_COLOR;
 
 const relayPort = Number(process.env.AGENT_REMOTE_TEST_RELAY_PORT ?? 5910);
 const webPort = Number(process.env.AGENT_REMOTE_TEST_WEB_PORT ?? 6175);
+// The specs that pair their own Host with the Relay read its address from the environment.
+process.env.AGENT_REMOTE_TEST_RELAY_PORT ??= String(relayPort);
+process.env.AGENT_REMOTE_TEST_WEB_PORT ??= String(webPort);
 const browserExecutable = process.env.AGENT_REMOTE_TEST_BROWSER;
 const mode = process.env.AGENT_REMOTE_TEST_INTERACTIONS === '1' ? 'interactions' : process.env.DSH_REPO !== undefined
   ? 'dsh'

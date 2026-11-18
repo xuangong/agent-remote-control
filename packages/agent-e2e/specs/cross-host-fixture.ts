@@ -14,6 +14,7 @@ import { createAgentHostRuntime, type AgentHostProviderRegistration } from '@orc
 import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from '@orchardworks/agent-relay-core';
 import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
 import { relaySocket, webRequest, writeResponse } from '@orchardworks/agent-relay-node/remote-host-broker';
+import { WORKBENCH_DIST } from './workbench-dist';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -125,7 +126,7 @@ export async function crossHostFixture(hostSpecs: readonly HostSpec[]) {
     // A real timer, as production's alarm: the owner's access is renewed before its one-minute grant runs out, so the
     // fixture keeps its Hosts past a minute.
     storage: { initial: saved, async commit(value) { saved = structuredClone(value); } }, scheduler: createTimerRelayScheduler() });
-  const serve = await createGatewayStaticPages(resolve('dist'), { origin });
+  const serve = await createGatewayStaticPages(WORKBENCH_DIST, { origin });
   server.on('request', (incoming, outgoing) => { void (async () => {
     const result = await gateway.fetch(webRequest(incoming, new URL(incoming.url!, origin)));
     if (result) return writeResponse(outgoing, result);

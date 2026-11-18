@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { expect, it } from 'vitest';
-import { RemoteHostControlClient } from '../headless.js';
+import { RemoteHostControlClient } from '../index.js';
 const work = { id: 'work/one', revision: 1, title: 'Delivery', providerId: 'codex', mainNativeSessionId: 'main', phase: 'clarifying', waiting: 'none', paused: false, summary: '', nextAction: '', document: '', acceptance: '', evidence: [], createdAt: '2026-10-09', updatedAt: '2026-10-09', nextCheckAt: 0 };
 it('uses scoped Host routes, validates work responses and never replays a failed mutation', async () => {
   const requests: Array<{ method?: string; path?: string; body: string }> = [];

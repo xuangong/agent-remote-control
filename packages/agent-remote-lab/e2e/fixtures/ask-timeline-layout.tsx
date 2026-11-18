@@ -1,8 +1,8 @@
 import { createRoot } from 'react-dom/client';
-import { createReplicaState } from '@orchardworks/agent-remote-web';
-import { AgentTimeline, TimelineDisplay } from '@orchardworks/agent-remote-web/react';
+import { createReplicaState } from '@orchardworks/agent-client';
+import { AgentTimeline, TimelineDisplay } from '@orchardworks/agent-client-web/react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
-import '@orchardworks/agent-remote-web/styles.css';
+import '@orchardworks/agent-client-web/styles.css';
 
 const description = 'Read the source session conversation, including the latest messages and tool activity, to explain the current implementation and verification results. Return enough context to answer the question without changing the source session.';
 const items: AgentTimelineItem[] = [

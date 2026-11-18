@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type AgentChildSession } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';
 import { render, unmount } from './test/setup.js';

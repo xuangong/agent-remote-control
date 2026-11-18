@@ -7,14 +7,10 @@ import type {
   ProjectedTimelineEntry,
 } from '@orchardworks/agent-remote-protocol';
 
-import {
-  applyHistoryPage,
-  createReplicaState,
-  reduceTimelineEvent,
-} from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { RendererRegistry } from './renderer-registry.js';
+import { applyHistoryPage, createReplicaState, reduceTimelineEvent } from '@orchardworks/agent-client';
 
 function ThrowDuringRender(): never {
   throw new Error('Extension render failed');

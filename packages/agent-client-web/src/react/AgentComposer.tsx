@@ -1,8 +1,6 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '../image-drafts.js';
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { AgentReplicaState } from '../replica/types.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions, ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { AgentCommandDetails } from './AgentCommandDetails.js';
@@ -19,6 +17,7 @@ import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
 import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
+import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface PendingFirstInputContext {
   state: 'restoring' | 'pending' | 'dispatching' | 'accepted' | 'unknown' | 'unavailable';

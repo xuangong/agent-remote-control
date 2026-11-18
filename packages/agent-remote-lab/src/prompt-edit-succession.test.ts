@@ -3,7 +3,7 @@ import { Blob as NativeBlob } from 'node:buffer';
 import { afterEach, expect, it, vi } from 'vitest';
 import { readPromptEditReservation, retainPromptEditReservation } from './prompt-edit-intent.js';
 import { retainPrefixEdit, readPrefixEdit, finishPrefixEdit } from './prompt-edit-succession.js';
-import { readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
+import { readImageDraft, writeImageDraft } from '@orchardworks/agent-client-web/browser';
 import { conversationSessionStorage } from './conversation-storage.js';
 
 import { persistedPrompt } from './test/image-draft-storage.js';

@@ -1,4 +1,4 @@
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 
 /** Retains conversation replicas independently from durable drafts and reading positions. */
 export class ReplicaCache {

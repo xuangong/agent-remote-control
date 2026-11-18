@@ -2,11 +2,9 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import type { AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
-import { remoteSessionState } from '../client/session-state.js';
 import { AgentSessionSettings, type SessionControlView } from './AgentSessionSettings.js';
+import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 
 const state: AgentReplicaState = { ...createReplicaState(), agent: {
   id: 'session', providerId: 'test', createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z', status: 'idle', activeTurn: null,

@@ -6,7 +6,7 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
-import { watchList, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
+import { watchList, type TpmActionInput } from '@orchardworks/agent-client';
 import type { OpenedSession } from '../directory-client.js';
 import type { SessionEntry } from '../session-tree.js';
 

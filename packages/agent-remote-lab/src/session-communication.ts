@@ -1,4 +1,4 @@
-import { timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { timelineEntryKey, type AgentReplicaState } from '@orchardworks/agent-client';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from './directory-client.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
@@ -62,7 +62,7 @@ export function findSessionCommunication(state: AgentReplicaState, entry: Projec
 
 /** Load by native message identity, preserving local timeline order even when timestamps coincide. */
 export async function loadSessionCommunication(
-  connection: { client: import('@orchardworks/agent-remote-web').RemoteSessionClient; replica: import('@orchardworks/agent-remote-web').AgentReplica },
+  connection: { client: import('@orchardworks/agent-client').RemoteSessionClient; replica: import('@orchardworks/agent-client').AgentReplica },
   entry: ProjectedTimelineEntry, signal: AbortSignal, endpoint: 'sender' | 'recipient' = 'recipient',
 ): Promise<{ key: string }> {
   await waitForCommunicationSession(connection.client, signal);
@@ -81,7 +81,7 @@ export async function loadSessionCommunication(
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 }
-export function waitForCommunicationSession(client: import('@orchardworks/agent-remote-web').RemoteSessionClient, signal: AbortSignal): Promise<void> {
+export function waitForCommunicationSession(client: import('@orchardworks/agent-client').RemoteSessionClient, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     let stop = () => {}; let done = false;
     const finish = (error?: unknown) => { if (done) return; done = true; stop(); signal.removeEventListener('abort', abort); error ? reject(error) : resolve(); };

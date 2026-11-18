@@ -6,7 +6,7 @@ import { executeCommand, type CliEnvironment, type OutputFormat, type ParsedInvo
 import { DebuggerError, remoteOperationFailure } from './errors.js';
 import type { DebuggerIo } from './output.js';
 import { writeStructuredError } from './output.js';
-import { RemoteOperationError } from '@orchardworks/agent-remote-web/headless';
+import { RemoteOperationError } from '@orchardworks/agent-client';
 
 export type { CliEnvironment } from './commands.js';
 

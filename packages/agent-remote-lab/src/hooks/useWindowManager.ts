@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import type { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { isWindowSessionBinding, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 
 interface ManagerState {

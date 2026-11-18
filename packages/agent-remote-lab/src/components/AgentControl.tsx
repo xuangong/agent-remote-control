@@ -1,5 +1,5 @@
 import type { WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
-import type { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import type { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { useWindowManager } from '../hooks/useWindowManager.js';
 
 /**

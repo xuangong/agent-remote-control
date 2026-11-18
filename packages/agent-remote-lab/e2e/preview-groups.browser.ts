@@ -10,7 +10,7 @@ it.each(['chromium', 'webkit'] as const)('keeps Host groups and pinned mapping a
   const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8');
   const source = `
     import React from 'react'; import {createRoot} from 'react-dom/client';
-    import {HostPreviewGroups} from './components/HostPreviewGroups.tsx'; import {notifyFeedReopened} from '@orchardworks/agent-remote-web';
+    import {HostPreviewGroups} from './components/HostPreviewGroups.tsx'; import {notifyFeedReopened} from '@orchardworks/agent-client';
     const pinned = new Set(); let inactive = false;
     const client = {
       async snapshot(host) {return {routing:'subdomain', pinnedNames: inactive && pinned.has(host) ? [{nameId:'preview-'+host,target:'http://localhost:5173',tunnelOrigin:'https://rose-seal-233f1df48bea.agents.example.test'}] : [], registrations:inactive ? [] : [{

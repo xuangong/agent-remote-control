@@ -1,4 +1,4 @@
-import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
+import { notifyFeedReopened } from '@orchardworks/agent-client';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';

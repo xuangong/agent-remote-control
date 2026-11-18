@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, createElement, useContext, useState } from 'react';
 import { vi } from 'vitest';
 import { PROTOCOL_VERSION, applyGroupOperation, createWindowView, type WindowGroup, type SessionSuccessionReplay, type ProjectedTimelineEntry, type SessionTitleUpdate } from '@orchardworks/agent-remote-protocol';
-import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-remote-web';
+import { SessionDraftStore, SessionOutboxStore, SessionReadStore, SessionStateStore, WindowWorkspaceClient, type RemoteTransportListener, type SessionDraftsFrame, type SessionOutboxFrame, type SessionReadsFrame, type SessionStatesFrame } from '@orchardworks/agent-client';
 import { App, type LabTransport } from '../App.js';
 import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';
 import * as workspaceHooks from '../hooks/useWindowWorkspace.js';

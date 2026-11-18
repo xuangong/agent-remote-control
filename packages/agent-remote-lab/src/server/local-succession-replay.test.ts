@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web/headless';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { createProtocolValidationServer } from '../server.js';
 import { createDebuggerRuntime } from '../../../agent-remote-debugger/src/runtime.js';

@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { SessionAttribution, SessionDescription } from '@orchardworks/agent-remote-web';
+import type { SessionAttribution, SessionDescription } from '@orchardworks/agent-client';
 import type { SessionEntry } from './session-tree.js';
 
 /** Product owners supply descriptions; containers resolve their navigation. */

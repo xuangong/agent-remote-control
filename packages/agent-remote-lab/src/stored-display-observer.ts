@@ -1,4 +1,4 @@
-import type { AgentReplica } from '@orchardworks/agent-remote-web';
+import type { AgentReplica } from '@orchardworks/agent-client';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { pinStoredSession, saveStoredDisplay } from './stored-display.js';

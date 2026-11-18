@@ -3,7 +3,7 @@ import { SessionLink, SessionWorkspaceContext } from '../../src/components/Sessi
 import { SessionConnectionNotice, sessionConnectionFailure } from '../../src/components/SessionConnectionNotice.js';
 import { DirectoryError } from '../../src/directory-client.js';
 import '../../src/ui/tokens.css';
-import '@orchardworks/agent-remote-web/styles.css';
+import '@orchardworks/agent-client-web/styles.css';
 import '../../src/app.css';
 
 createRoot(document.getElementById('root')!).render(<main style={{ padding: 16 }}>

@@ -2,10 +2,10 @@
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 const binding = { locator: 'native-image:cached', resourceId: 'picture', status: 'available' as const };
 const bytes = { status: 'available' as const, mediaType: 'image/png', byteLength: 1, sha256: 'picture', contentBase64: 'AA==' };

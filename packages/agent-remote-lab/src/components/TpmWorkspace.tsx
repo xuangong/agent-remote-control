@@ -1,8 +1,8 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
 import type { SessionTodoDecision } from '@orchardworks/agent-remote-protocol';
-import type { SessionTodoPanelProps } from '@orchardworks/agent-remote-web/react';
-import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { CommunicationNavigationContext, MarkdownContent, SessionAttributions } from '@orchardworks/agent-remote-web/react';
+import type { SessionTodoPanelProps } from '@orchardworks/agent-client-web/react';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-client';
+import { CommunicationNavigationContext, MarkdownContent, SessionAttributions } from '@orchardworks/agent-client-web/react';
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import type { OpenedSession } from '../directory-client.js';
 import type { TpmAction, TpmItem } from '../hooks/useTpmWork.js';

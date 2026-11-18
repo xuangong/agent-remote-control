@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { SessionStateStore } from '@orchardworks/agent-remote-web';
+import { SessionStateStore } from '@orchardworks/agent-client';
 import { sharedReminders } from './bot-attention.js';
 
 const bot = (id: string) => ({ hostId: 'host', providerId: 'codex', nativeSessionId: id, title: id, agentId: '' });

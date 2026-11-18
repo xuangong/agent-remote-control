@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer } from 'react';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { tpmMainTarget, type TpmMainSession } from '../tpm-main-sessions.js';

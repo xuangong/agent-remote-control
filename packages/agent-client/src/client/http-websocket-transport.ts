@@ -21,7 +21,7 @@ import {
   type TimelineDirection,
 } from '@orchardworks/agent-remote-protocol';
 
-import { watchPageResume } from './page-resume.js';
+import { watchPageResume } from '../page-lifecycle.js';
 import { SessionChannelPool } from './session-channel-transport.js';
 import { SessionStateStore, type SessionStateRef, type SessionStatesView } from './session-states.js';
 import { SessionReadStore, type SessionReadsView } from './session-reads.js';

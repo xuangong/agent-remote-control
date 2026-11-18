@@ -5,7 +5,7 @@ import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { RemoteTeamClient } from '../../agent-remote-web/src/client/remote-team-client.js';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
 import { isTeam as isLegacyTeam } from '../../agent-remote-protocol/test/fixtures/legacy-team/team.js';
 import { decodeRemoteHostUplinkMessage as decodeLegacy } from '../../agent-remote-protocol/test/fixtures/legacy-team/remote-host-uplink.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';

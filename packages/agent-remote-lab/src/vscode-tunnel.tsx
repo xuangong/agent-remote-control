@@ -1,5 +1,5 @@
 import { workspaceFetch } from './workspace-access.js';
-import { watchList } from '@orchardworks/agent-remote-web';
+import { watchList } from '@orchardworks/agent-client';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { parseVscodeTunnelSnapshot, type VscodeTunnelSnapshot } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from './components/HostPairing.js';

@@ -2,11 +2,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay, type TimelineDisplayMode } from './TimelineDisplay.js';
 import { RendererRegistry } from './renderer-registry.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 const items: AgentTimelineItem[] = [
   { type: 'user_message', text: 'Please **fix** this.' },

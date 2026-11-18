@@ -20,12 +20,12 @@ beforeAll(async () => {
     import React, { useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { AgentTimeline } from '../../agent-remote-web/src/react/AgentTimeline.tsx';
-    import { AgentActivityStatus } from '../../agent-remote-web/src/react/AgentActivityStatus.tsx';
-    import { remoteSessionState } from '../../agent-remote-web/src/client/session-state.ts';
-    import { AgentReplica } from '../../agent-remote-web/src/replica/store.ts';
-    import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
-    import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '../../agent-remote-web/src/session-record.ts';
+    import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
+    import { AgentActivityStatus } from '../../agent-client-web/src/react/AgentActivityStatus.tsx';
+    import { remoteSessionState } from '../../agent-client/src/client/session-state.ts';
+    import { AgentReplica } from '../../agent-client/src/replica/store.ts';
+    import { deviceStore } from '@orchardworks/agent-client/device-store';
+    import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '../../agent-client/src/session-record.ts';
 
     const scope = 'https://relay.example/u/alice/';
     const identity = ['host', 'copilot', 'one'];

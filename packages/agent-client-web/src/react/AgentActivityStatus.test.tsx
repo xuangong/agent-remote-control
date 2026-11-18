@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
 import type { AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
-import { remoteSessionState } from '../client/session-state.js';
-import { AgentReplica } from '../replica/store.js';
 import { render } from '../test/setup.js';
 import { AgentActivityStatus } from './AgentActivityStatus.js';
+import { remoteSessionState, AgentReplica } from '@orchardworks/agent-client';
 
 const snapshot = (): AgentSnapshotPayload => ({
   id: 'agent-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null,

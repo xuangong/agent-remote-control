@@ -27,7 +27,7 @@ it('renders pending images in their original positions and uses authorized previ
 });
 
 it('explains a retry the Host could not settle in plain words, as the message records it, rather than the Host\'s raw reply', async () => {
-  const { RemoteOperationError } = await import('../client/transport.js');
+  const { RemoteOperationError } = await import('@orchardworks/agent-client');
   const raw = 'The operation may have reached the native runtime. Inspect native state before creating a new intent.';
   const guidance = 'This message may not have arrived. If it is not in the conversation, Retry sends it again.';
   const message = { id: 'unsure', agentId: 'one', text: 'Ship it', status: 'unconfirmed' as const, afterKey: 'epoch-start:epoch', error: 'Delivery is not confirmed. Check the conversation before sending again.' };

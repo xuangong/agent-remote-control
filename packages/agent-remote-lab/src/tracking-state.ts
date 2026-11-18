@@ -1,6 +1,6 @@
 import { clearCacheOnClose, conversationLocalStorage } from './conversation-storage.js';
 import type { AgentStatus, TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 import { validSessionStar, starKey, type SessionStar } from '@orchardworks/agent-remote-protocol/model';
 export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;

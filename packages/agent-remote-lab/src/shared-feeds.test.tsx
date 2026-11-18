@@ -1,6 +1,6 @@
 import { act, createElement } from 'react';
 import { expect, it, vi } from 'vitest';
-import { SessionOutboxStore, SessionStateStore, type SessionStatesView } from '@orchardworks/agent-remote-web';
+import { SessionOutboxStore, SessionStateStore, type SessionStatesView } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { SharedFeeds, SharedFeedsContext, useSharedFeed, useSharedFeedsSource, type SharedFeedsTransport } from './shared-feeds.js';
 import { render, unmount } from './test/setup.js';

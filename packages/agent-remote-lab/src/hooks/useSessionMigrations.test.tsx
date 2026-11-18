@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SessionMigration } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { useSessionMigrations } from './useSessionMigrations.js';
 const from = { hostId: 'host', providerId: 'codex', nativeSessionId: 'old', agentId: 'old-agent', title: 'Conversation' };

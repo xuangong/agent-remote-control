@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 
-import type { AgentReplicaState } from '../replica/types.js';
 import { ImagePreview } from './ImagePreview.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface ResourceCardProps {
   readonly binding: ResourceBinding;

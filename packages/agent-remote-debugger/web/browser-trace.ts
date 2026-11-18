@@ -1,4 +1,4 @@
-import type { RemoteProtocolObservation } from '@orchardworks/agent-remote-web';
+import type { RemoteProtocolObservation } from '@orchardworks/agent-client';
 
 /** Best-effort metadata, separate from the public control and recovery protocol. */
 export function createBrowserTrace() {

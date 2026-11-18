@@ -17,7 +17,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     import React from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
     import { App } from './App.tsx';
-    import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+    import { HttpWebSocketTransport } from '@orchardworks/agent-client';
     import { SessionDirectoryClient } from './directory-client.ts';
     import { saveLastSession } from './conversation-recovery.tsx';
     const base = ${JSON.stringify(baseUrl)};

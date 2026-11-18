@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
 import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type AgentStreamMessage } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
 import { createProtocolValidationServer } from './server.js';
 
 it.each([

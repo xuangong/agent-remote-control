@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-remote-web';
+import { watchPageResume } from '@orchardworks/agent-client';
 import { DirectoryError } from './directory-client.js';
 
 /**

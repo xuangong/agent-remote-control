@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react';
-import { excerptMessageCount } from '@orchardworks/agent-remote-web/react';
+import { excerptMessageCount } from '@orchardworks/agent-client-web/react';
 import { removeQuotes, useViewQuotes } from '../session-quotes.js';
 import './session-quotes.css';
 

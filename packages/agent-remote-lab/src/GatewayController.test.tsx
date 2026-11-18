@@ -337,7 +337,7 @@ it('removes local content when another tab signs out', async () => {
 });
 
 it('shows stored rows on a cached unexpired lease before the status answers, and removes them and the records when the Relay answers 401', async () => {
-  const { deviceStore } = await import('@orchardworks/agent-remote-web/device-store');
+  const { deviceStore } = await import('@orchardworks/agent-client/device-store');
   const { saveStoredDisplay, readStoredDisplay } = await import('./stored-display.js');
   const { replicaState } = await import('./test/fixtures.js');
   const basePath = '/u/' + 'b'.repeat(64) + '/', scope = window.location.origin + basePath;

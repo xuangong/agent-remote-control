@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, it } from 'vitest';
 
 const lab = fileURLToPath(new URL('..', import.meta.url));
-const shared = fileURLToPath(new URL('../../../agent-remote-web/src/styles.css', import.meta.url));
+const shared = fileURLToPath(new URL('../../../agent-client-web/src/styles.css', import.meta.url));
 const literal = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|oklch|oklab|lab|lch|color)\(|:\s*(?:white|black)\b/g;
 
 function stylesheets(directory: string): string[] {

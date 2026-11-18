@@ -2,9 +2,9 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 function entry(seq: number, turnId: string | undefined, text: string, withdrawn = false): ProjectedTimelineEntry {
   return { providerId: 'claude', ...(turnId ? { turnId } : {}), item: { type: 'user_message', text, messageId: text, ...(withdrawn ? { withdrawn: { reason: 'stopped' as const } } : {}) }, resources: [],

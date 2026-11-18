@@ -1,7 +1,7 @@
 import { act, useEffect, useState } from 'react';
 import { afterEach, expect, it } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { render, unmount } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionDirectoryClient } from '../directory-client.js';

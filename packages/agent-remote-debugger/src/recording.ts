@@ -1,9 +1,5 @@
 import { decodeServerMessage, PROTOCOL_VERSION, type HistoryPage } from '@orchardworks/agent-remote-protocol';
-import {
-  applyAgentSnapshot, applyHistoryPage, applyInteractionRequested, applyInteractionResolved,
-  applyResourceUpdate, createReplicaState, resetTimeline,
-  type AgentReplicaState, type RemoteSessionStatus,
-} from '@orchardworks/agent-remote-web/headless';
+import { applyAgentSnapshot, applyHistoryPage, applyInteractionRequested, applyInteractionResolved, applyResourceUpdate, createReplicaState, resetTimeline, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { DebuggerRecord } from './records.js';
 
 export interface SessionRecording {

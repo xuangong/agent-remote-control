@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, webcrypto } from 'node:crypto';
 import type {
   AgentSnapshot,
@@ -22,6 +22,9 @@ import type {
   RemoteOperationError,
   RemoteTransportListener,
 } from './transport.js';
+import { stubBrowserPage } from '../testing/page.js';
+const browserPage = stubBrowserPage();
+beforeEach(() => browserPage.reset());
 
 const capabilities = {
   history: true,
@@ -394,7 +397,7 @@ describe('RemoteSessionClient', () => {
     expect(transport.connections).toBe(1);
     expect(client.getSessionState().connection).toBe('unavailable');
     expect(replica.getState().diagnostics.at(-1)).toEqual({ code: 'session_unavailable', message: reason, recoverable: false });
-    window.dispatchEvent(new Event('online'));
+    browserPage.window.dispatchEvent(new Event('online'));
     await transport.settle();
     expect(transport.connections).toBe(2);
     expect(statuses.at(-1)).toBe('connecting');

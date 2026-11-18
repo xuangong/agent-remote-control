@@ -14,7 +14,7 @@ import {
   type AgentManagerEvent,
   type ResourceStore,
 } from '@orchardworks/agent-session-runtime';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 
 import { createAgentRemoteRelay as createSourceAgentRemoteRelay } from '../../agent-session-runtime/src/relay.js';
 

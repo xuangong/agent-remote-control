@@ -1,7 +1,7 @@
 import { useFeedbackToast } from './Toast.js';
 import { Fragment, type ReactElement, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
-import { createTimelineRenderModel, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';
+import { createTimelineRenderModel, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 import { traceItemLabel, traceItemLabels, traceItemStatus, traceItemSummary, traceSequence, traceSessionReferences, type TraceEntryRequest } from '../trace-model.js';
 import { TraceEntryDetails } from './TraceEntryDetails.js';
 import { TraceSessionLinks } from './TraceSessionLinks.js';

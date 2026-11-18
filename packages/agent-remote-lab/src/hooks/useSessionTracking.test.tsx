@@ -1,6 +1,6 @@
 import { act, useEffect, useLayoutEffect, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, RemoteActivityClient, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';

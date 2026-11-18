@@ -1,6 +1,6 @@
 import { useWindowLayout } from '../window-workspace-context.js';
 import { useState } from 'react';
-import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import type { TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
 import type { SessionDisplayPreferences } from '../components/SessionViewOptions.js';
 import { clearCacheOnClose, conversationLocalStorage } from '../conversation-storage.js';
 import { recoveryGeneration } from '../conversation-recovery.js';

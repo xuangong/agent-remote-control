@@ -7,7 +7,7 @@ import { conversationSessionStorage } from '../conversation-storage.js';
 import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
-import type { SessionStatesView } from '@orchardworks/agent-remote-web';
+import type { SessionStatesView } from '@orchardworks/agent-client';
 import { Avatar } from '../ui/Avatar.js';
 import { useSharedFeed } from '../shared-feeds.js';
 

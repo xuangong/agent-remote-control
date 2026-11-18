@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import type { TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
 import { useSessionMenuLayer } from '../hooks/useSessionMenuLayer.js';
 
 export interface SessionDisplayPreferences {

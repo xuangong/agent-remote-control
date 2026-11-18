@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentReplicaState } from '../replica/types.js';
-import { findTimelineMatches, type TimelineSearchMatch, type TimelineSearchProgress, type TimelineSearchScope } from '../client/timeline-search.js';
-import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import type { SessionViewActions } from './session-view-actions.js';
+import { type AgentReplicaState, findTimelineMatches, type TimelineSearchMatch, type TimelineSearchProgress, type TimelineSearchScope, timelineEntryKey } from '@orchardworks/agent-client';
 
 interface SearchState extends TimelineSearchProgress {
   query: string;

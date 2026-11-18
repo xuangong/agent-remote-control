@@ -1,5 +1,5 @@
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
-import { HttpWebSocketTransport, type WebSocketLike } from '../../../agent-remote-web/src/headless.js';
+import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as remote from '../index.js';
 

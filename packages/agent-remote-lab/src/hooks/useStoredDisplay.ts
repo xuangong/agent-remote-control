@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { loadStoredDisplay, readStoredDisplay, sessionIdentity } from '../stored-display.js';
 import { storedRowsRelay, subscribeStoredRows } from '../workspace-access.js';

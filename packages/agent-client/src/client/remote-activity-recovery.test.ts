@@ -4,11 +4,12 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { PROTOCOL_VERSION, type SessionChannelClientMessage, type SessionChannelServerMessage } from '@orchardworks/agent-remote-protocol';
 import { HttpWebSocketTransport } from './http-websocket-transport.js';
 import { RemoteActivityClient, type RemoteActivityState } from './remote-activity-client.js';
+import { installPageLifecycle, installStubbedGlobalPage } from '../testing/page.js';
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  vi.unstubAllGlobals();
+  vi.unstubAllGlobals(); installPageLifecycle();
   vi.useRealTimers();
 });
 
@@ -17,6 +18,7 @@ async function activityChannel(initiallyHidden: boolean) {
   const document = Object.assign(new EventTarget(), { visibilityState: initiallyHidden ? 'hidden' : 'visible' });
   vi.stubGlobal('window', new EventTarget());
   vi.stubGlobal('document', document);
+  installStubbedGlobalPage();
   const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
   await new Promise<void>(resolve => wss.once('listening', resolve));
   const sockets: WebSocket[] = [];

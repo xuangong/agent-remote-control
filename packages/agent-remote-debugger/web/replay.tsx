@@ -1,7 +1,7 @@
-import type { SessionViewActions } from '@orchardworks/agent-remote-web/react';
+import type { SessionViewActions } from '@orchardworks/agent-client-web/react';
 import { RecordingPicker } from './recording-picker.js';
 import { memo, useEffect, useState } from 'react';
-import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import { DebugSessionView, DebugWorkbench } from './session-view.js';
 import { RecordingPlayer, type SessionRecording } from '../src/recording.js';
 

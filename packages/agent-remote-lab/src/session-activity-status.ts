@@ -1,5 +1,5 @@
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
-import type { SessionStateRef, SessionStatesView } from '@orchardworks/agent-remote-web';
+import type { SessionStateRef, SessionStatesView } from '@orchardworks/agent-client';
 import { sessionKey } from './session-tree.js';
 import type { SessionObservation } from './tracking-state.js';
 

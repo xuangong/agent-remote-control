@@ -1,7 +1,5 @@
-/** Browser lifecycle and recovery helpers without loading a Remote session client. */
-export { watchPageResume } from './client/page-resume.js';
-export { watchPagePolling } from './client/page-polling.js';
-export { notifyFeedReopened, watchFeedReopen, watchFeedRefresh, watchList } from './client/feed-reopen.js';
+/** Browser storage helpers that do not load a Remote session client. Importing this entry connects the headless client to this page. */
+import './page/browser-environment.js';
 export { clearImageDraftScope, configureImageDraftPersistence, clearPersistedImageDrafts } from './image-drafts.js';
 export type { ImageDraftBinding, ImageDraftRecipient } from './image-drafts.js';
 export { inspectImageDraft, readImageDraft, writeImageDraft, releaseImageDraft } from './image-drafts.js';

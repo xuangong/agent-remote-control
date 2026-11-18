@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { compareControllerVersions, releaseCoversHost, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease, type ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
-import { watchList } from '@orchardworks/agent-remote-web';
+import { watchList } from '@orchardworks/agent-client';
 import type { HostPairingService, RemoteHost } from './HostPairing.js';
 import { hostDisplayLabel } from './host-environment.js';
 import { readControllerHealth, type ControllerHealthView } from '../controller-health-view.js';

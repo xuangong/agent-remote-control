@@ -1,8 +1,8 @@
 import 'fake-indexeddb/auto';
 import { expect, it, vi } from 'vitest';
 import { act, useState } from 'react';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { promptText, render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import type { OpenedSession, SessionDirectoryClient as DirectoryClient } from '../directory-client.js';

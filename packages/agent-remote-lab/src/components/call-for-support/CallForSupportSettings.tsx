@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CallForSupportConflictError, RemoteCallForSupportClient } from '@orchardworks/agent-remote-web/headless';
+import { CallForSupportConflictError, RemoteCallForSupportClient } from '@orchardworks/agent-client';
 import type { CallForSupportProfile, CallForSupportProfileInput } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../workspace-access.js';
 import { ProfileEditor, type SupportProvider } from './ProfileEditor.js';

@@ -1,75 +1,41 @@
 {
-  "name": "@orchardworks/agent-remote-web",
+  "name": "@orchardworks/agent-client",
   "version": "0.1.1",
   "private": false,
   "publishConfig": {
     "access": "public"
   },
   "type": "module",
-  "description": "Framework-neutral browser replica for remote agent observation.",
+  "description": "Headless client for remote agent sessions: connection, session client, replica, device store, pending messages and the lease and send-state tables. It imports no React or DOM.",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./headless": {
-      "types": "./dist/headless.d.ts",
-      "import": "./dist/headless.js"
-    },
-    "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js"
-    },
-    "./react": {
-      "types": "./dist/react.d.ts",
-      "import": "./dist/react.js"
-    },
     "./device-store": {
       "types": "./dist/device-store.d.ts",
       "import": "./dist/device-store.js"
     },
-    "./styles.css": "./dist/styles.css"
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
   },
   "types": "./dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsc && node -e \"require('node:fs').copyFileSync('src/styles.css', 'dist/styles.css')\"",
+    "build": "node scripts/clean-dist.mjs && tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=10000"
   },
   "dependencies": {
-    "@orchardworks/agent-remote-protocol": "workspace:*",
-    "@codemirror/language": "^6.12.4",
-    "@codemirror/language-data": "^6.5.2",
-    "@codemirror/search": "^6.7.2",
-    "@codemirror/state": "^6.7.4",
-    "@codemirror/view": "^6.43.11",
-    "@lezer/highlight": "^1.2.3",
-    "mdast-util-from-markdown": "^2.0.3",
-    "prosemirror-commands": "^1.7.2",
-    "prosemirror-history": "^1.5.0",
-    "prosemirror-keymap": "^1.2.3",
-    "prosemirror-model": "^1.25.11",
-    "prosemirror-state": "^1.4.4",
-    "prosemirror-view": "^1.42.3",
-    "react-markdown": "^10.1.0",
-    "remark-breaks": "^4.0.0",
-    "remark-gfm": "^4.0.1"
-  },
-  "peerDependencies": {
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0"
+    "@orchardworks/agent-remote-protocol": "workspace:*"
   },
   "devDependencies": {
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.18.1",
-    "fake-indexeddb": "^6.2.5",
-    "jsdom": "^25.0.1",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
     "typescript": "^5.7.0",
     "vitest": "4.1.11",
     "ws": "^8.21.0",

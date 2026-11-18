@@ -2,7 +2,7 @@ import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol
 import { vectorText, windowVectors, type VectorItem } from '@orchardworks/agent-remote-journal/testing';
 import { describe, expect, it } from 'vitest';
 
-import { absorbWindow } from '@orchardworks/agent-remote-web/headless';
+import { absorbWindow } from '@orchardworks/agent-client';
 
 /**
  * S3, the client end of the window decision. The replica's side of the window vectors: whatever the journal decided, the replica that receives the window as the tail of

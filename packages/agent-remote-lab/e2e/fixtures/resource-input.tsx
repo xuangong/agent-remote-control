@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web/headless';
-import { useSessionView, AgentComposer, AgentTimeline } from '@orchardworks/agent-remote-web/react';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
+import { useSessionView, AgentComposer, AgentTimeline } from '@orchardworks/agent-client-web/react';
 import '../../src/session-view-styles';
 const transport = new HttpWebSocketTransport(location.origin, { sessionChannels: false });
 const agentId = new URLSearchParams(location.search).get('agent') ?? 'resource-desktop';

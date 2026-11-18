@@ -53,8 +53,8 @@ for (const engine of [chromium, webkit]) it(`preserves local Markdown images acr
   const source = `
     import React, { useMemo, useState, useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
-    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
-    import { MarkdownContent } from '../../agent-remote-web/src/react/MarkdownContent.tsx';
+    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
+    import { MarkdownContent } from '../../agent-client-web/src/react/MarkdownContent.tsx';
     const replica = new AgentReplica();
     const client = new RemoteSessionClient(${JSON.stringify(f.agentId)}, new HttpWebSocketTransport(${JSON.stringify(f.url + f.alice.basePath)}), replica);
     const resolveResource = (locator,source) => client.resolveResource(locator,source);
@@ -118,7 +118,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   onPreviewCleanup(() => vite.close()); await vite.listen();
   const port = (vite.httpServer!.address() as import('node:net').AddressInfo).port;
   let browserScript = '';
-  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/ui/tokens.css', import.meta.url), 'utf8') + await readFile(new URL('../src/app.css', import.meta.url), 'utf8') + await readFile(new URL('../../agent-client-web/src/styles.css', import.meta.url), 'utf8');
   const f = await previewFixture({ ttlMs: 8000, target: `http://127.0.0.1:${port}`, servePage: async (request, response) => {
     if (request.url === '/workbench.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
     if (request.url === '/workbench') { response.setHeader('content-type', 'text/html'); response.setHeader('content-security-policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self' https://external.test"); response.end(`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style><div id="root"></div><script src="/workbench.js"></script>`); return true; }
@@ -126,10 +126,10 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   } });
   const source = `
     import React, {useRef,useState} from 'react';import {createRoot} from 'react-dom/client';
-    import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-remote-web/src/react/PreviewContext.tsx';
-    import {PreviewActions} from '../../agent-remote-web/src/react/PreviewActions.tsx';
-    import {PreviewWorkspace} from '../../agent-remote-web/src/react/PreviewWorkspace.tsx';
-    import {HttpPreviewClient} from '../../agent-remote-web/src/client/preview-client.ts';
+    import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-client-web/src/react/PreviewContext.tsx';
+    import {PreviewActions} from '../../agent-client-web/src/react/PreviewActions.tsx';
+    import {PreviewWorkspace} from '../../agent-client-web/src/react/PreviewWorkspace.tsx';
+    import {HttpPreviewClient} from '../../agent-client/src/client/preview-client.ts';
     import {trackFocusModality} from './focus-modality.ts';
     import {ViewOptions} from './components/ViewOptions.tsx';
     import {SupportingRail} from './components/SupportingRail.tsx';

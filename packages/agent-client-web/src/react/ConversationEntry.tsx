@@ -1,6 +1,5 @@
 import { memo, useMemo, type ReactNode } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '../replica/types.js';
 import type { AgentTimelineProps } from './AgentTimeline.js';
 import { TimelineEntry } from './TimelineEntry.js';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
@@ -11,6 +10,7 @@ import type { MessageGroupPosition } from './timeline-render-model.js';
 import { messageResources } from './message-resources.js';
 import { RuntimeNoticeItem } from './items/ErrorItem.js';
 import type { RuntimeNoticePresentation } from './RuntimeNoticeGroup.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 interface ConversationEntryProps extends Pick<AgentTimelineProps, 'onEditPrompt' | 'onInspectEntry' | 'resolveSessionLink'
   | 'onResourceResolve' | 'onResourceRequest'>, RuntimeNoticePresentation {

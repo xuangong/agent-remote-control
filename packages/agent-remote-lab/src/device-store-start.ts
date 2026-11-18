@@ -1,4 +1,4 @@
-import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { conversationLocalStorage, storageKeys } from './conversation-storage.js';
 import { readWorkspaceAccess, scopeFor } from './workspace-access.js';
 

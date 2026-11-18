@@ -7,7 +7,7 @@ import {
 } from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
 import { notifyFeedReopened } from './feed-reopen.js';
-import { watchPageResume } from './page-resume.js';
+import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import type {
   RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
 } from './transport.js';
@@ -84,7 +84,7 @@ export class SessionChannelPool {
   private nextId = 0;
   private disposed = false;
   private pendingBytes = 0;
-  private pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  private pageHidden = pageHidden();
   private pageHiddenSince = this.pageHidden ? Date.now() : undefined;
   private readonly intents = new Set<Subscription>();
   private stateWatchers = 0;

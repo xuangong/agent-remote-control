@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
-import { leaseNoticeLabel, leaseView, type AgentReplicaState, type SessionHandoffState } from '@orchardworks/agent-remote-web';
+import { leaseNoticeLabel, leaseView, type AgentReplicaState, type SessionHandoffState } from '@orchardworks/agent-client';
 
-import type { SessionTakeControlOptions } from '@orchardworks/agent-remote-web/react';
+import type { SessionTakeControlOptions } from '@orchardworks/agent-client';
 export type TakeControlOptions = SessionTakeControlOptions;
 
 export function SessionControlNotice({ control, handoff, connected, onTakeControl }: {

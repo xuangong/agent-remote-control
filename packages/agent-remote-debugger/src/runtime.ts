@@ -1,16 +1,6 @@
 import WebSocket from 'ws';
 import type { AgentCapabilities, ClientMessage, ServerMessage } from '@orchardworks/agent-remote-protocol';
-import {
-  AgentReplica,
-  HttpWebSocketTransport,
-  RemoteOperationError,
-  RemoteSessionClient,
-  type RemoteAgentTransport,
-  type RemoteProtocolObservation,
-  type RemoteSessionStatus,
-  type RemoteTransportDiagnostic,
-  type WebSocketLike,
-} from '@orchardworks/agent-remote-web/headless';
+import { AgentReplica, HttpWebSocketTransport, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport, type RemoteProtocolObservation, type RemoteSessionStatus, type RemoteTransportDiagnostic, type WebSocketLike } from '@orchardworks/agent-client';
 
 import { DebuggerError, remoteOperationFailure } from './errors.js';
 import { resolveOrigin, resolveRelayUrl } from './input.js';

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 type Editor = HTMLTextAreaElement | HTMLDivElement;
 const draft = 'Keep this draft\nAnother line';

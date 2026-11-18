@@ -2,11 +2,11 @@
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
-import { HttpPreviewClient } from '../client/preview-client.js';
 import { PreviewProvider } from './PreviewContext.js';
 import { PreviewWorkspace } from './PreviewWorkspace.js';
 import { MarkdownContent } from './MarkdownContent.js';
 import { FilePreviewScope } from './FilePreviewScope.js';
+import { HttpPreviewClient } from '@orchardworks/agent-client';
 
 beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.open = true; } });

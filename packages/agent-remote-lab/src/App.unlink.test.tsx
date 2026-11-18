@@ -6,7 +6,7 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AgentSessionSetting, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { sessionKey } from './session-tree.js';
 import { App, type LabTransport } from './App.js';

@@ -1,6 +1,6 @@
 import { useBoundDraft, type DraftBinding } from '../draft-store.js';
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject, type ReactNode } from 'react';
-import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-client';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { isAskAttached, askParticipantKey, type AskEntry, type AskInput, type AskInputSender } from '../hooks/useAskConversations.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
@@ -13,7 +13,7 @@ import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionViewPlacement } from './SessionDock.js';
 import { AskResize } from './AskResize.js';
-import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { DisplayPreferenceBinding } from '../hooks/useSessionDisplayPreferences.js';
 import { useWindowLayout, WindowPresentationContext } from '../window-workspace-context.js';
 interface AskStorageBindings { baseUrl?: string; viewId?: string; compact?: boolean; imageDraftBinding?: ImageDraftBinding; imageRecipient?: ImageDraftRecipient; displayBinding?: DisplayPreferenceBinding }

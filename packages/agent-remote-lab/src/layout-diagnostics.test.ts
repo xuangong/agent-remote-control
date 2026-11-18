@@ -1,5 +1,5 @@
 import { applyWindowOperation, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { WindowRequestError, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowRequestError, type WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { WindowWorkspaceStore } from './window-workspace-store.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { clearLayoutDiagnostics, exportLayoutDiagnostics, getLayoutDiagnosticsStatus, recordKeyboardRefocus, recordWindowSelection, startLayoutDiagnostics, stopLayoutDiagnostics } from './layout-diagnostics.js';

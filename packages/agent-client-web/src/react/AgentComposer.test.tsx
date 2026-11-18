@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
-import { remoteSessionState } from '../client/session-state.js';
+import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 
 it.each([
   ['connecting', 'Opening session'],

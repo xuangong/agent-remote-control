@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { botGroup, botTarget, mountBotApp, seedGroup, until } from './test/bot-mode-fixtures.js';
 
 // jsdom has no modal dialogs; like browsers, closing queues the close event. The stubs are removed after each test.

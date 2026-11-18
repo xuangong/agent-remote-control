@@ -1,9 +1,7 @@
 import type { MarkdownResourceContext } from './markdown-resources.js';
 import { useState } from 'react';
-import type { OutgoingMessage } from '../replica/types.js';
-import { isUncertainSend } from '../client/transport.js';
-import { describe } from '../replica/send-state.js';
 import { UserMessageItem } from './items/MessageItem.js';
+import { type OutgoingMessage, isUncertainSend, sendState } from '@orchardworks/agent-client';
 
 export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContext }: {
   readonly message: OutgoingMessage;
@@ -14,7 +12,7 @@ export function OutgoingMessageItem({ message, onRetry, onDelete, resourceContex
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState(false);
   const [error, setError] = useState<string>();
-  const { label, settled, deliveryState } = describe(message.status, message.delivery);
+  const { label, settled, deliveryState } = sendState.describe(message.status, message.delivery);
   async function retry(): Promise<void> {
     if (!onRetry || busy) return;
     setBusy(true); setError(undefined);

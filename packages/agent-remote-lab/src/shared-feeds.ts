@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from 'react';
-import type { RemoteAgentTransport, SessionDraftsView, SessionOutboxView, SessionReadsView, SessionStatesView } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport, SessionDraftsView, SessionOutboxView, SessionReadsView, SessionStatesView } from '@orchardworks/agent-client';
 
 /** The account's shared IM state as the Relay shares it; a part is absent while it is not wanted or has not arrived. */
 export interface SharedFeedsSnapshot {

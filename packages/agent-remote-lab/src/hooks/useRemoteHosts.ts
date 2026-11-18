@@ -1,4 +1,4 @@
-import { watchFeedRefresh } from '@orchardworks/agent-remote-web';
+import { watchFeedRefresh } from '@orchardworks/agent-client';
 import { useCallback, useEffect, useState } from 'react';
 import type { HostPairingService, RemoteHost } from '../components/HostPairing.js';
 

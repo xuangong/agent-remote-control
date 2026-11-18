@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
   id: 'one', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
@@ -307,7 +306,7 @@ it('queues input when control is checking even if the transport reports ready', 
 });
 
 it('uses public synchronization and operation admission without legacy disabled props', async () => {
-  const { remoteSessionState } = await import('../client/session-state.js');
+  const { remoteSessionState } = await import("@orchardworks/agent-client");
   const view = await setup({ disabled: false, recovering: false, sessionState: remoteSessionState(state, 'connecting') });
   expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Opening session');
   await view.type('Wait for synchronization');

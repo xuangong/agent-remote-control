@@ -49,8 +49,12 @@
       "dir": "packages/agent-controller",
       "entry": "src/index.ts"
     },
-    "@orchardworks/agent-remote-web": {
-      "dir": "packages/agent-remote-web",
+    "@orchardworks/agent-client": {
+      "dir": "packages/agent-client",
+      "entry": "src/index.ts"
+    },
+    "@orchardworks/agent-client-web": {
+      "dir": "packages/agent-client-web",
       "entry": "src/index.ts"
     },
     "@orchardworks/agent-remote-lab": {
@@ -412,12 +416,7 @@
       "name": "client",
       "layer": 2,
       "paths": [
-        "packages/agent-remote-web/src/client/**",
-        "packages/agent-remote-web/src/replica/**",
-        "packages/agent-remote-web/src/headless.ts",
-        "packages/agent-remote-web/src/index.ts",
-        "packages/agent-remote-web/src/device-store*.ts",
-        "packages/agent-remote-web/src/session-*.ts"
+        "packages/agent-client/src/**"
       ],
       "seams": [
         "S3",
@@ -437,7 +436,7 @@
       "name": "client-web",
       "layer": 3,
       "paths": [
-        "packages/agent-remote-web/src/**"
+        "packages/agent-client-web/src/**"
       ],
       "seams": [
         "S6",
@@ -456,7 +455,8 @@
       "name": "client-test-support",
       "layer": 5,
       "paths": [
-        "packages/agent-remote-web/src/test/**"
+        "packages/agent-client/src/testing/**",
+        "packages/agent-client-web/src/test/**"
       ],
       "seams": [
         "S6"
@@ -826,8 +826,8 @@
         "react-dom/*"
       ],
       "code": [
-        "\\bwindow\\.",
-        "\\bdocument\\.",
+        "(?<![.\\w])window\\.",
+        "(?<![.\\w])document\\.",
         "\\bindexedDB\\b",
         "\\blocalStorage\\b",
         "\\bnavigator\\.",

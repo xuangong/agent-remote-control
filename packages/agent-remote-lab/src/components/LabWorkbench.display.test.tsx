@@ -1,6 +1,6 @@
 import { act, useState, type ComponentProps } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { ReadingPositions, RecoveryScope } from '../conversation-recovery.js';
 import { replicaState } from '../test/fixtures.js';
 import { render, unmount } from '../test/setup.js';
@@ -171,7 +171,7 @@ it.each(['simple', 'content'])('retains an unmounted absent Ask display without 
   const { useAskConversations } = await import('../hooks/useAskConversations.js');
   const { sessionKey } = await import('../session-tree.js');
   const source = { agentId: 'source', providerId: 'codex', nativeSessionId: 'native', hostId: 'local', title: 'Source' };
-  const key = sessionKey(source), transport = {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport;
+  const key = sessionKey(source), transport = {} as import('@orchardworks/agent-client').RemoteAgentTransport;
   let ask!: ReturnType<typeof useAskConversations>;
   const { createCompositionDocument, createCompositionSlot, createAskOwner } = await import('../session-composition.js');
   const slot = createCompositionSlot('A', source, scope);

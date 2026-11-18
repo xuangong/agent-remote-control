@@ -4,7 +4,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import WebSocket from 'ws';
 import {expect,it,vi} from 'vitest';
-import {AgentReplica,HttpWebSocketTransport,RemoteSessionClient,type WebSocketLike} from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
 import {createAgentRemoteHttpServer} from '@orchardworks/agent-session-runtime';
 import {createAgentHostRuntime} from '../../agent-controller/src/host.js';
 import {createCopilotSessionDirectory} from '../../agent-controller/src/copilot-directory.js';

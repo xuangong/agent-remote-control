@@ -1,4 +1,4 @@
-import type { RemoteOperationError } from '@orchardworks/agent-remote-web/headless';
+import type { RemoteOperationError } from '@orchardworks/agent-client';
 
 export class DebuggerError extends Error {
   readonly name = 'DebuggerError';

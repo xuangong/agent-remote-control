@@ -1,7 +1,7 @@
 import { createContext, memo, useCallback, useContext, useInsertionEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type ContextType, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import type { TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
+import type { TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
 import type { WorkbenchMode } from '../workbench-mode.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { WindowLayoutContext, WindowPresentationContext, type WindowLayoutAuthority } from '../window-workspace-context.js';

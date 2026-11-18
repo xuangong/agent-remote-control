@@ -38,6 +38,122 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
+  packages/agent-client:
+    dependencies:
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+    devDependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@orchardworks/agent-timeline':
+        specifier: workspace:*
+        version: link:../agent-timeline
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.1
+
+  packages/agent-client-web:
+    dependencies:
+      '@codemirror/language':
+        specifier: ^6.12.4
+        version: 6.12.4
+      '@codemirror/language-data':
+        specifier: ^6.5.2
+        version: 6.5.2
+      '@codemirror/search':
+        specifier: ^6.7.2
+        version: 6.7.2
+      '@codemirror/state':
+        specifier: ^6.7.4
+        version: 6.7.4
+      '@codemirror/view':
+        specifier: ^6.43.11
+        version: 6.43.11
+      '@lezer/highlight':
+        specifier: ^1.2.3
+        version: 1.2.3
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      mdast-util-from-markdown:
+        specifier: ^2.0.3
+        version: 2.0.3
+      prosemirror-commands:
+        specifier: ^1.7.2
+        version: 1.7.2
+      prosemirror-history:
+        specifier: ^1.5.0
+        version: 1.5.0
+      prosemirror-keymap:
+        specifier: ^1.2.3
+        version: 1.2.3
+      prosemirror-model:
+        specifier: ^1.25.11
+        version: 1.25.11
+      prosemirror-state:
+        specifier: ^1.4.4
+        version: 1.4.4
+      prosemirror-view:
+        specifier: ^1.42.3
+        version: 1.42.3
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@18.3.31)(react@18.3.1)
+      remark-breaks:
+        specifier: ^4.0.0
+        version: 4.0.0
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+    devDependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.0
+        version: 18.3.7(@types/react@18.3.31)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.1
+
   packages/agent-controller:
     dependencies:
       '@orchardworks/agent-platform':
@@ -346,6 +462,9 @@ importers:
         specifier: ^8.5.24
         version: 8.5.24
     devDependencies:
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
@@ -379,6 +498,12 @@ importers:
       '@opencode/client':
         specifier: 2.0.25
         version: 2.0.25(effect@4.0.0-rc.112)
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
+      '@orchardworks/agent-client-web':
+        specifier: workspace:*
+        version: link:../agent-client-web
       '@orchardworks/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
@@ -388,9 +513,6 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-web':
-        specifier: workspace:*
-        version: link:../agent-remote-web
       '@orchardworks/agent-session-runtime':
         specifier: workspace:*
         version: link:../agent-session-runtime
@@ -555,6 +677,12 @@ importers:
       '@deepseek-ai/dsh-agent':
         specifier: 0.1.2-rc.1
         version: 0.1.2-rc.1(6f833cf90b9dd3f0d529840b1aebfb48)
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
+      '@orchardworks/agent-client-web':
+        specifier: workspace:*
+        version: link:../agent-client-web
       '@orchardworks/agent-provider-codex':
         specifier: workspace:*
         version: link:../agent-provider-codex
@@ -579,9 +707,6 @@ importers:
       '@orchardworks/agent-remote-tunnel':
         specifier: workspace:*
         version: link:../agent-remote-tunnel
-      '@orchardworks/agent-remote-web':
-        specifier: workspace:*
-        version: link:../agent-remote-web
       '@orchardworks/agent-session-runtime':
         specifier: workspace:*
         version: link:../agent-session-runtime
@@ -671,6 +796,9 @@ importers:
 
   packages/agent-remote-seams:
     devDependencies:
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
       '@orchardworks/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
@@ -698,9 +826,6 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-web':
-        specifier: workspace:*
-        version: link:../agent-remote-web
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
@@ -730,97 +855,6 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
 
-  packages/agent-remote-web:
-    dependencies:
-      '@codemirror/language':
-        specifier: ^6.12.4
-        version: 6.12.4
-      '@codemirror/language-data':
-        specifier: ^6.5.2
-        version: 6.5.2
-      '@codemirror/search':
-        specifier: ^6.7.2
-        version: 6.7.2
-      '@codemirror/state':
-        specifier: ^6.7.4
-        version: 6.7.4
-      '@codemirror/view':
-        specifier: ^6.43.11
-        version: 6.43.11
-      '@lezer/highlight':
-        specifier: ^1.2.3
-        version: 1.2.3
-      '@orchardworks/agent-remote-protocol':
-        specifier: workspace:*
-        version: link:../agent-remote-protocol
-      mdast-util-from-markdown:
-        specifier: ^2.0.3
-        version: 2.0.3
-      prosemirror-commands:
-        specifier: ^1.7.2
-        version: 1.7.2
-      prosemirror-history:
-        specifier: ^1.5.0
-        version: 1.5.0
-      prosemirror-keymap:
-        specifier: ^1.2.3
-        version: 1.2.3
-      prosemirror-model:
-        specifier: ^1.25.11
-        version: 1.25.11
-      prosemirror-state:
-        specifier: ^1.4.4
-        version: 1.4.4
-      prosemirror-view:
-        specifier: ^1.42.3
-        version: 1.42.3
-      react-markdown:
-        specifier: ^10.1.0
-        version: 10.1.0(@types/react@18.3.31)(react@18.3.1)
-      remark-breaks:
-        specifier: ^4.0.0
-        version: 4.0.0
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1
-    devDependencies:
-      '@orchardworks/agent-provider-sdk':
-        specifier: workspace:*
-        version: link:../agent-provider-sdk
-      '@orchardworks/agent-timeline':
-        specifier: workspace:*
-        version: link:../agent-timeline
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.31)
-      '@types/ws':
-        specifier: ^8.18.1
-        version: 8.18.1
-      fake-indexeddb:
-        specifier: ^6.2.5
-        version: 6.2.5
-      jsdom:
-        specifier: ^25.0.1
-        version: 25.0.1
-      react:
-        specifier: ^18.3.0
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.0
-        version: 18.3.1(react@18.3.1)
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
-      ws:
-        specifier: ^8.21.0
-        version: 8.21.1
-
   packages/agent-session-runtime:
     dependencies:
       '@orchardworks/agent-platform':
@@ -842,6 +876,9 @@ importers:
         specifier: ^8.21.0
         version: 8.21.1
     devDependencies:
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3
@@ -1090,91 +1127,91 @@ packages:
     resolution: {integrity: sha1-Na7dMNf4SeAXL3CiqmSJxXgA9Q8=}
 
   '@codemirror/autocomplete@6.20.3':
-    resolution: {integrity: sha1-aWt0AxLGqWLhRWe0mjZhtZJLxa4=}
+    resolution: {integrity: sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==}
 
   '@codemirror/lang-angular@0.1.4':
-    resolution: {integrity: sha1-W56UB4a6IBqaQuq225UB+j/iKSo=}
+    resolution: {integrity: sha512-oap+gsltb/fzdlTQWD6BFF4bSLKcDnlxDsLdePiJpCVNKWXSTAbiiQeYI3UmES+BLAdkmIC1WjyztC1pi/bX4g==}
 
   '@codemirror/lang-cpp@6.0.3':
-    resolution: {integrity: sha1-sXW1n83o3W5WO3/u6LvtgZY6lJE=}
+    resolution: {integrity: sha512-URM26M3vunFFn9/sm6rzqrBzDgfWuDixp85uTY49wKudToc2jTHUrKIGGKs+QWND+YLofNNZpxcNGRynFJfvgA==}
 
   '@codemirror/lang-css@6.3.1':
-    resolution: {integrity: sha1-djykGu6BuyQxvlXjz8x8yOkUIaM=}
+    resolution: {integrity: sha512-kr5fwBGiGtmz6l0LSJIbno9QrifNMUusivHbnA1H6Dmqy4HZFte3UAICix1VuKo0lMPKQr2rqB+0BkKi/S3Ejg==}
 
   '@codemirror/lang-go@6.0.1':
-    resolution: {integrity: sha1-WYIiyQ9W6uKNEQacYSymTQMGsFc=}
+    resolution: {integrity: sha512-7fNvbyNylvqCphW9HD6WFnRpcDjr+KXX/FgqXy5H5ZS0eC5edDljukm/yNgYkwTsgp2busdod50AOTIy6Jikfg==}
 
   '@codemirror/lang-html@6.4.12':
-    resolution: {integrity: sha1-yl3A90HB6BkYK86dA7BzVSFysbc=}
+    resolution: {integrity: sha512-pw2ReWKUqSkbvh76RAT4NYxiogRu+PWkR2ukAwO9uOgrm8uipkzjtKKtNpyeAQwHOqxEeSvAXZ6vr3AfyB9y/w==}
 
   '@codemirror/lang-java@6.0.2':
-    resolution: {integrity: sha1-YB1bPXdKSpl9EWR8y2wFcCxUvVs=}
+    resolution: {integrity: sha512-m5Nt1mQ/cznJY7tMfQTJchmrjdjQ71IDs+55d1GAa8DGaB8JXWsVCkVT284C3RTASaY43YknrK2X3hPO/J3MOQ==}
 
   '@codemirror/lang-javascript@6.2.5':
-    resolution: {integrity: sha1-ueprLwOD7WiV+ueIjAMiVBU48Qo=}
+    resolution: {integrity: sha512-zD4e5mS+50htS7F+TYjBPsiIFGanfVqg4HyUz6WNFikgOPf2BgKlx+TQedI1w6n/IqRBVBbBWmGFdLB/7uxO4A==}
 
   '@codemirror/lang-jinja@6.0.1':
-    resolution: {integrity: sha1-AdEop+B1aycUzUU60Wwd/7IBiPA=}
+    resolution: {integrity: sha512-P5kyHLObzjtbGj16h+hyvZTxJhSjBEeSx4wMjbnAf3b0uwTy2+F0zGjMZL4PQOm/mh2eGZ5xUDVZXgwP783Nsw==}
 
   '@codemirror/lang-json@6.0.2':
-    resolution: {integrity: sha1-BUsWBnEwZmfiXYA4UoYEmEGDYXk=}
+    resolution: {integrity: sha512-x2OtO+AvwEHrEwR0FyyPtfDUiloG3rnVTSZV1W8UteaLL8/MajQd8DpvUb2YVzC+/T18aSDv0H9mu+xw0EStoQ==}
 
   '@codemirror/lang-less@6.0.2':
-    resolution: {integrity: sha1-Lj2Co924cQ5kCWic1KKMZlWNDLg=}
+    resolution: {integrity: sha512-EYdQTG22V+KUUk8Qq582g7FMnCZeEHsyuOJisHRft/mQ+ZSZ2w51NupvDUHiqtsOy7It5cHLPGfHQLpMh9bqpQ==}
 
   '@codemirror/lang-liquid@6.3.2':
-    resolution: {integrity: sha1-Yjv1d22Qad2uNxrJob0ZFNcBB7g=}
+    resolution: {integrity: sha512-6PDVU3ZnfeYyz1at1E/ttorErZvZFXXt1OPhtfe1EZJ2V2iDFa0CwPqPgG5F7NXN0yONGoBogKmFAafKTqlwIw==}
 
   '@codemirror/lang-markdown@6.5.2':
-    resolution: {integrity: sha1-UwuRRCwDXKXU6lE1wEmbLBXDmHI=}
+    resolution: {integrity: sha512-AwBOdkWYuA//WcM0xO5PfHPUcmz/O2i5o0Nsg1U69SII/loCJlFI1Romd9xp2HYb1kYJRGZotyqRghuHH5n8Kw==}
 
   '@codemirror/lang-php@6.0.2':
-    resolution: {integrity: sha1-vcQ50ZXI5zUTvFuXGpmle1yZ7lU=}
+    resolution: {integrity: sha512-ZKy2v1n8Fc8oEXj0Th0PUMXzQJ0AIR6TaZU+PbDHExFwdu+guzOA4jmCHS1Nz4vbFezwD7LyBdDnddSJeScMCA==}
 
   '@codemirror/lang-python@6.2.1':
-    resolution: {integrity: sha1-N8mTBxYRAVaGWpXFSKoO71VShjo=}
+    resolution: {integrity: sha512-IRjC8RUBhn9mGR9ywecNhB51yePWCGgvHfY1lWN/Mrp3cKuHr0isDKia+9HnvhiWNnMpbGhWrkhuWOc09exRyw==}
 
   '@codemirror/lang-rust@6.0.2':
-    resolution: {integrity: sha1-aRRuaz6Plh7xSQWa7Lnge/17870=}
+    resolution: {integrity: sha512-EZaGjCUegtiU7kSMvOfEZpaCReowEf3yNidYu7+vfuGTm9ow4mthAparY5hisJqOHmJowVH3Upu+eJlUji6qqA==}
 
   '@codemirror/lang-sass@6.0.2':
-    resolution: {integrity: sha1-OMGwoTJsyfXLJ0HSzVHPvNerwLI=}
+    resolution: {integrity: sha512-l/bdzIABvnTo1nzdY6U+kPAC51czYQcOErfzQ9zSm9D8GmNPD0WTW8st/CJwBTPLO8jlrbyvlSEcN20dc4iL0Q==}
 
   '@codemirror/lang-sql@6.10.0':
-    resolution: {integrity: sha1-Sb+/bPMVFqmeZ02po5n0QmEBqVo=}
+    resolution: {integrity: sha512-6ayPkEd/yRw0XKBx5uAiToSgGECo/GY2NoJIHXIIQh1EVwLuKoU8BP/qK0qH5NLXAbtJRLuT73hx7P9X34iO4w==}
 
   '@codemirror/lang-vue@0.1.3':
-    resolution: {integrity: sha1-v3m5FSzBi0kD1kwfZ+GGrgRcipc=}
+    resolution: {integrity: sha512-QSKdtYTDRhEHCfo5zOShzxCmqKJvgGrZwDQSdbvCRJ5pRLWBS7pD/8e/tH44aVQT6FKm0t6RVNoSUWHOI5vNug==}
 
   '@codemirror/lang-wast@6.0.2':
-    resolution: {integrity: sha1-0rFBdeXoDXh4y7sp4g7JDcEtOis=}
+    resolution: {integrity: sha512-Imi2KTpVGm7TKuUkqyJ5NRmeFWF7aMpNiwHnLQe0x9kmrxElndyH0K6H/gXtWwY6UshMRAhpENsgfpSwsgmC6Q==}
 
   '@codemirror/lang-xml@6.1.0':
-    resolution: {integrity: sha1-4+eG4aif3JUg7+dcHW094cQOuRw=}
+    resolution: {integrity: sha512-3z0blhicHLfwi2UgkZYRPioSgVTo9PV5GP5ducFH6FaHy0IAJRg+ixj5gTR1gnT/glAIC8xv4w2VL1LoZfs+Jg==}
 
   '@codemirror/lang-yaml@6.1.3':
-    resolution: {integrity: sha1-TUEn6DOZhGOXFdHj+O3KHqW/q/s=}
+    resolution: {integrity: sha512-AZ8DJBuXGVHybpBQhmZtgew5//4hv3tdkXnr3vDmOUMJRuB6vn/uuwtmTOTlqEaQFg3hQSVeA90NmvIQyUV6FQ==}
 
   '@codemirror/language-data@6.5.2':
-    resolution: {integrity: sha1-QE3D1QqA0PdryPgfk8wdguMiQXw=}
+    resolution: {integrity: sha512-CPkWBKrNS8stYbEU5kwBwTf3JB1kghlbh4FSAwzGW2TEscdeHHH4FGysREW86Mqnj3Qn09s0/6Ea/TutmoTobg==}
 
   '@codemirror/language@6.12.4':
-    resolution: {integrity: sha1-AecP1ao6igZ/8d/sddW2OUzfoFg=}
+    resolution: {integrity: sha512-1q4PaT+o6PbgpkJt4Q8Fv5XJxTy4FUZ4MWETtyiDw3J0Pyr9E2vqcKL+k9wcvjNTIsauxvE7OfmWj3FRPHQ76A==}
 
   '@codemirror/legacy-modes@6.5.4':
-    resolution: {integrity: sha1-SigITMh50prE1/L6N5+lBwKsPmY=}
+    resolution: {integrity: sha512-/cZr6qZyl08iYNLGsJ862CXXNI51LryRFRE40ejgoIjXZz0C1rGkD3/Ek5jM/8w1ceRjqtt4qx/KLMh4zBTgew==}
 
   '@codemirror/lint@6.9.7':
-    resolution: {integrity: sha1-hB/HM2dDidkf5JocNAJ607q98QU=}
+    resolution: {integrity: sha512-28/+iWLYxKxsvGYhSYL7zaCZqLz5+FFFDq9tVsvGv9kv8RY4fFAchJ5WX9M3YrrRlTIsECjsXPqeNgnSmNP2dg==}
 
   '@codemirror/search@6.7.2':
-    resolution: {integrity: sha1-k6SeshwCbeRzxPw6BHuP1neEsPA=}
+    resolution: {integrity: sha512-gUYkYhT2+n/+VGZ+8EzE5WFkYZUZYm1VOKDudIsNqh42uRVQJ0a6Yss9sdKT3MeOYfuL1N6AZA57oza0Oyr0LA==}
 
   '@codemirror/state@6.7.4':
-    resolution: {integrity: sha1-xA/2bBMu6fj25g46CSz840bj5MY=}
+    resolution: {integrity: sha512-QhQIVRY+xHZDxwOSFrJ1eUMapJBUID3IdeAjf7dHO7zBUzSkyooHiodnalz5MG3iHzwixKMlAAyn7244y537EA==}
 
   '@codemirror/view@6.43.11':
-    resolution: {integrity: sha1-sPq8UZs1fXG0gfDSR89gndBms70=}
+    resolution: {integrity: sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg==}
 
   '@cspotcode/source-map-support@0.8.1':
     resolution: {integrity: sha1-AGKcNaaI4FqIsc2mhPudXnPwAKE=}
@@ -2134,58 +2171,58 @@ packages:
     os: [win32]
 
   '@lezer/common@1.5.2':
-    resolution: {integrity: sha1-1oQNsTd54/G0LnDJqXxAhtEvriI=}
+    resolution: {integrity: sha512-sxQE460fPZyU3sdc8lafxiPwJHBzZRy/udNFynGQky1SePYBdhkBl1kOagA9uT3pxR8K09bOrmTUqA9wb/PjSQ==}
 
   '@lezer/cpp@1.1.6':
-    resolution: {integrity: sha1-RAjGbwzk+0d1mjuD2/3XgKSTFao=}
+    resolution: {integrity: sha512-vh9gWWJOXFVY8HBHK3Twzq8MgwG2iN4GSyzBP9sCGTe37P15x2R14VaBQk0VA0ezTRN1KHYBBsHhvpGZ2Xy/pA==}
 
   '@lezer/css@1.3.6':
-    resolution: {integrity: sha1-LNrltTK+qlzx59zLkY2LGQtsbRQ=}
+    resolution: {integrity: sha512-YJE78Wcg+zX8f10hiHWQ4Az48Qr/c13eId0VtRQYLBpxHDmDeSrXIlkbl+fJGW42rWC/uoUco9mhBZeVWP/A1g==}
 
   '@lezer/go@1.0.1':
-    resolution: {integrity: sha1-MAS1T15Mlxnty6mGU/OAuvjA0aI=}
+    resolution: {integrity: sha512-xToRsYxwsgJNHTgNdStpcvmbVuKxTapV0dM0wey1geMMRc9aggoVyKgzYp41D2/vVOx+Ii4hmE206kvxIXBVXQ==}
 
   '@lezer/highlight@1.2.3':
-    resolution: {integrity: sha1-og8yS3EUii6pum/0Lli7+uxwKFc=}
+    resolution: {integrity: sha512-qXdH7UqTvGfdVBINrgKhDsVTJTxactNNxLk7+UMwZhU13lMHaOBlJe9Vqp907ya56Y3+ed2tlqzys7jDkTmW0g==}
 
   '@lezer/html@1.3.13':
-    resolution: {integrity: sha1-ahMFrjvSycAfh3+KjcHhXsZS0Bw=}
+    resolution: {integrity: sha512-oI7n6NJml729m7pjm9lvLvmXbdoMoi2f+1pwSDJkl9d68zGr7a9Btz8NdHTGQZtW2DA25ybeuv/SyDb9D5tseg==}
 
   '@lezer/java@1.1.4':
-    resolution: {integrity: sha1-xXCIj6xCgzQf0rCmobi90BteuXw=}
+    resolution: {integrity: sha512-gQylJ2xHV2xXsVqtnAcJrcROvLZJaQiC0tR//+q0k961BxqvyYttusPkJ8d9T1fPDJKHJW2etUH8XbIn9jhVUg==}
 
   '@lezer/javascript@1.5.4':
-    resolution: {integrity: sha1-EXRpVflX0zwJM/F9dZTbVKi0vuo=}
+    resolution: {integrity: sha512-vvYx3MhWqeZtGPwDStM2dwgljd5smolYD2lR2UyFcHfxbBQebqx8yjmFmxtJ/E6nN6u1D9srOiVWm3Rb4tmcUA==}
 
   '@lezer/json@1.0.3':
-    resolution: {integrity: sha1-53OgEq0AiPvwfOSc+6h1zJ5bwF8=}
+    resolution: {integrity: sha512-BP9KzdF9Y35PDpv04r0VeSTKDeox5vVr3efE7eBbx3r4s3oNLfunchejZhjArmeieBH+nVOpgIiBJpEAv8ilqQ==}
 
   '@lezer/lr@1.4.10':
-    resolution: {integrity: sha1-s6zDblrQSbdN23cZWU5+dNkWH/U=}
+    resolution: {integrity: sha512-rnCpTIBafOx4mRp43xOxDJbFipJm/c0cia/V5TiGlhmMa+wsSdoGmUN3w5Bqrks/09Q/D4tNAmWaT8p6NRi77A==}
 
   '@lezer/markdown@1.7.2':
-    resolution: {integrity: sha1-3+AkmBPcj6pgtGWaTKK42m3K91M=}
+    resolution: {integrity: sha512-iTkYvoVcKt3WkeL7qUDyXHONZEwLio4wj8KTNi2dnjQEXBZKMV63BpQrPqfsM+OkvuRbiSTAcycYAsQzLhRNoQ==}
 
   '@lezer/php@1.0.6':
-    resolution: {integrity: sha1-mltB90Becr7sfLPlEepKuRlt+yA=}
+    resolution: {integrity: sha512-QJ2xNXPmsm/Z3IpThq8fnJrEIVpxhsIoj6GZBW0JYEd/l9zxpJZW216X4fzqQY4vgpdGIumypvI4uQjd4tnYtw==}
 
   '@lezer/python@1.1.19':
-    resolution: {integrity: sha1-eEPUT/J8mAQ5qC6HwYsoFy6FxHg=}
+    resolution: {integrity: sha512-MhQIURHRytsNzP/YXnqpYKW6la6voAH3kyplTOOiCdjyFY6cWWGFVmYVdHIPrElqSDf4iCDktQCockB9FxuhzQ==}
 
   '@lezer/rust@1.0.2':
-    resolution: {integrity: sha1-zJp1YF1nGCoOeZrECxllph3MbvA=}
+    resolution: {integrity: sha512-Lz5sIPBdF2FUXcWeCu1//ojFAZqzTQNRga0aYv6dYXqJqPfMdCAI0NzajWUd4Xijj1IKJLtjoXRPMvTKWBcqKg==}
 
   '@lezer/sass@1.1.0':
-    resolution: {integrity: sha1-yC5mCqWzkwPR3nY5I675ef7x06Q=}
+    resolution: {integrity: sha512-3mMGdCTUZ/84ArHOuXWQr37pnf7f+Nw9ycPUeKX+wu19b7pSMcZGLbaXwvD2APMBDOGxPmpK/O6S1v1EvLoqgQ==}
 
   '@lezer/xml@1.0.6':
-    resolution: {integrity: sha1-kIwgOSMoj4VOuOL02bBsQ36GELk=}
+    resolution: {integrity: sha512-CdDwirL0OEaStFue/66ZmFSeppuL6Dwjlk8qk153mSQwiSH/Dlri4GNymrNWnUmPl2Um7QfV1FO9KFUyX3Twww==}
 
   '@lezer/yaml@1.0.4':
-    resolution: {integrity: sha1-ZqYiGI8ZhKcdNFBnWbWAdpkENYk=}
+    resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
 
   '@marijn/find-cluster-break@1.0.4':
-    resolution: {integrity: sha1-QsKuphzaMHzbE0dER5JFLXtdv7Q=}
+    resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
   '@modelcontextprotocol/sdk@1.32.1':
     resolution: {integrity: sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/@modelcontextprotocol/sdk/-/sdk-1.32.1.tgz}
@@ -2659,7 +2696,7 @@ packages:
     engines: {node: '>= 0.10'}
 
   crelt@1.0.7:
-    resolution: {integrity: sha1-O0QbLd+nMWHWoncKpM1nf4leryg=}
+    resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha1-ilj+ePANzXDDcEUXWd+/rwPo7p8=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/cross-spawn/-/cross-spawn-7.0.6.tgz}
@@ -3290,7 +3327,7 @@ packages:
     resolution: {integrity: sha1-WDsap3WWHUsROsF9nFC6753Xa9E=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/once/-/once-1.4.0.tgz}
 
   orderedmap@2.1.1:
-    resolution: {integrity: sha1-YUgSacRAMcRJkVSXv1pK0nPFEtI=}
+    resolution: {integrity: sha512-TvAWxi0nDe1j/rtMcWcIj94+Ffe6n7zhow33h40SKxmsmozs6dz/e+EajymfoFcHd7sxNn8yHM8839uixMOV6g==}
 
   p-limit@2.3.0:
     resolution: {integrity: sha512-//88mFWSJx8lxCzwdAABTJL2MyWB12+eIY7MDL2SqLmAkeKU9qxRvWuSyTjm3FUmpBEMuFfckAIqEaVGUDxb6w==}
@@ -3364,25 +3401,25 @@ packages:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
   prosemirror-commands@1.7.2:
-    resolution: {integrity: sha1-y+87DXItxR5xzJNsh8TKJ9gd86Y=}
+    resolution: {integrity: sha512-q6Q6szxqdu9Xd6EcdKsqXghu5nQdZTpB4Q9yd04WRc7/jt763e/rT60Owh0L1GYY+T46o5rD+9lEN36dZS43tw==}
 
   prosemirror-history@1.5.0:
-    resolution: {integrity: sha1-7iH8XehaFHPj43UgFf/W1kmgaFk=}
+    resolution: {integrity: sha512-zlzTiH01eKA55UAf1MEjtssJeHnGxO0j4K4Dpx+gnmX9n+SHNlDqI2oO1Kv1iPN5B1dm5fsljCfqKF9nFL6HRg==}
 
   prosemirror-keymap@1.2.3:
-    resolution: {integrity: sha1-wParlfdcC4LJfkTraq8py/wVBHI=}
+    resolution: {integrity: sha512-4HucRlpiLd1IPQQXNqeo81BGtkY8Ai5smHhKW9jjPKRc2wQIxksg7Hl1tTI2IfT2B/LgX6bfYvXxEpJl7aKYKw==}
 
   prosemirror-model@1.25.11:
-    resolution: {integrity: sha1-KsAdzlF2CUpSzBuInCDzhJVjq6k=}
+    resolution: {integrity: sha512-QWg9RhnpLlogAmp3p96uEFrE5txQpFynd4vhBAELkwgOCWQs/X0yCzB3/hrHqiPwf91RG5KyWq6553zs9JqIOQ==}
 
   prosemirror-state@1.4.4:
-    resolution: {integrity: sha1-crXpJvnpLc7hK2KgX8yKLeO/Wzk=}
+    resolution: {integrity: sha512-6jiYHH2CIGbCfnxdHbXZ12gySFY/fz/ulZE333G6bPqIZ4F+TXo9ifiR86nAHpWnfoNjOb3o5ESi7J8Uz1jXHw==}
 
   prosemirror-transform@1.12.1:
-    resolution: {integrity: sha1-M11tmx5B+4LKQIFSEeglVQXn7aI=}
+    resolution: {integrity: sha512-t4F5615FycnCqsX7ShTUs8+jfnwcf46kuFRvSl/3qFx2QTZ4DjgowesLHQXcFP7G//TjesqZG3WtgL7vdyVJyA==}
 
   prosemirror-view@1.42.3:
-    resolution: {integrity: sha1-WxyPGwhPnvK9f2cFfReEOD7mrFU=}
+    resolution: {integrity: sha512-oTN7EtH+CpwxU9NrwEYWd0UZ4JUx7l048l5A2Xppm4p/60isZYLnth9QVQmC3VRIvdrIWCxwZSd+Uz791G31/w==}
 
   proxy-addr@2.0.8:
     resolution: {integrity: sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ==, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/proxy-addr/-/proxy-addr-2.0.8.tgz}
@@ -3463,7 +3500,7 @@ packages:
     hasBin: true
 
   rope-sequence@1.3.4:
-    resolution: {integrity: sha1-34VxGq7NMvHnVvduQ6QVFxI11CU=}
+    resolution: {integrity: sha512-UT5EDe2cu2E/6O4igUr5PSFs23nvvukicWHx6GnOPlHAiiYbzNuCRQCuiUdHJQcqKalLKlrYJnjY0ySGsXNQXQ==}
 
   router@2.2.0:
     resolution: {integrity: sha1-AZvmILcRyHZBFnzHm5kJDwCxRu8=, tarball: https://ms-feed-25.pkgs.visualstudio.com/1es-public/_packaging/npm-public/npm/registry/router/-/router-2.2.0.tgz}
@@ -3571,7 +3608,7 @@ packages:
     engines: {node: '>=8'}
 
   style-mod@4.1.3:
-    resolution: {integrity: sha1-bpASJVu3mb2sN+KI92cbXXG/n3M=}
+    resolution: {integrity: sha512-i/n8VsZydrugj3Iuzll8+x/00GH2vnYsk1eomD8QiRrSAeW6ItbCQDtfXCeJHd0iwiNagqjQkvpvREEPtW3IoQ==}
 
   style-to-js@1.1.21:
     resolution: {integrity: sha512-RjQetxJrrUJLQPHbLku6U/ocGtzyjbJMP9lCNK7Ag0CNh690nSH8woqWH9u16nMjYBAok+i7JO1NP2pOy8IsPQ==}
@@ -3780,7 +3817,7 @@ packages:
     engines: {node: '>=14.0.0'}
 
   w3c-keyname@2.2.8:
-    resolution: {integrity: sha1-exfIxog9TouGrIq6edOeiA+IacU=}
+    resolution: {integrity: sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==}
 
   w3c-xmlserializer@5.0.0:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}

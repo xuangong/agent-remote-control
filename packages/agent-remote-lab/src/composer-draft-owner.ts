@@ -1,4 +1,4 @@
-import type { ImageDraft, ImageDraftStorageHandle, ImageDraftStorageSnapshot } from '@orchardworks/agent-remote-web/browser';
+import type { ImageDraft, ImageDraftStorageHandle, ImageDraftStorageSnapshot } from '@orchardworks/agent-client-web/browser';
 import type { DraftBinding, DraftTextSnapshot } from './draft-store.js';
 
 declare const draftOwnerToken: unique symbol;

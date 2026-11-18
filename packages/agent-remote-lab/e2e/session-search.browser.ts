@@ -40,7 +40,7 @@ beforeAll(async () => {
   const source = `
     import React, { useEffect, useState } from 'react'; import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { AgentReplica, RemoteSessionClient, HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+    import { AgentReplica, RemoteSessionClient, HttpWebSocketTransport } from '@orchardworks/agent-client';
     import { SessionWorkbench } from './components/SessionWorkbench.tsx';
     function View({ id }) {
       const [replica] = useState(() => {

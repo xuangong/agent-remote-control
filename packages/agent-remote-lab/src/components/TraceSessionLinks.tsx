@@ -1,7 +1,7 @@
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
-import type { SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import type { SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 import { traceSessionReferences } from '../trace-model.js';
 
 export function TraceSessionLinks({ item, resolveSessionLink }: { item: AgentTimelineItem; resolveSessionLink?: SessionLinkResolver }) {

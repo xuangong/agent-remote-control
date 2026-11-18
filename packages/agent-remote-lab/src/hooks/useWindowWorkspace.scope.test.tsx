@@ -1,6 +1,6 @@
 import { act, useMemo, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import type { WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument } from '../session-composition.js';
 import { botGroup, until } from '../test/bot-mode-fixtures.js';

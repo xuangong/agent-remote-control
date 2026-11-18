@@ -1,6 +1,5 @@
-import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useVisibleClock } from './visible-clock.js';
-import type { AgentReplicaState } from '../replica/types.js';
+import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface AgentActivityStatusProps {
   state?: AgentReplicaState;

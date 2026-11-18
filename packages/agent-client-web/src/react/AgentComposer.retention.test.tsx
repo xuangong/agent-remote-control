@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
 import { inspectImageDraft, readImageDraft, writeImageDraft, type ImageDraft } from '../image-drafts.js';
 import { AgentComposer } from './AgentComposer.js';
 import { render, unmount } from '../test/setup.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 vi.mock('../image-drafts.js', async importOriginal => ({ ...await importOriginal<typeof import('../image-drafts.js')>(),
   readImageDraft: vi.fn(), writeImageDraft: vi.fn() }));

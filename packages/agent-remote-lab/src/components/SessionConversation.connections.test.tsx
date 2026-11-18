@@ -3,7 +3,7 @@ import { act, useCallback, useMemo, useState, useSyncExternalStore } from 'react
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
-import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { DraftStore } from '../draft-store.js';

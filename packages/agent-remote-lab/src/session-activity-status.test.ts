@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionStatesView, SharedSessionState } from '@orchardworks/agent-remote-web';
+import type { SessionStatesView, SharedSessionState } from '@orchardworks/agent-client';
 import { activityLabel, sessionActivity, windowActivity } from './session-activity-status.js';
 import { sessionKey } from './session-tree.js';
 

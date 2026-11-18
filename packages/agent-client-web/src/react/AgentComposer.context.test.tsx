@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 const hint = 'History from the previous session will be included with your first message.';
 const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {

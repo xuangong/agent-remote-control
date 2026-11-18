@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import { createWindowView, splitSessionExcerpts, type WindowMutation, type WorkspaceWindow, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
 import { createWindowFeature } from './window-feature-views.js';
 import { readQuotes } from './session-quotes.js';
-import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
 import { type OpenedSession, type SuccessionDescription } from './directory-client.js';
 import * as askHooks from './hooks/useAskConversations.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';

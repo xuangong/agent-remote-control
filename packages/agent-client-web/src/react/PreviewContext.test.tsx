@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
-import { notifyFeedReopened } from '../client/feed-reopen.js';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
-import type { HttpPreviewClient, PreviewRegistration, PreviewSnapshot } from '../client/preview-client.js';
 import { PreviewProvider, usePreviewController } from './PreviewContext.js';
+import { notifyFeedReopened, type HttpPreviewClient, type PreviewRegistration, type PreviewSnapshot } from '@orchardworks/agent-client';
 
 it('loads authoritative Host previews and synchronizes registration mutations', async () => {
   const snapshots: PreviewSnapshot[] = [{ epoch: 'host-one', revision: 1, registrations: [] }];

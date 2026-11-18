@@ -1,8 +1,8 @@
-import { notifyFeedReopened } from '@orchardworks/agent-remote-web';
+import { notifyFeedReopened } from '@orchardworks/agent-client';
 import 'fake-indexeddb/auto';
 import { type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { type SuccessionActionResult } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { SessionLocatorSynchronizingError } from './session-view-operations.js';

@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import type { AgentInteractionRequest, AgentTimelineItem, AgentToolDetail } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
-import { AgentCommandDetails, AgentTimeline, TimelineDisplay } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import { AgentCommandDetails, AgentTimeline, TimelineDisplay } from '@orchardworks/agent-client-web/react';
 import { App } from '../../src/App.js';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReplicaInspector } from '../../src/components/ReplicaInspector.js';

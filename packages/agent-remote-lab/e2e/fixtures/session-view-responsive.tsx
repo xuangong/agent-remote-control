@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { SessionWorkbench } from '../../src/components/SessionWorkbench';
 import { SessionControlNotice } from '../../src/components/SessionControlNotice';
 import { replicaState } from '../../src/test/fixtures';
-import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState, RemoteSessionStatus } from '@orchardworks/agent-client';
 import '../../src/session-view-styles';
 import '../../src/ask.css';
 

@@ -1,5 +1,5 @@
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
-import type { AgentChildSessionView, CommunicationNavigation, SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import type { AgentChildSessionView, CommunicationNavigation, SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 import type { OpenedSession } from './directory-client.js';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import { sessionChildren, sessionKey, sessionRootKey, type SessionEntry } from './session-tree.js';

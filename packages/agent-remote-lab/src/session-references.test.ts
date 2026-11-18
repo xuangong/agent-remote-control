@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { appendSessionExcerpts, appendSessionReferences, createSessionExcerpt, splitSessionExcerpts, splitSessionReferences } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { withViewQuotes, restoreQuotes } from './session-quotes.js';
 import { changeSessionRef, loadSessionRefs, pendingReferenceNote, withSessionReferences } from './session-references.js';

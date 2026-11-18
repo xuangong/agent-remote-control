@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { ResourceList } from './ResourceList.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 const image = { resourceId: 'image', locator: 'codex-image:generated', status: 'available' as const };
 const metadata = { status: 'available' as const, mediaType: 'image/png', byteLength: 4, sha256: 'digest' };

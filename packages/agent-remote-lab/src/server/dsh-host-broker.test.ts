@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web/headless';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
 import { startDshAgentRemote } from '@orchardworks/dsh/host';
 import { createRemoteHostBroker } from './remote-host-broker.js';
 

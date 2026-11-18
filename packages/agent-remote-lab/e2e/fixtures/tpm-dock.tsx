@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { TpmWork, AgentSnapshot, HistoryPage } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { MinimizeMainSession, SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { ConversationPane, ConversationSplit } from '../../src/components/ConversationSplit';
 import { SessionWorkbench } from '../../src/components/SessionWorkbench';

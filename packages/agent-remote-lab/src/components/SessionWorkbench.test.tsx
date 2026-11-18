@@ -6,8 +6,8 @@ import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
-import { createTimelineRenderModel } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import { createTimelineRenderModel } from '@orchardworks/agent-client-web/react';
 
 it('uses only the containing toolbar disclosure when heading actions move into the timeline', async () => {
   const change = vi.fn();

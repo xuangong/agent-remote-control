@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { expect, it } from 'vitest';
-import { SessionTodoPanel } from '@orchardworks/agent-remote-web/react';
+import { SessionTodoPanel } from '@orchardworks/agent-client-web/react';
 import type { SessionTodoList } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 

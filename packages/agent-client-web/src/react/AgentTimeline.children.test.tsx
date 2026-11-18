@@ -2,11 +2,10 @@
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
 import type { AgentChildSession, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 const child = (nativeSessionId: string, parentTurnId?: string): AgentChildSession => ({
   nativeSessionId, title: `Review ${nativeSessionId}`, role: 'Reviewer', description: 'Check the native flow',

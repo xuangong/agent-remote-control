@@ -1,7 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
-import { PreviewWorkspace, TimelineDisplay } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import { PreviewWorkspace, TimelineDisplay } from '@orchardworks/agent-client-web/react';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { ReadingPositions, RecoveryScope } from '../../src/conversation-recovery.js';
 import { replicaState } from '../../src/test/fixtures.js';

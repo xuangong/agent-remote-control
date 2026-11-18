@@ -2,7 +2,7 @@
 import { createRoot } from 'react-dom/client';
 import type { ReactNode } from 'react';
 import { GatewayController } from '../../src/GatewayController.js';
-import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import type { HttpWebSocketTransport, RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-client';
 import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
 import { App } from '../../src/App.js';
 import { SessionDirectoryClient } from '../../src/directory-client.js';

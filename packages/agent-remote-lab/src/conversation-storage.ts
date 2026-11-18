@@ -1,5 +1,5 @@
-import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
-import { configureDeviceStorePersistence, deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { clearPersistedImageDrafts, configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
+import { configureDeviceStorePersistence, deviceStore } from '@orchardworks/agent-client/device-store';
 
 const preferenceKey = 'agent-remote:clear-cache-on-close';
 const contentPrefixes = ['agent-remote:recovery:', 'agent-remote-forks:', 'agent-remote-ask:', 'agent-remote-opened:', 'agent-remote-tracking:', 'arc:prompt-edit'];

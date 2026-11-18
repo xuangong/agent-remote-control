@@ -1,6 +1,6 @@
 import { useContext, useRef, useState, type ComponentProps } from 'react';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
-import type { ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
+import type { ImageDraftBinding } from '@orchardworks/agent-client-web/browser';
 import type { DraftBinding } from '../draft-store.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { type SessionWindowEntry } from '../hooks/useSessionWindows.js';

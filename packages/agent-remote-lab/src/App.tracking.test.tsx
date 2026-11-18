@@ -1,7 +1,7 @@
 import { act, useState, type ComponentProps } from 'react';
 import * as teamComponents from './components/TeamMenu.js';
 import { afterEach, expect, it, vi } from 'vitest';
-import { WindowRequestError, WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import { WindowRequestError, WindowWorkspaceClient, type RemoteTransportListener } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient } from './directory-client.js';

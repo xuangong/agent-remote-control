@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { AgentComposer } from './AgentComposer.js';
-import { AgentReplica } from '../replica/store.js';
-import type { RemoteSessionClient, RemoteSessionStatus } from '../client/remote-session-client.js';
-import type { RemoteAgentTransport } from '../client/transport.js';
 import { render, rerender, unmount } from '../test/setup.js';
 import { useSessionView, type SessionConnectionSource } from './useSessionView.js';
 import type { SessionViewActions } from './session-view-actions.js';
+import { remoteSessionState, type RemoteSessionState, AgentReplica, type RemoteSessionClient, type RemoteSessionStatus, type RemoteAgentTransport } from '@orchardworks/agent-client';
 
 it('retires exact draft recipients on reconnect, lease replacement, session switch and unmount', async () => {
   const replica = new AgentReplica();

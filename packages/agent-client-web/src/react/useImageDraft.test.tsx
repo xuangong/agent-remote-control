@@ -430,74 +430,27 @@ it('retries an unmounted failed read through checked retention before certifying
   await act(async () => { expect(await handle.flush(handle.snapshot().revision, () => true)).toMatchObject({ status: 'ready', draft: { parts: original.parts } }); });
 });
 
-it('fences same-key A and B held receipts before sending C through a real WebSocket', async () => {
-  const { randomUUID, webcrypto } = await import('node:crypto');
+it('fences same-key A and B held receipts before sending C to scripted receivers', async () => {
+  const { webcrypto } = await import('node:crypto');
   const { Blob: NodeBlob } = await import('node:buffer');
-  const { URL: NodeURL } = await import('node:url');
-  const { uploadImage } = await import('../client/image-upload.js');
-  const { mkdtemp, readFile, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const { once } = await import('node:events');
-  const { default: WebSocket } = await import('ws');
-  const { PROTOCOL_VERSION } = await import('@orchardworks/agent-remote-protocol');
-  const { IMAGE_INPUT_CAPABILITIES } = await import('@orchardworks/agent-provider-sdk');
-  const { InputImageStore } = await import('../../../agent-session-runtime/src/resources/input-image-store.js');
-  const { createAgentRemoteRelay } = await import('../../../agent-session-runtime/src/relay.js');
-  const { createAgentRemoteHttpServer } = await import('../../../agent-session-runtime/src/transport/http-server.js');
-  type ServerMessage = import('@orchardworks/agent-remote-protocol').ServerMessage;
-  type InputPart = import('@orchardworks/agent-provider-sdk').AgentInputPart;
-  const directory = await mkdtemp(join(tmpdir(), 'draft-binding-wire-'));
-  const sent: Array<{ native: string; parts: readonly InputPart[] }> = [];
-  const provider: import('@orchardworks/agent-provider-sdk').AgentProviderAdapter = {
-    descriptor: { providerId: 'vision', displayName: 'Vision fixture' },
-    async createSession(config) {
-      let finish!: () => void; const ended = new Promise<void>(resolve => { finish = resolve; });
-      return { capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false, imageInput: IMAGE_INPUT_CAPABILITIES,
-        interactions: { question: false, planApproval: false, toolApproval: false } },
-        async *observe() { yield { type: 'history_boundary' as const }; await ended; },
-        async sendMessage() {}, async sendMessageContent(parts) { sent.push({ native: String(config.sessionId), parts }); },
-        async respondToInteraction() {}, async runtimeInfo() { return { providerId: 'vision', sessionId: config.sessionId, status: 'idle' as const }; },
-        async dispose() { finish(); } };
-    }, async resumeSession() { throw new Error('Unused'); },
-  };
-  const relay = createAgentRemoteRelay({ providers: [provider], inputImageStore: new InputImageStore({ directory }) });
-  const server = createAgentRemoteHttpServer(relay, { websocketAuthorizer: { authenticate: () => ({ subject: 'fixture-owner' }), authorize: () => true } });
-  const sockets: import('ws').WebSocket[] = [];
+  const { uploadImage } = await import('@orchardworks/agent-client');
   let container: HTMLDivElement | undefined;
   const release: Array<() => void> = [];
   vi.stubGlobal('crypto', webcrypto);
+  let issued = 0;
+  /** A receiver that accepts every chunk and answers the finish with a new attachment id, as one recipient's session would. */
+  const receiver = (native: string) => {
+    let digest = '', length = 0;
+    return async (type: string, payload: Record<string, unknown>) => {
+      const uploadId = String(payload.uploadId);
+      if (type === 'image_upload_begin') { digest = String(payload.sha256); length = Number(payload.byteLength); return { type: 'image_upload_result' as const, payload: { uploadId, offset: 0 } }; }
+      if (type === 'image_upload_chunk') return { type: 'image_upload_result' as const, payload: { uploadId, offset: Number(payload.offset) + atob(String(payload.contentBase64)).length } };
+      return { type: 'image_upload_result' as const, payload: { uploadId, offset: length, attachment: { attachmentId: `${native}-${++issued}`, sha256: digest, mediaType: 'image/png' as const, byteLength: length, imageDimensions: { width: 1, height: 1 } } } };
+    };
+  };
   try {
-    const { url } = await server.listen(0, '127.0.0.1');
-    async function connect(agentId: string) {
-      await relay.createAgent({ protocolVersion: PROTOCOL_VERSION, type: 'create_agent', payload: { requestId: randomUUID(), operationId: randomUUID(), agentId, providerId: 'vision', config: { sessionId: agentId } } });
-      const socket = new WebSocket(`${url.replace('http', 'ws')}/v1/sessions/${agentId}/events`); sockets.push(socket);
-      const messages: ServerMessage[] = []; const listeners = new Set<() => void>();
-      socket.on('message', data => { messages.push(JSON.parse(String(data))); for (const listener of listeners) listener(); });
-      await once(socket, 'open');
-      let phase = 'negotiate';
-      const next = (predicate: (message: ServerMessage) => boolean): Promise<ServerMessage> => new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { listeners.delete(check); reject(new Error(`Wire deadline during ${phase}.`)); }, 2000);
-        function check() { const index = messages.findIndex(predicate); if (index >= 0) { clearTimeout(timer); listeners.delete(check); resolve(messages.splice(index, 1)[0]!); } }
-        listeners.add(check); check();
-      });
-      socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' }));
-      await next(message => message.type === 'negotiated');
-      const state = await next(message => message.type === 'session_control');
-      if (state.type !== 'session_control') throw new Error('Missing control');
-      phase = 'control';
-      socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_control_request', payload: { agentId, requestId: 'control', action: 'take_over', revision: state.payload.revision } }));
-      const control = await next(message => message.type === 'session_control' && message.payload.requestId === 'control');
-      if (control.type !== 'session_control') throw new Error('Missing control receipt');
-      return async (type: string, payload: Record<string, unknown>) => {
-        const requestId = randomUUID(); phase = type;
-        socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type, controlToken: control.payload.token, payload: { ...payload, agentId, requestId } }));
-        return next(message => 'payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId);
-      };
-    }
-    const bytes = await readFile(new NodeURL('../../../agent-session-runtime/src/resources/fixtures/dimensions.png', import.meta.url));
-    const file = new NodeBlob([new Uint8Array(bytes)], { type: 'image/png' });
-    const requests = { A: await connect('A'), B: await connect('B'), C: await connect('C') };
+    const file = new NodeBlob([new Uint8Array(200)], { type: 'image/png' });
+    const requests = { A: receiver('A'), B: receiver('B'), C: receiver('C') };
     const receipts: Partial<Record<'A' | 'B' | 'C', typeof attachment>> = {};
     const signals: Partial<Record<'A' | 'B' | 'C', AbortSignal | undefined>> = {};
     const progress: Partial<Record<'A' | 'B' | 'C', ((loaded: number, total: number) => void) | undefined>> = {};
@@ -565,17 +518,9 @@ it('fences same-key A and B held receipts before sending C through a real WebSoc
     expect(draft.digests()).toEqual(digests);
     expect(draft.parts).toEqual(retainedParts);
     expect(Object.values(draft.images)[0]).toMatchObject({ progress: 1, status: 'ready', attachment: receipts.C });
-    expect(sent).toEqual([]);
-    expect(await requests.C('send_message', { operationId: randomUUID(), content: draft.snapshot() })).toMatchObject({ type: 'command_acknowledged' });
-    expect(sent.map(value => value.native)).toEqual(['C']);
-    const image = sent[0]!.parts[0]!;
-    if (image.type !== 'image') throw new Error('Missing native image');
-    expect(await readFile(image.path)).toEqual(bytes);
   } finally {
     for (const finish of release) finish();
     if (container) await unmount(container);
-    for (const socket of sockets) socket.terminate();
-    await server.close(); await relay.close(); await rm(directory, { recursive: true, force: true });
     vi.unstubAllGlobals();
   }
 });

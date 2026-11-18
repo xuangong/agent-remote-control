@@ -5,11 +5,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentSnapshotPayload, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 
 import { AgentTimeline } from '../react/AgentTimeline.js';
-import { AgentReplica } from '../replica/store.js';
 import { journalRelay, text, type Row } from '../test/journal-relay.js';
 import { render } from '../test/setup.js';
-import { HttpWebSocketTransport } from './http-websocket-transport.js';
-import { RemoteSessionClient } from './remote-session-client.js';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
 
 const snapshot: AgentSnapshotPayload = {
   id: 'one', providerId: 'copilot', createdAt: '2026-11-16T00:00:00.000Z', updatedAt: '2026-11-16T00:00:00.000Z', status: 'idle', activeTurn: null, pendingInteractions: [],

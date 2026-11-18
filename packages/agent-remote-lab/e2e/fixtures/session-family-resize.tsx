@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyWindowOperation, createWindowView, type WorkspaceWindow, type WindowOperation } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDockProvider, SessionDockRail } from '../../src/components/SessionDock';
 import { SessionFamily } from '../../src/components/SessionFamily';
 import { SessionWindow } from '../../src/components/SessionWindow';

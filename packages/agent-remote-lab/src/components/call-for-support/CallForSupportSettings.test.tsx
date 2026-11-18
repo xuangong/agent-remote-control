@@ -4,8 +4,8 @@ import type { CallForSupportProfile } from '@orchardworks/agent-remote-protocol'
 import { render, setPromptText } from '../../test/setup.js';
 
 const fixture = vi.hoisted(() => ({ profiles: [] as any[], commands: [] as any[], conflict: false }));
-vi.mock('@orchardworks/agent-remote-web/headless', async importOriginal => {
-  const original = await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>();
+vi.mock('@orchardworks/agent-client', async importOriginal => {
+  const original = await importOriginal<typeof import('@orchardworks/agent-client')>();
   return { ...original, RemoteCallForSupportClient: class {
     async read() { return { profiles: structuredClone(fixture.profiles), enablement: [] }; }
     async profile(command: any) {

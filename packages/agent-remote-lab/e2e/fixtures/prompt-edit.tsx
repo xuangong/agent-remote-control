@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../../src/conversation-connections.js';
 import { SessionDirectoryClient, type OpenedSession } from '../../src/directory-client.js';
 import { DraftStore } from '../../src/draft-store.js';

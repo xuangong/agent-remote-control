@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { HttpWebSocketTransport, remoteSessionState, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { HttpWebSocketTransport, remoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { createRecordedValidationServer } from '../server/recorded.js';
 import { SessionViewOperationsContext } from '../session-view-operations.js';

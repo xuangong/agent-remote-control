@@ -4,11 +4,9 @@ import { createRequire } from 'node:module';
 import { act, useEffect, useState, useSyncExternalStore } from 'react';
 import { expect, it, vi } from 'vitest';
 import { decodeHistoryPage, type ClientMessage, type HistoryPage, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica } from '../replica/store.js';
-import { HttpWebSocketTransport } from '../client/http-websocket-transport.js';
-import { RemoteSessionClient, type RemoteSessionStatus } from '../client/remote-session-client.js';
 import { AgentComposer } from './AgentComposer.js';
 import { render, unmount } from '../test/setup.js';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type RemoteSessionStatus } from '@orchardworks/agent-client';
 
 const { WebSocket, WebSocketServer } = createRequire(import.meta.url)('ws') as typeof import('ws');
 const version = '1.8.0';

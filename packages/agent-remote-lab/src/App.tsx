@@ -42,7 +42,7 @@ import { SessionDescriptionsContext } from './session-description-context.js';
 import { describeSession } from './session-description.js';
 import { attributionWindowOperation } from './session-attribution-navigation.js';
 import { sideWindowOperation } from './window-side-navigation.js';
-import type { SessionAttribution, SessionStateRef } from '@orchardworks/agent-remote-web';
+import type { SessionAttribution, SessionStateRef } from '@orchardworks/agent-client';
 import { labSessionSuccessionDirectory, type SessionSuccessionDirectory } from './session-succession-directory.js';
 import { TeamViewScope, useTeamVisibility } from './hooks/useTeamVisibility.js';
 import { teamLayoutTargets } from './team-layout.js';
@@ -57,12 +57,12 @@ import { AskViewScope, useAskVisibility } from './hooks/useAskVisibility.js';
 import { isAskSelected, resolveAskPresentation } from './ask-presentation.js';
 import { resolveConversationLayout } from './conversation-layout.js';
 import { communicationResolver, communicationDirection, loadSessionCommunication, waitForCommunicationSession, type CommunicationSnapshot } from './session-communication.js';
-import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-remote-web/react';
+import { CommunicationNavigationContext, type CommunicationNavigation } from '@orchardworks/agent-client-web/react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { SessionEntry } from './session-tree.js';
 import { useSessionRelations } from './hooks/useSessionRelations.js';
 import { sessionViewNavigation, type SessionViewNavigation, type SessionViewNavigationActions } from './session-view-navigation.js';
-import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-remote-web';
+import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState, sessionHandoffScope, SessionHandoffRejectedError, type SessionHandoffState } from '@orchardworks/agent-client';
 import {SessionControlNotice, type TakeControlOptions} from './components/SessionControlNotice.js';
 import type {NativeSessionOwner} from '@orchardworks/agent-remote-protocol';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
@@ -134,17 +134,7 @@ import type {
   ResourceBinding,
   WindowSessionBinding,
 } from '@orchardworks/agent-remote-protocol';
-import {
-  AgentReplica,
-  RemoteOperationError,
-  HttpWebSocketTransport,
-  RemoteSessionClient,
-  HttpPreviewClient,
-  timelineEntryKey,
-  type AgentReplicaState,
-  type RemoteAgentTransport,
-  type RemoteSessionStatus,
-} from '@orchardworks/agent-remote-web';
+import { AgentReplica, RemoteOperationError, HttpWebSocketTransport, RemoteSessionClient, HttpPreviewClient, timelineEntryKey, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { ReadingPositions, RecoveryScope, readLastSession, saveLastSession } from './conversation-recovery.js';
 import { compositionRoleKey, compositionSession, compositionSelection, type StoreOwner } from './session-composition.js';
 import type { CompositionDocument } from './session-composition-model.js';
@@ -163,7 +153,7 @@ import { useNativeTitles } from './hooks/useNativeTitles.js';
 import { readCurrentConversationLayout, useConversationHistory } from './hooks/useConversationHistory.js';
 import { sessionKey, sessionRootKey } from './session-tree.js';
 import { ViewOptions } from './components/ViewOptions.js';
-import { PreviewProvider, PreviewWorkspace, type AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
+import { PreviewProvider, PreviewWorkspace, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import { ChatSessionManager } from './components/ChatSessionManager.js';
 import { LabWorkbench, type LabWorkbenchActions } from './components/LabWorkbench.js';
 import { SideConversation } from './components/SideConversation.js';
@@ -182,10 +172,10 @@ import { ConversationPane, ConversationSplit } from './components/ConversationSp
 import { expandedSideRange, sidePath, type SideSelections } from './side-tree.js';
 import { configureFork, forkActions, forkCommands, sendForkInput } from './fork-actions.js';
 import { createSessionExcerpt, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { SessionExcerptNavigation, type TimelineEntrySelection } from '@orchardworks/agent-remote-web/react';
+import { SessionExcerptNavigation, type TimelineEntrySelection } from '@orchardworks/agent-client-web/react';
 import { addQuote, restoreQuotes, withViewQuotes } from './session-quotes.js';
 import { NEW_SESSION_TARGET, QuoteAttachments, QuoteMessagesButton, QuoteNotice, QuoteSelectionBar, type QuoteTargetWindow } from './components/SessionQuotes.js';
-import type { QuestionDraft } from '@orchardworks/agent-remote-web/react';
+import type { QuestionDraft } from '@orchardworks/agent-client-web/react';
 import { ReplicaInspector } from './components/ReplicaInspector.js';
 import { ProviderSessionControls, type ProviderCatalogStatus } from './components/ProviderSessionControls.js';
 import { RecordedPlaybackControls } from './components/RecordedPlaybackControls.js';

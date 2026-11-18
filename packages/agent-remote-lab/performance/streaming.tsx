@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 import { LabWorkbench } from '../src/components/LabWorkbench.js';
 import { replicaState } from '../src/test/fixtures.js';
 import '../src/session-view-styles.js';

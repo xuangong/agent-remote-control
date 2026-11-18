@@ -1,4 +1,4 @@
-import type { AgentReplica, AgentReplicaState, RemoteActivityState, RemoteSessionClient, RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { AgentReplica, AgentReplicaState, RemoteActivityState, RemoteSessionClient, RemoteSessionStatus } from '@orchardworks/agent-client';
 
 /**
  * The activity an activity-only subscription reports, read from a shown conversation's replica. The Host

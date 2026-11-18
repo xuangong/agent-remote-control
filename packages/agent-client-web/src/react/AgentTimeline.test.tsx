@@ -7,12 +7,11 @@ import type {
   ProjectedTimelineEntry,
 } from '@orchardworks/agent-remote-protocol';
 
-import { applyResourceUpdate, createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import type { PreviewController } from './PreviewActions.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
+import { applyResourceUpdate, createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 function entry(
   seq: number,
@@ -607,7 +606,7 @@ it('reveals a quiet original search target in content mode without hiding unreso
   const input = entry(1, { type: 'user_message', text: 'Automatic source', background: bg });
   const reply = entry(2, { type: 'assistant_message', text: 'Quiet result', background: bg });
   const pending = entry(3, { type: 'assistant_message', text: 'Unsettled response', background: { ...bg, id: 'other', status: 'pending' } });
-  const { timelineEntryKey } = await import('../replica/timeline-entry-key.js');
+  const { timelineEntryKey } = await import("@orchardworks/agent-client");
   const key = timelineEntryKey('epoch-one', reply);
   const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([input, reply, pending])} searchEntryKey={key} searchRequestId={1} /></TimelineDisplay.Provider>);
   expect(container.textContent).toContain('Quiet result');

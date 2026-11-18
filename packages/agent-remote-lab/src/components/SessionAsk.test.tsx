@@ -1,5 +1,5 @@
 import { act, createRef, useState, type ComponentProps } from 'react';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 import { applyWindowOperation, createWindowView } from '@orchardworks/agent-remote-protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';

@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from '../test/bot-mode-fixtures.js';
 import { SessionDirectoryClient } from '../directory-client.js';

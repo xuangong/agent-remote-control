@@ -1,5 +1,5 @@
-import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
-import { holdsUnconfirmedRows, isUncertainSend, leaseActivityLabel, leaseView, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-remote-web';
+import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
+import { holdsUnconfirmedRows, isUncertainSend, leaseActivityLabel, leaseView, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -11,15 +11,15 @@ import type {
   AgentInteractionResponse,
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-remote-web';
-import { SessionAttributions, AgentCommandDetails, AgentTimeline, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState, RemoteSessionStatus, SessionHandoffState } from '@orchardworks/agent-client';
+import { SessionAttributions, AgentCommandDetails, AgentTimeline, type TimelineEntrySelection, TimelineSearch, PreviewDock, TimelineDisplay, TimelineLettersVisible, createTimelineRenderModel, isContentOnlyItem, type TimelineDisplayMode, type AgentChildSessionView, type QuestionDraft, type SessionLinkResolver } from '@orchardworks/agent-client-web/react';
 
 
-import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-remote-web/react';
+import { AgentComposer as DraftComposer, type SessionViewActions, type TimelineReadingPositions } from '@orchardworks/agent-client-web/react';
 
 import { PlanningControl } from './PlanningControl.js';
 import { SessionViewOptions, type SessionDisplayPreferences } from './SessionViewOptions.js';
-import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agent-remote-web/react';
+import { SessionTodoPanel, type SessionTodoPanelProps } from '@orchardworks/agent-client-web/react';
 import { SessionHeading } from './SessionHeading.js';
 import { SessionHeadingActionsPresentationContext } from './SessionHeadingActions.js';
 import { SessionTimelineTools } from './SessionTimelineTools.js';

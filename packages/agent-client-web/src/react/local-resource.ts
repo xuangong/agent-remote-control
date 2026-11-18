@@ -1,5 +1,5 @@
 import type { ResourceBinding, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '../replica/types.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface MarkdownResourceContext {
   readonly scopeKey: string;

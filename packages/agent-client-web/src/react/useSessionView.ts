@@ -1,12 +1,8 @@
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AgentReplica } from '../replica/store.js';
-import { RemoteSessionClient } from '../client/remote-session-client.js';
-import type { AgentReplicaState } from '../replica/types.js';
-import type { RemoteAgentTransport } from '../client/transport.js';
 import type { QuestionDraft } from './interactions/QuestionCard.js';
 import type { SessionViewActions } from './session-view-actions.js';
 import type { ImageDraftRecipient } from '../image-drafts.js';
+import { remoteSessionState, type RemoteSessionState, AgentReplica, RemoteSessionClient, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-client';
 
 export interface SessionConnectionLease { client: RemoteSessionClient; replica: AgentReplica; release(): void }
 /** The owner controls retention and persistence; a mounted view owns only its lease. */

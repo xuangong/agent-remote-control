@@ -20,11 +20,11 @@ beforeAll(async () => {
     import React, { useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { AgentTimeline } from '../../agent-remote-web/src/react/AgentTimeline.tsx';
-    import { AgentComposer } from '../../agent-remote-web/src/react/AgentComposer.tsx';
-    import { useTimelineScroll } from '../../agent-remote-web/src/react/useTimelineScroll.ts';
-    import { remoteSessionState } from '../../agent-remote-web/src/client/session-state.ts';
-    import { AgentReplica } from '../../agent-remote-web/src/replica/store.ts';
+    import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
+    import { AgentComposer } from '../../agent-client-web/src/react/AgentComposer.tsx';
+    import { useTimelineScroll } from '../../agent-client-web/src/react/useTimelineScroll.ts';
+    import { remoteSessionState } from '../../agent-client/src/client/session-state.ts';
+    import { AgentReplica } from '../../agent-client/src/replica/store.ts';
 
     const replica = new AgentReplica();
     window.replica = replica;

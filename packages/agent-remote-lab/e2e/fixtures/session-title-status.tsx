@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
-import { AgentChildSessionList } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
+import { AgentChildSessionList } from '@orchardworks/agent-client-web/react';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { SessionDirectory } from '../../src/components/SessionDirectory.js';
 import { ChatSessionManager } from '../../src/components/ChatSessionManager.js';

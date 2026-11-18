@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { botGroup, mountBotApp, seedGroup, until, visibleButton } from '../test/bot-mode-fixtures.js';
 
 const dialogMethods = ['showModal', 'close'] as const;

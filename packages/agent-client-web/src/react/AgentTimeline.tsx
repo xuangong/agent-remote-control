@@ -6,7 +6,6 @@ import type {
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
 
-import type { AgentReplicaState } from '../replica/types.js';
 import type { SessionLinkResolver } from './items/ToolCallItem.js';
 import { AgentChildSessionList, type AgentChildSessionView } from './AgentChildSessionList.js';
 import { InteractionPanel } from './InteractionPanel.js';
@@ -20,8 +19,8 @@ import type { PreviewController } from './PreviewActions.js';
 import { usePreviewController } from './PreviewContext.js';
 import { OutgoingMessageItem } from './OutgoingMessageItem.js';
 import { TimelineDisplay, TimelineLettersVisible, isContentOnlyItem } from './TimelineDisplay.js';
-import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { useTimelineAction } from './useTimelineAction.js';
+import { type AgentReplicaState, timelineEntryKey } from '@orchardworks/agent-client';
 
 export type AgentTimelineState = AgentReplicaState;
 

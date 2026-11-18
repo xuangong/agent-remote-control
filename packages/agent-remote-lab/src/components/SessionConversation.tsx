@@ -1,15 +1,15 @@
 import { LiveConnectionsContext } from '../hooks/useLiveBudget.js';
 import type { LiveRegistration } from '../live-budget.js';
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode, type ComponentProps } from 'react';
-import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-remote-web/headless';
-import { CommunicationNavigationContext, type AgentChildSessionView, type TimelineDisplayMode } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplicaState, RemoteAgentTransport } from '@orchardworks/agent-client';
+import { CommunicationNavigationContext, type AgentChildSessionView, type TimelineDisplayMode } from '@orchardworks/agent-client-web/react';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { ConversationConnectionScope } from '../conversation-connections.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
-import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-remote-web';
+import { AgentReplica, sessionHandoffScope, SessionHandoffRejectedError } from '@orchardworks/agent-client';
 import type { NativeSessionOwner, NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { DirectoryError, nativeSessionMissing, SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { unavailableSessions } from '../unavailable-sessions.js';
@@ -17,7 +17,7 @@ import { forgetStoredSession, workspaceDisplayState } from '../stored-display.js
 import { useStoredDisplay } from '../hooks/useStoredDisplay.js';
 import { useConversationSession } from '../hooks/useConversationSession.js';
 import { useSharedDraft } from '../hooks/useSharedDraft.js';
-import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { DraftBinding } from '../draft-store.js';
 import { sessionViewNavigation, type SessionViewNavigationActions, type SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
@@ -36,8 +36,8 @@ export interface SessionConversationProps extends Pick<ComponentProps<typeof Lab
   attachmentManaged?: boolean; attachmentNotice?: ReactNode; sessionIntent?: 'history';
   successionContext?: { operationId: string; target: NativeSessionRef };
   directoryFor?(hostId: string): SessionDirectoryClient | undefined;
-  replica?: import('@orchardworks/agent-remote-web').AgentReplica;
-  replicaFor?(agentId: string): import('@orchardworks/agent-remote-web').AgentReplica;
+  replica?: import('@orchardworks/agent-client').AgentReplica;
+  replicaFor?(agentId: string): import('@orchardworks/agent-client').AgentReplica;
   onSessionBound?(session: OpenedSession, viewId?: string, windowViewId?: string): void;
   /** The Host confirmed that the view's own session no longer exists; the container presents the view as empty instead. */
   onSessionUnavailable?(target: SessionWindowTarget): void;

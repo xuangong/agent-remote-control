@@ -3,8 +3,8 @@ import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render, rerender } from '../test/setup.js';
-import type { PreviewRegistration } from '../client/preview-client.js';
 import { PreviewActions, discoverLoopbackTargets, type PreviewController } from './PreviewActions.js';
+import { type PreviewRegistration } from '@orchardworks/agent-client';
 
 describe('PreviewActions', () => {
   it.each([

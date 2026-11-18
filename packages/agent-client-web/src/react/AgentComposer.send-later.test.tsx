@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
 import { render } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 async function setup(props: Partial<AgentComposerProps> = {}) {
   const container = await render(<AgentComposer state={undefined} draftOnly {...props} />);

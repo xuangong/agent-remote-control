@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ResourceInputCapabilities, ResourceUploadReceipt, MessagePart } from '@orchardworks/agent-remote-protocol';
 import type { DraftPart } from './composer-document.js';
-import type { ResourceTransferOptions } from '../client/resource-upload.js';
 export type UploadResource = (file: Blob, name: string, uploadId: string, options?: ResourceTransferOptions) => Promise<NonNullable<ResourceUploadReceipt['resource']>>;
 import { resourceDraftMemory as memory, readResourceDraft as read, writeResourceDraft as write, resourceDraftGeneration, type Entry } from '../resource-drafts.js';
 import type { ImageDraftRecipient } from '../image-drafts.js';
+import { type ResourceTransferOptions } from '@orchardworks/agent-client';
 export function useResourceDraft({ scope, sessionKey, parts, active, limits, upload, recipient, documentHydrated = true }: { scope?: string; sessionKey: string; parts: readonly DraftPart[]; active: boolean; limits?: ResourceInputCapabilities; upload?: UploadResource; recipient?: ImageDraftRecipient; documentHydrated?: boolean }) {
   const generation = resourceDraftGeneration(scope ?? 'page');
   const key = JSON.stringify([scope ?? 'page', sessionKey]);

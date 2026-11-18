@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { render, promptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { DraftStore } from '../draft-store.js';

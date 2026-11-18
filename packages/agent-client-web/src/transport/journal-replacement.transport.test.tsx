@@ -4,11 +4,9 @@ import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { AgentTimeline } from '../react/AgentTimeline.js';
-import { AgentReplica } from '../replica/store.js';
 import { journalRelay, text, type Row } from '../test/journal-relay.js';
 import { render } from '../test/setup.js';
-import { HttpWebSocketTransport } from './http-websocket-transport.js';
-import { RemoteSessionClient } from './remote-session-client.js';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
 
 const closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });

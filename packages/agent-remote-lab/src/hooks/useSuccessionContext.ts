@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef } from 'react';
-import { watchFeedRefresh } from '@orchardworks/agent-remote-web';
+import { watchFeedRefresh } from '@orchardworks/agent-client';
 import { nativeSessionRefKey, type NativeSessionRef, type SuccessionContextStatus } from '@orchardworks/agent-remote-protocol';
 import type { SessionDirectoryClient } from '../directory-client.js';
 

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { RemoteCallForSupportClient, type CallForSupportSettings, type RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
+import { RemoteCallForSupportClient, type CallForSupportSettings, type RemoteTeamClient } from '@orchardworks/agent-client';
 import { isCallForSupportCallInput, type CallForSupportCallInput, type CallForSupportDeliverable, type CallForSupportProfile, type Team, type TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../../workspace-access.js';
 import './call-for-support.css';

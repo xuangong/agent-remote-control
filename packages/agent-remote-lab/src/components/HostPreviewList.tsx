@@ -1,6 +1,6 @@
 import { useFeedbackToast } from './Toast.js';
 import { useState } from 'react';
-import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-remote-web/react';
+import { CopyTunnelUrl, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
 
 export function HostPreviewList({ controller: supplied, onOpenSource, onOpen, hostName, hideEmpty = false }: {
   readonly hideEmpty?: boolean;

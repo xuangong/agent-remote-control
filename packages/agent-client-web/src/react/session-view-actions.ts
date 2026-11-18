@@ -1,13 +1,12 @@
-import type { TimelineSearchOptions, TimelineSearchProgress, TimelineSearchMatch } from '../client/timeline-search.js';
 import type { ImageUploadReceipt, MessagePart, ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentCommand, AgentCommandResult, AgentMessageOptions } from '@orchardworks/agent-remote-protocol';
 import type {
   AgentInteractionResponse,
   ResourceBinding,
 } from '@orchardworks/agent-remote-protocol';
+import { type TimelineSearchOptions, type TimelineSearchProgress, type TimelineSearchMatch, type SessionTakeControlOptions } from '@orchardworks/agent-client';
+export { type SessionTakeControlOptions } from '@orchardworks/agent-client';
 
-import type { SessionTakeControlOptions } from '../client/session-control-extension.js';
-export type { SessionTakeControlOptions } from '../client/session-control-extension.js';
 
 export interface SessionViewActions {
   takeControl?(options?: SessionTakeControlOptions): Promise<void>;

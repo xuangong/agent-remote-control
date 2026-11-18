@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import type { SessionAttribution, SessionDescription } from '../session-description.js';
+import { type SessionAttribution, type SessionDescription } from '@orchardworks/agent-client';
 
 export interface SessionAttributionsProps {
   description?: SessionDescription;

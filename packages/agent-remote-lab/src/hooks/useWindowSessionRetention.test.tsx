@@ -2,7 +2,7 @@ import { act, useCallback, useState } from 'react';
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { createWindowView, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from '../conversation-connections.js';
 import { createRecordedValidationServer } from '../server/recorded.js';
 import { render, unmount } from '../test/setup.js';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AgentReplica, type RemoteSessionStatus } from '@orchardworks/agent-remote-web/headless';
+import { AgentReplica, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION, type AgentSnapshot, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { observeReplica, type DebuggerRecord } from './records.js';
 import { parseRecording, RecordingPlayer } from './recording.js';

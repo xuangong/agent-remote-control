@@ -14,7 +14,7 @@ import * as successionHooks from './hooks/useSessionSuccession.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
 import { sessionKey } from './session-tree.js';
 import { saveTrackedSessions } from './tracking-state.js';
-import * as remoteReact from '@orchardworks/agent-remote-web/react';
+import * as remoteReact from '@orchardworks/agent-client-web/react';
 import * as managerComponents from './components/ChatSessionManager.js';
 import { act, cleanups, committed, editVisiblePrompt, failureFixture, native, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
 

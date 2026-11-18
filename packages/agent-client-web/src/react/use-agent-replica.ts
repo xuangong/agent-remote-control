@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
-import type { AgentReplicaState } from '../replica/types.js';
 
 export interface AgentReplicaStore {
   getState(): AgentReplicaState;

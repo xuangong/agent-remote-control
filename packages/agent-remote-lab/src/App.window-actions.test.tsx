@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { act, type ComponentProps } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type Team, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
+import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { App, type LabTransport } from './App.js';
 import * as teamMenu from './components/TeamMenu.js';
 import * as workspaceHooks from './hooks/useWindowWorkspace.js';

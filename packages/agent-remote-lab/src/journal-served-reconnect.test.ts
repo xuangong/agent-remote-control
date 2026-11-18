@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionJournal, type JournalRowInput } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
 
 /**
  * The real client over a real WebSocket, reading pages that a real `SessionJournal` and `pageJournal` produce. The journal updates its

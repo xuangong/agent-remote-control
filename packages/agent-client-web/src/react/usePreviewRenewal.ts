@@ -1,6 +1,5 @@
-import { watchPagePolling } from '../client/page-polling.js';
 import { useEffect, useRef, useState } from 'react';
-import { PreviewRequestError, type HttpPreviewClient, type PreviewRegistration } from '../client/preview-client.js';
+import { watchPagePolling, PreviewRequestError, type HttpPreviewClient, type PreviewRegistration } from '@orchardworks/agent-client';
 
 interface RenewalIssue { message: string; terminal: boolean }
 

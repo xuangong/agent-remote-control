@@ -265,7 +265,7 @@ describe('Remote Host broker', () => {
 
 it('carries native-host discovery, creation, snapshots, and chat through the production uplink client', async () => {
   const { createAgentRemoteRelay, createRemoteHostUplinkClient, InputImageStore } = await import('@orchardworks/agent-session-runtime');
-  const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless');
+  const { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-client');
   const { createRecordedLabProvider } = await import('./recorded.js');
   const { vi } = await import('vitest');
   const f = await setup(); const pair = await (await f.post('/v1/remote/pairings')).json();

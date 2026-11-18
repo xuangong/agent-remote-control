@@ -2,7 +2,7 @@ import { scanTimelineHistory, type TimelineSearchOptions, type TimelineSearchMat
 import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { sessionHandoffScope, type SessionHandoffScope, type SessionHandoff, type SessionControlExtension, type SessionTakeControlOptions } from './session-control-extension.js';
 import { remoteSessionState, type RemoteSessionState } from './session-state.js';
-import { watchPageResume } from './page-resume.js';
+import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import { equalJitter } from './reconnect-delay.js';
 import { isSessionMutation, type SessionControlMessage, type SessionControlState } from '@orchardworks/agent-remote-protocol';
 import {
@@ -153,7 +153,7 @@ export class RemoteSessionClient {
 
   start(): void {
     this.unwatchResume?.();
-    this.pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    this.pageHidden = pageHidden();
     this.unwatchResume = watchPageResume(() => {
       this.pageHidden = false;
       queueMicrotask(() => {

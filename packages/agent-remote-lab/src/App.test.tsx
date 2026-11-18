@@ -9,7 +9,7 @@ import {
   type WindowGroupOperation,
   type WindowOperation,
 } from '@orchardworks/agent-remote-protocol';
-import type { RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import type { RemoteTransportListener } from '@orchardworks/agent-client';
 
 import { App, type LabTransport } from './App.js';
 import { render, unmount, setPromptText, promptText } from './test/setup.js';

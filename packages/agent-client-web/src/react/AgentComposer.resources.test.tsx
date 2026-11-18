@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
 import { ResourceDownload, ResourceDownloadContext } from './ResourceDownload.js';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
 const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
   id: 'resources', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
   capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: true,

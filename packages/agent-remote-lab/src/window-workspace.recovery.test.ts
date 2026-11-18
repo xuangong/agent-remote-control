@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { applyWindowOperation, createWindowView, type WindowMutation, type WindowOperationResult, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { WindowRequestError, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowRequestError, type WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { WindowWorkspaceStore } from './window-workspace-store.js';
 
 const initial = (): WorkspaceWindow => ({ schemaVersion: 3, id: 'recovery-window', title: 'Before', revision: 0,

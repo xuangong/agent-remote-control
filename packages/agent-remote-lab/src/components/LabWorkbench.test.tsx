@@ -1,4 +1,4 @@
-import { applyInteractionRequested, remoteSessionState, RemoteOperationError, SessionHandoff } from '@orchardworks/agent-remote-web';
+import { applyInteractionRequested, remoteSessionState, RemoteOperationError, SessionHandoff } from '@orchardworks/agent-client';
 import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';

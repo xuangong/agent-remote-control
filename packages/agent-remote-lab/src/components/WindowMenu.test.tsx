@@ -5,7 +5,7 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
 import { render } from '../test/setup.js';
 import { WindowMenu } from './WindowMenu.js';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 
 const dialogMethods = ['showModal', 'close'] as const;
 const originalDialog = Object.fromEntries(dialogMethods.map(name => [name, Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name)]));

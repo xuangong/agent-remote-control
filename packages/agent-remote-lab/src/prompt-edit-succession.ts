@@ -1,5 +1,5 @@
 import { isNativePrefixSelection, isSessionExcerpt, type SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { releaseImageDraft, writeImageDraft, type ImageDraft, type ImageDraftBinding } from '@orchardworks/agent-remote-web/browser';
+import { releaseImageDraft, writeImageDraft, type ImageDraft, type ImageDraftBinding } from '@orchardworks/agent-client-web/browser';
 import type { OpenedSession, SuccessionPrepareInput } from './directory-client.js';
 import { clearCacheOnClose, conversationSessionStorage } from './conversation-storage.js';
 

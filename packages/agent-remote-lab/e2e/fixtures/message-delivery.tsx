@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
-import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-remote-web/headless';
-import { useAgentReplica } from '@orchardworks/agent-remote-web/react';
+import { AgentReplica, RemoteSessionClient, type RemoteAgentTransport, type RemoteTransportListener } from '@orchardworks/agent-client';
+import { useAgentReplica } from '@orchardworks/agent-client-web/react';
 import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { LabWorkbench } from '../../src/components/LabWorkbench.js';
 import { replicaState } from '../../src/test/fixtures.js';

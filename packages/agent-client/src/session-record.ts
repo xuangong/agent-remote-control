@@ -42,13 +42,13 @@ export function displaySnapshot(snapshot: AgentSnapshotPayload): AgentSnapshotPa
 }
 
 export function createStoredRecord(relayUrl: string, identity: SessionIdentity, session: SessionToStore, limits: StoredWindowLimits, now: number): StoredRecord | undefined {
-  const window = windowForStorage(session.entries, limits);
-  if (!window) return undefined;
+  const kept = windowForStorage(session.entries, limits);
+  if (!kept) return undefined;
   const snapshot = displaySnapshot(session.snapshot);
   return {
     key: deviceKey(relayUrl, identity), relayUrl, version: STORED_SESSION_VERSION,
-    agentId: session.agentId, epoch: session.epoch, nextSeq: session.nextSeq, hasOlder: session.hasOlder || window.trimmed,
-    entries: window.entries, snapshot, updatedAt: now, bytes: window.bytes + JSON.stringify(snapshot).length + 256,
+    agentId: session.agentId, epoch: session.epoch, nextSeq: session.nextSeq, hasOlder: session.hasOlder || kept.trimmed,
+    entries: kept.entries, snapshot, updatedAt: now, bytes: kept.bytes + JSON.stringify(snapshot).length + 256,
   };
 }
 

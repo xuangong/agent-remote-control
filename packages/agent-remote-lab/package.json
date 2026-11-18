@@ -16,7 +16,9 @@
     "benchmark:journals": "node scripts/journal-benchmark.mjs"
   },
   "dependencies": {
-    "@orchardworks/dsh": "workspace:*",
+    "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
+    "@orchardworks/agent-client": "workspace:*",
+    "@orchardworks/agent-client-web": "workspace:*",
     "@orchardworks/agent-provider-codex": "workspace:*",
     "@orchardworks/agent-provider-dsh": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
@@ -24,14 +26,13 @@
     "@orchardworks/agent-remote-journal": "workspace:*",
     "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-tunnel": "workspace:*",
     "@orchardworks/agent-session-runtime": "workspace:*",
-    "@orchardworks/agent-remote-web": "workspace:*",
-    "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
+    "@orchardworks/dsh": "workspace:*",
+    "jsqr": "1.4.0",
     "qrcode": "1.5.4",
     "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@orchardworks/agent-remote-tunnel": "workspace:*",
-    "jsqr": "1.4.0"
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
     "@orchardworks/agent-e2e": "workspace:*",

@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
-import { remoteSessionState, type AgentReplica, type RemoteAgentTransport, type RemoteSessionState } from '@orchardworks/agent-remote-web';
-import { useSessionView } from '@orchardworks/agent-remote-web/react';
+import { remoteSessionState, type AgentReplica, type RemoteAgentTransport, type RemoteSessionState } from '@orchardworks/agent-client';
+import { useSessionView } from '@orchardworks/agent-client-web/react';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
 import { WorkspaceReady } from '../workspace-access.js';
 import { RecoveryScope } from '../conversation-recovery.js';

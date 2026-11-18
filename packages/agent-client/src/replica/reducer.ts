@@ -284,7 +284,7 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
  * The tail of an epoch is the newest window of its timeline. It replaces what the replica holds without an empty state in
  * between: a held row whose key and content are in the window stays as it is (only its sequence changes), a row the window lacks
  * leaves (including rows older than the window, which `loadOlder` reads again), and a new row is inserted in the window's order.
- * The old epoch retires here, and the frames buffered for the new epoch are applied after the window.
+ * The old epoch retires here, and the frames buffered for the new epoch are applied after the item window.
  */
 function absorbTail(state: AgentReplicaState, page: HistoryPage): TimelineReduction {
   const payload = page.payload;

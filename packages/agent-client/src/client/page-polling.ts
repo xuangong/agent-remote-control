@@ -1,10 +1,12 @@
+import { pageHidden, watchPageVisibility } from '../page-lifecycle.js';
+
 /** A single polling task that sleeps in hidden pages and never overlaps itself. Becoming visible restarts the interval; it does not poll. */
 export function watchPagePolling(poll: () => unknown, intervalMs: number): () => void {
   let stopped = false;
   let running = false;
   let wakePending = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const visible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  const visible = () => !pageHidden();
   const run = async () => {
     clearTimeout(timer);
     if (stopped || !visible()) return;
@@ -26,7 +28,7 @@ export function watchPagePolling(poll: () => unknown, intervalMs: number): () =>
     if (visible()) { if (!running) timer = setTimeout(() => void run(), intervalMs); }
     else wakePending = false;
   };
-  document.addEventListener('visibilitychange', visibility);
+  const unwatch = watchPageVisibility(visibility);
   void run();
-  return () => { stopped = true; clearTimeout(timer); document.removeEventListener('visibilitychange', visibility); };
+  return () => { stopped = true; clearTimeout(timer); unwatch(); };
 }

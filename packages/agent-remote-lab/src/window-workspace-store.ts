@@ -3,7 +3,7 @@ import {
   applyGroupOperation, decodeWindowGroup, hasBotAppearance, hasWindowAppearance, isWindowGroup, isWindowGroupMutation, isWindowGroupOperation, toWindowGroup,
   type WindowBots, type WindowGroup, type WindowGroupEdit, type WindowGroupMutation, type WindowGroupOperation, type WindowPresentation, type WorkspaceWindow,
 } from '@orchardworks/agent-remote-protocol';
-import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowRequestError, type WindowCommit, type WindowWorkspaceClient } from '@orchardworks/agent-client';
 
 /** A value the store can read as a group: a Window, a group, or a Relay snapshot with its manager. */
 export type WindowGroupSource = WorkspaceWindow | { window: WorkspaceWindow; bots?: WindowBots; presentation?: WindowPresentation; manager?: unknown };

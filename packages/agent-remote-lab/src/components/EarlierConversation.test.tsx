@@ -1,8 +1,8 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type AgentSnapshot, type HistoryPage, type ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { TimelineDisplay } from '@orchardworks/agent-remote-web/react';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import { TimelineDisplay } from '@orchardworks/agent-client-web/react';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';
 import { EarlierConversation, type EarlierTransport } from './EarlierConversation.js';

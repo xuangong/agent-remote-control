@@ -1,5 +1,5 @@
 import type { AgentInteractionRequest, AgentSnapshotPayload, ProjectedTimelineEntry, ResourceResponseState, ResourceState } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplica, ReplicaDiagnostic, RemoteSessionStatus } from '@orchardworks/agent-remote-web/headless';
+import type { AgentReplica, ReplicaDiagnostic, RemoteSessionStatus } from '@orchardworks/agent-client';
 
 import { stableJsonValue } from './structural.js';
 import { redactDebuggerValue } from './redaction.js';

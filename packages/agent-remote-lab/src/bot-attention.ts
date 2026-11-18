@@ -1,4 +1,4 @@
-import type { SessionStatesView } from '@orchardworks/agent-remote-web';
+import type { SessionStatesView } from '@orchardworks/agent-client';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 
 export interface SharedReminder { session: SessionEntry; reminder: 'waiting' | 'idle'; identity: string }

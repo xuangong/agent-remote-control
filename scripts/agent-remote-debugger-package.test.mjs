@@ -20,7 +20,7 @@ test('installed public ARDB contains its local service and recovers exact prefix
   const artifacts = join(directory, 'tarballs'), prefix = join(directory, 'installed');
   await mkdir(artifacts); await mkdir(prefix);
   try {
-    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'codex-daemon-client', 'agent-provider-codex', 'agent-session-runtime', 'agent-remote-web', 'agent-remote-debugger'];
+    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'codex-daemon-client', 'agent-provider-codex', 'agent-session-runtime', 'agent-client', 'agent-client-web', 'agent-remote-debugger'];
     const dependencies = {};
     for (const name of names) {
       const path = join(repository, 'packages', name), manifest = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));
@@ -79,7 +79,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createDebuggerServer } from '@orchardworks/agent-remote-debugger/dist/server.js';
 import { createDebuggerRuntime } from '@orchardworks/agent-remote-debugger/dist/runtime.js';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web/headless';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { createPrefixAdapter } from './prefix-adapter.mjs';
 const post = (server, action, body) => fetch(server.url + '/__ardb/succession/' + action, { method: 'POST', headers: { origin: server.url, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(5000) });
 async function prepare(server, id) {

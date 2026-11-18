@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
 

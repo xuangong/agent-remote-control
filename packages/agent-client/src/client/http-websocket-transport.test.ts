@@ -1,5 +1,5 @@
-// @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import {
   PROTOCOL_VERSION,
@@ -13,6 +13,9 @@ import type NodeWebSocket from 'ws';
 import { HttpWebSocketTransport, type HttpWebSocketTransportDependencies } from './http-websocket-transport.js';
 import { RemoteOperationError } from './transport.js';
 import type { RemoteProtocolObservation, RemoteTransportDiagnostic } from './transport.js';
+import { stubBrowserPage } from '../testing/page.js';
+const page = stubBrowserPage();
+beforeEach(() => page.reset());
 
 declare const NodeWebSocketConstructor: typeof NodeWebSocket;
 const require = createRequire(import.meta.url);
@@ -475,14 +478,14 @@ it('retires a silent socket when a background page becomes visible, only once', 
   const connection = transport.connect('agent', { onOpen() {}, onMessage() {}, onDisconnect: disconnect });
   try {
     socket.open();
-    window.dispatchEvent(new Event('pageshow'));
+    page.window.dispatchEvent(new Event('pageshow'));
     expect(disconnect).not.toHaveBeenCalled();
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
-    document.dispatchEvent(new Event('visibilitychange'));
+    vi.spyOn(page.document, 'visibilityState', 'get').mockReturnValue('hidden');
+    page.document.dispatchEvent(new Event('visibilitychange'));
     expect(disconnect).not.toHaveBeenCalled();
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-    document.dispatchEvent(new Event('visibilitychange'));
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    vi.spyOn(page.document, 'visibilityState', 'get').mockReturnValue('visible');
+    page.document.dispatchEvent(new Event('visibilitychange'));
+    page.window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     expect(disconnect).toHaveBeenCalledTimes(1);
     expect(() => connection.send({ protocolVersion: PROTOCOL_VERSION, type: 'negotiate' })).toThrow();
     expect(socket.sent).toEqual([]);

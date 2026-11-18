@@ -1,6 +1,6 @@
 import { act, useRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { DraftStore } from '../draft-store.js';
 import type { TpmItem } from '../hooks/useTpmWork.js';

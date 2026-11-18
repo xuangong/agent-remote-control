@@ -34,6 +34,7 @@
     "@orchardworks/agent-timeline": "workspace:*"
   },
   "devDependencies": {
+    "@orchardworks/agent-client": "workspace:*",
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",
     "typescript": "^5.7.0",

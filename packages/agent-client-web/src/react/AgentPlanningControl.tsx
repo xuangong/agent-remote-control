@@ -1,7 +1,5 @@
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useEffect, useRef, useState } from 'react';
-import type { AgentReplicaState } from '../replica/types.js';
-import type { RemoteSessionStatus } from '../client/remote-session-client.js';
+import { remoteSessionState, type RemoteSessionState, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 
 export interface AgentPlanningControlProps {
   readonly sessionState?: RemoteSessionState;

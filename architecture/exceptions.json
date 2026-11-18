@@ -51,18 +51,6 @@
       "reason": "The resource stores write files through the platform helper; they move behind the same StateStore port as the Controller state."
     },
     {
-      "rule": "layer",
-      "from": [
-        "packages/agent-remote-web/src/**"
-      ],
-      "to": [
-        "client-web"
-      ],
-      "max": 3,
-      "owner": "M8",
-      "reason": "The headless entry still re-exports the browser and React bindings; M8 splits agent-client from agent-client-web."
-    },
-    {
       "rule": "controller-concrete-provider",
       "from": [
         "packages/agent-controller/src/**"
@@ -85,15 +73,6 @@
       "max": 2,
       "owner": "M10",
       "reason": "The update commands read Controller releases through the helper in relay-core; M10 moves release lookup to a module both sides import."
-    },
-    {
-      "rule": "client-ui",
-      "from": [
-        "packages/agent-remote-web/src/**"
-      ],
-      "max": 13,
-      "owner": "M8",
-      "reason": "The client reads window, document and IndexedDB directly; M8 turns them into Transport and DeviceDatabase ports in agent-client-web."
     },
     {
       "rule": "domain-impure",
@@ -199,7 +178,7 @@
       "from": [
         "packages/agent-relay-core/**"
       ],
-      "max": 8,
+      "max": 7,
       "owner": "M11",
       "reason": "Relay tests reach the client and the Cloudflare package by path; they move to the S2, S3 and S4 seam suites in M11."
     },
@@ -242,20 +221,11 @@
     {
       "rule": "cross-package-relative",
       "from": [
-        "packages/agent-remote-web/**"
-      ],
-      "max": 6,
-      "owner": "M8",
-      "reason": "Client tests start the session runtime and the SDK by path; M8 gives agent-client a ./testing entry and the S6 and S7 suites."
-    },
-    {
-      "rule": "cross-package-relative",
-      "from": [
         "packages/agent-session-runtime/**"
       ],
-      "max": 6,
-      "owner": "M8",
-      "reason": "Runtime tests drive the headless client by path; they move to the S3 seam suite once agent-client is a package in M8."
+      "max": 2,
+      "owner": "M10",
+      "reason": "codex-images.test.ts drives the real provider and its scripted app server through the runtime; M10 gives the Codex package a ./testing entry for the scripted app server, and this test becomes an S1 run."
     }
   ]
 }

@@ -2,10 +2,7 @@
 import { expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
-import {
-  AgentReplica, HttpWebSocketTransport, RemoteSessionClient,
-  type RemoteSessionStatus, type WebSocketLike,
-} from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-client';
 import { createFakeChildProcess, type FakeChildProcess } from '../../../agent-provider-codex/src/test-utils/fake-child.js';
 import { createProtocolValidationServer } from '../server.js';
 import { createCodexDirectory } from './codex-directory.js';

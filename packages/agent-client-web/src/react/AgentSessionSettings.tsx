@@ -1,9 +1,8 @@
-import { remoteSessionState, type RemoteSessionState } from '../client/session-state.js';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import type { AgentSessionSetting, AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '../replica/types.js';
 import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
 import { AgentSessionUsage } from './AgentSessionUsage.js';
+import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
 
 export type SessionControlView = 'status' | 'model' | 'permissions' | 'actions';
 

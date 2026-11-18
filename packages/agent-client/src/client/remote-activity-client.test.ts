@@ -1,7 +1,10 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteActivityClient, type RemoteActivityState } from './remote-activity-client.js';
 import type { RemoteAgentTransport, RemoteTransportListener } from './transport.js';
+import { stubBrowserPage } from '../testing/page.js';
+const page = stubBrowserPage();
+beforeEach(() => page.reset());
 afterEach(() => vi.useRealTimers());
 it('negotiates activity only, reconnects without replaying content, and releases its socket', async () => {
   vi.useFakeTimers();
@@ -75,7 +78,7 @@ describe('activity confirmation across page suspension', () => {
 
   function setup() {
     vi.useFakeTimers();
-    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const visibility = vi.spyOn(page.document, 'visibilityState', 'get').mockReturnValue('visible');
     const connections: RemoteTransportListener[] = [];
     const values: RemoteActivityState[] = [];
     const transport = { connect: (_id: string, listener: RemoteTransportListener) => {
@@ -85,8 +88,8 @@ describe('activity confirmation across page suspension', () => {
     const client = new RemoteActivityClient('agent', transport, value => values.push(value));
     clients.push(client);
     client.start();
-    const hide = () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); };
-    const show = () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); };
+    const hide = () => { visibility.mockReturnValue('hidden'); page.document.dispatchEvent(new Event('visibilitychange')); };
+    const show = () => { visibility.mockReturnValue('visible'); page.document.dispatchEvent(new Event('visibilitychange')); };
     const confirm = () => connections.at(-1)!.onMessage({ protocolVersion: '1.8.0', type: 'agent_activity', payload: { agentId: 'agent', status: 'running' } });
     return { client, connections, values, hide, show, confirm };
   }
@@ -134,17 +137,17 @@ describe('activity confirmation across page suspension', () => {
   it('does not extend a foreground confirmation deadline on repeated online events', async () => {
     const h = setup();
     await vi.advanceTimersByTimeAsync(10_000);
-    window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online'));
+    page.window.dispatchEvent(new Event('online')); page.window.dispatchEvent(new Event('online'));
     await vi.advanceTimersByTimeAsync(10_000);
     expect(h.values.at(-1)?.connection).toBe('disconnected');
   });
 
   it('pauses on pagehide even before visibilityState changes', async () => {
     const h = setup();
-    window.dispatchEvent(new Event('pagehide'));
+    page.window.dispatchEvent(new Event('pagehide'));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.values).toEqual([{ connection: 'connecting' }]);
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    page.window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     await Promise.resolve(); h.confirm();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(h.values.at(-1)?.connection).toBe('ready');
@@ -154,7 +157,7 @@ describe('activity confirmation across page suspension', () => {
   it('renews confirmation after a persisted pageshow without an observed pagehide', async () => {
     const h = setup();
     await vi.advanceTimersByTimeAsync(19_000);
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    page.window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     await vi.advanceTimersByTimeAsync(19_999);
     expect(h.values).toEqual([{ connection: 'connecting' }]);
     await vi.advanceTimersByTimeAsync(1);
@@ -164,7 +167,7 @@ describe('activity confirmation across page suspension', () => {
   it('wakes a pending retry once and ignores callbacks from the previous connection', async () => {
     const h = setup();
     h.connections[0]!.onDisconnect();
-    h.hide(); h.show(); window.dispatchEvent(new Event('online'));
+    h.hide(); h.show(); page.window.dispatchEvent(new Event('online'));
     await Promise.resolve();
     expect(h.connections).toHaveLength(2);
     h.confirm(); h.connections[0]!.onDisconnect();
@@ -223,29 +226,28 @@ it('shows why tracking waits when the Relay refuses it for stream capacity, and 
 });
 it('waits for the page to resume after the Relay gives its stream to a subscription in more recent use', async () => {
   vi.useFakeTimers();
-  const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
-  vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
+  const document = page.document; document.visibilityState = 'visible';
   try {
     let listener!: RemoteTransportListener;
     const connect = vi.fn((_id, next) => { listener = next; return { send: vi.fn(), close: vi.fn() }; });
     const values: RemoteActivityState[] = [];
     const client = new RemoteActivityClient('agent', { connect } as unknown as RemoteAgentTransport, state => values.push(state));
     client.start(); listener.onOpen();
-    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'hidden'; page.document.dispatchEvent(new Event('visibilitychange'));
     const reason = 'Paused to free a connection for a window used more recently. Return to this window to resume.';
     listener.onDisconnect({ permanent: false, reason, preempted: true });
     expect(values.at(-1)).toEqual({ connection: 'disconnected', error: reason });
     await vi.advanceTimersByTimeAsync(60000);
     expect(connect).toHaveBeenCalledOnce();
-    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible'; page.document.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(0);
     expect(connect).toHaveBeenCalledTimes(2);
     // Refused for capacity while hidden, it waits as well.
-    document.visibilityState = 'hidden'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'hidden'; page.document.dispatchEvent(new Event('visibilitychange'));
     listener.onDisconnect({ permanent: false, reason: 'Too many sessions are open (limit 64).', capacity: true });
     await vi.advanceTimersByTimeAsync(60000);
     expect(connect).toHaveBeenCalledTimes(2);
-    document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible'; page.document.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(0);
     expect(connect).toHaveBeenCalledTimes(3);
     client.stop();

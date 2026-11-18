@@ -2,7 +2,6 @@ import { CommunicationLetter } from './CommunicationLetter.js';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import type { AgentTimelineItem, ResourceBinding } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '../replica/types.js';
 import { memo, useMemo } from 'react';
 
 import type { MessageGroupPosition } from './timeline-render-model.js';
@@ -13,6 +12,7 @@ import { InteractionItem } from './items/InteractionItem.js';
 import { ReasoningItem } from './items/ReasoningItem.js';
 import { TodoItem } from './items/TodoItem.js';
 import { ToolCallItem, type SessionLinkResolver } from './items/ToolCallItem.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface TimelineItemRendererProps {
   readonly item: AgentTimelineItem;

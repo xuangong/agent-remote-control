@@ -1,7 +1,7 @@
 import type { ConversationConnections } from '../conversation-connections.js';
 import type { TimelineCursor } from '@orchardworks/agent-remote-protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { RemoteActivityClient, type RemoteActivityState, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { observeConversation } from '../conversation-activity.js';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
@@ -141,7 +141,7 @@ export function useSessionTracking(baseUrl: string, transport: RemoteAgentTransp
     });
   }, [captureVisibleCursor, acknowledgeVisible, setObservations]);
   useEffect(() => {
-    const subscriptions = new Map<string, { replica: import('@orchardworks/agent-remote-web').AgentReplica; stop(): void }>();
+    const subscriptions = new Map<string, { replica: import('@orchardworks/agent-client').AgentReplica; stop(): void }>();
     const refresh = () => {
       for (const key of visibleKeys) {
         const session = observed.current.find(item => sessionKey(item.session) === key)?.session;

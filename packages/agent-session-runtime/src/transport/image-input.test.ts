@@ -10,7 +10,7 @@ import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote
 import { InputImageStore } from '../resources/input-image-store.js';
 import { createAgentRemoteRelay } from '../relay.js';
 import { createAgentRemoteHttpServer } from './http-server.js';
-import { uploadImage } from '../../../agent-remote-web/src/client/image-upload.js';
+import { uploadImage } from '@orchardworks/agent-client';
 
 function provider(sent: AgentInputPart[][]): AgentProviderAdapter {
   return { descriptor: { providerId: 'vision', displayName: 'Vision' },

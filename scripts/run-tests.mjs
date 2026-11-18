@@ -47,9 +47,9 @@ if (changedSinceModes.includes(mode) && !affected.length) {
   console.log('No workspace package changed, so nothing runs.');
   process.exit(0);
 }
-/** The package named by a directory name (`agent-remote-web`) or a full package name, with the script that holds its unit tests. */
+/** The package named by a directory name (`agent-client`) or a full package name, with the script that holds its unit tests. */
 function workspacePackage(selector) {
-  if (!selector) throw new Error('Name the package to test, for example: pnpm test:unit agent-remote-web [vitest arguments].');
+  if (!selector) throw new Error('Name the package to test, for example: pnpm test:unit agent-client [vitest arguments].');
   for (const directory of readdirSync('packages')) {
     const manifest = join('packages', directory, 'package.json');
     if (!existsSync(manifest)) continue;

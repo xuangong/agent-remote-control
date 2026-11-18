@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import type { HistoryPage, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { applyHistoryPage, applyTimelineReplacement, createReplicaState } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
+import { applyHistoryPage, applyTimelineReplacement, createReplicaState } from '@orchardworks/agent-client';
 
 const renders = vi.hoisted(() => vi.fn());
 vi.mock('./TimelineEntry.js', async original => {

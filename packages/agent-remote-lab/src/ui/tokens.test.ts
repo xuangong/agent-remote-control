@@ -117,7 +117,7 @@ it('turns motion off when the system asks for reduced motion', () => {
 });
 
 const app = readFileSync(new URL('../app.css', import.meta.url), 'utf8');
-const shared = readFileSync(new URL('../../../agent-remote-web/src/styles.css', import.meta.url), 'utf8');
+const shared = readFileSync(new URL('../../../agent-client-web/src/styles.css', import.meta.url), 'utf8');
 
 /** The app.css text from `opening` up to the first `}` after it; throws when either is missing. */
 function appRule(opening: string): string {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type RemoteAgentTransport, watchList } from '@orchardworks/agent-remote-web';
+import { type RemoteAgentTransport, watchList } from '@orchardworks/agent-client';
 import { SessionStarsClient, FavoritesConflict, type FavoriteChange, type FavoritesSnapshot, type StarInput } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
 import { useFeedbackToast } from '../components/Toast.js';

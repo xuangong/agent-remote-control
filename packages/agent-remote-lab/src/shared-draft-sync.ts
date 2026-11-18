@@ -1,5 +1,5 @@
 import { SESSION_DRAFT_BYTES, sessionDraftBytes } from '@orchardworks/agent-remote-protocol';
-import type { SharedDraft } from '@orchardworks/agent-remote-web';
+import type { SharedDraft } from '@orchardworks/agent-client';
 
 /** The shared draft a composer last agreed with: its revision and a hash of its text. */
 export interface SharedDraftAgreement { revision: number; hash: string }

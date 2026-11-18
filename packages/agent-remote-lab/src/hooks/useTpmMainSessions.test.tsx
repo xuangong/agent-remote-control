@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { SessionDirectoryClient, type SessionCatalogPage } from '../directory-client.js';
 import { groupTpmWorks, type TpmMainSession } from '../tpm-main-sessions.js';
 import { sessionKey } from '../session-tree.js';

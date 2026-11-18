@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { ConversationConnections } from './conversation-connections.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { readStoredDisplay, saveStoredDisplay } from './stored-display.js';
-import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { replicaState } from './test/fixtures.js';
 
 const scope = 'display-cache';

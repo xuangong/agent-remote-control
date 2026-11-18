@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it } from 'vitest';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import type { WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { useWindowManager } from './useWindowManager.js';
 

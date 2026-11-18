@@ -2,7 +2,7 @@ import { isSessionSuccessionReplay, isSessionSuccessionCurrent, isSessionSuccess
   type SessionSuccessionReplay, type SessionSuccessionCurrent, type SessionSuccessionReplayPage } from '@orchardworks/agent-remote-protocol';
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
-import { inspectImageDraft, type ImageDraftStorageHandle } from '@orchardworks/agent-remote-web/browser';
+import { inspectImageDraft, type ImageDraftStorageHandle } from '@orchardworks/agent-client-web/browser';
 import type { DraftStore } from './draft-store.js';
 import { inspectSessionDisplayPreferences, flushSessionDisplayPreferences } from './hooks/useSessionDisplayPreferences.js';
 import { patchTrackedSessions, readTrackedSessionsChecked, trackingEditRevision, type TrackedSessionPatch } from './tracking-state.js';

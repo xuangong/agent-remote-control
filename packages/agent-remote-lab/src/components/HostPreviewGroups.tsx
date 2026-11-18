@@ -1,5 +1,5 @@
-import { PreviewProvider, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-remote-web/react';
-import type { HttpPreviewClient } from '@orchardworks/agent-remote-web';
+import { PreviewProvider, usePreviewController, type PreviewContextValue } from '@orchardworks/agent-client-web/react';
+import type { HttpPreviewClient } from '@orchardworks/agent-client';
 import type { RemoteHost } from './HostPairing.js';
 import { HostPreviewList } from './HostPreviewList.js';
 

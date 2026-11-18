@@ -1,3 +1,4 @@
+import './page/browser-environment.js';
 export { AgentTimeline } from './react/AgentTimeline.js';
 export { TimelineDisplay, TimelineLettersVisible, isContentOnlyItem } from './react/TimelineDisplay.js';
 export type { TimelineDisplayMode } from './react/TimelineDisplay.js';

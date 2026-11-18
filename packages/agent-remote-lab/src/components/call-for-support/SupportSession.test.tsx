@@ -4,7 +4,7 @@ import type { Team, TeamAction, TeamCreate } from '@orchardworks/agent-remote-pr
 import { render } from '../../test/setup.js';
 
 const fixture = vi.hoisted(() => ({ settings: { profiles: [] as any[], enablement: [] as any[] }, enabled: [] as any[] }));
-vi.mock('@orchardworks/agent-remote-web/headless', async importOriginal => ({ ...await importOriginal<typeof import('@orchardworks/agent-remote-web/headless')>(),
+vi.mock('@orchardworks/agent-client', async importOriginal => ({ ...await importOriginal<typeof import('@orchardworks/agent-client')>(),
   RemoteCallForSupportClient: class {
     async read() { return structuredClone(fixture.settings); }
     async enable(input: any) { fixture.enabled.push(input); fixture.settings.enablement = [{ ...input, updatedAt: 1 }]; return structuredClone(fixture.settings); }

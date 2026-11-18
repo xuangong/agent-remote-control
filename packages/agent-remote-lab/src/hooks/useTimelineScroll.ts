@@ -1,1 +1,1 @@
-export { useTimelineScroll } from '@orchardworks/agent-remote-web/react';
+export { useTimelineScroll } from '@orchardworks/agent-client-web/react';

@@ -1,8 +1,8 @@
 import { useEffect, useState, type ComponentProps } from 'react';
 import type { OutboxEntry } from '@orchardworks/agent-remote-protocol';
-import type { SessionStateRef } from '@orchardworks/agent-remote-web';
+import type { SessionStateRef } from '@orchardworks/agent-client';
 import { useSharedFeed } from '../shared-feeds.js';
-import { UserMessageItem } from '@orchardworks/agent-remote-web/react';
+import { UserMessageItem } from '@orchardworks/agent-client-web/react';
 import './outbox-messages.css';
 
 /** How long a message has waited, once that is over a minute: 5 min, 2 h, 3 d. */

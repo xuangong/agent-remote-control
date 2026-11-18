@@ -5,7 +5,7 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { render } from '../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useWindowActions } from '../hooks/useWindowActions.js';
-import { WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { botGroup, mountBotApp, seedGroup, until } from '../test/bot-mode-fixtures.js';
 
 const dialogMethods = ['showModal', 'close'] as const;

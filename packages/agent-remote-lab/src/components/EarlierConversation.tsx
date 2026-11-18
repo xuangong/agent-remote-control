@@ -1,7 +1,7 @@
 import './earlier-conversation.css';
 import { useEffect, useMemo, useReducer, useState } from 'react';
-import { AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { AgentTimeline, useAgentReplica } from '@orchardworks/agent-remote-web/react';
+import { AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-client';
+import { AgentTimeline, useAgentReplica } from '@orchardworks/agent-client-web/react';
 import { loadStoredDisplay, readStoredDisplay } from '../stored-display.js';
 import { knownTitle, sessionKey, type SessionEntry } from '../session-tree.js';
 

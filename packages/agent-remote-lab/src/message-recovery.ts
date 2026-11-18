@@ -1,5 +1,5 @@
 import { conversationLocalStorage } from './conversation-storage.js';
-import { sendState, type AgentReplica, type OutgoingMessage } from '@orchardworks/agent-remote-web';
+import { sendState, type AgentReplica, type OutgoingMessage } from '@orchardworks/agent-client';
 
 export function recoverMessages(replica: AgentReplica, relay: string, session: string, agentId: string): () => void {
   const key = `agent-remote:recovery:${relay}:outbox:${session}`;

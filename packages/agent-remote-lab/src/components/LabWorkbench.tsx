@@ -18,7 +18,7 @@ import { SessionDescriptionsContext } from '../session-description-context.js';
 import { describeSession } from '../session-description.js';
 import type { SessionEntry } from '../session-tree.js';
 import type { SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-remote-web/react';
+export type { SessionViewActions as LabWorkbenchActions } from '@orchardworks/agent-client-web/react';
 
 /** Product policy is supplied around the same session renderer used by ARDB. */
 export function LabWorkbench({ draftBinding, displayBinding, defaultDisplayMode, fixedDisplayMode, operationBinding, sessionIdentity, hostLabel, showAttributions = true, receiveQuotes, ...props }: ComponentProps<typeof SessionWorkbench> & { draftBinding?: DraftBinding; displayBinding?: DisplayPreferenceBinding; operationBinding?: SessionOperationBinding; sessionIdentity?: SessionEntry; hostLabel?: string; showAttributions?: boolean; receiveQuotes?(excerpts: readonly SessionExcerpt[]): void }) {

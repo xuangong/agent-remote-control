@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
-import type { SessionDescription } from '@orchardworks/agent-remote-web';
+import type { SessionDescription } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionWorkbench } from './SessionWorkbench.js';

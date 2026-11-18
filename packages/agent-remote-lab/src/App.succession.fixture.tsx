@@ -4,8 +4,8 @@ import { act as reactAct, StrictMode, useState, type ComponentProps } from 'reac
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow, type AgentChildSession, type ProjectedTimelineEntry, type SessionSuccessionReplay, type Team } from '@orchardworks/agent-remote-protocol';
-import { configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
-import { HttpWebSocketTransport } from '@orchardworks/agent-remote-web';
+import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
+import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult, type SuccessionDescription } from './directory-client.js';
 import { DraftStore } from './draft-store.js';

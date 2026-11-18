@@ -2,8 +2,8 @@
 import 'fake-indexeddb/auto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { AgentReplica, createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-remote-web';
-import { deviceStore, type SessionIdentity } from '@orchardworks/agent-remote-web/device-store';
+import { AgentReplica, createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
+import { deviceStore, type SessionIdentity } from '@orchardworks/agent-client/device-store';
 import { journalOf, servedJournal } from './test/served-journal.js';
 
 /**

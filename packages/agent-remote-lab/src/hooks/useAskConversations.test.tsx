@@ -1,4 +1,4 @@
-import { configureImageDraftPersistence } from '@orchardworks/agent-remote-web/browser';
+import { configureImageDraftPersistence } from '@orchardworks/agent-client-web/browser';
 import { act, StrictMode, useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render, unmount } from '../test/setup.js';
@@ -39,7 +39,7 @@ function fixtureOwner(value: typeof source) {
 const ownerId = (value: typeof source) => fixtureOwner(value).id;
 afterEach(() => { viewDocument = undefined; conversationLocalStorage.clear(); conversationSessionStorage.clear(); localStorage.clear(); sessionStorage.clear(); });
 
-async function setup(transport = {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport) {
+async function setup(transport = {} as import('@orchardworks/agent-client').RemoteAgentTransport) {
   const requests: { path: string; body: Record<string, unknown> }[] = [];
   let attachError: { message: string; status: number; code?: string } | undefined;
   let createError: string | undefined;
@@ -651,7 +651,7 @@ it('retains a completed create and saved question on ordinary close then explici
 it('does not expose attached success while required configuration waits and does not mutate a replacement after cancellation', async () => {
   const connected: string[] = [];
   const closed: string[] = [];
-  const transport: import('@orchardworks/agent-remote-web').RemoteAgentTransport = {
+  const transport: import('@orchardworks/agent-client').RemoteAgentTransport = {
     fetchSnapshot: async () => { throw new Error('Readiness is still pending'); },
     fetchTimeline: async () => { throw new Error('History must not be read'); },
     onDiagnostic: () => () => {}, onProtocolMessage: () => () => {},
@@ -1101,7 +1101,7 @@ it('routes discovered Ask relations to explicit role and fixed owners of the sam
   const owners = [role, fixed, history].map(slot => createAskOwner(slot, baseUrl));
   document.asks.push(...owners); document.editRevision++;
   let ask!: ReturnType<typeof useAskConversations>;
-  function Harness() { ask = useAskConversations(document, {} as import('@orchardworks/agent-remote-web').RemoteAgentTransport); return null; }
+  function Harness() { ask = useAskConversations(document, {} as import('@orchardworks/agent-client').RemoteAgentTransport); return null; }
   await render(<Harness />);
   const relations: import('@orchardworks/agent-remote-protocol').SessionRelation[] = [
     { id: 'role-ask', kind: 'ask', createdAt: '2026-10-11T00:00:00.000Z', source, target: { ...source, nativeSessionId: 'role-ask', agentId: 'role-agent' },

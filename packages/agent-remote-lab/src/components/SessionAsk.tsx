@@ -1,13 +1,13 @@
 import { useWindowLayout } from '../window-workspace-context.js';
 import { useEffect, useRef, type RefObject } from 'react';
-import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-remote-web';
-import { FilePreviewScope } from '@orchardworks/agent-remote-web/react';
+import type { AgentReplica, RemoteAgentTransport } from '@orchardworks/agent-client';
+import { FilePreviewScope } from '@orchardworks/agent-client-web/react';
 import type { OpenedSession } from '../directory-client.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from '../hooks/useAskConversations.js';
 import type { SessionViewNavigationFactory } from '../session-view-navigation.js';
 import { sessionKey } from '../session-tree.js';
 import { AskConversation } from './AskConversation.js';
-import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import { resolveAskPresentation } from '../ask-presentation.js';
 
 /** Each source association retains its Ask conversation in the global surface. */

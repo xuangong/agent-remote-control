@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HistoryPage, TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplica } from '@orchardworks/agent-remote-web';
+import type { AgentReplica } from '@orchardworks/agent-client';
 
 export interface SessionCatchUp {
   id: number;

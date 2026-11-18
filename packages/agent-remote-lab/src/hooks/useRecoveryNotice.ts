@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RemoteSessionStatus } from '@orchardworks/agent-remote-web';
+import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 
 const RECOVERY_NOTICE_DELAY_MS = 5000;
 

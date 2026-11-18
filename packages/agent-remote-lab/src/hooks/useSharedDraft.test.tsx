@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { SessionDraftsView, SharedDraft } from '@orchardworks/agent-remote-web';
+import type { SessionDraftsView, SharedDraft } from '@orchardworks/agent-client';
 import { DraftStore } from '../draft-store.js';
 import { render } from '../test/setup.js';
 import { SharedFeeds } from '../shared-feeds.js';

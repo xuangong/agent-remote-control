@@ -5,11 +5,9 @@ import { expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay, TimelineLettersVisible, type TimelineDisplayMode } from './TimelineDisplay.js';
-import { createReplicaState } from '../replica/reducer.js';
-import { findTimelineMatches } from '../client/timeline-search.js';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { TimelineItemRenderer } from './TimelineItemRenderer.js';
-import { timelineEntryKey } from '../replica/timeline-entry-key.js';
+import { createReplicaState, findTimelineMatches, timelineEntryKey } from '@orchardworks/agent-client';
 
 it('shows attributed agent tasks in content mode without user edit actions', async () => {
   const entry: ProjectedTimelineEntry = { providerId: 'codex', seqStart: 1, seqEnd: 1, turnId: 'turn', timestamp: '2026-09-29T00:00:00Z',

@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useContext, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { RemoteTeamClient, watchList } from '@orchardworks/agent-remote-web/headless';
+import { RemoteTeamClient, watchList } from '@orchardworks/agent-client';
 import type { Team, TeamAction, TeamSource } from '@orchardworks/agent-remote-protocol';
 import { workspaceFetch } from '../workspace-access.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';

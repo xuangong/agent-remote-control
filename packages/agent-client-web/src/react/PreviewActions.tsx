@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { CopyTunnelUrl } from './CopyTunnelUrl.js';
+import { type PinnedPreviewName, type PreviewPathMode, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
 
-import type { PinnedPreviewName, PreviewPathMode, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 
 export interface PreviewController {
   readonly registrations: readonly PreviewRegistration[];

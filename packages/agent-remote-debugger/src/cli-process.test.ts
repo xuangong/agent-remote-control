@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
-import type { AgentReplica as AgentReplicaInstance, WebSocketLike } from '@orchardworks/agent-remote-web/headless';
+import type { AgentReplica as AgentReplicaInstance, WebSocketLike } from '@orchardworks/agent-client';
 
 const debuggerDirectory = fileURLToPath(new URL('..', import.meta.url));
 const repositoryDirectory = fileURLToPath(new URL('../../..', import.meta.url));
@@ -53,9 +53,9 @@ type ReplicaJson = {
 
 const children = new Map<ChildProcessWithoutNullStreams, Promise<ChildClose>>();
 let createRecordedValidationServer: typeof import('../../agent-remote-lab/src/server/recorded.js')['createRecordedValidationServer'];
-let AgentReplica: typeof import('@orchardworks/agent-remote-web/headless')['AgentReplica'];
-let HttpWebSocketTransport: typeof import('@orchardworks/agent-remote-web/headless')['HttpWebSocketTransport'];
-let RemoteSessionClient: typeof import('@orchardworks/agent-remote-web/headless')['RemoteSessionClient'];
+let AgentReplica: typeof import('@orchardworks/agent-client')['AgentReplica'];
+let HttpWebSocketTransport: typeof import('@orchardworks/agent-client')['HttpWebSocketTransport'];
+let RemoteSessionClient: typeof import('@orchardworks/agent-client')['RemoteSessionClient'];
 let server: ReturnType<typeof createRecordedValidationServer>;
 let relayUrl = '';
 let temporaryDirectory = '';
@@ -65,7 +65,7 @@ beforeAll(async () => {
     'packages/agent-remote-protocol',
     'packages/agent-provider-sdk',
     'packages/agent-session-runtime',
-    'packages/agent-remote-web',
+    'packages/agent-client',
     'packages/agent-remote-debugger',
   ]) {
     const build = spawnSync(process.execPath, [typescriptCliPath], {
@@ -81,7 +81,7 @@ beforeAll(async () => {
   const adapters = spawnSync(process.execPath, ['scripts/build-adapters.mjs'], { cwd: debuggerDirectory, encoding: 'utf8', timeout: childTimeoutMs });
   expect(adapters.status, adapters.stderr).toBe(0);
   ({ createRecordedValidationServer } = await import('../../agent-remote-lab/src/server/recorded.js'));
-  ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-remote-web/headless'));
+  ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-client'));
   server = createRecordedValidationServer();
   relayUrl = (await server.http.listen(0, '127.0.0.1')).url;
   temporaryDirectory = await mkdtemp(join(tmpdir(), 'ardb-process-'));

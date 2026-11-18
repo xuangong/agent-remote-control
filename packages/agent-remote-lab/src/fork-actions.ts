@@ -1,5 +1,5 @@
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, RemoteOperationError, RemoteSessionClient, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import type { LabWorkbenchActions } from './components/LabWorkbench.js';
 import { captureForkContext, contextPrefix, type ForkStore, type SessionFork } from './session-forks.js';
 

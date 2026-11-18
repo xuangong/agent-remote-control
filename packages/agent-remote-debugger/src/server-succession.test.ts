@@ -95,7 +95,7 @@ test('restores the exact uncommitted candidate without refreshing its source cap
 }, 15000);
 
 test('serves immutable committed replay and actual current through the public transport with owned-role access', async () => {
-  const { HttpWebSocketTransport } = await import('@orchardworks/agent-remote-web/headless');
+  const { HttpWebSocketTransport } = await import('@orchardworks/agent-client');
   const { LocalSessionSuccession } = await import('./local-session-succession.js');
   const f = await fixture(); let server = await f.start();
   const transport = new HttpWebSocketTransport(server.url, { sessionSuccessions: true });

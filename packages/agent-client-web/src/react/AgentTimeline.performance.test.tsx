@@ -2,9 +2,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState, reduceTimelineEvent } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
+import { createReplicaState, reduceTimelineEvent } from '@orchardworks/agent-client';
 
 const renders = vi.hoisted(() => vi.fn());
 vi.mock('./TimelineEntry.js', async original => {

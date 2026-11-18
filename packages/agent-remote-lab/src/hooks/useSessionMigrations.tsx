@@ -1,7 +1,7 @@
 import { conversationSessionStorage } from '../conversation-storage.js';
 import { workspaceFetch } from '../workspace-access.js';
 import { useEffect, useRef, useState } from 'react';
-import { watchList, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { watchList, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { decodeSessionChannelServerMessage, PROTOCOL_VERSION, type SessionMigration } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';

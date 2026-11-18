@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import { AgentReplica, HttpWebSocketTransport, type RemoteSessionState, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, type RemoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from './conversation-connections.js';
 import { createRecordedValidationServer } from './server/recorded.js';
 

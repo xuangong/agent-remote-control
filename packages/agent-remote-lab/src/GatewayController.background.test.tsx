@@ -1,10 +1,7 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
-import {
-  AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient,
-  type RemoteActivityState, type RemoteSessionStatus,
-} from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient, type RemoteActivityState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { GatewayController } from './GatewayController.js';
 import { createProtocolValidationServer } from './server.js';
 import { createRecordedLabProvider } from './server/recorded.js';

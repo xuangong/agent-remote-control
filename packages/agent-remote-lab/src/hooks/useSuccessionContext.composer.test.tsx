@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-remote-web';
-import { AgentComposer } from '@orchardworks/agent-remote-web/react';
+import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { AgentComposer } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
 import { useSuccessionContext } from './useSuccessionContext.js';

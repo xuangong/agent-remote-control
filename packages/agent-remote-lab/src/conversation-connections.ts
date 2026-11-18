@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport, type SessionControlExtension } from '@orchardworks/agent-remote-web';
+import { RemoteSessionClient, type AgentReplica, type RemoteAgentTransport, type SessionControlExtension } from '@orchardworks/agent-client';
 import { recoverMessages } from './message-recovery.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { observeStoredDisplay } from './stored-display-observer.js';

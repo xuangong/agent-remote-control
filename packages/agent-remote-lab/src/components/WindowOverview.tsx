@@ -1,7 +1,7 @@
 import './window-overview.css';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { WindowView, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { SessionStateRef } from '@orchardworks/agent-remote-web';
+import type { SessionStateRef } from '@orchardworks/agent-client';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { navigationArrow } from '../hooks/useSessionViewMouseNavigation.js';
 import { byRecentUse } from '../window-recency.js';

@@ -1,7 +1,7 @@
 import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient } from '@orchardworks/agent-remote-web';
+import { WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { createWindowView, applyGroupOperation, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';

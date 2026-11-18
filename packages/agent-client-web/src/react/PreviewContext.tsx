@@ -1,12 +1,11 @@
-import { watchList } from '../client/feed-reopen.js';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
-import type { HttpPreviewClient, PinnedPreviewName, PreviewRegistration, PreviewRegistrationRequest } from '../client/preview-client.js';
 import type { PreviewController } from './PreviewActions.js';
 import { previewRegistrationKey, usePreviewRenewal } from './usePreviewRenewal.js';
 import { PreviewBrowser } from './PreviewBrowser.js';
 import { PreviewWorkspaceContext } from './PreviewWorkspace.js';
 import { FilePreviewProvider } from './FilePreviewScope.js';
+import { watchList, type HttpPreviewClient, type PinnedPreviewName, type PreviewRegistration, type PreviewRegistrationRequest } from '@orchardworks/agent-client';
 
 export interface PreviewContextValue extends PreviewController {
   readonly loading: boolean;

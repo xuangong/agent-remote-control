@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import type { RemoteAgentTransport, SessionDraftsView, SessionStateRef } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport, SessionDraftsView, SessionStateRef } from '@orchardworks/agent-client';
 import { conversationSessionStorage } from '../conversation-storage.js';
 import type { DraftBinding } from '../draft-store.js';
 import { createSharedDraftSync, type SharedDraftAgreement, type SharedDraftSync } from '../shared-draft-sync.js';

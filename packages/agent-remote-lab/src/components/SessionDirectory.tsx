@@ -1,4 +1,4 @@
-import { watchList } from '@orchardworks/agent-remote-web';
+import { watchList } from '@orchardworks/agent-client';
 import type { SessionListingStatus } from '@orchardworks/agent-remote-protocol';
 import { StarButton } from './SessionFavorites.js';
 import type { SessionStars } from '../hooks/useSessionStars.js';

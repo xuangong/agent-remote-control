@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
-import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { AgentReplica } from '@orchardworks/agent-client';
+import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { conversationLocalStorage } from './conversation-storage.js';
 import { removeLegacyDisplayCache } from './device-store-start.js';

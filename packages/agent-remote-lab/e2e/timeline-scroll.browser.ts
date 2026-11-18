@@ -14,8 +14,8 @@ beforeAll(async () => {
   const source = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
-    import { useTimelineScroll } from '../../agent-remote-web/src/react/useTimelineScroll.ts';
-    import { captureReadingText, readingTextTop } from '../../agent-remote-web/src/react/reading-text-anchor.ts';
+    import { useTimelineScroll } from '../../agent-client-web/src/react/useTimelineScroll.ts';
+    import { captureReadingText, readingTextTop } from '../../agent-client-web/src/react/reading-text-anchor.ts';
     const positions = new Map();
     const count = Number(new URLSearchParams(location.search).get('count') || 1200);
     const shape = new URLSearchParams(location.search).get('shape');

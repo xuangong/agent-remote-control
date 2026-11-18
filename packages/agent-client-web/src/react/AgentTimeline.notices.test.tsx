@@ -2,11 +2,10 @@
 import { act } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
-import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline, type AgentTimelineProps } from './AgentTimeline.js';
 import { TimelineDisplay, type TimelineDisplayMode } from './TimelineDisplay.js';
+import { createReplicaState, timelineEntryKey } from '@orchardworks/agent-client';
 
 const epoch = 'notice-history';
 const messages = [

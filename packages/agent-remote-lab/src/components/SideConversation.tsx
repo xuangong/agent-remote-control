@@ -1,11 +1,11 @@
-import { CommunicationNavigationContext } from '@orchardworks/agent-remote-web/react';
+import { CommunicationNavigationContext } from '@orchardworks/agent-client-web/react';
 import type { DraftBinding } from '../draft-store.js';
 import { SessionLink } from './SessionLink.js';
 import { SessionTitle } from './SessionTitle.js';
 import { ConversationPane } from './ConversationSplit.js';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { useConversationSession } from '../hooks/useConversationSession.js';
-import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { type AgentReplica, type AgentReplicaState, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import type { AgentCommandResult } from '@orchardworks/agent-remote-protocol';
 import type { OpenedSession } from '../directory-client.js';
 import { sideNavigationSource, sideLinkVisible, forkDisplayState, type ForkStore, type SessionFork } from '../session-forks.js';
@@ -17,7 +17,7 @@ import type { SessionViewNavigationFactory } from '../session-view-navigation.js
 
 export function SideConversation({ session, replica: cachedReplica, transport, store, draft, draftBinding, imageDraftBinding, displayBinding, onDraftChange, onClose, onOpenSource, onFork, onOpenFork, onUnlink, onRecover, standalone = false, onFocus, onActivityChange, initialInput, visible = true, expanded = true, focused = true, position = 1, openSides, navigation, headingStart, headingMode, onRenameTitle }: {
   navigation?: SessionViewNavigationFactory;
-  imageDraftBinding?: import('@orchardworks/agent-remote-web/browser').ImageDraftBinding;
+  imageDraftBinding?: import('@orchardworks/agent-client-web/browser').ImageDraftBinding;
   displayBinding?: import('../hooks/useSessionDisplayPreferences.js').DisplayPreferenceBinding;
   headingStart?: ReactNode;
   headingMode?: 'inline' | 'toolbar';

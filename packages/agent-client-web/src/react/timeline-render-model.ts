@@ -1,5 +1,5 @@
-import { timelineEntryKey } from '../replica/timeline-entry-key.js';
 import type { AgentTimelineItem, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
+import { timelineEntryKey } from '@orchardworks/agent-client';
 
 export type MessageGroupPosition = 'single' | 'first' | 'middle' | 'last';
 

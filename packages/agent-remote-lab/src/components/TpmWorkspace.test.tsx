@@ -1,6 +1,6 @@
 import { act, useRef, useState } from 'react';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { createWindowView, type WorkspaceWindow, type AgentSnapshot, type HistoryPage } from '@orchardworks/agent-remote-protocol';
 import { replicaState } from '../test/fixtures.js';
 import { render } from '../test/setup.js';

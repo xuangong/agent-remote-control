@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { useContext, type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
-import { inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-remote-web/browser';
+import { inspectImageDraft, readImageDraft, writeImageDraft } from '@orchardworks/agent-client-web/browser';
 import { type OpenedSession } from './directory-client.js';
 import { DraftStore } from './draft-store.js';
 import { readCompositionDocument, initializeCompositionDocument, saveCompositionDocument, createCompositionSlot } from './session-composition.js';

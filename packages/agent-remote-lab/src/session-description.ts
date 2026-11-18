@@ -1,5 +1,5 @@
 import type { NativeSessionRef, Team } from '@orchardworks/agent-remote-protocol';
-import type { SessionAttribution, SessionDescription, SessionDescriptionIdentity } from '@orchardworks/agent-remote-web/headless';
+import type { SessionAttribution, SessionDescription, SessionDescriptionIdentity } from '@orchardworks/agent-client';
 import type { TpmItem } from './hooks/useTpmWork.js';
 import { currentForkSource, sideLinkVisible, sideNavigationSource, sideNavigationTarget, type SessionFork } from './session-forks.js';
 import { sessionKey, type SessionEntry } from './session-tree.js';

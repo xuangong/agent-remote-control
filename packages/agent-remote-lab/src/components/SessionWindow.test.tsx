@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import { AgentReplica, type RemoteAgentTransport } from '@orchardworks/agent-client';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { SessionWindow } from './SessionWindow.js';
 import { SessionDockProvider, SessionDockRail } from './SessionDock.js';

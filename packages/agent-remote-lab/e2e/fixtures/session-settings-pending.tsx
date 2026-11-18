@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import { AgentSessionSettings, type SessionControlView } from '../../../agent-remote-web/src/react/AgentSessionSettings.js';
-import type { AgentReplicaState } from '../../../agent-remote-web/src/replica/types.js';
+import { AgentSessionSettings, type SessionControlView } from '../../../agent-client-web/src/react/AgentSessionSettings.js';
+import type { AgentReplicaState } from '../../../agent-client/src/replica/types.js';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';
 

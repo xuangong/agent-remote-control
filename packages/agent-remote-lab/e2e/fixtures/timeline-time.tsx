@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createReplicaState } from '@orchardworks/agent-remote-web';
-import { AgentTimeline } from '@orchardworks/agent-remote-web/react';
+import { createReplicaState } from '@orchardworks/agent-client';
+import { AgentTimeline } from '@orchardworks/agent-client-web/react';
 import type { AgentTimelineItem } from '@orchardworks/agent-remote-protocol';
-import '@orchardworks/agent-remote-web/styles.css';
+import '@orchardworks/agent-client-web/styles.css';
 
 const items: AgentTimelineItem[] = [
   { type: 'user_message', text: 'Please check the build.', messageId: 'user' },

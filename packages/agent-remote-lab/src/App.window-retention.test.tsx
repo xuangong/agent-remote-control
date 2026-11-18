@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { WindowWorkspaceClient, type RemoteTransportListener, type WindowSnapshot } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient, type RemoteTransportListener, type WindowSnapshot } from '@orchardworks/agent-client';
 import { App, type LabTransport } from './App.js';
 import { ConversationConnections } from './conversation-connections.js';
 import { SessionDirectoryClient } from './directory-client.js';

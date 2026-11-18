@@ -4,8 +4,8 @@ import { applyConversationLayout, type ConversationLayout } from '../conversatio
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
 import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, resolveNativePrefix, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { remoteSessionState, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-remote-web';
-import type { ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import { remoteSessionState, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-client';
+import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
 import { restoreSession } from '../session-restoration.js';

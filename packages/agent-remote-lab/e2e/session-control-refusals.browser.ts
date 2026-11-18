@@ -17,7 +17,7 @@ async function sessionPage(journalServed: boolean) {
     import React from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, useSessionView } from '@orchardworks/agent-remote-web';
+    import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, useSessionView } from '@orchardworks/agent-client';
     import { LabWorkbench } from './components/LabWorkbench.tsx';
     const query = new URLSearchParams(location.search);
     const transport = new HttpWebSocketTransport(location.origin);

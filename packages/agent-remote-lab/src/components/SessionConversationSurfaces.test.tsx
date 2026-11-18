@@ -1,6 +1,6 @@
 import { act, StrictMode, useMemo, useState } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import type { RemoteAgentTransport } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport } from '@orchardworks/agent-client';
 import { DraftStore } from '../draft-store.js';
 import { render, unmount } from '../test/setup.js';
 import type { WorkbenchMode } from '../workbench-mode.js';

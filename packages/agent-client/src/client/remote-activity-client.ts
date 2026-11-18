@@ -1,4 +1,4 @@
-import { watchPageResume } from './page-resume.js';
+import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import { equalJitter } from './reconnect-delay.js';
 import { PROTOCOL_VERSION, type TimelineCursor, type AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { RemoteAgentTransport, RemoteConnection, RemoteServerMessage } from './transport.js';
@@ -28,7 +28,7 @@ export class RemoteActivityClient {
     private readonly changed: (state: RemoteActivityState) => void, private readonly random: () => number = Math.random) {}
   start(): void {
     this.stop(); this.attempts = 0; this.refused = false; this.paused = false;
-    this.pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    this.pageHidden = pageHidden();
     this.unwatchResume = watchPageResume(suspendedMs => {
       this.pageHidden = false;
       // A restored page may not have observed pagehide before being suspended.

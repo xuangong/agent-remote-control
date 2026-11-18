@@ -1,7 +1,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { WindowWorkspaceClient, WindowRequestError, type WindowSnapshot } from '@orchardworks/agent-remote-web';
+import { WindowWorkspaceClient, WindowRequestError, type WindowSnapshot } from '@orchardworks/agent-client';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument } from '../session-composition.js';
 import { useWindowWorkspace } from './useWindowWorkspace.js';

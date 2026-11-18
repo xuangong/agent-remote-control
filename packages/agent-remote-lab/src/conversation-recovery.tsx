@@ -2,10 +2,10 @@ import { conversationLocalStorage, conversationSessionStorage, storageKeys } fro
 import { cancelRecoveryWrites, flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import { createContext } from 'react';
 import { controllerPath, readControllerLocation, type ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
-import { clearImageDraftScope } from '@orchardworks/agent-remote-web/browser';
-import { deviceStore } from '@orchardworks/agent-remote-web/device-store';
+import { clearImageDraftScope } from '@orchardworks/agent-client-web/browser';
+import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { scopeFor } from './workspace-access.js';
-import type { TimelineReadingPosition } from '@orchardworks/agent-remote-web/react';
+import type { TimelineReadingPosition } from '@orchardworks/agent-client-web/react';
 
 const prefix = 'agent-remote:recovery:';
 const generations = new Map<string, number>();

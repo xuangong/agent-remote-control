@@ -1,5 +1,5 @@
 import type { AgentSnapshotPayload, ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { requestBrowserDatabase, SESSION_INDEX_STORE, SESSIONS_STORE } from './browser-database.js';
+import { watchPageResume } from './page-lifecycle.js';
 
 /**
  * Whose conversations these are is the Relay URL: a Relay with accounts puts the person in it (`/u/<hash of issuer and subject>/`), and one without accounts
@@ -22,7 +22,21 @@ export interface StoredRecord {
   readonly updatedAt: number;
   readonly bytes: number;
 }
-interface IndexRow { readonly key: string; readonly relayUrl: string; readonly updatedAt: number; readonly bytes: number }
+export interface IndexRow { readonly key: string; readonly relayUrl: string; readonly updatedAt: number; readonly bytes: number }
+
+/**
+ * Where the device store keeps records between pages. The store owns every rule (what is kept, for whom, how much); a database only persists
+ * and reads back. Its failures are the store's to absorb: any rejection means the records stay in memory for this page.
+ */
+export interface DeviceDatabase {
+  /** The index row of every record on disk. */
+  readIndex(): Promise<IndexRow[]>;
+  read(key: string): Promise<StoredRecord | undefined>;
+  /** Applies one batch atomically: a record is written with its index row, `null` removes both. A full disk rejects with an error named `QuotaExceededError`. */
+  write(batch: ReadonlyMap<string, StoredRecord | null>): Promise<void>;
+  /** Removes every record and index row. */
+  clear(): Promise<void>;
+}
 
 export const deviceKey = (relayUrl: string, identity: SessionIdentity): string => JSON.stringify([relayUrl, identity]);
 
@@ -32,7 +46,7 @@ export const DEFAULT_PRELOAD_BYTES = 4 * 1024 * 1024;
 const WRITE_BEHIND_MS = 50;
 
 export interface DeviceStoreOptions {
-  readonly factory?: () => IDBFactory | undefined;
+  readonly database?: DeviceDatabase;
   readonly diskCapBytes?: number;
   readonly preloadBytes?: number;
   readonly writeBehindMs?: number;
@@ -55,15 +69,22 @@ export class DeviceStore {
   private purges = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private chain: Promise<void> = Promise.resolve();
-  private database: Promise<IDBDatabase> | undefined;
+  private database: DeviceDatabase | undefined;
   private persistent = () => true;
+  private stopWatchingPage: (() => void) | undefined;
 
   constructor(private readonly options: DeviceStoreOptions = {}) {
-    // The one place a leaving page writes what is queued: a record is kept once a page confirmed it or a turn ended, and the page's own listeners stop there.
-    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-      window.addEventListener('pagehide', () => { void this.flush(); });
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') void this.flush(); });
-    }
+    if (options.database) this.useDatabase(options.database);
+  }
+
+  /**
+   * Keeps records in `database` from now on, and writes what is queued when the page is hidden or leaves: the one place a leaving page writes,
+   * because a record is kept once a page confirmed it or a turn ended and the page's own listeners stop there.
+   */
+  useDatabase(database: DeviceDatabase): void {
+    this.database = database;
+    this.stopWatchingPage?.();
+    this.stopWatchingPage = watchPageResume(() => undefined, () => { void this.flush(); });
   }
 
   /** The embedding application owns the device's retention preference; without persistence records live in memory only. */
@@ -82,7 +103,7 @@ export class DeviceStore {
     if (held || !this.diskAllowed()) return held;
     const generation = this.purges;
     const record = await this.enqueueDisk(async database => {
-      const stored = await request<StoredRecord | undefined>(database.transaction(SESSIONS_STORE, 'readonly').objectStore(SESSIONS_STORE).get(key));
+      const stored = await database.read(key);
       return stored && stored.relayUrl === relayUrl ? stored : undefined;
     }, undefined);
     if (record && generation === this.purges && !this.records.has(key) && !this.queue.has(key)) this.records.set(key, record);
@@ -101,7 +122,7 @@ export class DeviceStore {
         if (row.bytes > budget) break;
         budget -= row.bytes;
         if (this.records.has(row.key)) continue;
-        const record = await request<StoredRecord | undefined>(database.transaction(SESSIONS_STORE, 'readonly').objectStore(SESSIONS_STORE).get(row.key));
+        const record = await database.read(row.key);
         // A purge while this read was in flight wins: what it removed is not put back into memory.
         if (record && generation === this.purges && !this.records.has(row.key) && !this.queue.has(row.key)) this.records.set(row.key, record);
       }
@@ -150,13 +171,13 @@ export class DeviceStore {
     if (!batch.size || !this.diskAllowed()) return this.chain;
     return this.enqueueDisk(async database => {
       await this.loadIndex(database);
-      try { await this.commit(database, batch); }
+      try { await database.write(batch); }
       catch (error) {
         if (!isQuota(error)) throw error;
         // Make room by dropping the oldest unpinned records, then try once more; a second failure keeps the content in memory.
         const needed = [...batch.values()].reduce((sum, record) => sum + (record?.bytes ?? 0), 0);
         await this.evictOldest(database, needed, new Set(batch.keys()));
-        await this.commit(database, batch);
+        await database.write(batch);
       }
       await this.evictOldest(database, 0, new Set());
     }, undefined);
@@ -171,7 +192,7 @@ export class DeviceStore {
     for (const [key, record] of [...this.queue]) if (record === null || matches(record)) this.queue.delete(key);
     // A purge reaches the disk even when persistence is off: records written while it was on must not outlive the person.
     await this.enqueueDisk(async database => {
-      const rows = await request<IndexRow[]>(database.transaction(SESSION_INDEX_STORE, 'readonly').objectStore(SESSION_INDEX_STORE).getAll());
+      const rows = await database.readIndex();
       await this.remove(database, rows.filter(matches).map(row => row.key));
     }, undefined);
   }
@@ -181,18 +202,10 @@ export class DeviceStore {
     clearTimeout(this.timer);
     this.timer = undefined;
     this.queue.clear();
-    await this.enqueueDisk(async database => {
-      await new Promise<void>((resolve, reject) => {
-        const transaction = database.transaction([SESSIONS_STORE, SESSION_INDEX_STORE], 'readwrite');
-        transaction.objectStore(SESSIONS_STORE).clear();
-        transaction.objectStore(SESSION_INDEX_STORE).clear();
-        transaction.oncomplete = () => resolve();
-        transaction.onabort = () => reject(transaction.error);
-      });
-    }, undefined);
+    await this.enqueueDisk(database => database.clear(), undefined);
   }
 
-  private diskAllowed(): boolean { return this.persistent() && !!(this.options.factory ?? defaultFactory)(); }
+  private diskAllowed(): boolean { return this.persistent() && !!this.database; }
 
   private trimMemory(): void {
     let bytes = 0;
@@ -208,66 +221,30 @@ export class DeviceStore {
   }
 
   /** One disk task at a time, in order. Any failure of the browser's storage is absorbed and the fallback returned. */
-  private enqueueDisk<T>(task: (database: IDBDatabase) => Promise<T>, fallback: T): Promise<T> {
+  private enqueueDisk<T>(task: (database: DeviceDatabase) => Promise<T>, fallback: T): Promise<T> {
     const run = this.chain.then(async () => {
-      try { return await task(await this.open()); }
+      try { return this.database ? await task(this.database) : fallback; }
       catch { return fallback; }
     });
     this.chain = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private open(): Promise<IDBDatabase> {
-    if (this.database) return this.database;
-    const factory = (this.options.factory ?? defaultFactory)();
-    if (!factory) return Promise.reject(new Error('Browser storage is unavailable.'));
-    const pending = new Promise<IDBDatabase>((resolve, reject) => {
-      const opening = requestBrowserDatabase(factory);
-      opening.onerror = () => reject(opening.error ?? new Error('Browser storage is unavailable.'));
-      opening.onblocked = () => reject(new Error('Browser storage is blocked.'));
-      opening.onsuccess = () => {
-        const database = opening.result;
-        const release = () => { if (this.database === pending) this.database = undefined; };
-        database.onversionchange = () => { release(); database.close(); };
-        database.onclose = release;
-        resolve(database);
-      };
-    });
-    this.database = pending;
-    pending.catch(() => { if (this.database === pending) this.database = undefined; });
-    return pending;
-  }
-
-  private async loadIndex(database: IDBDatabase): Promise<void> {
+  private async loadIndex(database: DeviceDatabase): Promise<void> {
     if (this.indexLoaded) return;
-    const rows = await request<IndexRow[]>(database.transaction(SESSION_INDEX_STORE, 'readonly').objectStore(SESSION_INDEX_STORE).getAll());
+    const rows = await database.readIndex();
     for (const row of rows) if (!this.index.has(row.key)) this.index.set(row.key, row);
     this.indexLoaded = true;
   }
 
-  private commit(database: IDBDatabase, batch: ReadonlyMap<string, StoredRecord | null>): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction([SESSIONS_STORE, SESSION_INDEX_STORE], 'readwrite');
-      const sessions = transaction.objectStore(SESSIONS_STORE), index = transaction.objectStore(SESSION_INDEX_STORE);
-      for (const [key, record] of batch) {
-        if (record) {
-          sessions.put(record);
-          index.put({ key, relayUrl: record.relayUrl, updatedAt: record.updatedAt, bytes: record.bytes } satisfies IndexRow);
-        } else { sessions.delete(key); index.delete(key); }
-      }
-      transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(transaction.error ?? new Error('Browser storage write aborted.'));
-    });
-  }
-
-  private async remove(database: IDBDatabase, keys: readonly string[]): Promise<void> {
+  private async remove(database: DeviceDatabase, keys: readonly string[]): Promise<void> {
     if (!keys.length) return;
-    await this.commit(database, new Map(keys.map(key => [key, null] as const)));
+    await database.write(new Map(keys.map(key => [key, null] as const)));
     for (const key of keys) { this.index.delete(key); }
   }
 
   /** Drops whole records, oldest update first, until the disk total is under the cap by `room` bytes. Pinned records stay, so mounted sessions may exceed it. */
-  private async evictOldest(database: IDBDatabase, room: number, keep: ReadonlySet<string>): Promise<void> {
+  private async evictOldest(database: DeviceDatabase, room: number, keep: ReadonlySet<string>): Promise<void> {
     const cap = this.options.diskCapBytes ?? DEFAULT_DISK_CAP_BYTES;
     let total = 0;
     for (const row of this.index.values()) total += row.bytes;
@@ -282,15 +259,6 @@ export class DeviceStore {
     await this.remove(database, victims);
     for (const key of victims) this.records.delete(key);
   }
-}
-
-const defaultFactory = (): IDBFactory | undefined => typeof indexedDB === 'undefined' ? undefined : indexedDB;
-
-function request<T>(operation: IDBRequest<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    operation.onsuccess = () => resolve(operation.result);
-    operation.onerror = () => reject(operation.error);
-  });
 }
 
 /** The device store of this page. */

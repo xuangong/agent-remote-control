@@ -2,13 +2,11 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
-import { createReplicaState } from '../replica/reducer.js';
-import type { AgentReplicaState } from '../replica/types.js';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { findTimelineMatches, type TimelineSearchOptions } from '../client/timeline-search.js';
 import { TimelineSearch } from './TimelineSearch.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
+import { createReplicaState, type AgentReplicaState, findTimelineMatches, type TimelineSearchOptions } from '@orchardworks/agent-client';
 
 const entry = (seq: number, text: string): ProjectedTimelineEntry => ({ providerId: 'recorded', seqStart: seq, seqEnd: seq,
   timestamp: '2026-09-29T00:00:00Z', item: { type: 'assistant_message', text }, resources: [], collapsed: [], sourceSeqRanges: [] });

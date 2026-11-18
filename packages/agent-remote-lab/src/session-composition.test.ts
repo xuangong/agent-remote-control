@@ -231,7 +231,7 @@ import { flushRecoveryWrites } from './recovery-writes.js';
 import { DraftStore } from './draft-store.js';
 import { TrackedSessionViews } from './tracked-session-views.js';
 import { saveTrackedSessions, readTrackedSessions } from './tracking-state.js';
-import { configureImageDraftPersistence, writeImageDraft, readImageDraft } from '@orchardworks/agent-remote-web/browser';
+import { configureImageDraftPersistence, writeImageDraft, readImageDraft } from '@orchardworks/agent-client-web/browser';
 const importedSlot = (id: string, session: OpenedSession, scope: string, nativeKey: string) => createCompositionSlot(id, session, scope, {
   text: { scope, key: session.agentId }, image: { scope, key: JSON.stringify([scope, nativeKey]) }, display: { scope, key: nativeKey },
 });

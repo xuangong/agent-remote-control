@@ -1,7 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectedTimelineEntry, SessionExcerpt } from '@orchardworks/agent-remote-protocol';
-import { preparePromptDraft, withoutSessionExcerpts } from '@orchardworks/agent-remote-web/react';
-import { inspectImageDraft, readImageDraft, type ImageDraftBinding, type ImageDraftRecipient } from '@orchardworks/agent-remote-web/browser';
+import { preparePromptDraft, withoutSessionExcerpts } from '@orchardworks/agent-client-web/react';
+import { inspectImageDraft, readImageDraft, type ImageDraftBinding, type ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import { SessionSuccessionDialog } from '../components/SessionSuccessionDialog.js';
 import { ComposerDraftOwner, type DraftOwnerToken } from '../composer-draft-owner.js';
 import type { DraftBinding } from '../draft-store.js';

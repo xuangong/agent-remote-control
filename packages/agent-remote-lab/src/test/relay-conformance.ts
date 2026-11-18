@@ -9,14 +9,7 @@ import {
   createAgentRemoteRelay,
   createAgentRemoteUplinkClient,
 } from '@orchardworks/agent-session-runtime';
-import {
-  AgentReplica,
-  HttpWebSocketTransport,
-  RemoteSessionClient,
-  type RemoteProtocolObservation,
-  type RemoteSessionStatus,
-  type WebSocketLike,
-} from '@orchardworks/agent-remote-web/headless';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type RemoteProtocolObservation, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-client';
 import { createRecordedLabProvider } from '../server/recorded.js';
 
 export interface ConformanceManifest {

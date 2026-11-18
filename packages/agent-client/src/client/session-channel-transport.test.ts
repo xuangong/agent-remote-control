@@ -7,6 +7,7 @@ import { HttpWebSocketTransport, type WebSocketLike } from './http-websocket-tra
 import type { RemoteConnection, RemoteServerMessage } from './transport.js';
 import { AgentReplica } from '../replica/store.js';
 import { RemoteSessionClient } from './remote-session-client.js';
+import { installPageLifecycle, installStubbedGlobalPage } from '../testing/page.js';
 
 const version = '1.8.0';
 const negotiate: ClientMessage = { protocolVersion: version, type: 'negotiate' };
@@ -301,7 +302,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const sockets: ControlledSocket[] = [];
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
       const socket = new ControlledSocket(); socket.readyState = 0; sockets.push(socket); return socket;
@@ -332,7 +333,7 @@ describe('session channel transport', () => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const sockets: ControlledSocket[] = [];
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
       const socket = new ControlledSocket(); sockets.push(socket); return socket;
@@ -411,7 +412,7 @@ describe('session channel transport', () => {
     vi.setSystemTime(1_000_000);
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const sockets: ControlledSocket[] = [];
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
       const socket = new ControlledSocket(); sockets.push(socket); return socket;
@@ -465,7 +466,7 @@ describe('session channel transport', () => {
     vi.useFakeTimers(); cleanups.push(() => vi.useRealTimers());
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', new EventTarget()); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const sockets: ControlledSocket[] = [];
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
       const socket = new ControlledSocket(); sockets.push(socket); return socket;
@@ -580,7 +581,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
@@ -610,7 +611,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     vi.stubGlobal('window', browserWindow);
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
@@ -649,7 +650,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     vi.stubGlobal('window', browserWindow);
     vi.stubGlobal('document', Object.assign(new EventTarget(), { visibilityState: 'visible' }));
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }); cleanups.push(() => vi.useRealTimers());
     const a = connect(harness.transport, 'a');
     await vi.waitFor(() => expect(harness.frames).toHaveLength(1));
@@ -665,7 +666,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server();
     const { RemoteActivityClient } = await import('./remote-activity-client.js');
     const client = mode === 'content'
@@ -691,7 +692,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const socket = new ControlledSocket();
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => socket });
     cleanups.push(() => transport.dispose());
@@ -720,7 +721,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const sockets: ControlledSocket[] = [];
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => {
       const socket = new ControlledSocket(); sockets.push(socket); return socket;
@@ -745,7 +746,7 @@ describe('session channel transport', () => {
     const browserWindow = new EventTarget();
     const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-    cleanups.push(() => vi.unstubAllGlobals());
+    cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const socket = new ControlledSocket();
     const transport = new HttpWebSocketTransport('http://relay.test', { sessionChannels: true, webSocketFactory: () => socket });
     cleanups.push(() => transport.dispose());
@@ -878,7 +879,7 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
   const browserWindow = new EventTarget();
   const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-  cleanups.push(() => vi.unstubAllGlobals());
+  cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
   const history: HistoryPage = { protocolVersion: version, type: 'timeline_page', payload: {
     requestId: 'history', agentId: 'a', direction: 'tail', epoch: 'epoch', reset: false, staleCursor: false, gap: false, error: null,
     window: { minSeq: 1, maxSeq: 1, nextSeq: 2 }, startCursor: { epoch: 'epoch', seq: 1 }, endCursor: { epoch: 'epoch', seq: 1 },
@@ -958,7 +959,7 @@ it.each((['snapshot', 'control', 'history'] as const).flatMap(phase => (['recove
   const browserWindow = new EventTarget();
   const document = Object.assign(new EventTarget(), { visibilityState: 'visible' });
   vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
-  cleanups.push(() => vi.unstubAllGlobals());
+  cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
   const harness = await server();
   const replica = new AgentReplica();
   const client = new RemoteSessionClient('a', harness.transport, replica, { connectionTimeoutMs: 300, operationTimeoutMs: 200, reconnectInitialDelayMs: 10 });

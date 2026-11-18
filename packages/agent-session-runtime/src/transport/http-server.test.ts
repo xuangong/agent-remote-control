@@ -31,7 +31,7 @@ import {
   type RemoteProtocolObservation,
   type RemoteSessionStatus,
   type WebSocketLike,
-} from '../../../agent-remote-web/src/headless.js';
+} from '@orchardworks/agent-client';
 import type { AgentRemoteRelay } from '../relay.js';
 import { createAgentRemoteRelay } from '../relay.js';
 import type { AgentRemoteHttpServer } from './http-server.js';

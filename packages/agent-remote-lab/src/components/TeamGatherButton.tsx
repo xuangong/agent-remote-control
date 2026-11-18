@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RemoteTeamClient } from '@orchardworks/agent-remote-web/headless';
+import { RemoteTeamClient } from '@orchardworks/agent-client';
 import { workspaceFetch } from '../workspace-access.js';
 import { type SessionWindowEntry, type SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { sessionKey } from '../session-tree.js';

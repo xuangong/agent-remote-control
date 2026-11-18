@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentSnapshot, ClientMessage, HistoryPage, Team } from '@orchardworks/agent-remote-protocol';
-import type { RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-remote-web';
+import type { RemoteAgentTransport, RemoteTransportListener } from '@orchardworks/agent-client';
 import { TeamMenu } from '../../src/components/TeamMenu';
 import { SessionTrackingMenu } from '../../src/components/SessionTrackingMenu';
 import type { SessionTracking } from '../../src/hooks/useSessionTracking';

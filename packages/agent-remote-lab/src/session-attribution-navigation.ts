@@ -1,5 +1,5 @@
 import { createWindowView, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import type { SessionAttributionTarget } from '@orchardworks/agent-remote-web';
+import type { SessionAttributionTarget } from '@orchardworks/agent-client';
 import { sessionKey } from './session-tree.js';
 
 /** Descriptions identify sessions; only the container decides where they appear. */

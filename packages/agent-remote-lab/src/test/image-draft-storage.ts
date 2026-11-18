@@ -1,4 +1,4 @@
-import type { ImageDraft } from '@orchardworks/agent-remote-web/browser';
+import type { ImageDraft } from '@orchardworks/agent-client-web/browser';
 
 export async function persistedPrompt(key: string) {
   const database = await new Promise<IDBDatabase>((resolve, reject) => {

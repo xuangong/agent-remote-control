@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AgentProviderAdapter, AgentSession } from '@orchardworks/agent-provider-sdk';
-import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-remote-web';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
 import { createProtocolValidationServer } from './server.js';
 
 it.each([

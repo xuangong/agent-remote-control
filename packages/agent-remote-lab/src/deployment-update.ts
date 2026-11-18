@@ -1,4 +1,4 @@
-import { watchFeedReopen } from '@orchardworks/agent-remote-web';
+import { watchFeedReopen } from '@orchardworks/agent-client';
 
 /** The content-hashed module entry an index document loads; development servers have none. */
 export function deploymentEntry(html: string): string | undefined {

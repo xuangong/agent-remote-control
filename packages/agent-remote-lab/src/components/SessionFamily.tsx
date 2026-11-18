@@ -1,6 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { AgentChildSessionView } from '@orchardworks/agent-remote-web/react';
+import type { AgentChildSessionView } from '@orchardworks/agent-client-web/react';
 import { isBotView } from '@orchardworks/agent-remote-protocol';
 import type { SessionWindowTarget } from '../hooks/useSessionWindows.js';
 import { useWindowSessionBridgeContext } from '../window-session-bridge-context.js';

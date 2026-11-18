@@ -1,8 +1,8 @@
 import type { ResourceResponseState } from '@orchardworks/agent-remote-protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { AgentCommand, ResourceBinding } from '@orchardworks/agent-remote-protocol';
-import type { AgentReplicaState } from '../replica/types.js';
 import { MarkdownContent } from './MarkdownContent.js';
+import { type AgentReplicaState } from '@orchardworks/agent-client';
 
 export interface AgentCommandDetailsProps {
   command: AgentCommand;

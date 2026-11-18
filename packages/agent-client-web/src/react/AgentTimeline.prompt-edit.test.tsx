@@ -2,10 +2,10 @@
 import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
-import { createReplicaState } from '../replica/reducer.js';
 import { render, rerender } from '../test/setup.js';
 import { AgentTimeline } from './AgentTimeline.js';
 import { TimelineDisplay } from './TimelineDisplay.js';
+import { createReplicaState } from '@orchardworks/agent-client';
 
 function entry(seq: number, turnId: string, type: 'user_message' | 'assistant_message' | 'reasoning', text: string): ProjectedTimelineEntry {
   return { providerId: 'codex', turnId, item: type === 'reasoning' ? { type, text } : { type, text, messageId: text }, resources: [],

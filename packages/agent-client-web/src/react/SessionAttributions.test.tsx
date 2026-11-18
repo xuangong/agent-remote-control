@@ -2,8 +2,8 @@
 import { act, useEffect, type ReactNode } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
-import type { SessionDescription } from '../session-description.js';
 import { SessionAttributions, type SessionAttributionsProps } from './SessionAttributions.js';
+import { type SessionDescription } from '@orchardworks/agent-client';
 
 const description: SessionDescription = {
   identity: { hostId: 'host-a', providerId: 'codex', nativeSessionId: 'task' },

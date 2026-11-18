@@ -1,3 +1,4 @@
+import { pageHidden, watchPageVisibility } from '../page-lifecycle.js';
 import { watchPagePolling } from './page-polling.js';
 
 /**
@@ -23,11 +24,10 @@ export function watchFeedReopen(listener: () => void): () => void {
  */
 export function watchFeedRefresh(refresh: () => unknown): () => void {
   let due = false;
-  const hidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
-  const stopFeed = watchFeedReopen(() => { if (hidden()) due = true; else void refresh(); });
-  const visible = () => { if (due && !hidden()) { due = false; void refresh(); } };
-  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', visible);
-  return () => { stopFeed(); if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', visible); };
+  const stopFeed = watchFeedReopen(() => { if (pageHidden()) due = true; else void refresh(); });
+  const visible = () => { if (due && !pageHidden()) { due = false; void refresh(); } };
+  const unwatch = watchPageVisibility(visible);
+  return () => { stopFeed(); unwatch(); };
 }
 
 /**

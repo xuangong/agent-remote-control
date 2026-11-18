@@ -1,5 +1,5 @@
-import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-remote-web';
-import { deviceStore, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-remote-web/device-store';
+import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS, type AgentReplica, type AgentReplicaState, type StoredSession } from '@orchardworks/agent-client';
+import { deviceStore, type SessionIdentity, type StoredRecord } from '@orchardworks/agent-client/device-store';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { storedRowsRelay } from './workspace-access.js';
 

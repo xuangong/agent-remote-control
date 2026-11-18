@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { AgentReplica } from '@orchardworks/agent-remote-web';
+import { AgentReplica } from '@orchardworks/agent-client';
 import { recoverMessages } from './message-recovery.js';
 
 afterEach(() => localStorage.clear());

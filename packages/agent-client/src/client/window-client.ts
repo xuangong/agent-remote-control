@@ -54,10 +54,10 @@ export class WindowWorkspaceClient {
   }
   async inspect(id: string, signal?: AbortSignal): Promise<WindowSnapshot> { const { value } = await this.request(`/${encodeURIComponent(id)}`, 'GET', undefined, signal); this.validate(value, id); return value; }
   private validate(value: any, id: string): void {
-    const window = decodeWorkspaceWindow(value.window);
+    const decoded = decodeWorkspaceWindow(value.window);
     const appearances = value.bots !== undefined || value.presentation !== undefined;
-    if (!window || window.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)
-      || appearances && !isWindowGroup({ window, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw new Error('Invalid Window snapshot.');
+    if (!decoded || decoded.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)
+      || appearances && !isWindowGroup({ window: decoded, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw new Error('Invalid Window snapshot.');
     value.window = window;
   }
   private receipt({ value, status }: WindowResponse, operationId: string): WindowOperationResult {
@@ -81,19 +81,19 @@ export class WindowWorkspaceClient {
     return result;
   }
   /** Read a retained creation receipt without replaying its mutation. */
-  async recoverCreate(window: WorkspaceWindow, operation: WindowOperationIdentity): Promise<WindowSnapshot> {
-    const input: WindowCreateRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, window: structuredClone(window) };
-    const result = await this.recover(window.id, input);
-    try { return this.commit({ value: { ...await this.inspect(window.id), result }, status: 200 }, window.id, result); }
-    catch (error) { throw new WindowMutationUnknownError(window.id, input, error, result); }
+  async recoverCreate(workspaceWindow: WorkspaceWindow, operation: WindowOperationIdentity): Promise<WindowSnapshot> {
+    const input: WindowCreateRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, window: structuredClone(workspaceWindow) };
+    const result = await this.recover(workspaceWindow.id, input);
+    try { return this.commit({ value: { ...await this.inspect(workspaceWindow.id), result }, status: 200 }, workspaceWindow.id, result); }
+    catch (error) { throw new WindowMutationUnknownError(workspaceWindow.id, input, error, result); }
   }
-  async create(window: WorkspaceWindow, operation: WindowOperationIdentity = identity()): Promise<WindowSnapshot> {
-    const input: WindowCreateRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, window: structuredClone(window) };
+  async create(workspaceWindow: WorkspaceWindow, operation: WindowOperationIdentity = identity()): Promise<WindowSnapshot> {
+    const input: WindowCreateRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, window: structuredClone(workspaceWindow) };
     try {
       const response = await this.request('', 'POST', input);
       const result = this.receipt(response, input.operationId);
       this.committed(result, response.status);
-      return this.commit(response, window.id, result);
+      return this.commit(response, workspaceWindow.id, result);
     } catch (error) {
       if (isWindowRejection(error)) throw error;
       return this.recoverCreate(input.window, input);
@@ -116,17 +116,17 @@ export class WindowWorkspaceClient {
   async operation(id: string, operationId: string): Promise<WindowOperationResult> { return this.receipt(await this.request(`/${encodeURIComponent(id)}/operations/${encodeURIComponent(operationId)}`), operationId); }
   async changes(id: string, revision: number, signal: AbortSignal): Promise<WindowSnapshot | undefined> { const { value } = await this.request(`/${encodeURIComponent(id)}/changes?afterRevision=${revision}`, 'GET', undefined, signal); if (!value.window) return; this.validate(value, id); return value; }
   /** Read a retained deletion receipt, including after the Window becomes a tombstone. */
-  async recoverDelete(window: WorkspaceWindow, operation: WindowOperationIdentity): Promise<void> {
-    await this.recover(window.id, { operationId: operation.operationId, issuedAt: operation.issuedAt, baseRevision: window.revision, operation: { type: 'delete' } });
+  async recoverDelete(workspaceWindow: WorkspaceWindow, operation: WindowOperationIdentity): Promise<void> {
+    await this.recover(workspaceWindow.id, { operationId: operation.operationId, issuedAt: operation.issuedAt, baseRevision: workspaceWindow.revision, operation: { type: 'delete' } });
   }
-  async delete(window: WorkspaceWindow, operation: WindowOperationIdentity = identity()): Promise<void> {
-    const input: WindowDeleteRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, baseRevision: window.revision, operation: { type: 'delete' } };
+  async delete(workspaceWindow: WorkspaceWindow, operation: WindowOperationIdentity = identity()): Promise<void> {
+    const input: WindowDeleteRequest = { operationId: operation.operationId, issuedAt: operation.issuedAt, baseRevision: workspaceWindow.revision, operation: { type: 'delete' } };
     try {
-      const response = await this.request(`/${encodeURIComponent(window.id)}`, 'DELETE', input);
+      const response = await this.request(`/${encodeURIComponent(workspaceWindow.id)}`, 'DELETE', input);
       this.committed(this.receipt(response, input.operationId), response.status);
     } catch (error) {
       if (isWindowRejection(error)) throw error;
-      await this.recoverDelete(window, input);
+      await this.recoverDelete(workspaceWindow, input);
     }
   }
   async assign(id: string, session: WindowSessionBinding | null): Promise<unknown> { return (await this.request(`/${encodeURIComponent(id)}/manager`, 'POST', { session })).value; }

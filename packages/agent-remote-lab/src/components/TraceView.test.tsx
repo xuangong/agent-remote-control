@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { AgentReplicaState } from '@orchardworks/agent-remote-web';
+import type { AgentReplicaState } from '@orchardworks/agent-client';
 import type { ProjectedTimelineEntry } from '@orchardworks/agent-remote-protocol';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';

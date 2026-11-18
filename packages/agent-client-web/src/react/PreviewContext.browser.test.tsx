@@ -5,8 +5,8 @@ import { expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
 import { PreviewWorkspace } from './PreviewWorkspace.js';
 import { FilePreviewContext } from './FilePreviewContext.js';
-import { HttpPreviewClient } from '../client/preview-client.js';
 import { PreviewDock, PreviewProvider, usePreviewController, type PreviewContextValue } from './PreviewContext.js';
+import { HttpPreviewClient } from '@orchardworks/agent-client';
 
 vi.mock('./PreviewBrowser.js', () => ({
   PreviewBrowser: ({ url, error, visible, onMinimize }: { url?: string; error?: string; visible: boolean; onMinimize(): void }) =>

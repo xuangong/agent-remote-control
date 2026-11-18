@@ -1,5 +1,5 @@
 import { isSessionListingStatus, type SessionListingStatus } from '@orchardworks/agent-remote-protocol';
-import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-remote-web/headless';
+import { RemoteHostControlClient, RemoteHostControlError, type TpmActionInput } from '@orchardworks/agent-client';
 import type { TpmCreate, TpmList, TpmWork } from '@orchardworks/agent-remote-protocol';
 import { isHostProviderSettings, type HostProviderChange, type HostProviderSettings } from '@orchardworks/agent-remote-protocol';
 import { isHostStatus, type HostStatus } from '@orchardworks/agent-remote-protocol';

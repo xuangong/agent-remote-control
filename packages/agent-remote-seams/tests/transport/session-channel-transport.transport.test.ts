@@ -1,13 +1,9 @@
 // @vitest-environment node
-import { watchFeedReopen } from './feed-reopen.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { ClientMessage, HistoryPage } from '@orchardworks/agent-remote-protocol';
-import { HttpWebSocketTransport, type WebSocketLike } from './http-websocket-transport.js';
-import type { RemoteConnection, RemoteServerMessage } from './transport.js';
-import { AgentReplica } from '../replica/store.js';
-import { RemoteSessionClient } from './remote-session-client.js';
-import { installPageLifecycle, installStubbedGlobalPage } from '../testing/page.js';
+import { AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient, watchFeedReopen, type RemoteConnection, type RemoteServerMessage, type WebSocketLike } from '@orchardworks/agent-client';
+import { installPageLifecycle, installStubbedGlobalPage } from '@orchardworks/agent-client/testing';
 
 const version = '1.8.0';
 const negotiate: ClientMessage = { protocolVersion: version, type: 'negotiate' };
@@ -668,7 +664,6 @@ describe('session channel transport', () => {
     vi.stubGlobal('window', browserWindow); vi.stubGlobal('document', document);
     cleanups.push(() => { vi.unstubAllGlobals(); installPageLifecycle(); }); installStubbedGlobalPage();
     const harness = await server();
-    const { RemoteActivityClient } = await import('./remote-activity-client.js');
     const client = mode === 'content'
       ? new RemoteSessionClient('a', harness.transport, new AgentReplica(), {reconnectInitialDelayMs: 5000})
       : new RemoteActivityClient('a', harness.transport, () => {});

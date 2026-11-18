@@ -4,9 +4,7 @@ import { createHash } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { expect, it, vi } from 'vitest';
 import { PROTOCOL_VERSION, type HistoryPage, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { AgentReplica } from '../replica/store.js';
-import { HttpWebSocketTransport } from './http-websocket-transport.js';
-import { RemoteSessionClient } from './remote-session-client.js';
+import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
 
 it.each([false, true])('recovers an omitted live echo through HTTP without reconnecting or resending (prepared text: %s)', async prepared => {
   let sends = 0;

@@ -78,6 +78,7 @@ test('Ask floats over the page, preserves its source and minimized draft, and st
   await page.screenshot({ path: info.outputPath('ask-session.png') });
 });
 
+test('a lost Clean response keeps the old conversation and retries the same creation', async ({ page }) => {
   await start(page);
   await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
   const ask = page.getByRole('dialog', { name: 'Ask', exact: true });
@@ -494,6 +495,7 @@ test('desktop Ask keeps its controls visible in a wide short window', async ({ p
 });
 
 
+test('desktop Ask title dragging keeps controls inside the page at every edge', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop window dragging.');
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });

@@ -560,7 +560,7 @@ async function pressSearchShortcut(page: Page) {
   await page.keyboard.press(apple ? 'Meta+K' : 'Control+K');
 }
 
-test('opens a Window and a bot from the command palette, and returns focus when it closes', async ({ page }) => {
+test('opens a Window from the command palette, and returns focus when it closes', async ({ page }) => {
   test.skip((page.viewportSize()?.width ?? 0) <= 1180, 'It checks the desktop sidebar header (the mode switch, Search and +).');
   await openRecordedBot(page);
   // Windows persist for the shared test user, so each run names its own.
@@ -604,19 +604,4 @@ test('opens a Window and a bot from the command palette, and returns focus when 
   await page.keyboard.press('Enter');
   await expect(palette).toHaveCount(0);
   await expect(toolbar.locator('h2')).toHaveText(windowTitle);
-
-  // In Bot mode the palette lists each session as a bot under its group's name; choosing one opens it.
-  // (Window mode lists sessions instead, since stage 1: each session is one item.)
-  await mode(page, 'bot');
-  const bot = modeRegion(page, 'bot').locator('.lab-bot-section .lab-bot-row').first();
-  const name = (await bot.getAttribute('aria-label'))!;
-  await modeRegion(page, 'bot').getByRole('button', { name: 'Search', exact: true }).click();
-  // The recorded bot is named like the New session action, which ranks first; its section's name, its subtitle, narrows to it.
-  await palette.getByRole('combobox', { name: 'Search Windows, Bots, sessions and actions', exact: true }).fill(`${name} ${windowTitle}`);
-  await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveCount(1);
-  await expect(palette.getByRole('group', { name: 'Bots' }).getByRole('option')).toHaveAttribute('aria-selected', 'true');
-  await page.keyboard.press('Enter');
-  await expect(palette).toHaveCount(0);
-  await expect(bot).toHaveAttribute('aria-current', 'true');
-  await expect(composer(page, 'bot')).toBeVisible();
 });

@@ -54,8 +54,8 @@ test('Discover sessions reopens linked Ask and Side native sessions from their s
     await expect(row).toHaveCount(1);
     await row.click();
     await expect(page).toHaveURL(url => url.searchParams.get('session') === identity.nativeSessionId);
-    // The opened session is the selected primary group; other groups of the Window stay beside it.
-    const opened = page.locator('.lab-primary-conversation[data-selected="true"]');
+    // The opened session is the selected view of the Window: a new primary group, or the pane that already shows it.
+    const opened = page.locator('[data-view-id][data-selected="true"]');
     await expect(opened.locator('.agent-message-assistant').last()).toContainText(message);
     await expect(opened.locator('.agent-message-user')).toHaveCount(messageCount);
     expect(creations).toHaveLength(3);

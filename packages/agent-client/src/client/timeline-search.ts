@@ -60,7 +60,7 @@ export function findTimelineMatches(epoch: string, entries: readonly ProjectedTi
     if (offset < 0) continue;
     const start = Math.max(0, offset - 55);
     const end = Math.min(text.length, offset + needle.length + 100);
-    matches.push({ key: timelineEntryKey(epoch, entry), epoch, seq: entry.seqStart,
+    matches.push({ key: timelineEntryKey(entry), epoch, seq: entry.seqStart,
       label: entry.item.type === 'tool_call' ? entry.item.name : labels[entry.item.type], timestamp: entry.timestamp,
       snippet: `${start ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}` });
   }

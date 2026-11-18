@@ -620,13 +620,14 @@ describe('absorbing a replacement by item key', () => {
     expect(read.state.timeline.entries.map(row => row.item.type === 'assistant_message' ? row.item.text : '')).toEqual(['A', 'Waits']);
   });
 
-  it('replaces rows without keys, which key by epoch, through one transition and never an empty state', () => {
+  it('absorbs rows without keys, which key by position and identity, through one transition and never an empty state', () => {
     const state = applyHistoryPage(createReplicaState(), page('tail', [entry(1, 1, { type: 'user_message', text: 'Old' })])).state;
     const marked = applyTimelineReplacement(state, 'epoch-two');
     expect(marked.timeline.entries).toHaveLength(1);
     const replaced = applyHistoryPage(marked, page('tail', [entry(1, 1, { type: 'user_message', text: 'Old' })], { epoch: 'epoch-two' }));
     expect(replaced.state.timeline.entries).toHaveLength(1);
-    expect(replaced.state.timeline.entries[0]).not.toBe(state.timeline.entries[0]);
+    // The same row in the new epoch is the same row: its key, and so a reader's place, survive the replacement.
+    expect(replaced.state.timeline.entries[0]).toBe(state.timeline.entries[0]);
   });
 
   it('holds one row per key: a live event updates the held row in place and keeps its position', () => {

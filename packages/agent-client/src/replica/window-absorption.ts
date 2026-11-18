@@ -13,14 +13,12 @@ import { timelineEntryKey } from './timeline-entry-key.js';
  */
 export function absorbWindow(
   held: readonly ProjectedTimelineEntry[],
-  heldEpoch: string | null,
-  windowEpoch: string,
   offered: readonly ProjectedTimelineEntry[],
 ): ProjectedTimelineEntry[] {
-  const heldByKey = new Map(held.map((entry) => [timelineEntryKey(heldEpoch, entry), entry]));
+  const heldByKey = new Map(held.map((entry) => [timelineEntryKey(entry), entry]));
   const seen = new Set<string>();
   return offered.flatMap((incoming) => {
-    const key = timelineEntryKey(windowEpoch, incoming);
+    const key = timelineEntryKey(incoming);
     if (seen.has(key)) return [];
     seen.add(key);
     return [absorbEntry(heldByKey.get(key), incoming)];

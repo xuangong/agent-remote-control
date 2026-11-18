@@ -27,7 +27,7 @@ export class PendingMessages {
     // so an asynchronous result cannot settle an obsolete epoch or submission.
     if (!this.prepareDigests(state)) return state;
     const entries = state.timeline.entries;
-    const keys = entries.map(entry => timelineEntryKey(state.timeline.epoch, entry));
+    const keys = entries.map(entry => timelineEntryKey(entry));
     const consumed = new Set<string>();
     let changed = false;
     const remaining: OutgoingMessage[] = [];
@@ -79,7 +79,7 @@ export class PendingMessages {
   }
 
   private prepareDigests(state: AgentReplicaState): boolean {
-    const keys = state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry));
+    const keys = state.timeline.entries.map(entry => timelineEntryKey(entry));
     const candidates = (state.outgoingMessages?.filter(message => message.submittedTextSha256 !== undefined
       && message.agentId === state.agent?.id && message.afterKey !== undefined && message.status !== 'failed'
       && !message.content?.some(part => part.type !== 'text')) ?? []).map(message => ({ message, after: anchorPosition(state, message.afterKey!, keys) }))
@@ -116,7 +116,7 @@ export function anchorNow(state: AgentReplicaState): string | undefined {
 
 /** A stream without item keys names a position, not a row: a row can be folded into an earlier one, and its key would then vanish. */
 function anchorOfEntry(state: AgentReplicaState, entry: AgentReplicaState['timeline']['entries'][number]): string {
-  return entry.itemKey === undefined ? `${SEQUENCE}${state.timeline.epoch ?? ''}:${entry.seqEnd}` : timelineEntryKey(state.timeline.epoch, entry);
+  return entry.itemKey === undefined ? `${SEQUENCE}${state.timeline.epoch ?? ''}:${entry.seqEnd}` : timelineEntryKey(entry);
 }
 
 const EPOCH_START = 'epoch-start:';
@@ -127,7 +127,7 @@ const SEQUENCE = 'epoch-seq:';
  * replica no longer holds the row or the epoch (a replacement rewrote it). A position anchor (a stream without item keys) stands
  * after the last row that ends at or before its sequence.
  */
-export function anchorPosition(state: AgentReplicaState, afterKey: string, keys = state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry))): number | undefined {
+export function anchorPosition(state: AgentReplicaState, afterKey: string, keys = state.timeline.entries.map(entry => timelineEntryKey(entry))): number | undefined {
   if (afterKey.startsWith(EPOCH_START)) return afterKey === `${EPOCH_START}${state.timeline.epoch ?? ''}` ? -1 : undefined;
   if (afterKey.startsWith(SEQUENCE)) {
     const at = afterKey.lastIndexOf(':');

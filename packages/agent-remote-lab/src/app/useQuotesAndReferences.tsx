@@ -90,7 +90,7 @@ export function useQuotesAndReferences(scope: Pick<AppInputs & RequestedSessionS
       if (epoch !== selection.epoch) throw new Error('This conversation was reloaded. Select the messages again.');
       const excerpt = createSessionExcerpt({ id: crypto.randomUUID(), capturedAt: new Date().toISOString(), entries: sourceState.timeline.entries,
         source: { hostId: source.hostId ?? 'local', providerId: source.providerId, nativeSessionId: source.nativeSessionId, title: source.title },
-        selected: entry => selection.keys.has(timelineEntryKey(epoch, entry)) });
+        selected: entry => selection.keys.has(timelineEntryKey(entry)) });
       let destination = target.viewId;
       if (destination === NEW_SESSION_TARGET) {
         const creationId = selection.creationId ?? crypto.randomUUID();

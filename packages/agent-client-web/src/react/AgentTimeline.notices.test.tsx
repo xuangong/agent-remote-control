@@ -49,7 +49,7 @@ function visibleText(node: Node): string {
 }
 
 function renderedEntry(container: HTMLElement, item: ProjectedTimelineEntry): HTMLElement | null {
-  const key = timelineEntryKey(epoch, item);
+  const key = timelineEntryKey(item);
   return container.querySelector<HTMLElement>(`.agent-timeline-entry[data-entry-key="${key}"]`);
 }
 
@@ -125,7 +125,7 @@ describe('runtime notice groups', () => {
   it.each(['preview', 'content'] as const)('reveals a search hit at its real entry inside a closed group in %s mode', async mode => {
     const entries = notices();
     const selected = entries[1]!;
-    const key = timelineEntryKey(epoch, selected);
+    const key = timelineEntryKey(selected);
     const container = await render(view(entries, mode));
     expect(noticeToggles(container)).toHaveLength(1);
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
@@ -143,8 +143,8 @@ describe('runtime notice groups', () => {
 
   it('reopens the group when search moves to another notice after the previous hit was collapsed', async () => {
     const entries = notices();
-    const firstKey = timelineEntryKey(epoch, entries[0]!);
-    const secondKey = timelineEntryKey(epoch, entries[1]!);
+    const firstKey = timelineEntryKey(entries[0]!);
+    const secondKey = timelineEntryKey(entries[1]!);
     const container = await render(view(entries, 'content', firstKey));
     expect(noticeToggles(container)).toHaveLength(1);
     const toggle = noticeToggles(container)[0]!;
@@ -181,7 +181,7 @@ describe('runtime notice groups', () => {
     await act(async () => noticeToggles(container)[0]!.click());
     const list = container.querySelector('.agent-timeline-entries')!;
     for (const item of entries) {
-      const key = timelineEntryKey(epoch, item);
+      const key = timelineEntryKey(item);
       const rendered = renderedEntry(container, item)!;
       expect(rendered.parentElement).toBe(list);
       expect(container.querySelectorAll(`[data-entry-key="${key}"]`)).toHaveLength(1);
@@ -190,7 +190,7 @@ describe('runtime notice groups', () => {
       expect(trace).not.toBeNull();
       await act(async () => trace!.click());
     }
-    expect(inspect.mock.calls.map(([key]) => key)).toEqual(entries.map(item => timelineEntryKey(epoch, item)));
+    expect(inspect.mock.calls.map(([key]) => key)).toEqual(entries.map(item => timelineEntryKey(item)));
   });
 
   it('reveals a Trace target and reopens its group when inspection moves to another notice', async () => {
@@ -199,7 +199,7 @@ describe('runtime notice groups', () => {
     const container = await render(view(entries, 'preview', undefined, { onInspectEntry: inspect }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
     await rerender(container, view(entries, 'preview', undefined, {
-      onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(epoch, entries[1]!),
+      onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(entries[1]!),
     }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
     const firstTarget = renderedEntry(container, entries[1]!)!;
@@ -209,7 +209,7 @@ describe('runtime notice groups', () => {
     await act(async () => noticeToggles(container)[0]!.click());
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('false');
     await rerender(container, view(entries, 'preview', undefined, {
-      onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(epoch, entries[2]!),
+      onInspectEntry: inspect, inspectedEntryKey: timelineEntryKey(entries[2]!),
     }));
     expect(noticeToggles(container)[0]!.getAttribute('aria-expanded')).toBe('true');
     const nextTarget = renderedEntry(container, entries[2]!)!;
@@ -222,7 +222,7 @@ describe('runtime notice groups', () => {
   it.each(['search', 'Trace'] as const)('reopens the same %s target on a new locate request after the group was collapsed', async source => {
     const entries = notices();
     const target = entries[1]!;
-    const key = timelineEntryKey(epoch, target);
+    const key = timelineEntryKey(target);
     const locate = (requestId: number) => source === 'search'
       ? view(entries, 'content', key, { searchRequestId: requestId })
       : view(entries, 'preview', undefined, { inspectedEntryKey: key, inspectedRequestId: requestId });

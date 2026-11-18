@@ -120,7 +120,7 @@ it.each(['preview', 'simple', 'content'] as const)('toggles letters independentl
   const message = { ...letter, seqStart: 2, seqEnd: 2, item: { type: 'assistant_message' as const, text: 'Assistant answer.' } };
   const state = createReplicaState();
   state.timeline = { ...state.timeline, epoch: 'epoch', initialized: true, entries: [letter, message] };
-  const key = timelineEntryKey('epoch', letter);
+  const key = timelineEntryKey(letter);
   const view = (visible: boolean, searchEntryKey?: string) => <TimelineDisplay.Provider value={mode}>
     <TimelineLettersVisible.Provider value={visible}><AgentTimeline state={state} searchEntryKey={searchEntryKey} inspectedEntryKey={key} /></TimelineLettersVisible.Provider>
   </TimelineDisplay.Provider>;

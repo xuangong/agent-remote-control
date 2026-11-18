@@ -4,7 +4,7 @@ test.use({ locale: 'en-GB', timezoneId: 'Asia/Shanghai' });
 
 test('edits a user prompt from the swipe timestamp on mobile and inline action on desktop', async ({ page, isMobile }, testInfo) => {
   await page.goto('/e2e/fixtures/timeline-time.html?edit=1');
-  const user = page.locator('[data-entry-key="time:codex:1:user"]');
+  const user = page.locator('[data-entry-key="codex:1:user"]');
   const height = (await user.boundingBox())!.height;
   if (isMobile) {
     await drag(page, user.locator('.agent-message'), -120);
@@ -30,7 +30,7 @@ test('edits a user prompt from the swipe timestamp on mobile and inline action o
   await page.screenshot({ path: testInfo.outputPath('prompt-edit-action.png') });
   if (isMobile) await button.tap(); else await button.click();
   await expect(page.getByTestId('edits')).toHaveText('1');
-  await expect(page.locator('[data-entry-key="time:codex:2:assistant"] button[data-prompt-edit-action]')).toHaveCount(0);
+  await expect(page.locator('[data-entry-key="codex:2:assistant"] button[data-prompt-edit-action]')).toHaveCount(0);
 });
 
 async function drag(page: Page, target: Locator, dx: number, dy = 0, release = true) {
@@ -50,8 +50,8 @@ async function drag(page: Page, target: Locator, dx: number, dy = 0, release = t
 test('reveals local timestamps in the sender direction without changing row height', async ({ page, isMobile }, testInfo) => {
   test.skip(!isMobile, 'Touch gesture');
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const user = page.locator('[data-entry-key="time:codex:1:user"]');
-  const assistant = page.locator('[data-entry-key="time:codex:2:assistant"]');
+  const user = page.locator('[data-entry-key="codex:1:user"]');
+  const assistant = page.locator('[data-entry-key="codex:2:assistant"]');
   const rowHeight = (await assistant.boundingBox())!.height;
   for (const [row, dx] of [[user, -120], [assistant, 120]] as const) {
     await expect(row.locator('.agent-entry-content')).toHaveCSS('transform', 'none');
@@ -74,8 +74,8 @@ test('keeps vertical scrolling, opposite swipes, links and code scrolling availa
   const errors: string[] = [];
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const user = page.locator('[data-entry-key="time:codex:1:user"]');
-  const assistant = page.locator('[data-entry-key="time:codex:2:assistant"]');
+  const user = page.locator('[data-entry-key="codex:1:user"]');
+  const assistant = page.locator('[data-entry-key="codex:2:assistant"]');
   await drag(page, user, 100);
   await expect(user.locator('.agent-entry-time')).toBeHidden();
   await drag(page, assistant, -100);
@@ -95,7 +95,7 @@ test('keeps vertical scrolling, opposite swipes, links and code scrolling availa
 
 test('cancels interrupted gestures and does not swipe desktop entries', async ({ page, isMobile }) => {
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const assistant = page.locator('[data-entry-key="time:codex:2:assistant"]');
+  const assistant = page.locator('[data-entry-key="codex:2:assistant"]');
   if (isMobile) {
     const cdp = await drag(page, assistant, 100, 0, false);
     await expect(assistant.locator('.agent-entry-time')).toBeVisible();
@@ -111,13 +111,13 @@ test('cancels interrupted gestures and does not swipe desktop entries', async ({
   }
   await expect(page.getByText('Runtime notice', { exact: true })).toHaveCount(1);
   await expect(page.getByText('Wait up to 15 seconds (requested)', { exact: true }).first()).toBeVisible();
-  await expect(page.locator('[data-entry-key="time:codex:4:invalid"] time')).toHaveCount(0);
+  await expect(page.locator('[data-entry-key="codex:4:invalid"] time')).toHaveCount(0);
 });
 
 test('reveals tool time without activating its disclosure', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'Touch gesture');
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const row = page.locator('[data-entry-key="time:codex:3:sleep"]');
+  const row = page.locator('[data-entry-key="codex:3:sleep"]');
   const toggle = row.locator('.agent-tool-toggle');
   await drag(page, toggle, 120);
   await expect(row.locator('.agent-entry-time')).toBeVisible();
@@ -128,7 +128,7 @@ test.describe('local calendar date', () => {
   test.use({ timezoneId: 'America/Los_Angeles' });
   test('uses the device timezone across a date boundary', async ({ page, isMobile }) => {
     await page.goto('/e2e/fixtures/timeline-time.html');
-    const row = page.locator('[data-entry-key="time:codex:1:user"]');
+    const row = page.locator('[data-entry-key="codex:1:user"]');
     if (isMobile) await drag(page, row, -120);
     const time = row.locator(isMobile ? '.agent-entry-time' : '.agent-title-time');
     await expect(time).toBeVisible();
@@ -141,8 +141,8 @@ test.describe('local calendar date', () => {
 test('desktop titles show local time by default and toggle together on double click', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'Desktop titles');
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const user = page.locator('[data-entry-key="time:codex:1:user"]');
-  const assistant = page.locator('[data-entry-key="time:codex:2:assistant"]');
+  const user = page.locator('[data-entry-key="codex:1:user"]');
+  const assistant = page.locator('[data-entry-key="codex:2:assistant"]');
   for (const row of [user, assistant]) {
     await expect(row.locator('.agent-title-time')).toBeVisible();
     await expect(row.locator('.agent-title-time')).toHaveText('18/09/2026 10:11:17');
@@ -155,7 +155,7 @@ test('desktop titles show local time by default and toggle together on double cl
   await expect(user.locator('.agent-title-time')).toBeHidden();
   await expect(page.locator('.agent-title-time:visible')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open Side conversation' }).click();
-  const side = page.locator('[data-entry-key="side:codex:1:side"]');
+  const side = page.locator('[data-entry-key="codex:1:side"]');
   await expect(side.locator('.agent-title-time')).toBeHidden();
   await side.locator('.agent-time-title-label:visible').dblclick();
   await expect(assistant.locator('.agent-title-time')).toBeVisible();
@@ -209,7 +209,7 @@ test('double clicking a tool title changes time without changing disclosure', as
 test('timestamps follow the desktop breakpoint without affecting mobile titles', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Desktop viewport resizing');
   await page.goto('/e2e/fixtures/timeline-time.html');
-  const row = page.locator('[data-entry-key="time:codex:1:user"]');
+  const row = page.locator('[data-entry-key="codex:1:user"]');
   for (const width of [1440, 1181, 1180, 844, 390, 320]) {
     await page.setViewportSize({ width, height: 900 });
     if (width > 1180) await expect(row.locator('.agent-title-time')).toBeVisible();
@@ -232,6 +232,6 @@ test('uses one native swipe listener per timeline as history grows', async ({ pa
   await expect(page.locator('.agent-timeline-entry')).toHaveCount(17);
   expect(await page.evaluate(() => (window as any).swipeListeners)).toBe(1);
   await page.getByRole('button', { name: 'Open Side conversation' }).click();
-  await expect(page.locator('[data-entry-key="side:codex:1:side"]')).toBeVisible();
+  await expect(page.locator('[data-entry-key="codex:1:side"]')).toBeVisible();
   expect(await page.evaluate(() => (window as any).swipeListeners)).toBe(2);
 });

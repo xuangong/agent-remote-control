@@ -173,7 +173,7 @@ it('reopens a collapsed runtime notice group when the same search result is requ
   await act(async () => next.click());
   const toggle = container.querySelector<HTMLButtonElement>('.agent-notice-toggle')!;
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  const target = '.agent-timeline-entry[data-entry-key="epoch-1:recorded:2:error"]';
+  const target = '.agent-timeline-entry[data-entry-key="recorded:2:error"]';
   expect(container.querySelector(target)?.getAttribute('data-inspected')).toBe('true');
   await act(async () => toggle.click());
   expect(container.querySelector(target)).toBeNull();
@@ -215,7 +215,7 @@ it('collapses the session actions and closes search for a press on an entry high
       sourceSeqRanges: [], collapsed: [], resources: [], item: { type: 'error', message },
     })),
   } };
-  const traced = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries)[0]!.key;
+  const traced = createTimelineRenderModel(state.timeline.entries)[0]!.key;
   const container = await render(<SessionWorkbench state={state} sessionStatus="ready" actions={{}} headingMode="toolbar" revealEntry={{ key: traced, requestId: 1 }} />);
   const highlighted = container.querySelector<HTMLElement>(`.agent-timeline-entry[data-entry-key="${traced}"]`)!;
   expect(highlighted.dataset.inspected).toBe('true');

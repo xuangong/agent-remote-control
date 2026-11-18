@@ -30,9 +30,9 @@ function TraceBrowser({ state, visible = true, revealEntry, onShowConversation, 
   const consumedRequest = useRef<number>();
   const [focusRevision, setFocusRevision] = useState(0);
   const timeline = state?.timeline;
-  const rows = useMemo(() => createTimelineRenderModel(timeline?.epoch ?? null, timeline?.entries ?? []).map(row => ({
+  const rows = useMemo(() => createTimelineRenderModel(timeline?.entries ?? []).map(row => ({
     ...row, search: JSON.stringify(row.entry).toLocaleLowerCase(),
-  })), [timeline?.epoch, timeline?.entries]);
+  })), [timeline?.entries]);
   const matches = rows.filter(row => (type === 'all' || row.entry.item.type === type) && row.search.includes(query.trim().toLocaleLowerCase()));
   const selection = rows.find(row => row.key === selected);
   const waits = rows.filter(row => row.entry.item.type === 'tool_call' && row.entry.item.name === 'agent.wait' && row.entry.item.status === 'running');

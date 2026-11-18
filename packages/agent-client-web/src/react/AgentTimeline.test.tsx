@@ -65,7 +65,7 @@ describe('AgentTimeline', () => {
     const register = vi.fn(async () => ({
       id: 'preview-one', target: 'http://localhost:5173', status: 'active' as const,
       createdAt: 1_789_516_800_000, expiresAt: 1_789_520_400_000, revision: 1,
-      pathMode: 'strip' as const, sources: [{ sessionId: 'agent-one', itemId: 'epoch-one:provider-neutral:1:answer' }], availability: 'online' as const,
+      pathMode: 'strip' as const, sources: [{ sessionId: 'agent-one', itemId: 'provider-neutral:1:answer' }], availability: 'online' as const,
     }));
     const previews: PreviewController = { registrations: [], canManage: true, register, unregister: async () => undefined, open: async () => '' };
     const content = state([
@@ -99,7 +99,7 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('.agent-message-assistant')?.textContent).toContain('Run http://localhost:5173/docs.');
     expect(register).not.toHaveBeenCalled();
     await act(async () => container.querySelector<HTMLButtonElement>('.agent-preview-target button')?.click());
-    expect(register.mock.calls[0]?.[1]).toMatchObject({ itemId: 'epoch-one:provider-neutral:1:answer' });
+    expect(register.mock.calls[0]?.[1]).toMatchObject({ itemId: 'provider-neutral:1:answer' });
   });
   it('replaces the actionable request with one completed history item when the Replica resolves it', async () => {
     const request: AgentInteractionRequest = { kind: 'plan_approval', requestId: 'plan-history', plan: 'Inspect once', allowedActions: ['approve'] };
@@ -111,7 +111,7 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('.agent-interactions')).toBeNull();
     expect(container.querySelectorAll('.agent-interaction-completed')).toHaveLength(1);
     expect(container.textContent).toContain('Inspect once');
-    expect(container.querySelector('[data-entry-key]')?.getAttribute('data-entry-key')).toBe('epoch-one:provider-neutral:1:plan-history');
+    expect(container.querySelector('[data-entry-key]')?.getAttribute('data-entry-key')).toBe('provider-neutral:1:plan-history');
   });
 
   it('keeps a host-hidden header out of the conversation without removing entries', async () => {
@@ -122,7 +122,7 @@ describe('AgentTimeline', () => {
     await rerender(container, <AgentTimeline state={content} showHeader={false} />);
 
     expect(container.querySelector('.agent-surface-header')).toBeNull();
-    expect(container.querySelector('[data-entry-key="epoch-one:provider-neutral:1:answer"]')?.textContent).toContain('The answer');
+    expect(container.querySelector('[data-entry-key="provider-neutral:1:answer"]')?.textContent).toContain('The answer');
   });
 
   it('waits for earlier history and suppresses repeated activation before rendering pending state', async () => {
@@ -222,7 +222,7 @@ describe('AgentTimeline', () => {
     expect(container.querySelector('.agent-reasoning-content')?.textContent).toContain('Second fragment.');
   });
 
-  it('remounts a stateful timeline item when replacement begins a new epoch', async () => {
+  it('keeps a stateful timeline item through a replacement that brings the same row, and shows its new content', async () => {
     const epochA = entry(1, { type: 'reasoning', text: 'Epoch A reasoning' });
     const container = await render(<AgentTimeline state={state([epochA], [], 'epoch-a')} />);
     const toggle = container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle');
@@ -232,10 +232,9 @@ describe('AgentTimeline', () => {
     const epochB = { ...epochA, item: { type: 'reasoning' as const, text: 'Epoch B replacement reasoning' } };
     await rerender(container, <AgentTimeline state={state([epochB], [], 'epoch-b')} />);
 
-    const replacementToggle = container.querySelector<HTMLButtonElement>('.agent-reasoning-toggle');
-    expect(replacementToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('.agent-reasoning-toggle')).toBe(toggle);
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
     expect(container.textContent).not.toContain('Epoch A reasoning');
-    await act(async () => replacementToggle?.click());
     expect(container.querySelector('.agent-reasoning-content')?.textContent).toContain('Epoch B replacement reasoning');
   });
 
@@ -607,7 +606,7 @@ it('reveals a quiet original search target in content mode without hiding unreso
   const reply = entry(2, { type: 'assistant_message', text: 'Quiet result', background: bg });
   const pending = entry(3, { type: 'assistant_message', text: 'Unsettled response', background: { ...bg, id: 'other', status: 'pending' } });
   const { timelineEntryKey } = await import("@orchardworks/agent-client");
-  const key = timelineEntryKey('epoch-one', reply);
+  const key = timelineEntryKey(reply);
   const container = await render(<TimelineDisplay.Provider value="content"><AgentTimeline state={state([input, reply, pending])} searchEntryKey={key} searchRequestId={1} /></TimelineDisplay.Provider>);
   expect(container.textContent).toContain('Quiet result');
   expect(container.textContent).toContain('Unsettled response');

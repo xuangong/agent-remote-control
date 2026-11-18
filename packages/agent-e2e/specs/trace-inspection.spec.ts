@@ -9,7 +9,7 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   const prompt = page.getByTestId('prompt-input');
   await prompt.fill('Keep this draft');
   const viewport = page.getByTestId('timeline');
-  const entry = viewport.locator('[data-entry-key="epoch-1:recorded:12:test-call"]');
+  const entry = viewport.locator('[data-entry-key="recorded:12:test-call"]');
   await viewport.hover();
   await page.mouse.wheel(0, -3000);
   await entry.scrollIntoViewIfNeeded();
@@ -20,7 +20,7 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
     await expect(viewport.getByRole('button', { name: /Inspect event in Trace/ })).toHaveCount(0);
     if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
     await page.getByRole('tab', { name: 'Trace', exact: true }).click();
-    await page.locator('[data-trace-entry-key="epoch-1:recorded:12:test-call"]').click();
+    await page.locator('[data-trace-entry-key="recorded:12:test-call"]').click();
   } else {
     await expect(inspectButton).toBeVisible();
     await inspectButton.click();
@@ -32,7 +32,7 @@ test('inspects a live tool and returns to a stable conversation anchor', async (
   await page.getByRole('button', { name: 'Complete tool', exact: true }).click();
   await expect(details).toContainText('All tests passed.');
   await expect(details).toContainText('1200 ms');
-  await expect(page.locator('[data-trace-entry-key][aria-current="true"]')).toHaveAttribute('data-trace-entry-key', 'epoch-1:recorded:12:test-call');
+  await expect(page.locator('[data-trace-entry-key][aria-current="true"]')).toHaveAttribute('data-trace-entry-key', 'recorded:12:test-call');
   if (!await page.getByRole('tab', { name: 'Trace', exact: true }).isVisible()) await toggleViewPanel(page, 'Header');
   await details.evaluate(element => { element.scrollTop = 160; });
   const detailTop = await details.evaluate(element => element.scrollTop);

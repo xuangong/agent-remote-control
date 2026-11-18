@@ -8,7 +8,7 @@ import { startLatencyProxy, type LatencyProxy } from './latency-proxy.mjs';
 
 interface Upstream { origin: string; seenOrigins: string[]; seenHosts: string[]; close(): Promise<void> }
 
-async function startUpstream(): Promise<Upstream> {
+async function startUpstream(closeAfterResponseMs?: number): Promise<Upstream> {
   const seenOrigins: string[] = [];
   const seenHosts: string[] = [];
   const server = http.createServer((request, response) => {
@@ -19,6 +19,8 @@ async function startUpstream(): Promise<Upstream> {
     request.on('data', chunk => chunks.push(chunk));
     request.on('end', () => { response.writeHead(200, { 'content-type': 'text/plain' }); response.end(`echo:${Buffer.concat(chunks).toString()}`); });
   });
+  // A server that closes a connection a little after it answered, as an instance does when its keep-alive timeout runs out.
+  if (closeAfterResponseMs !== undefined) server.on('request', (request, response) => response.on('finish', () => { const socket = request.socket; setTimeout(() => socket?.destroy(), closeAfterResponseMs); }));
   const sockets = new WebSocketServer({ server });
   sockets.on('connection', (socket, request) => { seenOrigins.push(String(request.headers.origin)); socket.on('message', data => socket.send(`echo:${String(data)}`)); });
   await new Promise<void>(resolve => server.listen(0, resolve));
@@ -100,6 +102,20 @@ describe('the network conditions of the proxy', () => {
     expect(await response.text()).toBe('echo:ping');
     expect(Date.now() - started).toBeGreaterThanOrEqual(120);
     expect(proxy.counts.retransmits).toBeGreaterThanOrEqual(12);
+  });
+
+  it('takes an upstream socket when a delayed request arrives, so a request held back while the server closes its idle connection is not reset', async () => {
+    const upstream = await startUpstream(100);
+    const proxy = await startLatencyProxy({ target: upstream.origin, rttMs: 0 });
+    open.push(upstream, proxy);
+    const get = (path: string) => new Promise<number | undefined>((resolve, reject) => {
+      http.get(`${proxy.origin}${path}`, { headers: { connection: 'keep-alive' }, agent: false }, response => { response.resume(); response.on('end', () => resolve(response.statusCode)); }).on('error', reject);
+    });
+    // The first exchange leaves an idle upstream socket that the server closes 100 ms later. The second request is sent while it is
+    // still open and reaches the upstream 300 ms after that, when a socket taken at its send would be closed.
+    expect(await get('/first')).toBe(200);
+    proxy.setConditions({ rttMs: 600 });
+    expect(await get('/second')).toBe(200);
   });
 
   it('adds jitter on top of the round trip without reordering frames', async () => {

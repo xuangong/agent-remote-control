@@ -103,24 +103,31 @@ export async function startLatencyProxy({ target, rttMs = 0, port = 0, jitterMs 
   const server = http.createServer((request, response) => {
     if (network.offline) { counts.refused += 1; request.socket.destroy(); return; }
     counts.requests += 1;
-    const forward = pipe(chunk => { if (chunk === null) outgoing.end(); else outgoing.write(chunk); });
-    const outgoing = http.request({ host: upstream.hostname, port: upstream.port, path: request.url, method: request.method, headers: toTarget(request.headers), agent }, incoming => {
-      const reply = pipe(chunk => {
-        if (response.destroyed) return;
-        if (chunk === HEAD) { response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, toBrowser(incoming.headers)); response.flushHeaders(); }
-        else if (chunk === null) response.end();
-        else response.write(chunk);
+    // The request leaves the proxy when its first bytes arrive after the delay, so it takes an upstream socket then: a socket taken
+    // earlier idles through a loss timeout and the instance's server closes it (a reset the browser would never see on a real network).
+    let outgoing;
+    const start = () => {
+      if (outgoing) return outgoing;
+      outgoing = http.request({ host: upstream.hostname, port: upstream.port, path: request.url, method: request.method, headers: toTarget(request.headers), agent }, incoming => {
+        const reply = pipe(chunk => {
+          if (response.destroyed) return;
+          if (chunk === HEAD) { response.writeHead(incoming.statusCode ?? 502, incoming.statusMessage, toBrowser(incoming.headers)); response.flushHeaders(); }
+          else if (chunk === null) response.end();
+          else response.write(chunk);
+        });
+        reply.push(HEAD);
+        incoming.on('data', chunk => reply.push(chunk));
+        incoming.on('end', () => reply.push(null));
+        incoming.on('error', () => response.destroy());
       });
-      reply.push(HEAD);
-      incoming.on('data', chunk => reply.push(chunk));
-      incoming.on('end', () => reply.push(null));
-      incoming.on('error', () => response.destroy());
-    });
-    outgoing.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end(); });
-    response.on('close', () => { if (!response.writableFinished) outgoing.destroy(); });
+      outgoing.on('error', () => { if (!response.headersSent) response.writeHead(502); response.end(); });
+      return outgoing;
+    };
+    const forward = pipe(chunk => { if (chunk === null) start().end(); else start().write(chunk); });
+    response.on('close', () => { if (!response.writableFinished) outgoing?.destroy(); });
     request.on('data', chunk => forward.push(chunk));
     request.on('end', () => forward.push(null));
-    request.on('error', () => outgoing.destroy());
+    request.on('error', () => outgoing?.destroy());
   });
 
   server.on('upgrade', (request, browserSocket, head) => {

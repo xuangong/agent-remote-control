@@ -347,7 +347,7 @@ export class RemoteSessionClient {
       options.signal?.throwIfAborted();
       const timeline = this.replica.getState().timeline;
       if (generation !== this.generation || timeline.epoch !== match.epoch) throw new Error('Conversation changed. Search again.');
-      if (timeline.entries.some(entry => timelineEntryKey(timeline.epoch, entry) === match.key)) return;
+      if (timeline.entries.some(entry => timelineEntryKey(entry) === match.key)) return;
       const before = timeline.entries[0]?.seqStart;
       if (!timeline.hasOlder || !before || before <= match.seq) throw new Error('This search result is no longer available. Search again.');
       await this.loadOlder();

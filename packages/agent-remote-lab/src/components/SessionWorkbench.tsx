@@ -58,7 +58,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     if (fixedDisplayMode || !visible || !revealEntry || !state) return;
     const request = JSON.stringify([displayScope, state.timeline.epoch, revealEntry.requestId, revealEntry.key]);
     if (revealedDisplayRequest.current === request) return;
-    const item = createTimelineRenderModel(state.timeline.epoch, state.timeline.entries).find(entry => entry.key === revealEntry.key)?.entry.item;
+    const item = createTimelineRenderModel(state.timeline.entries).find(entry => entry.key === revealEntry.key)?.entry.item;
     if (!item) return;
     revealedDisplayRequest.current = request;
     const mode = preferences.mode === 'content' && !isContentOnlyItem(item) ? 'simple' : preferences.mode;

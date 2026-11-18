@@ -24,7 +24,7 @@ it('locks Bot content without changing the Window display or text/image editor o
     return <WindowLayoutContext.Provider value={{ window: { schemaVersion: 3, id: 'window', title: 'Window', revision: 0, views: [windowView], selectedPrimaryViewId: 'view', selectedViewId: 'view' }, operate }}>
       <LabWorkbench state={state} sessionStatus="ready" actions={{}} draftSessionKey="native" draftBinding={draftBinding} imageDraftBinding={imageDraftBinding}
         displayBinding={{ scope: 'fixed-display', key: 'view' }} fixedDisplayMode={fixed ? 'content' : undefined}
-        revealEntry={fixed ? { key: 'epoch-1:recorded:2:reasoning', requestId: 1 } : undefined} />
+        revealEntry={fixed ? { key: 'recorded:2:reasoning', requestId: 1 } : undefined} />
     </WindowLayoutContext.Provider>;
   }
   const container = await render(<Harness />), prompt = container.querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
@@ -34,7 +34,7 @@ it('locks Bot content without changing the Window display or text/image editor o
   await act(async () => toggle(true));
   expect(container.textContent).toContain('Keep this request visible');
   expect(container.textContent).toContain('A visible failure');
-  expect(container.querySelector('[data-entry-key="epoch-1:recorded:2:reasoning"]')).toBeNull();
+  expect(container.querySelector('[data-entry-key="recorded:2:reasoning"]')).toBeNull();
   expect(container.querySelector('[aria-label="Session view options"]')).toBeNull();
   expect(container.querySelector('[data-testid="prompt-input"]')).toBe(prompt);
   expect(promptText(prompt)).toBe('Keep my draft');

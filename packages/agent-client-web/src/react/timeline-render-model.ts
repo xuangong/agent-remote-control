@@ -10,12 +10,11 @@ export interface TimelineRenderEntry {
 }
 
 export function createTimelineRenderModel(
-  epoch: string | null,
   entries: readonly ProjectedTimelineEntry[],
 ): readonly TimelineRenderEntry[] {
   return entries.map((entry, index) => ({
     entry,
-    key: timelineEntryKey(epoch, entry),
+    key: timelineEntryKey(entry),
     ...(isMessage(entry.item) ? { messageGroup: messageGroupPosition(entries, index) } : {}),
   }));
 }

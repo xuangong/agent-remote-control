@@ -39,12 +39,12 @@ test('keeps tool descriptions readable as a desktop timeline container narrows',
 
 test('keeps complete details and session navigation available in a narrow timeline', async ({ page, isMobile }) => {
   await page.goto('/e2e/fixtures/ask-timeline-layout.html');
-  const source = page.locator('[data-entry-key="layout:codex:2:source"]');
+  const source = page.locator('[data-entry-key="codex:2:source"]');
   const toggle = source.getByRole('button');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   if (isMobile) await toggle.tap(); else await toggle.click();
   await expect(source.locator('.agent-tool-details')).toContainText('Return enough context to answer the question without changing the source session.');
-  const linked = page.locator('[data-entry-key="layout:codex:3:linked"]');
+  const linked = page.locator('[data-entry-key="codex:3:linked"]');
   const link = linked.getByRole('link', { name: '/root/verify_sdk_boundary', exact: true });
   if (isMobile) await link.tap(); else await link.click();
   await expect(page).toHaveURL(/#child$/);

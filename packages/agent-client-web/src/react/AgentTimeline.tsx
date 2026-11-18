@@ -135,12 +135,12 @@ export function AgentTimeline({
   const entries = useMemo(() => {
     if (!contentOnly && lettersVisible) return state.timeline.entries;
     return state.timeline.entries.filter(entry => {
-      if (searchEntryKey !== undefined && timelineEntryKey(state.timeline.epoch, entry) === searchEntryKey) return true;
+      if (searchEntryKey !== undefined && timelineEntryKey(entry) === searchEntryKey) return true;
       if (!lettersVisible && entry.item.type === 'agent_communication') return false;
       return !contentOnly || isContentOnlyItem(entry.item);
     });
   }, [contentOnly, lettersVisible, state.timeline.entries, state.timeline.epoch, searchEntryKey]);
-  const renderModel = useMemo(() => createTimelineRenderModel(state.timeline.epoch, entries), [state.timeline.epoch, entries]);
+  const renderModel = useMemo(() => createTimelineRenderModel(entries), [entries]);
   // A range is taken over the entries shown, so hidden activity is never selected unseen.
   const selectionAnchor = useRef<string>();
   const selectedKeys = entrySelection?.selected;
@@ -158,7 +158,7 @@ export function AgentTimeline({
     const positions = new Map(state.timeline.entries.map((entry, index) => [entry, index]));
     let ordinary: TimelineRenderEntry[] = [];
     const flush = () => { result.push(...groupRuntimeNotices(ordinary, positions)); ordinary = []; };
-    for (const row of groupBackgroundActivity(renderModel, createTimelineRenderModel(state.timeline.epoch, state.timeline.entries))) {
+    for (const row of groupBackgroundActivity(renderModel, createTimelineRenderModel(state.timeline.entries))) {
       if (row.type === 'entry') ordinary.push(row.value);
       else { flush(); result.push(row); }
     }

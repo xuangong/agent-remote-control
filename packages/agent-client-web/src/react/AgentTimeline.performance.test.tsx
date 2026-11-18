@@ -64,11 +64,11 @@ describe('incremental timeline rendering', () => {
     } }).state;
     const latestInspect = vi.fn();
     await rerender(container, <AgentTimeline state={next} onInspectEntry={latestInspect} {...callbacks()} />);
-    expect(renders.mock.calls.map(call => call[0])).toEqual(['test:codex:20:19']);
+    expect(renders.mock.calls.map(call => call[0])).toEqual(['codex:20:19']);
     expect(container.textContent).toContain('Reply 19 continued');
     expect(container.querySelectorAll('.agent-timeline-entry')).toHaveLength(20);
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Inspect event in Trace"]')!.click());
-    expect(latestInspect).toHaveBeenCalledWith('test:codex:1:0');
+    expect(latestInspect).toHaveBeenCalledWith('codex:1:0');
     expect(inspect).not.toHaveBeenCalled();
   });
 
@@ -99,7 +99,7 @@ describe('incremental timeline rendering', () => {
         item: { type: 'assistant_message', messageId: 'live', text: ' continues' } },
     } }).state;
     await rerender(container, <AgentTimeline state={next} onInspectEntry={inspect} />);
-    expect(renders.mock.calls.map(([key]) => key)).toEqual(['test:codex:5:live']);
+    expect(renders.mock.calls.map(([key]) => key)).toEqual(['codex:5:live']);
     expect(container.textContent).toContain('Current reply continues');
     expect(container.querySelector('.agent-notice-toggle')?.getAttribute('aria-expanded')).toBe('true');
     for (const row of historicalRows) {

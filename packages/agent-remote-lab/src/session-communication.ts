@@ -72,7 +72,7 @@ export async function loadSessionCommunication(
     const state = connection.replica.getState();
     if (state.timeline.epoch !== epoch) throw new Error('The target conversation changed. Open the letter again.');
     const received = findSessionCommunication(state, entry, endpoint);
-    if (received) return { key: timelineEntryKey(epoch, received) };
+    if (received) return { key: timelineEntryKey(received) };
     const before = state.timeline.entries[0]?.seqStart;
     if (!state.timeline.hasOlder || before === undefined) throw new Error('The target history does not contain this letter. Refresh the session and retry.');
     await connection.client.loadOlder();

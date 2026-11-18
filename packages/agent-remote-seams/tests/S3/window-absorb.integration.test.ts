@@ -17,7 +17,7 @@ describe('absorbWindow over the window vectors', () => {
   it.each(windowVectors.map(vector => [vector.name, vector] as const))('%s', (_name, vector) => {
     const held = vector.held.map((item, at) => entryOf(item, at + 1));
     const window = vector.window.map((item, at) => entryOf(item, at + 10));
-    const absorbed = absorbWindow(held, 'epoch-1', 'epoch-2', window);
+    const absorbed = absorbWindow(held, window);
     expect(absorbed.map(({ itemKey }) => itemKey)).toEqual(vector.window.map(({ key }) => key));
     absorbed.forEach((entry, at) => {
       const before = held.find(({ itemKey }) => itemKey === entry.itemKey);

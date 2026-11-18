@@ -121,7 +121,7 @@ it('keys rows by item key on a flagged stream, and by the older key on a stream 
   expect([...nodesByKey(keyedContainer).keys()]).toEqual(['a']);
   const plain = await openSession({ echoFlag: false, rows: [text('a', 1, 'A')] });
   const plainContainer = await render(<Screen replica={plain.replica} />);
-  expect([...nodesByKey(plainContainer).keys()]).toEqual(['epoch-one:copilot:1:a']);
+  expect([...nodesByKey(plainContainer).keys()]).toEqual(['copilot:1:a']);
   plain.relay.replace([text('a', 1, 'A'), text('b', 2, 'B')], 'epoch-two');
   await vi.waitFor(() => expect(plain.replica.getState().timeline.epoch).toBe('epoch-two'));
   expect(plain.replica.getState().timeline.entries).toHaveLength(2);

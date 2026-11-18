@@ -31,7 +31,7 @@ describe('TraceView', () => {
       const [visible, setVisible] = useState(true);
       const [requestId, setRequestId] = useState(1);
       show = setVisible; reveal = () => setRequestId(value => value + 1);
-      return <TraceView state={state} visible={visible} revealEntry={{ key: 'epoch-1:recorded:3:read-file', requestId }} />;
+      return <TraceView state={state} visible={visible} revealEntry={{ key: 'recorded:3:read-file', requestId }} />;
     }
     const container = await render(<Harness />);
     await act(async () => button(container, 'Finished.').click());
@@ -63,7 +63,7 @@ describe('TraceView', () => {
     expect(details.textContent).toContain('123 ms');
     expect(details.textContent).toContain('Result truncated');
     await act(async () => button(details, 'Show in Conversation').click());
-    expect(destination).toBe('epoch-1:recorded:3:read-file');
+    expect(destination).toBe('recorded:3:read-file');
   });
 
   it('filters by content and type without changing the replica or losing turn association', async () => {
@@ -118,7 +118,7 @@ describe('TraceView', () => {
     function Harness() {
       const [scope, setScope] = useState('one');
       const [request, setRequest] = useState<{ key: string; requestId: number }>();
-      reveal = () => setRequest({ key: 'epoch-1:recorded:3:read-file', requestId: 1 });
+      reveal = () => setRequest({ key: 'recorded:3:read-file', requestId: 1 });
       changeSession = () => { setScope('two'); setRequest(undefined); };
       return <TraceView key={scope} state={state} revealEntry={request} />;
     }

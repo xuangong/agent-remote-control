@@ -156,7 +156,7 @@ describe('content-only timeline', () => {
       <AgentTimeline state={current} onInspectEntry={() => {}} />
     </TimelineDisplay.Provider>;
     const container = await render(view('preview'));
-    const summary = container.querySelector('[data-entry-key="epoch:test:9:summary"]');
+    const summary = container.querySelector('[data-entry-key="test:9:summary"]');
     expect(container.querySelector('.agent-tool')).not.toBeNull();
     await rerender(container, view('content'));
     expect(container.querySelectorAll('[data-entry-key]')).toHaveLength(6);
@@ -165,7 +165,7 @@ describe('content-only timeline', () => {
     expect(container.querySelector('.agent-message-assistant h2')?.textContent).toBe('Summary');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
     expect(container.querySelector('.agent-inspect-entry')).toBeNull();
-    expect(container.querySelector('[data-entry-key="epoch:test:9:summary"]')).toBe(summary);
+    expect(container.querySelector('[data-entry-key="test:9:summary"]')).toBe(summary);
     expect([...container.querySelectorAll('.agent-message-assistant')].map(node => node.getAttribute('data-message-group'))).toEqual(['single', 'single']);
     expect(container.textContent).toContain('Runtime notice');
     for (const hidden of ['Internal reasoning', 'Tool output']) {

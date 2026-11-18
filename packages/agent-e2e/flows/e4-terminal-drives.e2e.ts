@@ -48,9 +48,17 @@ it('E4: a terminal takes the session, the page turns read-only and offers contro
   await showsText(page, 'The native client owns this session.');
   await showsText(page, 'Read only');
   expect(stack.provider.session('owned')?.sent).toEqual(['first']);
-  expect(await page.getByRole('button', { name: 'Take control', exact: true }).count()).toBe(1);
+  expect(await page.getByRole('button', { name: 'Interrupt and take control', exact: true }).count()).toBe(1);
   // The refused text stays on the page as a failed message that can be retried; nothing reached the provider.
   expect(await page.locator('.agent-outgoing-message', { hasText: 'too late' }).count()).toBe(1);
+  // A terminal owner is named, so the offer is to interrupt it; taking over returns the composer, and the next send reaches the provider.
+  await page.getByRole('button', { name: 'Interrupt and take control', exact: true }).click();
+  await expect.poll(() => composer(page).isEditable(), { timeout: 15_000 }).toBe(true);
+  await composer(page).fill('control is back');
+  await composer(page).press('Enter');
+  await showsText(page, 'Echo: control is back');
+  // The take-over opened the session again, so the provider's record of sends starts over.
+  expect(stack.provider.session('owned')?.sent).toEqual(['control is back']);
   await context.close();
 });
 

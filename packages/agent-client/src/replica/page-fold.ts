@@ -34,7 +34,7 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
   if (epochChanged) return { status: 'replaced', state: applyTimelineReplacement(state, payload.epoch), epoch: payload.epoch };
 
   const base = timeline.initialized ? timeline.entries : [];
-  const entries = mergePage(timeline.epoch, base, page, options?.preserveLive === true);
+  const entries = mergePage(base, page, options?.preserveLive === true);
   const nextSeq = options?.preserveLive
     ? Math.max(timeline.nextSeq, nextSequenceForPage(state, page))
     : nextSequenceForPage(state, page);
@@ -66,7 +66,7 @@ export function applyHistoryPage(state: AgentReplicaState, page: HistoryPage, op
 export function absorbTail(state: AgentReplicaState, page: HistoryPage): TimelineReduction {
   const payload = page.payload;
   const timeline = state.timeline;
-  const entries = absorbWindow(timeline.entries, timeline.epoch, payload.epoch, payload.entries);
+  const entries = absorbWindow(timeline.entries, payload.entries);
   const retiredEpochs = unique([...state.retiredEpochs, ...[timeline.epoch, timeline.pendingEpoch].filter((epoch): epoch is string => !!epoch && epoch !== payload.epoch)]);
   const prepared: AgentReplicaState = {
     ...state,
@@ -91,16 +91,16 @@ export function absorbTail(state: AgentReplicaState, page: HistoryPage): Timelin
  * place and inserts the others; a `before` page drops every key already held, so an item updated above the window cannot appear twice.
  * Entries without keys keep the older rule of replacing the rows whose source sequences they overlap.
  */
-export function mergePage(epoch: string | null, held: readonly ProjectedTimelineEntry[], page: HistoryPage, preserveLive: boolean): ProjectedTimelineEntry[] {
+export function mergePage(held: readonly ProjectedTimelineEntry[], page: HistoryPage, preserveLive: boolean): ProjectedTimelineEntry[] {
   const incoming = page.payload.entries;
   const keyed = incoming.filter((entry) => entry.itemKey !== undefined);
   const unkeyed = incoming.filter((entry) => entry.itemKey === undefined);
-  const position = new Map(held.map((entry, index) => [timelineEntryKey(epoch, entry), index]));
+  const position = new Map(held.map((entry, index) => [timelineEntryKey(entry), index]));
   const next = held.slice();
   const inserted: ProjectedTimelineEntry[] = [];
   const first = held[0]?.seqStart;
   for (const entry of keyed) {
-    const index = position.get(timelineEntryKey(epoch, entry));
+    const index = position.get(timelineEntryKey(entry));
     if (index === undefined) {
       // A row above the first held row is older history that a `before` page brings, in its place; adding it here would hide
       // the rows between (the journal keeps an updated item's first sequence).

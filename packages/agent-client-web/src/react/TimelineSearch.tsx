@@ -77,7 +77,7 @@ export function TimelineSearch({ state, search, onSelect, onClose, onClearSelect
   useEffect(() => () => { jump.current?.abort(); }, []);
 
   const loaded = useMemo(() => ({
-    keys: new Set(state.timeline.entries.map(entry => timelineEntryKey(state.timeline.epoch, entry))),
+    keys: new Set(state.timeline.entries.map(entry => timelineEntryKey(entry))),
     matches: state.timeline.epoch ? findTimelineMatches(state.timeline.epoch, state.timeline.entries, needle, scope) : [],
   }), [needle, scope, state.timeline.entries, state.timeline.epoch]);
   const matches = useMemo(() => {

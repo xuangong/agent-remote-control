@@ -35,7 +35,7 @@ it.each(['preview', 'content'] as const)('starts a selection from a message, tog
   expect(container.querySelectorAll('[aria-label="Quote this message"]')).toHaveLength(mode === 'content' ? 4 : 5);
   expect(container.querySelector('[role="checkbox"]')).toBeNull();
   await act(async () => message(container, 'First prompt').querySelector<HTMLButtonElement>('[aria-label="Quote this message"]')!.click());
-  const seqs = () => (changes.mock.lastCall![0] as string[]).map(key => Number(key.split(':')[2])).sort((a, b) => a - b);
+  const seqs = () => (changes.mock.lastCall![0] as string[]).map(key => Number(key.split(':')[1])).sort((a, b) => a - b);
   expect(seqs()).toEqual([1]);
   // While selecting, every selectable message has a checkbox and starting actions are gone.
   expect(container.querySelectorAll('[role="checkbox"]')).toHaveLength(mode === 'content' ? 4 : 5);

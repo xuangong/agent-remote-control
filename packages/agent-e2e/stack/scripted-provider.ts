@@ -11,6 +11,7 @@
  * back). `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
  * so a reload shows the same rows. The provider reads nothing outside this process.
  */
+import { randomUUID } from 'node:crypto';
 import type { AgentProviderAdapter, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
@@ -151,7 +152,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       saved.history.push(...rows); saved.updatedAt = new Date().toISOString(); saved.diverged = true;
     },
     /** A terminal takes the session: the Controller records the owner and lets the session go. */
-    async terminalTakes(nativeSessionId: string, generation = 'terminal-1') {
+    /** The owner's generation is a UUID, as the Controller's own owner records are: the Relay and the take-over request accept no other shape. */
+    async terminalTakes(nativeSessionId: string, generation: string = randomUUID()) {
       const owner: NativeOwnerIdentity = { kind: 'native_cli', generation };
       owners.set(nativeSessionId, owner);
       await handoff!(nativeSessionId, owner);

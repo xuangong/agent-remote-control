@@ -239,3 +239,20 @@ it('disables Delete Window while another Window action runs', async () => {
   expect(item(menu, 'Delete Window…').getAttribute('aria-disabled')).toBe('true');
   expect(item(menu, 'Copy link').getAttribute('aria-disabled')).toBeNull();
 });
+
+it('ignores Enter while an input method is composing, so a candidate is not saved as the title', async () => {
+  const { bar, props } = await toolbar();
+  const field = await startRename(bar);
+  await type(field, 'Draft');
+  await act(async () => { field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, isComposing: true })); });
+  expect(props.onRename).not.toHaveBeenCalled();
+  expect(input()).not.toBeNull();
+});
+
+it('keeps focus on the dock toggle when it is pressed, even where a click does not focus buttons', async () => {
+  const { bar, props } = await toolbar();
+  const toggle = bar.querySelector<HTMLButtonElement>('button[aria-label="Hide docks"]')!;
+  await act(async () => toggle.click());
+  expect(props.onToggleDocks).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(toggle);
+});

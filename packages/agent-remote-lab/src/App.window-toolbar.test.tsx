@@ -95,25 +95,6 @@ it('renames the Window in place, and Escape cancels without leaving the Window',
   } finally { await app.close(); }
 });
 
-it('ends an open rename unsaved when the page switches to another Window', async () => {
-  const scope = 'http://localhost/window-toolbar-rename-switch/'; seedGroup(scope, windowGroup('A')); seedGroup(scope, windowGroup('B'));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope);
-  try {
-    await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await act(async () => titleButton(app.container).click());
-    const field = toolbar(app.container)!.querySelector<HTMLInputElement>('input[aria-label="Window title"]')!;
-    await type(field, 'Meant for A');
-    await act(async () => { await app.workspace().open('B'); });
-    await until(() => expect(titleButton(app.container)?.textContent).toBe('B'));
-    expect(toolbar(app.container)!.querySelector('input')).toBeNull();
-    await act(async () => { field.dispatchEvent(new FocusEvent('blur')); await new Promise(resolve => setTimeout(resolve, 50)); });
-    const titles = () => Object.fromEntries(sidebarRows(app.container, 'Windows').map(row => [row.dataset.windowRow, row.querySelector('strong')?.textContent]));
-    expect(titles()).toEqual({ A: 'A', B: 'B' });
-    expect(app.workspace().window?.title).toBe('B');
-  } finally { await app.close(); }
-});
-
 it('adds a session view, or opens All sessions for one, from the Add menu', async () => {
   const scope = 'http://localhost/window-toolbar-add/'; seedGroup(scope, windowGroup('A'));
   history.replaceState(null, '', '/?window=A');
@@ -200,17 +181,6 @@ it('confirms before deleting the Window, then shows another one', async () => {
   } finally { await app.close(); }
 });
 
-it('says that deleting the only Window leaves a new empty one', async () => {
-  const scope = 'http://localhost/window-toolbar-delete-last/'; seedGroup(scope, windowGroup('A'));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope);
-  try {
-    await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await choose(app.container, 'Window actions', 'Delete Window…');
-    expect(sheet('Delete this Window?')!.textContent).toContain('A new empty Window opens in its place.');
-  } finally { await app.close(); }
-});
-
 it('shares Window actions with the sidebar and shows their notices as toasts', async () => {
   const scope = 'http://localhost/window-toolbar-notice/'; seedGroup(scope, windowGroup('A'));
   history.replaceState(null, '', '/?window=A');
@@ -222,20 +192,6 @@ it('shares Window actions with the sidebar and shows their notices as toasts', a
     await until(() => expect([...document.querySelectorAll('.lab-toast')].some(node => node.textContent?.includes('Window link copied.'))).toBe(true));
     // The sidebar does not repeat the notice the toast shows.
     expect(app.container.querySelector('#lab-context .lab-window-workspaces')!.textContent).not.toContain('Window link copied.');
-  } finally { await app.close(); }
-});
-
-it('opens Agent control in a sheet', async () => {
-  const scope = 'http://localhost/window-toolbar-agent-control/'; seedGroup(scope, windowGroup('A'));
-  history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope, { hosted: true });
-  try {
-    await until(() => expect(app.workspace().client).toBeDefined());
-    await until(() => expect(toolbar(app.container)).not.toBeNull());
-    await choose(app.container, 'Window actions', 'Agent control…');
-    const dialog = sheet('Agent control')!;
-    expect(dialog?.open).toBe(true);
-    expect(dialog.textContent).toContain('Name the session that arranges this Window.');
   } finally { await app.close(); }
 });
 

@@ -1,4 +1,5 @@
-import { observationBuilder, uplinkHarness, type Uplink } from '../uplink-harness.js';
+import { createTerminalRefresh } from '@orchardworks/agent-remote-controller/terminal-refresh';
+import { observationBuilder, UPLINK_SESSION, uplinkHarness, type Uplink } from '../uplink-harness.js';
 import type { Scenario, ScenarioContext, ScenarioRecorder } from './scenario.js';
 
 const CONSUMER = 'packages/agent-remote-seams/tests/S2/journal-uplink.integration.test.ts';
@@ -118,6 +119,36 @@ export const uplinkScenarios: Scenario[] = [
       recorder.step('the connection drops and returns');
       publisher.available(undefined);
       uplink.reconnect(publisher);
+      await uplink.settle(60);
+    }),
+  },
+  {
+    seam: 'S2', name: 'terminal-write-refresh', consumers: [CONSUMER], relayBacking: { uplink: {} },
+    description: 'A terminal writes a turn to a released session: the next listing shows it newer and quiet, the Controller attaches the session once, and the Relay answers with an extension of its journal.',
+    run: withUplink({}, async (uplink, recorder) => {
+      const item = observationBuilder();
+      const history = [item('history', 'm1', 'Hello'), item('history', 'm2', 'World')];
+      const [providerId, nativeSessionId] = UPLINK_SESSION.split(':') as [string, string];
+      const binding = { agentId: 'agent-1', providerId, nativeSessionId };
+      const publisher = uplink.start();
+      const turn = [item('history', 'u2', 'Fix the bug'), item('history', 'a2', 'Done')];
+      const refresh = createTerminalRefresh({
+        now: uplink.clock.now, directory: () => ({ canReleaseSession: () => true }), bindings: () => [binding], bindingOf: () => binding,
+        isLive: () => false, hasDemand: () => false, expire: () => undefined, granted: () => true, stopped: () => false,
+        attachAndRelease: async () => {
+          await uplink.follow(publisher, [...history, ...turn]);
+          await uplink.settle(60);
+          await publisher.release(binding.agentId);
+        },
+        releaseJournal: agentId => publisher.release(agentId),
+      });
+      await uplink.follow(publisher, history);
+      await uplink.settled();
+      recorder.step('the session is released with its journal published');
+      await refresh.releaseJournal(binding);
+      recorder.step('a terminal writes a turn, and a listing shows it');
+      uplink.clock.advance(120_000);
+      await refresh.refresh(providerId, [{ nativeSessionId, providerId, title: 'Thread', createdAt: new Date(0).toISOString(), updatedAt: new Date(uplink.clock.now() - 60_000).toISOString(), state: 'idle' }]);
       await uplink.settle(60);
     }),
   },

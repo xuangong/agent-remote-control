@@ -15,6 +15,10 @@
       "types": "./dist/publisher/journal-publisher.d.ts",
       "import": "./dist/publisher/journal-publisher.js"
     },
+    "./terminal-refresh": {
+      "types": "./dist/publisher/terminal-refresh.d.ts",
+      "import": "./dist/publisher/terminal-refresh.js"
+    },
     "./local-session-succession": {
       "types": "./dist/local-session-succession.d.ts",
       "import": "./dist/local-session-succession.js"

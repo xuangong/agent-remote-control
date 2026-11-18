@@ -5,10 +5,12 @@ import type { SessionDirectoryClient } from '../directory-client.js';
 
 interface SuccessionContextOptions {
   directory?: SessionDirectoryClient; operationId?: string; target?: NativeSessionRef; enabled?: boolean; refreshKey?: unknown;
+  /** The least time between two reads of the context; a test shortens it. */
+  readIntervalMs?: number;
 }
 export interface SuccessionContextView { state: SuccessionContextStatus['state'] | 'restoring' | 'unavailable'; onRetry(): void }
 /** Refresh triggers request evidence; only the Host can confirm history materialization. */
-export function useSuccessionContext({ directory, operationId, target, enabled = true, refreshKey }: SuccessionContextOptions): SuccessionContextView | undefined {
+export function useSuccessionContext({ directory, operationId, target, enabled = true, refreshKey, readIntervalMs = 2000 }: SuccessionContextOptions): SuccessionContextView | undefined {
   const [, render] = useReducer(value => value + 1, 0);
   const targetKey = target && nativeSessionRefKey(target);
   const runtime = useMemo(() => ({ state: 'restoring' as SuccessionContextView['state'], active: false, reads: 0, lastRead: 0, refreshRequested: false,
@@ -22,7 +24,7 @@ export function useSuccessionContext({ directory, operationId, target, enabled =
     runtime.reads = 0;
     clearTimeout(runtime.timer);
     if (runtime.request) runtime.refreshRequested = true;
-    else runtime.timer = setTimeout(() => void read(), Math.max(0, 2000 - (Date.now() - runtime.lastRead)));
+    else runtime.timer = setTimeout(() => void read(), Math.max(0, readIntervalMs - (Date.now() - runtime.lastRead)));
   };
   async function read(): Promise<void> {
     if (!live() || runtime.request || runtime.state === 'materialized' || document.visibilityState === 'hidden') return;

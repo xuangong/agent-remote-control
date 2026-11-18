@@ -8,6 +8,10 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clea
 const ref = (id: string) => { const { title: _title, ...session } = botTarget(id); return session; };
 
 it("shares a bot's draft across devices: saved while typing, taken when idle, cleared once sent", async () => {
+  // A draft is published 800 ms after the last keystroke; the test waits that out three times.
+  const timeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number, ...args: unknown[]) =>
+    timeout(callback, delay === 800 ? 20 : delay, ...args)) as typeof setTimeout);
   const scope = 'http://localhost/u/bot-shared-drafts/';
   seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');
   const app = await mountBotApp(scope, { hosted: true });

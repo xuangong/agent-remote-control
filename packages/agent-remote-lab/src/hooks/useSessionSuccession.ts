@@ -34,6 +34,8 @@ interface DesiredSelection {
   title: string; sessionIntent?: 'history'; keepOriginal?: boolean;
 }
 interface SuccessionOptions {
+  /** Waits before refreshing locators restored from an unreachable Relay; a test shortens them. */
+  staleRetryDelays?: readonly number[];
   scope: string; transport: RemoteAgentTransport; enabled: boolean; initial?: ControllerLocation;
   initialDisplayState?: AgentReplicaState;
   initialLayout?: ConversationLayout;
@@ -112,7 +114,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   };
   /** Feeds an event to the refresh model; its state fields live on the runtime under the same names. */
   function refreshWith(event: RefreshEvent): RefreshEffect[] {
-    const { state, effects } = reduceRefresh({ discovered: runtime.discovered, evidenceStale: runtime.evidenceStale, staleAttempts: runtime.staleAttempts, unsupported: runtime.unsupported }, event);
+    const { state, effects } = reduceRefresh({ discovered: runtime.discovered, evidenceStale: runtime.evidenceStale, staleAttempts: runtime.staleAttempts, unsupported: runtime.unsupported }, event, latest.current.staleRetryDelays);
     Object.assign(runtime, state);
     return effects;
   }

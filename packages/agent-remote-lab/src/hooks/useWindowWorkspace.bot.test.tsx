@@ -7,8 +7,7 @@ import { createCompositionDocument } from '../session-composition.js';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
 import { useWindowWorkspace, type GroupHandle } from './useWindowWorkspace.js';
 import type { WorkbenchMode } from '../workbench-mode.js';
-import { createServer } from 'node:http';
-import { once } from 'node:events';
+import { stubMemoryFetch } from '../test/memory-fetch.js';
 
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
@@ -141,24 +140,23 @@ it('does not retire a section on catalog omission until inspect confirms deletio
   vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([group('a')]); await act(async () => read().refreshGroups()); expect(read().groups.some(g => g.window.id === 'b')).toBe(true);
   backend.groups.delete('b'); await act(async () => read().refreshGroups()); expect(read().groups.some(g => g.window.id === 'b')).toBe(false);
 });
-it('recovers a lost section POST over a real transport and adopts the inspected full group after reload', async () => {
+it('recovers a lost section POST and adopts the inspected full group after reload', async () => {
   const groups = new Map<string, WindowGroup>([['a', group('a')]]), writes: any[] = []; let receiptsAvailable = false;
-  const relay = createServer(async (request, response) => {
-    const path = new URL(request.url!, 'http://relay/').pathname;
-    if (request.method === 'POST') {
-      let body = ''; for await (const part of request) body += String(part); const input = JSON.parse(body); writes.push(input);
-      groups.set(input.window.id, { window: input.window, bots: input.bots, presentation: input.presentation }); response.destroy(); return;
+  const scope = 'https://lost-section.example/';
+  stubMemoryFetch(({ method, path: requested, body }) => {
+    const path = new URL(requested, 'http://relay/').pathname;
+    if (method === 'POST') {
+      const input = JSON.parse(body); writes.push(input);
+      groups.set(input.window.id, { window: input.window, bots: input.bots, presentation: input.presentation }); return 'lost';
     }
-    if (path.endsWith('/changes')) return;
-    response.setHeader('content-type', 'application/json');
+    if (path.endsWith('/changes')) return 'hang';
     if (path.includes('/operations/')) {
-      if (!receiptsAvailable) { response.writeHead(503); response.end(JSON.stringify({ error: 'Receipt unavailable' })); return; }
-      response.end(JSON.stringify({ result: { operationId: writes[0].operationId, status: 'committed', revision: 0, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } })); return;
+      if (!receiptsAvailable) return { status: 503, json: { error: 'Receipt unavailable' } };
+      return { json: { result: { operationId: writes[0].operationId, status: 'committed', revision: 0, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } } };
     }
-    if (path === '/v1/windows') { response.end(JSON.stringify({ windows: [groups.get('a')!.window], groups: [...groups.values()] })); return; }
-    const id = path.split('/').at(-1)!; response.end(JSON.stringify(groups.get(id)));
+    if (path === '/v1/windows') return { json: { windows: [groups.get('a')!.window], groups: [...groups.values()] } };
+    const id = path.split('/').at(-1)!; return { json: groups.get(id) };
   });
-  relay.listen(0, '127.0.0.1'); await once(relay, 'listening'); const address = relay.address() as { port: number }, scope = `http://127.0.0.1:${address.port}/`;
   try {
     history.replaceState(null, '', '/?window=a'); const harness = await mount(scope, true);
     await vi.waitFor(async () => { await act(async () => {}); expect(harness.read().hasActiveWindow).toBe(true); }, { timeout: 3000, interval: 5 });
@@ -168,7 +166,7 @@ it('recovers a lost section POST over a real transport and adopts the inspected 
     await act(async () => root!.unmount()); root = undefined; const reloaded = await mount(scope, true);
     await vi.waitFor(async () => { await act(async () => {}); expect(reloaded.read().readGroup(id)?.bots?.rank).toBe('z'); expect(reloaded.read().sectionCreationState.state).toBe('idle'); }, { timeout: 3000, interval: 5 });
     expect(reloaded.read().window?.id).toBe('a'); expect(location.search).toBe('?window=a'); expect(writes).toHaveLength(1); expect(conversationSessionStorage.getItem(`agent-remote:recovery:${scope}:shared-window:pending-section-create`)).toBeNull();
-  } finally { if (root) await act(async () => root!.unmount()); root = undefined; relay.closeAllConnections(); await new Promise<void>(resolve => relay.close(() => resolve())); }
+  } finally { if (root) await act(async () => root!.unmount()); root = undefined; }
 });
 it('shows a cached Window read-only on a cold start until the service confirms it', async () => {
   const backend = server(group('a')); const key = 'agent-remote:recovery:https://cold/:shared-window';

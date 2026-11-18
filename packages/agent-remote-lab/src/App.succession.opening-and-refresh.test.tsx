@@ -444,7 +444,8 @@ it('allows a manual refresh to confirm the retained source after a native restor
 it('keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay', async () => {
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>;
-  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
+  // The retry of a refresh that could not reach the Relay waits 1 s by default.
+  vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation(options => { succession = real({ ...options, staleRetryDelays: [20] }); return succession; });
   const f = await failureFixture(false, 'B');
   await settleApp(() => expect(succession.binding?.session.nativeSessionId).toBe('B'));
   const binding = succession.binding!, source = binding.session;
@@ -485,6 +486,11 @@ it.each(['timeout'] as const)('does not restore the confirmed locator after a re
   if (reason === 'timeout') {
     // A slow Relay that is online may be answering with a succession this page has not seen.
     vi.spyOn(HttpWebSocketTransport.prototype, 'fetchSessionSuccessions').mockRejectedValue(new DOMException('Timed out', 'TimeoutError'));
+    // Showing the page probes the channel, and the fixture never answers: the transport waits out its 4 s probe deadline, and the
+    // refresh that follows retries after 1 s.
+    const timeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: TimerHandler, delay?: number, ...args: unknown[]) =>
+      timeout(callback, delay === 4000 || delay === 1000 ? 20 : delay, ...args)) as typeof setTimeout);
     await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
   } else {
     f.failReplay('network');

@@ -45,6 +45,16 @@ describe('reduceRefresh', () => {
     expect(delays).toEqual([1000, 2000, 5000, 10000, 30000, 30000, 30000]);
     expect(staleRetryDelays).toEqual(delays.slice(0, 5));
   });
+  it('retries with the delays it is given, repeating the last one, instead of the defaults', () => {
+    let state = run([{ type: 'discovery_succeeded' }]);
+    const delays: number[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const result = reduceRefresh(state, failed(), [10, 20]);
+      state = result.state;
+      delays.push((result.effects[2] as { delayMs: number }).delayMs);
+    }
+    expect(delays).toEqual([10, 20, 20, 20]);
+  });
   it.each([
     ['a timeout', { failure: { kind: 'timeout' as const, message: 'slow' } }],
     ['a Relay answer', { failure: { kind: 'other' as const, code: 'http_500', message: 'broken' } }],

@@ -78,7 +78,8 @@ export type RefreshEffect =
   /** Show the error, and unless the view was invalid, mark the replays unavailable. */
   | { type: 'report_failure'; message: string; keepResult: boolean };
 
-export function reduceRefresh(state: RefreshState, event: RefreshEvent): { state: RefreshState; effects: RefreshEffect[] } {
+/** `delays` are the waits before refreshing locators restored from an unreachable Relay; they are an input so a test need not wait them out. */
+export function reduceRefresh(state: RefreshState, event: RefreshEvent, delays: readonly number[] = staleRetryDelays): { state: RefreshState; effects: RefreshEffect[] } {
   switch (event.type) {
     case 'discovery_succeeded':
       return { state: { ...state, discovered: true, evidenceStale: false, staleAttempts: 0 }, effects: [{ type: 'cancel_stale_retry' }] };
@@ -92,7 +93,7 @@ export function reduceRefresh(state: RefreshState, event: RefreshEvent): { state
         return { state: { ...state, unsupported: true }, effects: [{ type: 'rediscover' }] };
       }
       if (!event.notified && !event.replayRead && event.hasConfirmedEvidence && failure.kind === 'unreachable') {
-        const delayMs = staleRetryDelays[Math.min(state.staleAttempts, staleRetryDelays.length - 1)]!;
+        const delayMs = delays[Math.min(state.staleAttempts, delays.length - 1)]!;
         return { state: { ...state, discovered: true, evidenceStale: true, staleAttempts: state.staleAttempts + 1 },
           effects: [{ type: 'restore_confirmed_evidence' }, { type: 'cancel_stale_retry' }, { type: 'schedule_stale_retry', delayMs }] };
       }

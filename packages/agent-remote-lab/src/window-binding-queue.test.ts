@@ -1,11 +1,10 @@
-import { createServer } from 'node:http';
 import { expect, it } from 'vitest';
 import { createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createRelayState, createWindowWorkspaces, emptyRelayState, handleWindowRequest } from '@orchardworks/agent-relay-core';
 import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { WindowWorkspaceStore } from './window-workspace.js';
 
-it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an earlier HTTP binding commits in the queue', async mode => {
+it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an earlier binding commits in the queue', async mode => {
   const auth = { origin: 'https://relay.example', issuer: 'https://gateway.example', secret: 'window-queue-test-secret-01234567890123456789' };
   const source = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'source', title: 'Source' };
   const replacement = { ...source, nativeSessionId: 'replacement', title: 'Replacement' };
@@ -18,23 +17,17 @@ it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an 
   let release!: () => void, entered!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });
   const pending = new Promise<void>(resolve => { entered = resolve; });
-  const server = createServer(async (request, response) => {
-    const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    const body = chunks.length ? Buffer.concat(chunks) : undefined;
-    if (request.method === 'POST' && request.url?.endsWith('/operations')) {
-      mutations.push(JSON.parse(body!.toString()));
+  const fetcher: typeof fetch = async (input, init) => {
+    const url = new URL(String(input)), method = init?.method ?? 'GET', body = typeof init?.body === 'string' ? init.body : undefined;
+    if (method === 'POST' && url.pathname.endsWith('/operations')) {
+      mutations.push(JSON.parse(body!));
       if (mutations.length === 1) { entered(); await held; }
     }
-    try {
-      const result = await handleWindowRequest(service, new Request(`http://fixture${request.url}`, {
-        method: request.method, headers: { 'content-type': 'application/json' }, ...(body ? { body } : {}),
-      }), { subject: 'alice' });
-      response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(await result.text());
-    } catch (error) { response.writeHead(500); response.end(JSON.stringify({ error: String(error) })); }
-  });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as { port: number };
-  const client = new WindowWorkspaceClient(`http://127.0.0.1:${port}`);
+    return handleWindowRequest(service, new Request(`http://fixture${url.pathname}${url.search}`, {
+      method, headers: { 'content-type': 'application/json' }, ...(body ? { body } : {}),
+    }), { subject: 'alice' });
+  };
+  const client = new WindowWorkspaceClient('https://relay.example', fetcher);
   try {
     await client.create(initial);
     const store = new WindowWorkspaceStore(initial, client);
@@ -57,8 +50,5 @@ it.each(['empty', 'bound'] as const)('rejects a delayed %s destination after an 
     const retry = await client.mutate(initial.id, stale);
     expect(retry.result).toEqual(receipt);
     expect(retry.window.views[0]?.binding).toEqual(replacement);
-  } finally {
-    release(); service.close(); server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  }
-}, 10000);
+  } finally { release(); service.close(); }
+});

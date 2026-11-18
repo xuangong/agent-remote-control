@@ -7,8 +7,7 @@ import { conversationLocalStorage } from '../conversation-storage.js';
 import { applyGroupOperation, applyWindowOperation, createWindowView, type WindowMutation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
 import { WindowWorkspaces } from '../components/WindowWorkspaces.js';
-import { createServer } from 'node:http';
-import { once } from 'node:events';
+import { stubMemoryFetch } from '../test/memory-fetch.js';
 import { until } from '../test/bot-mode-fixtures.js';
 let root: Root | undefined;
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); history.replaceState(null, '', '/'); });
@@ -199,23 +198,15 @@ it('preserves a newer selection when deletion of the previous Window finishes', 
 it('retains one exact create request across lost replies, explicit retry and page recovery', async () => {
   const writes: any[] = [];
   let lookupAvailable = false;
-  const server = createServer(async (request, response) => {
-    const path = request.url!;
-    if (request.method === 'POST') {
-      let body = ''; for await (const part of request) body += String(part);
-      writes.push(JSON.parse(body)); response.destroy(); return;
-    }
-    if (path.includes('/changes?')) return;
-    if (path.includes('/operations/') && !lookupAvailable) {
-      response.writeHead(503, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: 'Unavailable' })); return;
-    }
+  const scope = 'https://lost-reply.example/';
+  stubMemoryFetch(({ method, path, body }) => {
+    if (method === 'POST') { writes.push(JSON.parse(body)); return 'lost'; }
+    if (path.includes('/changes?')) return 'hang';
+    if (path.includes('/operations/') && !lookupAvailable) return { status: 503, json: { error: 'Unavailable' } };
     const window = writes[0]?.window;
     const result = writes[0] && { operationId: writes[0].operationId, status: 'committed', revision: 0, committedAt: 1, expiresAt: Date.now() + 86400000 };
-    response.writeHead(200, { 'content-type': 'application/json' });
-    response.end(JSON.stringify(path === '/v1/windows' ? { windows: window ? [window] : [] } : path.includes('/operations/') ? { result } : { window }));
+    return { json: path === '/v1/windows' ? { windows: window ? [window] : [] } : path.includes('/operations/') ? { result } : { window } };
   });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  const scope = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
   const key = `agent-remote:recovery:${scope}:shared-window`;
   try {
     let read = await mount(scope, true);
@@ -237,9 +228,8 @@ it('retains one exact create request across lost replies, explicit retry and pag
     expect(sessionStorage.getItem(`${key}:pending-create`)).toBeNull();
   } finally {
     if (root) await act(async () => root!.unmount()); root = undefined;
-    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   }
-}, 10000);
+});
 
 it('does not submit a creation unless its recovery identity can be retained', async () => {
   vi.spyOn(WindowWorkspaceClient.prototype, 'listGroups').mockResolvedValue([]);

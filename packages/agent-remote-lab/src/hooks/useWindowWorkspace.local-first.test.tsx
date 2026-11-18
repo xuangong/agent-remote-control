@@ -5,8 +5,7 @@ import { WindowWorkspaceClient, WindowRequestError, type WindowCommit, type Wind
 import { applyWindowOperation, createWindowView, type WindowGroup, type WindowMutation, type WindowOperation, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { createCompositionDocument } from '../session-composition.js';
 import { useWindowWorkspace } from './useWindowWorkspace.js';
-import { createServer } from 'node:http';
-import { once } from 'node:events';
+import { stubMemoryFetch } from '../test/memory-fetch.js';
 
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
@@ -398,25 +397,20 @@ it('settles a lost HTTP save response by its receipt while the pane stays immedi
   const writes: WindowMutation[] = [];
   const receiptReads: string[] = [];
   const releaseReply = deferred<void>();
-  const server = createServer(async (request, response) => {
-    const path = request.url!;
-    if (path.includes('/changes?')) return;
-    if (request.method === 'POST' && path.endsWith('/operations')) {
-      let body = ''; for await (const part of request) body += String(part);
+  const scope = 'https://lost-save.example/';
+  stubMemoryFetch(async ({ method, path, body }) => {
+    if (path.includes('/changes?')) return 'hang';
+    if (method === 'POST' && path.endsWith('/operations')) {
       const mutation: WindowMutation = JSON.parse(body);
       writes.push(mutation); current = applyWindowOperation(current, mutation.operation);
-      await releaseReply.promise; response.destroy(); return;
+      await releaseReply.promise; return 'lost';
     }
-    response.writeHead(200, { 'content-type': 'application/json' });
     if (path.includes('/operations/')) {
       const operationId = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1)); receiptReads.push(operationId);
-      response.end(JSON.stringify({ result: { operationId, status: 'committed', revision: current.revision,
-        committedAt: Date.now(), expiresAt: Date.now() + 86400000 } })); return;
+      return { json: { result: { operationId, status: 'committed', revision: current.revision, committedAt: Date.now(), expiresAt: Date.now() + 86400000 } } };
     }
-    response.end(JSON.stringify(path === '/v1/windows' ? { windows: [current] } : { window: current }));
+    return { json: path === '/v1/windows' ? { windows: [current] } : { window: current } };
   });
-  server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  const scope = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
   const key = saveCache(scope, current);
   history.replaceState(null, '', `/?window=${current.id}`);
   try {
@@ -437,6 +431,5 @@ it('settles a lost HTTP save response by its receipt while the pane stays immedi
   } finally {
     releaseReply.resolve();
     if (root) await act(async () => root!.unmount()); root = undefined;
-    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   }
-}, 10000);
+});

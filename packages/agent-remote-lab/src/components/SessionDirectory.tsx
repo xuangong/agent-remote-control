@@ -23,6 +23,8 @@ interface Props {
   sideStore?: ForkStore;
   askStore?: ForkStore;
   hostId?: string;
+  /** How often a listing in progress is checked; a test shortens it. */
+  listingPollMs?: number;
   onOpenRelated?(item: SessionEntry): void;
   busy: boolean;
   revision: number;
@@ -31,7 +33,7 @@ interface Props {
   onClose(agentId: string): void;
 }
 
-export function SessionDirectory({ quickOpen, favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], sideStore, askStore, hostId = 'local', onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
+export function SessionDirectory({ quickOpen, favorites, searchable = false, directory, providerId, activeAgentId, opened, known = [], sideStore, askStore, hostId = 'local', listingPollMs = 2000, onOpenRelated, busy, revision, onOpen, onSelect, onClose }: Props) {
   const [search, setSearch] = useState('');
   const [listing, setListing] = useState<SessionListingStatus>();
   const [requestingListing, setRequestingListing] = useState(false);
@@ -115,9 +117,9 @@ export function SessionDirectory({ quickOpen, favorites, searchable = false, dir
         setFailure(error instanceof Error ? error.message : 'Could not check the session listing.');
         setListing({ ...listing, refreshing: false });
       });
-    }, 2000);
+    }, listingPollMs);
     return () => { retired = true; window.clearTimeout(timer); };
-  }, [listing, directory, providerId]);
+  }, [listing, directory, providerId, listingPollMs]);
 
   async function listNativeSessions() {
     const request = generation.current;

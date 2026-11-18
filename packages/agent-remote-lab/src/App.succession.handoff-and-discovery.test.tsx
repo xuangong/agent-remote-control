@@ -11,6 +11,7 @@ import { readCompositionDocument } from './session-composition.js';
 import * as trackingHooks from './hooks/useSessionTracking.js';
 import * as askHooks from './hooks/useAskConversations.js';
 import * as successionHooks from './hooks/useSessionSuccession.js';
+import * as successionContextHooks from './hooks/useSuccessionContext.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
 import { sessionKey } from './session-tree.js';
 import { readTrackedSessions, saveTrackedSessions } from './tracking-state.js';
@@ -73,6 +74,9 @@ it('keeps the Handoff chooser available while pending input blocks preparation a
 
 it('refreshes successor context after Composer delivery without waiting for a native timeline echo', async () => {
   vi.stubGlobal('crypto', webcrypto);
+  // The context is read at most once per interval, 2 s by default.
+  const readContext = successionContextHooks.useSuccessionContext;
+  vi.spyOn(successionContextHooks, 'useSuccessionContext').mockImplementation(options => readContext({ ...options, readIntervalMs: 100 }));
   const real = workbenchComponents.LabWorkbench;
   let primary!: ComponentProps<typeof real>, reads = 0;
   const pendingCounts: number[] = [];
@@ -87,8 +91,8 @@ it('refreshes successor context after Composer delivery without waiting for a na
       context: { operationId: replay.projection.receipt.operationId, target: native('B'), state: contextState } };
   } });
   await settleApp(() => { expect(primary.state?.agent?.id).toBe('agent-B'); expect(primary.pendingFirstInputContext?.state).toBe('pending'); });
-  // The context is read at most once per 2 s; past that, delivery's refresh reads it at once.
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 2200)); });
+  // The context is read at most once per interval; past that, delivery's refresh reads it at once.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
   const observed = reads, timeline = structuredClone(primary.state!.timeline);
   contextState = 'materialized';
   expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);

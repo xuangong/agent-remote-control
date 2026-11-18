@@ -254,23 +254,7 @@
    "reason": "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
   },
   {
-   "test": "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > does not restore the confirmed locator after a refresh timeout",
-   "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
-   "test": "packages/agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx > refreshes successor context after Composer delivery without waiting for a native timeline echo",
-   "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
    "test": "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > edits a real App managed Team window into its retained origin owner and admits input only to the successor",
-   "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
-   "test": "packages/agent-remote-lab/src/App.shared-drafts.test.tsx > shares a bot's draft across devices: saved while typing, taken when idle, cleared once sent",
-   "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
-   "test": "packages/agent-remote-lab/src/components/SessionDirectory.test.tsx > lists native sessions only after the explicit button and retains partial results after failure",
    "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
   },
   {
@@ -283,10 +267,6 @@
   },
   {
    "test": "packages/agent-remote-lab/src/App.render-budget.test.tsx > a change of a bot elsewhere renders its roster row, not App and not a conversation",
-   "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
-   "test": "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay",
    "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
   },
   {

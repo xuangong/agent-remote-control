@@ -108,7 +108,7 @@ it('lists native sessions only after the explicit button and retains partial res
   const directory = new SessionDirectoryClient('http://localhost', undefined, 'host');
   const status = vi.spyOn(directory, 'listing').mockResolvedValue({ refreshing: false, complete: false, version: 0 });
   vi.spyOn(directory, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
-  const container = await render(<SessionDirectory directory={directory} providerId="codex" hostId="host" opened={[]} busy={false} revision={0} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
+  const container = await render(<SessionDirectory listingPollMs={20} directory={directory} providerId="codex" hostId="host" opened={[]} busy={false} revision={0} onOpen={() => {}} onSelect={() => {}} onClose={() => {}} />);
   expect(status).toHaveBeenCalledWith('codex');
   expect(status.mock.calls.some(call => call[1] === true)).toBe(false);
   await act(async () => button(container, 'Refresh').click());

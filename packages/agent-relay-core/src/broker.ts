@@ -2,6 +2,7 @@ import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
 import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { createBrokerState } from './broker-state.js';
+import { createJournalDeletion } from './journal-deletion.js';
 import { JOURNAL_DELETION_LIMIT } from './state.js';
 import { committed, detached } from './drafts.js';
 import { freeze } from 'immer';
@@ -709,7 +710,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         let resumed = false;
         const resume = () => { if (resumed) return; resumed = true; clearTimeout(timer); registered(); };
         const timer = setTimeout(resume, options.journalDeletionWaitMs ?? 5000);
-        void deleteOne(ownId).then(resume);
+        void deletion.deleteOne(ownId).then(resume);
         return;
       }
       host.tunnelToken ??= ids.token();
@@ -723,7 +724,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (retired || host.socket !== socket) return;
       host.ready = true;
       host.control = controlRequested ? true : undefined;
-      if (brokerState.journalDeletions.length > 0) drainJournalDeletions();
+      if (brokerState.journalDeletions.length > 0) deletion.drain();
       host.hostStatus = statusRequested ? true : undefined;
       if (statesRequested) host.sessionStates ??= { states: new Map() };
       notifySessionStates();
@@ -1843,11 +1844,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           previews.forget(host.id);
           if (journals) {
             brokerState.journalDeletions = draft.journalDeletions ?? [];
-            pendingSerial.set(host.id, ++deletionSerial);
-            if (droppedDeletion !== undefined) { pendingSerial.delete(droppedDeletion); options.diagnostics?.record(host.id, { event: 'journal_deletion_dropped' }); }
-            // An id that the running pass already tried is tried again when the pass ends.
-            if (draining) rerun = true;
-            drainJournalDeletions();
+            deletion.revoked(host.id, droppedDeletion);
           }
           if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
         } };
@@ -2134,76 +2131,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { client.close(1012, 'Remote Host disconnected'); }
     } };
   }
-  /**
-   * Pending journal deletions. A revoke records a Host's id in the state; one sequential pass then clears the ids:
-   * - a Host's id receives no journal while it is pending (`registered` grants none), so a deletion that returns has nothing
-   *   left to delete for the entry it started under;
-   * - each id has one call in flight, the store call and its confirming commit, shared by the pass and by a returning Host's
-   *   wait; every caller races it against its own deadline, so a call that never answers is abandoned by each caller and is
-   *   never followed by another store call for the same entry. The confirmation clears the entry only if the entry was
-   *   created before the call started: a Host revoked again meanwhile stays pending and gets a call of its own after the
-   *   first one ends. The journal service runs one Host's calls in order, so an abandoned call ends before any later one;
-   * - a revoke or a registration while a pass runs is picked up by that pass, and an id the pass already tried is tried
-   *   again when the pass ends if it was revoked meanwhile; a start, a registration and a revoke are the triggers.
-   */
-  let draining = false;
-  let rerun = false;
-  /** Orders the revokes: the serial of the revoke that put an id into the pending list, and the serial a call started at. */
-  let deletionSerial = 0;
-  const pendingSerial = new Map<string, number>();
-  const deletionCalls = new Map<string, { startedAt: number; run: Promise<boolean> }>();
-  /** The call that deletes an id's journals and clears the entries up to its start. Resolves false on a failure and leaves the id pending. Never rejects. */
-  function deletionCall(hostId: string): Promise<boolean> {
-    const existing = deletionCalls.get(hostId);
-    if (existing && (pendingSerial.get(hostId) ?? 0) <= existing.startedAt) return existing.run;
-    const startedAt = deletionSerial;
-    const run: Promise<boolean> = (async () => {
-      await existing?.run;
-      try { await journals!.deleteHost(hostId); }
-      catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
-      try {
-        await brokerState.commit(draft => {
-          const pending = draft.journalDeletions ?? [];
-          if (!pending.includes(hostId) || (pendingSerial.get(hostId) ?? 0) > startedAt) return { value: undefined, unchanged: true, publish() {} };
-          const rest = pending.filter(id => id !== hostId);
-          if (rest.length > 0) draft.journalDeletions = rest; else delete draft.journalDeletions;
-          return { value: undefined, publish() { brokerState.journalDeletions = rest; pendingSerial.delete(hostId); } };
-        });
-      } catch { options.diagnostics?.record(hostId, { event: 'journal_store_failed' }); return false; }
-      return true;
-    })().finally(() => { if (deletionCalls.get(hostId)?.run === run) deletionCalls.delete(hostId); });
-    deletionCalls.set(hostId, { startedAt, run });
-    return run;
-  }
-  /** Waits for the id's call for at most `journalDeletionTimeoutMs`. Resolves false when the call failed or the deadline came first. Never rejects. */
-  async function deleteOne(hostId: string): Promise<boolean> {
-    if (!journals) return false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), options.journalDeletionTimeoutMs ?? 30_000); });
-    try {
-      const done = await Promise.race([deletionCall(hostId), deadline]);
-      if (!done) options.diagnostics?.record(hostId, { event: 'journal_store_failed' });
-      return done;
-    } finally { clearTimeout(timer); }
-  }
-  /** Deletes the pending ids one after another, each at most once per pass; a revoke that arrives meanwhile joins the pass. Never rejects. */
-  function drainJournalDeletions(): void {
-    if (draining || !journals) return;
-    draining = true;
-    void (async () => {
-      let tried = new Set<string>();
-      for (;;) {
-        const hostId = brokerState.journalDeletions.find(id => !tried.has(id));
-        if (hostId === undefined) {
-          if (rerun) { rerun = false; tried = new Set(); continue; }
-          draining = false;
-          return;
-        }
-        tried.add(hostId);
-        await deleteOne(hostId);
-      }
-    })();
-  }
+  const deletion = createJournalDeletion({ state: brokerState, journals, scheduler, diagnostics: options.diagnostics, timeoutMs: options.journalDeletionTimeoutMs ?? 30_000 });
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
     return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams|call-for-support)(\/|$)/.test(url.pathname) || !!(session && brokerState.bindings.has(session[1]!));
@@ -2221,7 +2149,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     return { hostId: host.id, hostName: host.name, pairingPurpose: host.pairingPurpose ?? (host.gatewayKeyRequested ? 'gateway-setup' : 'host-only'),
       current: () => !brokerState.unavailable && brokerState.keys.get(hash) === credential && credential.expires > now() && brokerState.hosts.get(host.id) === host };
   }
-  if (brokerState.journalDeletions.length > 0) drainJournalDeletions();
+  if (brokerState.journalDeletions.length > 0) deletion.drain();
   return {
     previews,
     authenticateDevice,

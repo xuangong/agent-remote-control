@@ -288,6 +288,9 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
       '@types/node':
         specifier: 24.13.3
         version: 24.13.3

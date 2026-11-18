@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect,it } from 'vitest';
 import { TeamResourceFiles } from './team-resource-files.js';
-import { PortableTeamResourceStore } from '../../agent-relay-core/src/team-resources.js';
+import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
 it('uploads and downloads original bytes without overwriting a conflicting local file',async()=>{
   const root=await mkdtemp(join(tmpdir(),'team-resource-')),rows=new Map<string,Uint8Array>();
   const store=new PortableTeamResourceStore({storage:{async get(key){return rows.get(key);},async put(key,value){rows.set(key,value);},async delete(key){rows.delete(key);},async list(prefix){return [...rows.keys()].filter(key=>key.startsWith(prefix));}}});

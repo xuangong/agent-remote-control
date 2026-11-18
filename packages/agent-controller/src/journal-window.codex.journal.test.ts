@@ -1,7 +1,7 @@
 import { supportsJournal } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
+import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
 import { windowHarness } from './test-utils/journal-window-harness.js';
 
 /**

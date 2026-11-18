@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest';
 import { createRequire } from 'node:module';
-import { AgentSessionSetting as PublicSessionSetting } from '../../agent-remote-protocol/src/session-settings.js';
+import { AgentSessionSetting as PublicSessionSetting } from '@orchardworks/agent-remote-protocol';
 const { Value } = createRequire(new URL('../../agent-remote-protocol/package.json', import.meta.url))('@sinclair/typebox/value');
 import { controlsFixture } from './controls-fixture.test-utils.js';
 import { OpenCodeSettings, nativeSelections, openCodeModel, type OpenCodeSelection } from './settings.js';

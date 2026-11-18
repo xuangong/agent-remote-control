@@ -5,7 +5,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { expect, it } from 'vitest';
 import { ClaudeAgentSession } from './session.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
-import { createClaudeCatalog } from '../dist/catalog.js';
+import { createClaudeCatalog } from './catalog.js';
 
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=';
 

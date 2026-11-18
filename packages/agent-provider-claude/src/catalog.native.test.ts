@@ -3,7 +3,7 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {randomUUID} from 'node:crypto';
 import {expect, it} from 'vitest';
-import {ClaudeAgentProvider} from '../dist/provider.js';
+import {ClaudeAgentProvider} from './provider.js';
 
 it('persists one native custom title in the configured Claude home without spawning a session', async () => {
   const home=await mkdtemp(join(tmpdir(),'arc-claude-rename-'));

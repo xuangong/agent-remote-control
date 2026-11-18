@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 
-import { CodexAppServerProvider } from '../../../agent-provider-codex/src/provider.js';
-import { createScriptedAppServer } from '../../../agent-provider-codex/src/test-utils/scripted-app-server.js';
+import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
+import { createScriptedAppServer } from '@orchardworks/agent-provider-codex/testing';
 import {
   AgentReplica,
   HttpWebSocketTransport,

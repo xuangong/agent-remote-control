@@ -3,9 +3,9 @@ import type { ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
-import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import { nativeFixture, nativeReply } from '@orchardworks/agent-provider-claude/testing';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';
+import { createClaudeCatalog } from '@orchardworks/agent-provider-claude/testing';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { createHostExecutionPolicy } from './execution-policy.js';
 import { createAgentHostRuntime } from './host.js';

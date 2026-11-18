@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { ClaudeAgentProvider } from '../dist/provider.js';
+import { ClaudeAgentProvider } from './provider.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 it('shows native SendMessage input before the resumed child answer', async () => {

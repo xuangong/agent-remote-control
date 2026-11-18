@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { expect, it } from 'vitest';
-import { ClaudeAgentProvider } from '../dist/provider.js';
+import { ClaudeAgentProvider } from './provider.js';
 
 async function fixture() {
   const home = await mkdtemp(join(tmpdir(), 'arc-claude-history-'));

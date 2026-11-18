@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { expect, it } from 'vitest';
-import { ClaudeAgentProvider } from '../dist/provider.js';
+import { ClaudeAgentProvider } from './provider.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 /** A terminal turn on a session a resident SDK process holds: does the resident process's next send see it? */

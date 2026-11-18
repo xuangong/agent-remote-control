@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { ClaudeAgentProvider } from './provider.js';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../dist/catalog.js';
+import { createClaudeCatalog } from './catalog.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 it('reopens a created session that never received input after its process is gone, under the same identity', async () => {

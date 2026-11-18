@@ -4,9 +4,9 @@ import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
-import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import { nativeFixture, nativeReply } from '@orchardworks/agent-provider-claude/testing';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';
+import { createClaudeCatalog } from '@orchardworks/agent-provider-claude/testing';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { SessionCreationStore } from './session-creation-store.js';
 import { closeHosts, startRelayHost } from './test-utils/relay-host-harness.js';

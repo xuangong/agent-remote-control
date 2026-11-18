@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 import type { AgentPersistenceHandle, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentProvider } from './provider.js';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../dist/catalog.js';
+import { createClaudeCatalog } from './catalog.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 const model = 'claude-sonnet-4-5-20250929';

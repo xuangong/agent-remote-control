@@ -58,16 +58,7 @@
       "from": [
         "packages/agent-controller/**"
       ],
-      "max": 69,
-      "owner": "M10",
-      "reason": "Controller tests wire the Relay, providers and the Workbench by file path. The wiring moves into the seam suites of agent-remote-seams and provider ./testing entries as M10 extracts session-core."
-    },
-    {
-      "rule": "dist-import",
-      "from": [
-        "packages/agent-controller/**"
-      ],
-      "max": 6,
+      "max": 10,
       "owner": "M10",
       "reason": "Controller tests wire the Relay, providers and the Workbench by file path. The wiring moves into the seam suites of agent-remote-seams and provider ./testing entries as M10 extracts session-core."
     },
@@ -81,40 +72,13 @@
       "reason": "Claude tests reach the Controller and the built catalog worker by path; they move to the S1 seam suite and a recordings entry in M10."
     },
     {
-      "rule": "dist-import",
-      "from": [
-        "packages/agent-provider-claude/**"
-      ],
-      "max": 14,
-      "owner": "M10",
-      "reason": "Claude tests reach the Controller and the built catalog worker by path; they move to the S1 seam suite and a recordings entry in M10."
-    },
-    {
       "rule": "cross-package-relative",
       "from": [
         "packages/agent-provider-codex/**"
       ],
-      "max": 9,
+      "max": 3,
       "owner": "M10",
       "reason": "Codex tests run the provider through the session runtime and the Controller by path; they move to the S1 seam suite in M10."
-    },
-    {
-      "rule": "dist-import",
-      "from": [
-        "packages/agent-provider-codex/**"
-      ],
-      "max": 2,
-      "owner": "M10",
-      "reason": "Codex tests run the provider through the session runtime and the Controller by path; they move to the S1 seam suite in M10."
-    },
-    {
-      "rule": "cross-package-relative",
-      "from": [
-        "packages/agent-provider-opencode/**"
-      ],
-      "max": 1,
-      "owner": "M10",
-      "reason": "One OpenCode test imports a protocol file by path; it moves to the S1 seam suite in M10."
     },
     {
       "rule": "cross-package-relative",
@@ -160,15 +124,6 @@
       "max": 2,
       "owner": "M12",
       "reason": "Workbench tests and e2e fixtures start the Relay, the Controller and the web package by path; they move to agent-e2e and to client component tests in M12 and M14."
-    },
-    {
-      "rule": "cross-package-relative",
-      "from": [
-        "packages/agent-remote-seams/**"
-      ],
-      "max": 2,
-      "owner": "M10",
-      "reason": "runtime-codex-images.transport.test.ts drives the real Codex provider and its scripted app server; M10 gives the Codex package a ./testing entry for the scripted app server, and this test becomes an S1 run."
     }
   ]
 }

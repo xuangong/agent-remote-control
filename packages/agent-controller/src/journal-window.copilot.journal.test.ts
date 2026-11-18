@@ -2,8 +2,8 @@ import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { supportsJournal } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { CopilotAgentProvider } from '../../agent-provider-copilot/src/provider.js';
-import { Projector } from '../../agent-provider-copilot/src/projector.js';
+import { CopilotAgentProvider } from '@orchardworks/agent-provider-copilot';
+import { Projector } from '@orchardworks/agent-provider-copilot/testing';
 import type { SessionEvent } from '@github/copilot-sdk';
 import type { Recording as CopilotRecording } from './test-utils/recordings.js';
 import { windowHarness } from './test-utils/journal-window-harness.js';

@@ -3,7 +3,7 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {expect,it} from 'vitest';
 import {ClaudeAgentProvider} from '@orchardworks/agent-provider-claude';
-import {nativeFixture,nativeReply} from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import {nativeFixture,nativeReply} from '@orchardworks/agent-provider-claude/testing';
 import {createClaudeSessionDirectory} from './claude-directory.js';
 import {inspectNativeOwner} from './native-session-owner.js';
 

@@ -8,12 +8,12 @@ import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 import type { Team } from '@orchardworks/agent-remote-protocol';
-import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import { nativeFixture, nativeReply } from '@orchardworks/agent-provider-claude/testing';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../../agent-provider-claude/dist/catalog.js';
-import { TeamBroker } from '../../agent-relay-core/src/teams.js';
-import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
-import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '../../agent-relay-core/src/call-for-support-profiles.js';
+import { createClaudeCatalog } from '@orchardworks/agent-provider-claude/testing';
+import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
+import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
+import { emptyCallForSupportState, executeProfileCommand, setEnablement } from '@orchardworks/agent-relay-core/testing';
 import { createClaudeSessionDirectory } from './claude-directory.js';
 import { createCodexHostRegistration } from './codex.js';
 import { createAgentHostRuntime } from './host.js';

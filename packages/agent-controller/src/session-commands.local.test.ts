@@ -9,7 +9,7 @@ import { afterEach, expect, it } from 'vitest';
 import type { AgentSession, AgentSessionHostAccess, AgentStreamEvent } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
-import { nativeFixture, nativeReply } from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import { nativeFixture, nativeReply } from '@orchardworks/agent-provider-claude/testing';
 import { handleSessionCall, listenSessionCalls, sessionCallerEndpoint, SessionCallerStore, SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE,
   type SessionCallerCatalog, type SessionCallerRef } from './session-callers.js';
 import { controllerSkills } from './session-skills.js';

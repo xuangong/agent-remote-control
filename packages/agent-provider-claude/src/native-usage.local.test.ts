@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { expect, it } from 'vitest';
-import { createClaudeCatalog } from '../dist/catalog.js';
+import { createClaudeCatalog } from './catalog.js';
 import { ClaudeAgentSession, type ClaudeSessionOptions } from './session.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 

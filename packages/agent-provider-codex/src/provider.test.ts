@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { validateAgentSessionCapabilities } from '@orchardworks/agent-provider-sdk/testing';
-import { AgentManager } from '../../agent-session-runtime/src/agent-manager.js';
-import type { AgentManagerEvent } from '../../agent-session-runtime/src/agent-manager-events.js';
+import { AgentManager } from '@orchardworks/agent-session-runtime';
+import type { AgentManagerEvent } from '@orchardworks/agent-session-runtime';
 import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 

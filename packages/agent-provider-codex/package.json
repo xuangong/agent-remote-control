@@ -13,6 +13,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
     "./recordings": {
       "types": "./dist/recordings.d.ts",
       "import": "./dist/recordings.js"
@@ -41,6 +45,7 @@
     "typescript": "5.9.3",
     "vitest": "4.1.11",
     "@types/ws": "^8.18.1",
-    "@orchardworks/agent-remote-protocol": "workspace:*"
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-session-runtime": "workspace:*"
   }
 }

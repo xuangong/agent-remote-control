@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentSession, AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { ClaudeAgentProvider } from '../dist/provider.js';
+import { ClaudeAgentProvider } from './provider.js';
 
 function sse(content: unknown[], stopReason: string): string {
   const id = `message-${Math.random().toString(36).slice(2)}`;

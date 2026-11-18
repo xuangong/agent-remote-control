@@ -13,8 +13,8 @@ import { createCodexSessionDirectory } from './directory.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
 import { createManagedStdioDirectory } from './stdio-directory.js';
 import { TpmStore } from './tpm-store.js';
-import { TeamBroker } from '../../agent-relay-core/src/teams.js';
-import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
+import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
+import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 
 for (const providerId of ['codex', 'opencode', 'claude'] as const) test.each(['leader', 'member', 'tpm'] as const)(`${providerId} first prefix attachment restores %s tools with exact recipient and release fencing`, async role => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-prefix-role-'))), teamDirectory = join(root, 'team'), tpmDirectory = join(root, 'tpm');

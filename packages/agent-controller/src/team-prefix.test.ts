@@ -6,8 +6,8 @@ import { expect, it } from 'vitest';
 import { AgentOperationRejectedError, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import { nativeSessionRefKey, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import type { SessionWireAgent } from '@orchardworks/agent-session-runtime';
-import { TeamBroker } from '../../agent-relay-core/src/teams.js';
-import type { SavedTeam } from '../../agent-relay-core/src/team-delivery.js';
+import { TeamBroker } from '@orchardworks/agent-relay-core/testing';
+import type { SavedTeam } from '@orchardworks/agent-relay-core/testing';
 import { TeamRuntime, type TeamRuntimeAccess } from './team.js';
 
 it.each(['leader', 'member'] as const)('keeps the %s seat and tools on a released prefix recipient and preserves unknown delivery after restart', async role => {

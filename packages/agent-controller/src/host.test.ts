@@ -14,9 +14,9 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { createRelayDiagnosticSink } from './relay-diagnostics.js';
 import { createCodexSessionDirectory } from './directory.js';
 import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostRequestDiagnostic, type AgentHostUplinkDiagnostic } from './host.js';
-import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
-import { CodexAppServerTransport } from '../../agent-provider-codex/src/app-server-transport.js';
-import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
+import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
+import { CodexAppServerTransport } from '@orchardworks/agent-provider-codex';
+import { createScriptedAppServer } from '@orchardworks/agent-provider-codex/testing';
 
 const capabilities: AgentCapabilities = { history: true, sendMessage: true, steer: false, cancel: false, readResource: false,
   interactions: { question: false, planApproval: false, toolApproval: false } };

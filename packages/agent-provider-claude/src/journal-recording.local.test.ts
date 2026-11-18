@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentInteractionRequest, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { journalObservation, recordingShape, serializeRecording, type JournalRecording } from '@orchardworks/agent-provider-sdk/testing';
 
-import { ClaudeAgentProvider } from '../dist/provider.js';
+import { ClaudeAgentProvider } from './provider.js';
 import { nativeFixture, nativeReply, nativeStalled, type NativeBlock } from './test-utils/native-fixture.js';
 
 /**

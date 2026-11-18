@@ -6,8 +6,8 @@ import { promisify } from 'node:util';
 import { afterEach, expect, it } from 'vitest';
 import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
 import { createCodexHostRegistration } from './codex.js';
-import { spawnCodexAppServer } from '../../agent-provider-codex/src/native.js';
-import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-server-transport.js';
+import { spawnCodexAppServer } from '@orchardworks/agent-provider-codex';
+import { CodexAppServerTransport } from '@orchardworks/codex-daemon-client';
 
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });

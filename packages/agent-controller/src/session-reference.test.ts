@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { createCodexSessionDirectory } from './directory.js';
-import { CodexAppServerProvider } from '../../agent-provider-codex/src/provider.js';
-import { createScriptedAppServer } from '../../agent-provider-codex/src/test-utils/scripted-app-server.js';
+import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
+import { createScriptedAppServer } from '@orchardworks/agent-provider-codex/testing';
 import { SessionReferenceStore, sourceSessionExtensions } from './session-reference.js';
 import { AgentOperationRejectedError, type AgentSession } from '@orchardworks/agent-provider-sdk';
 

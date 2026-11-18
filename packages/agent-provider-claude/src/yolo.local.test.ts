@@ -6,7 +6,7 @@ import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { ClaudeAgentSession } from './session.js';
 import { ClaudeAgentProvider } from './provider.js';
 // The real catalog runs its worker process from the build output.
-import { createClaudeCatalog } from '../dist/catalog.js';
+import { createClaudeCatalog } from './catalog.js';
 import { nativeFixture, nativeReply } from './test-utils/native-fixture.js';
 
 const hasToolResult = (body: any): boolean => Array.isArray(body.messages)

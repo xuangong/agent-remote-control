@@ -1,7 +1,7 @@
 import {readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {expect,it} from 'vitest';
-import {ClaudeAgentProvider} from '../dist/provider.js';
+import {ClaudeAgentProvider} from './provider.js';
 import {nativeFixture,nativeReply} from './test-utils/native-fixture.js';
 
 it('projects real Write/Edit output as diffs and restores the transcript through a cold native-ID resume', async () => {

@@ -8,7 +8,7 @@ import { expect, it } from 'vitest';
 import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
 import type { AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { Team, TeamMessage } from '@orchardworks/agent-remote-protocol';
-import { createFakeChildProcess } from '../../agent-provider-codex/src/test-utils/fake-child.js';
+import { createFakeChildProcess } from '@orchardworks/agent-provider-codex/testing';
 import { createRemoteHostBroker } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 

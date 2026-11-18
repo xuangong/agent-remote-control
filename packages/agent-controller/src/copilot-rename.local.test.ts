@@ -1,7 +1,7 @@
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {expect, it} from 'vitest';
-import {CopilotAgentProvider} from '../../agent-provider-copilot/src/provider.js';
+import {CopilotAgentProvider} from '@orchardworks/agent-provider-copilot';
 import {fixture, observe, reply, waitFor} from '../../agent-provider-copilot/tests/native-fixture.js';
 import {createCopilotSessionDirectory} from './copilot-directory.js';
 import {createHostExecutionPolicy, protectHostDirectory} from './execution-policy.js';

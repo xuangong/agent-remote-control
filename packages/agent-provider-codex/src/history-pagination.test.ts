@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { AgentManager } from '../../agent-session-runtime/src/agent-manager.js';
+import { AgentManager } from '@orchardworks/agent-session-runtime';
 import { CodexAppServerProvider } from './provider.js';
 import { createScriptedAppServer } from './test-utils/scripted-app-server.js';
 

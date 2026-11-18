@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 
-import { ClaudeAgentProvider } from '../dist/provider.js';
-import { ClaudeEventProjector } from '../dist/projector.js';
+import { ClaudeAgentProvider } from './provider.js';
+import { ClaudeEventProjector } from './projector.js';
 import { nativeFixture, nativeReply, nativeStalled, type NativeBlock } from './test-utils/native-fixture.js';
 
 const DUMP = process.env.JOURNAL_FACTS_DUMP;

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { expect, it } from 'vitest';
 import { CodexAppServerProvider, readWindowsCodexDaemon, requestWindowsCodexDaemon, windowsCodexSharedEndpoint } from '@orchardworks/agent-provider-codex';
-import { CodexAppServerTransport } from '../../codex-daemon-client/src/app-server-transport.js';
+import { CodexAppServerTransport } from '@orchardworks/codex-daemon-client';
 import { createCodexHostRegistration } from './codex.js';
 import { createAgentHostRuntime } from './host.js';
 import { createHostExecutionPolicy } from './execution-policy.js';

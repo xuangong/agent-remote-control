@@ -7,7 +7,7 @@ import { expect, it } from 'vitest';
 import type { AgentSession, AgentRuntimeInfo, AgentCapabilities, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { createRemoteHostBroker } from '../../agent-remote-lab/src/server/remote-host-broker.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
-import { PortableTeamResourceStore } from '../../agent-relay-core/src/team-resources.js';
+import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
 import { createHash } from 'node:crypto';
 
 class NativeSession implements AgentSession {

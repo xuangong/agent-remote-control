@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { expect, it } from 'vitest';
-import { AgentManager } from '../../agent-session-runtime/src/agent-manager.js';
+import { AgentManager } from '@orchardworks/agent-session-runtime';
 import { decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 import { CodexAppServerProvider } from './provider.js';
 

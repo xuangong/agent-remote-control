@@ -2,7 +2,7 @@ import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { supportsJournal } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { ClaudeAgentProvider } from '../../agent-provider-claude/src/provider.js';
+import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
 import { MESSAGE_BUDGET_BYTES } from './publisher/journal-items.js';
 import { recording } from './test-utils/recordings.js';
 import { windowHarness } from './test-utils/journal-window-harness.js';

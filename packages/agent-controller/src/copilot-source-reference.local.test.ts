@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
 import { expect, it } from 'vitest';
-import { CopilotAgentProvider } from '../../agent-provider-copilot/src/provider.js';
+import { CopilotAgentProvider } from '@orchardworks/agent-provider-copilot';
 import { fixture, observe, reply, waitFor } from '../../agent-provider-copilot/tests/native-fixture.js';
 import { createCopilotHostRegistration } from './copilot.js';
 import { createCopilotSessionDirectory } from './copilot-directory.js';

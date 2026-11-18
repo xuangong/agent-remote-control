@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher, type JournalSource } from './journal-publisher.js';
-import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
+import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from '../test-utils/journal-scripted-session.js';
 
 type Wire = Record<string, any>;
 const clock = virtualClock();

@@ -3,7 +3,7 @@ import { createJournalConnection, type JournalConnection } from '@orchardworks/a
 import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardworks/agent-remote-journal';
 import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks/agent-remote-protocol';
 
-import type { JournalPublisher } from '../journal-publisher.js';
+import type { JournalPublisher } from '../publisher/journal-publisher.js';
 import type { VirtualClock } from './journal-scripted-session.js';
 
 export const HOST_ID = 'host-1';

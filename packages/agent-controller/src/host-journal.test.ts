@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 
 import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
-import type { JournalPublisherDiagnostic } from './journal-publisher.js';
+import type { JournalPublisherDiagnostic } from './publisher/journal-publisher.js';
 import { boundary, item, ScriptedSession, untilReal as until } from './test-utils/journal-scripted-session.js';
 
 const closers: Array<() => Promise<void> | void> = [];

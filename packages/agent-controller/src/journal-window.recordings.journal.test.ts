@@ -1,7 +1,7 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { describe, expect, it } from 'vitest';
 
-import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
+import { MESSAGE_BUDGET_BYTES } from './publisher/journal-items.js';
 import { recording, recordingNames, type RecordedProvider } from './test-utils/recordings.js';
 import { windowHarness } from './test-utils/journal-window-harness.js';
 

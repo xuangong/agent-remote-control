@@ -1,7 +1,7 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { afterEach } from 'vitest';
 
-import { createJournalPublisher, type JournalPublisher } from '../journal-publisher.js';
+import { createJournalPublisher, type JournalPublisher } from '../publisher/journal-publisher.js';
 import { recording, type RecordedProvider } from './recordings.js';
 import { relayLoopback } from './journal-relay-loopback.js';
 import { attachScripted, boundary, driver, ScriptedSession, virtualClock } from './journal-scripted-session.js';

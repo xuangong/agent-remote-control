@@ -1,8 +1,8 @@
 import type { ResourceBinding } from '@orchardworks/agent-remote-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { MESSAGE_BUDGET_BYTES } from './journal-items.js';
-import { createJournalPublisher, type JournalPublisher } from './journal-publisher.js';
+import { MESSAGE_BUDGET_BYTES } from './publisher/journal-items.js';
+import { createJournalPublisher, type JournalPublisher } from './publisher/journal-publisher.js';
 import { HOST_ID, relayLoopback } from './test-utils/journal-relay-loopback.js';
 import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
 

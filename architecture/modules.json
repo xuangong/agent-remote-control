@@ -381,6 +381,44 @@
       ]
     },
     {
+      "name": "controller-publisher",
+      "layer": 2,
+      "paths": [
+        "packages/agent-controller/src/publisher/**"
+      ],
+      "seams": [
+        "S1",
+        "S2"
+      ],
+      "flows": [
+        "E1",
+        "E2"
+      ],
+      "invariants": [
+        "journal-reopen-recovery"
+      ]
+    },
+    {
+      "name": "controller-session-core",
+      "layer": 2,
+      "paths": [
+        "packages/agent-controller/src/session-core/**"
+      ],
+      "seams": [
+        "S1",
+        "S2"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E4",
+        "E5"
+      ],
+      "invariants": [
+        "native-owner"
+      ]
+    },
+    {
       "name": "controller-process",
       "layer": 4,
       "paths": [

@@ -1,7 +1,7 @@
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { SessionJournal, type JournalItemInput, type ReplacementReason, type SyncResult } from '@orchardworks/agent-remote-journal';
 
-import { digestOf, groupItems, mergedRow, type TimelineItem } from '../journal-items.js';
+import { digestOf, groupItems, mergedRow, type TimelineItem } from '../publisher/journal-items.js';
 import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
 
 /** What one native session produced: everything it emitted while it ran, and what the adapter returns after it is reopened. */

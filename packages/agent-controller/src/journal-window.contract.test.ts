@@ -3,8 +3,8 @@ import { describeDecision, heldTail, vectorText, windowVectors, type VectorItem 
 import type { CanonicalTimelineRow } from '@orchardworks/agent-timeline';
 import { describe, expect, it } from 'vitest';
 
-import { groupItems } from './journal-items.js';
-import { windowOp } from './journal-reconcile.js';
+import { groupItems } from './publisher/journal-items.js';
+import { windowOp } from './publisher/journal-reconcile.js';
 
 /**
  * The publisher's side of the window vectors: the window it builds from its timeline items, with the digests it computes,

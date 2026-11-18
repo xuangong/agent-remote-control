@@ -42,7 +42,7 @@ import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@
 import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
 import { SessionOutbox } from './session-outbox.js';
-import { createJournalPublisher, type JournalPublisher, type JournalPublisherDiagnostic } from './journal-publisher.js';
+import { createJournalPublisher, type JournalPublisher, type JournalPublisherDiagnostic } from './publisher/journal-publisher.js';
 import { loadResourceIdKey } from './resource-id-key.js';
 import { FileResourceIdIndex } from './resource-id-index-file.js';
 import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';

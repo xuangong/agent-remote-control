@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { groupItems, mergedRow } from './journal-items.js';
 import { createJournalPublisher, type JournalPublisher } from './journal-publisher.js';
-import { relayLoopback } from './test-utils/journal-relay-loopback.js';
-import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from './test-utils/journal-scripted-session.js';
+import { relayLoopback } from '../test-utils/journal-relay-loopback.js';
+import { attachScripted, boundary, driver, item, ScriptedSession, virtualClock } from '../test-utils/journal-scripted-session.js';
 
 const clock = virtualClock();
 const { settle, until } = driver(clock);

@@ -1,4 +1,4 @@
-import { openCodeVersionIssue, parseOpenCodeCliVersion } from '@orchardworks/agent-provider-opencode';
+import { openCodeVersionIssue, parseOpenCodeCliVersion } from './providers.js';
 import { resolveOpenCodeExecutable } from './opencode-executable.js';
 import { execFile, spawn } from 'node:child_process';
 import { chmod, mkdir, open } from 'node:fs/promises';

@@ -1,7 +1,7 @@
 import { realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { AgentRuntimeError, type AgentRuntimeInfo, type AgentSession, type AgentSessionNativeEvidence, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
-import type { AgentHostDirectory } from './host.js';
+import type { AgentHostDirectory } from './session-core/types.js';
 import { successionCreationHandle, nativePrefixResumeHandle } from './local-succession-preparation.js';
 
 /** Trusted local admission policy. A cwd check is not a filesystem sandbox. */

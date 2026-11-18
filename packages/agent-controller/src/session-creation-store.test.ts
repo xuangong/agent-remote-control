@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ function fixture() {
 
 it('reopens a session that never received input from its creation handle, and lets native history win once it has some', async () => {
   const f = fixture(), path = await root();
-  const make = () => createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, undefined, new SessionCreationStore(path, 'claude'));
+  const make = () => createManagedStdioDirectory('claude', 'Claude', f.provider, [], undefined, undefined, new SessionCreationStore(path, 'claude', atomicWriteFile));
   let directory = make();
   try {
     const id = await directory.create({ cwd: '/workspace', model: 'chosen-model' });
@@ -63,7 +64,7 @@ it('reopens a session that never received input from its creation handle, and le
 it('keeps creation handles for their provider and retention period only', async () => {
   const path = await root();
   let now = 1_000;
-  const store = new SessionCreationStore(path, 'claude', () => now);
+  const store = new SessionCreationStore(path, 'claude', atomicWriteFile, () => now);
   const old = { providerId: 'claude', sessionId: 'old', opaque: '{"model":"a"}' };
   await store.set(old);
   now += SESSION_CREATION_RETENTION_MS - 1;
@@ -77,5 +78,5 @@ it('keeps creation handles for their provider and retention period only', async 
   await store.set({ providerId: 'claude', sessionId: 'newer', opaque: '{}' });
   expect(await readdir(path)).toHaveLength(2);
   await expect(store.set({ providerId: 'codex', sessionId: 'other', opaque: '{}' })).rejects.toThrow(/provider/);
-  expect(await new SessionCreationStore(path, 'codex').get('new')).toBeUndefined();
+  expect(await new SessionCreationStore(path, 'codex', atomicWriteFile).get('new')).toBeUndefined();
 });

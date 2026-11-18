@@ -1,6 +1,6 @@
 import { isSuccessionActionResult, isSuccessionDescription, type SuccessionActionResult } from '@orchardworks/agent-remote-protocol';
-import type { CommandChannel } from './cli-client.js';
-import { CliError } from './cli-output.js';
+import type { CommandChannel } from './command-client.js';
+import { CliError } from './command-output.js';
 import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 
 /** A session as the Relay names it: by its Host's ID, whatever address the command line was given. */

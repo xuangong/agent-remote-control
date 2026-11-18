@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { commandChannel, type ManagementAccess } from './cli-client.js';
-import { CliError, EXIT_OK, operationId, printError, printResult, usage } from './cli-output.js';
+import { commandChannel, type ManagementAccess } from './command-client.js';
+import { CliError, EXIT_OK, operationId, printError, printResult, usage } from './command-output.js';
 import type { CliCredentials } from './relay-client.js';
 import { handoffSession, namedSession, starSession } from './session-relay.js';
 

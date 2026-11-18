@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,10 +12,10 @@ it('keeps the last confirmed mode per session privately and ignores files it can
   const root = await mkdtemp(join(tmpdir(), 'arc-permission-modes-'));
   const directory = join(root, 'claude');
   try {
-    const store = new SessionPermissionModeStore(directory, accepts);
+    const store = new SessionPermissionModeStore(directory, accepts, atomicWriteFile);
     expect(await store.read('a')).toBeUndefined();
     await Promise.all([store.write('a', 'bypassPermissions'), store.write('b', 'default'), store.write('a', 'default'), store.write('a', 'bypassPermissions')]);
-    const reopened = new SessionPermissionModeStore(directory, accepts);
+    const reopened = new SessionPermissionModeStore(directory, accepts, atomicWriteFile);
     expect(await reopened.read('a')).toBe('bypassPermissions');
     expect(await reopened.read('b')).toBe('default');
     expect((await stat(directory)).mode & 0o777).toBe(0o700);

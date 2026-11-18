@@ -6,7 +6,7 @@ import { resolveHostEnvironment } from './connection-config.js';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { loadGatewayCodexEnvironment } from './gateway-codex.js';
 import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
-import { windowsCodexSharedEndpoint } from '@orchardworks/agent-provider-codex';
+import { windowsCodexSharedEndpoint } from './providers.js';
 import { manageWindowsCodexDaemon } from './windows-codex-command.js';
 import { codexDaemonRestartArgs } from './codex-daemon-restart.js';
 

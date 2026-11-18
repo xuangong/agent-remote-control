@@ -1,7 +1,7 @@
 import { sessionExtensionIdentity, requireSessionExtensionIdentity } from './session-extension-identity.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferenceRemoved, sourceReferenceGuard, sourceReferenceState, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
-import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from '@orchardworks/agent-provider-opencode';
+import type { OpenCodeAgentProvider, OpenCodeSessionSummary } from './providers.js';
 import type { AgentProviderAdapter, AgentSession, AgentHistoryQuery, AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import type { RemoteSessionSummary } from '@orchardworks/agent-session-runtime';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';

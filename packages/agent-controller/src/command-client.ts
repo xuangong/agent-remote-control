@@ -1,5 +1,5 @@
 import { createConnection } from 'node:net';
-import { CliError } from './cli-output.js';
+import { CliError } from './command-output.js';
 import { relayHostAccess, runHostRequest } from './host-command.js';
 import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 import { SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';

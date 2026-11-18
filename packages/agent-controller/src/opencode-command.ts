@@ -1,3 +1,4 @@
+import { loadOpenCodeProvider } from './providers.js';
 import { resolveOpenCodeExecutable } from './opencode-executable.js';
 import { spawn } from 'node:child_process';
 import { resolveHostEnvironment } from './connection-config.js';
@@ -18,7 +19,7 @@ export async function runOpenCodeCommand(args: string[], stateDir: string, envir
   }
   if (args[0] === 'callbacks') {
     if (args[1] !== 'setup' || args.length !== 3 || !args[2]) throw new Error('Use opencode callbacks setup <private-directory>.');
-    const { setupOpenCodeCallbacks } = await import('@orchardworks/agent-provider-opencode');
+    const { setupOpenCodeCallbacks } = await loadOpenCodeProvider();
     const paths = await setupOpenCodeCallbacks(args[2], configured.AGENT_HOST_OPENCODE_URL ?? 'http://127.0.0.1:4096');
     process.stdout.write(JSON.stringify({ ...paths, instruction: 'Start the independently managed native server with OPENCODE_CONFIG set to nativeConfigPath. Set AGENT_HOST_OPENCODE_CALLBACK_CONFIG to configPath for the Controller. Use the same loopback hostname and port for AGENT_HOST_OPENCODE_URL and opencode serve. Existing servers require an explicit operator restart to load the plugin.' }, null, 2) + '\n');
     return 0;

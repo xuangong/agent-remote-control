@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { runWindowCommand } from './window-command.js';
 import {runClaudeCommand} from './claude-command.js';
 import { createDaemonMonitor } from './codex-daemon-monitor.js';
@@ -27,7 +28,7 @@ import { serveOpenCodeServerSupervisor } from './opencode-server-supervisor.js';
 import { runCopilotCommand } from './copilot-command.js';
 import { createLoginStartup, systemdUnavailable } from './platform/services/index.js';
 import { autostartEnabled, clearAutostartConnection, prepareAutostartConnection, resolveAutostartConnection } from './autostart-state.js';
-import { serveWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
+import { serveWindowsCodexDaemon } from './providers.js';
 import { spawnWindowsJob } from './platform/processes/windows-job.js';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { configureGatewayProviders } from './gateway-setup.js';
@@ -38,11 +39,11 @@ import { SessionRefStore } from './session-refs.js';
 import { runSessionCommand } from './session-command.js';
 import { runLoginCommand } from './login-command.js';
 import { readCredentials, relayRequest } from './relay-client.js';
-import { CliError } from './cli-output.js';
+import { CliError } from './command-output.js';
 import { runHostCommand } from './host-command.js';
 import { runRoleCommand } from './role-command.js';
 import { runApiCommand } from './api-command.js';
-import { relayCall } from './cli-client.js';
+import { relayCall } from './command-client.js';
 import { controllerSkills } from './session-skills.js';
 
 interface DaemonState { launcherPid?: number; pid: number; token: string; socket: string; startedAt: string; supervisor?: 'launchd' | 'systemd' | 'windows' }
@@ -215,7 +216,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
       const credentials = await readCredentials(stateDir).catch(() => undefined);
       if (!credentials) throw new CliError('signed_out', 'The Relay is reached as the signed-in owner: run agent-remote-controller login first.');
       return relayRequest(credentials, method, path, body);
-    }, sessionRefs: new SessionRefStore(join(stateDir, 'session-refs.json')), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
+    }, sessionRefs: new SessionRefStore(join(stateDir, 'session-refs.json'), atomicWriteFile), succession: { controllerId: installationId, stateDirectory: join(stateDir, 'succession'), enrollment: true }, tpm: { stateDirectory: join(stateDir, 'tpm-v1') }, team: { stateDirectory: join(stateDir, 'teams-v1') }, ...(identity ? { controller: { identity, stateDir, restart: requestLauncherRestart } } : {}), registrations, providerDiscovery, providerEnabled: providerDiscovery.enabled, environment: hostEnvironment, installationId, name: environment.AGENT_HOST_NAME?.trim() || hostname(),
     ...(supportsCodexDaemonControl(environment)
       ? { codexDaemon: { stateDir, restart: operationId => restartCodexDaemon({ stateDir, environment, operationId }) } } : {}),
     vscodeTunnel: { stateDirectory: stateDir, executable: environment.AGENT_HOST_VSCODE?.trim() || undefined,
@@ -318,7 +319,7 @@ async function serveConfigured(daemon: boolean, diagnosticLog: DiagnosticLog | u
 /** Credentials and the socket through which sessions' shell commands reach this Controller; without them sessions still work. */
 async function prepareSessionCallers(diagnostic: (line: string) => void) {
   try {
-    const store = new SessionCallerStore(join(stateDir, 'session-callers.json'));
+    const store = new SessionCallerStore(join(stateDir, 'session-callers.json'), atomicWriteFile);
     await store.ready;
     const skills = await controllerSkills();
     const sessionBin = process.env.AGENT_HOST_SESSION_BIN;

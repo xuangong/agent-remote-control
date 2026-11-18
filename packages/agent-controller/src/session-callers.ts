@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
-import { atomicWriteFile } from '@orchardworks/agent-platform';
+import type { StateFileWriter } from './state-file.js';
 import type { AgentSessionHostAccess } from '@orchardworks/agent-provider-sdk';
 import { refKey, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
 
@@ -36,7 +36,7 @@ export class SessionCallerStore {
   private writes: Promise<void> = Promise.resolve();
   readonly ready: Promise<void>;
 
-  constructor(private readonly path: string) {
+  constructor(private readonly path: string, private readonly writeState: StateFileWriter) {
     this.ready = this.load();
   }
 
@@ -114,7 +114,7 @@ export class SessionCallerStore {
     const saved: SavedCallers = { version: 1, sessions: [...this.tokens.values()], shared: [...this.shared.values()] };
     const write = this.writes.then(async () => {
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-      await atomicWriteFile(this.path, JSON.stringify(saved));
+      await this.writeState(this.path, JSON.stringify(saved));
     });
     this.writes = write.catch(() => undefined);
     return write;

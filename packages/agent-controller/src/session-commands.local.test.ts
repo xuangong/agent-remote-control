@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -24,7 +25,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function controller(ref: SessionCallerRef): Promise<AgentSessionHostAccess> {
   const state = await mkdtemp(join(tmpdir(), 'arc-session-commands-'));
   cleanup.push(() => rm(state, { recursive: true, force: true }));
-  const store = new SessionCallerStore(join(state, 'callers.json'));
+  const store = new SessionCallerStore(join(state, 'callers.json'), atomicWriteFile, atomicWriteFile);
   const endpoint = await sessionCallerEndpoint(state);
   const token = (await store.issue(ref))!;
   const summary = { ...ref, title: 'Native fixture', workspace: state, createdAt: '2026-11-04T00:00:00.000Z', updatedAt: '2026-11-04T00:00:00.000Z', state: 'running' as const };

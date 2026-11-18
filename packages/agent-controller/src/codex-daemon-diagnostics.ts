@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { readWindowsCodexDaemon } from '@orchardworks/agent-provider-codex';
+import { readWindowsCodexDaemon } from './providers.js';
 import { createDiagnosticLog } from './diagnostic-log.js';
 
 const variables = ['OPENAI_API_KEY', 'CODEX_GATEWAY_API_KEY', 'LC_ALL'] as const;

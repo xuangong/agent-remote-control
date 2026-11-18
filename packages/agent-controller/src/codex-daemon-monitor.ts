@@ -1,6 +1,6 @@
 import { open, stat, readFile, writeFile, rename } from 'node:fs/promises';
 import { join } from 'node:path';
-import { windowsCodexDaemonDirectory } from '@orchardworks/agent-provider-codex';
+import { windowsCodexDaemonDirectory } from './providers.js';
 import { createDaemonDiagnostics, readDaemonProcess } from './codex-daemon-diagnostics.js';
 
 /** Low-frequency local observation; it never connects to, starts or restarts the daemon. */

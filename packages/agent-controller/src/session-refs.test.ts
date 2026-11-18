@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ async function context(grant?: string) {
   let grantRemoved = false;
   const titles = new Map([['side', 'Side'], ['source', 'Source'], ['other', 'Other']]);
   const value: SessionRefContext = {
-    store: new SessionRefStore(join(root, 'session-refs.json')),
+    store: new SessionRefStore(join(root, 'session-refs.json'), atomicWriteFile),
     hostId: async () => 'host',
     async grantedSource(holder) { return grant && holder.nativeSessionId === 'side' ? { sourceNativeSessionId: grant, removed: grantRemoved } : undefined; },
     async setGrantRemoved(_holder, next) { grantRemoved = next; },
@@ -54,5 +55,5 @@ it('tells a session about a source it was not created with, and keeps references
   await value.store.setSource(side, source, { tell: true });
   expect(await pendingReferenceNote(side, value)).toEqual({ revision: 1, references: [{ address: 'host/claude/source', title: 'Source', origin: 'source' }] });
   await changeSessionRef(side, 'add', { providerId: 'claude', nativeSessionId: 'other' }, value);
-  expect(await describeSessionRefs(side, { ...value, store: new SessionRefStore(path) })).toMatchObject({ revision: 2, refs: [{ nativeSessionId: 'source' }, { nativeSessionId: 'other' }] });
+  expect(await describeSessionRefs(side, { ...value, store: new SessionRefStore(path, atomicWriteFile) })).toMatchObject({ revision: 2, refs: [{ nativeSessionId: 'source' }, { nativeSessionId: 'other' }] });
 });

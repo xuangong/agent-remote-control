@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
-import { CliError, EXIT_OK, parseOptions, printError, printResult, usage } from './cli-output.js';
+import { CliError, EXIT_OK, parseOptions, printError, printResult, usage } from './command-output.js';
 import { forgetCredentials, readCredentials, relayOrigin, relayRequest, saveCredentials } from './relay-client.js';
 
 const help = `Usage: agent-remote-controller login [--server URL] [--no-browser]

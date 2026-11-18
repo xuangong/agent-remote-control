@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
-import { CliError } from './cli-output.js';
+import { CliError } from './command-output.js';
 
 /**
  * A command line's own session at the Relay, approved by the signed-in user in a browser (agent-remote-controller login).

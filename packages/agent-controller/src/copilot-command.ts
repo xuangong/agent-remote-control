@@ -1,4 +1,4 @@
-import {CopilotAgentProvider} from '@orchardworks/agent-provider-copilot';
+import {CopilotAgentProvider} from './providers.js';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 import {resolveHostEnvironment} from './connection-config.js';

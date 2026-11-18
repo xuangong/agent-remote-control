@@ -1,6 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { atomicWriteFile } from '@orchardworks/agent-platform';
+import type { StateFileWriter } from './state-file.js';
 import type { SessionReferenceNote } from '@orchardworks/agent-remote-protocol';
 
 /** A session on this Host, by provider and native identity. */
@@ -38,7 +38,7 @@ export class SessionRefStore {
   private writes: Promise<void> = Promise.resolve();
   readonly ready: Promise<void>;
 
-  constructor(private readonly path: string) { this.ready = this.load(); }
+  constructor(private readonly path: string, private readonly writeState: StateFileWriter) { this.ready = this.load(); }
 
   private async load(): Promise<void> {
     let saved: SavedRefs;
@@ -146,7 +146,7 @@ export class SessionRefStore {
     const document: SavedRefs = { version: 1, holders: [...this.holders.values()] };
     const write = this.writes.then(async () => {
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-      await atomicWriteFile(this.path, JSON.stringify(document));
+      await this.writeState(this.path, JSON.stringify(document));
     });
     this.writes = write.catch(() => undefined);
     return write;

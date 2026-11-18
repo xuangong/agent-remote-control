@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { commandChannel, relayCall } from './cli-client.js';
+import { commandChannel, relayCall } from './command-client.js';
 import { runLoginCommand } from './login-command.js';
 import { credentialsPath, readCredentials, relayRequest, saveCredentials, type CliCredentials } from './relay-client.js';
 

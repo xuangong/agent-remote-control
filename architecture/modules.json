@@ -419,6 +419,49 @@
       ]
     },
     {
+      "name": "controller-root",
+      "layer": 4,
+      "paths": [
+        "packages/agent-controller/src/host.ts",
+        "packages/agent-controller/src/providers.ts",
+        "packages/agent-controller/src/index.ts"
+      ],
+      "seams": [
+        "S2"
+      ],
+      "flows": [
+        "E1",
+        "E2",
+        "E4",
+        "E5"
+      ],
+      "invariants": []
+    },
+    {
+      "name": "controller-providers",
+      "layer": 4,
+      "paths": [
+        "packages/agent-controller/src/claude*.ts",
+        "packages/agent-controller/src/codex*.ts",
+        "packages/agent-controller/src/copilot*.ts",
+        "packages/agent-controller/src/opencode*.ts",
+        "packages/agent-controller/src/windows-codex-command.ts",
+        "packages/agent-controller/src/directory.ts",
+        "packages/agent-controller/src/stdio*.ts",
+        "packages/agent-controller/src/registrations.ts",
+        "packages/agent-controller/src/provider-discovery.ts",
+        "packages/agent-controller/src/gateway*.ts"
+      ],
+      "seams": [
+        "S1"
+      ],
+      "flows": [
+        "E3",
+        "E4"
+      ],
+      "invariants": []
+    },
+    {
       "name": "controller-process",
       "layer": 4,
       "paths": [
@@ -430,7 +473,23 @@
         "packages/agent-controller/src/controller-launcher*.ts",
         "packages/agent-controller/src/codex-daemon-runner*.ts",
         "packages/agent-controller/src/platform/**",
-        "packages/agent-controller/src/update-command*.ts"
+        "packages/agent-controller/src/update-command*.ts",
+        "packages/agent-controller/src/relay-client.ts",
+        "packages/agent-controller/src/connection-config.ts",
+        "packages/agent-controller/src/autostart-state.ts",
+        "packages/agent-controller/src/controller-package.ts",
+        "packages/agent-controller/src/previews.ts",
+        "packages/agent-controller/src/api-command.ts",
+        "packages/agent-controller/src/host-command.ts",
+        "packages/agent-controller/src/login-command.ts",
+        "packages/agent-controller/src/role-command.ts",
+        "packages/agent-controller/src/session-command.ts",
+        "packages/agent-controller/src/window-command.ts",
+        "packages/agent-controller/src/diagnostics-command.ts",
+        "packages/agent-controller/src/update-command.ts",
+        "packages/agent-controller/src/command-client.ts",
+        "packages/agent-controller/src/command-output.ts",
+        "packages/agent-controller/src/session-relay.ts"
       ],
       "seams": [],
       "flows": [

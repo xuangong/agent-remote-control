@@ -52,7 +52,7 @@ import { FileResourceIdIndex } from './resource-id-index-file.js';
 import { type SessionCallerCatalog } from './session-callers.js';
 import { type SessionRefContext } from './session-refs.js';
 import { type SessionCaller, type SessionCallResult } from './session-routes.js';
-import { CliError } from './cli-output.js';
+import { CliError } from './command-output.js';
 import { runHostRequest } from './host-command.js';
 import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, RemoteHostCatalog, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 

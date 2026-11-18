@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -73,10 +74,10 @@ function summary(providerId: string, nativeSessionId: string, updatedAt: string,
 
 async function host(registrations: ReturnType<typeof provider>[], sessionBin?: string) {
   const state = await temporary('session-callers-');
-  const store = new SessionCallerStore(join(state, 'session-callers.json'));
+  const store = new SessionCallerStore(join(state, 'session-callers.json'), atomicWriteFile);
   const endpoint = await sessionCallerEndpoint(state);
   const runtime = createAgentHostRuntime({ registrations: registrations.map(item => item.registration), hostId: async () => 'host-1',
-    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote', ...(sessionBin ? { sessionBin } : {}) }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json')) });
+    sessionCallers: { store, endpoint, skills: '/controller/skills/agent-remote', ...(sessionBin ? { sessionBin } : {}) }, sessionRefs: new SessionRefStore(join(state, 'session-refs.json'), atomicWriteFile) });
   cleanup.push(() => runtime.close());
   return { runtime, store, endpoint, state };
 }
@@ -89,14 +90,14 @@ const attach = (runtime: AgentHostRuntime, agentId: string, body: Record<string,
 describe('session credentials', () => {
   it('keeps one credential per session across Controller restarts and identifies only bound credentials', async () => {
     const path = join(await temporary('session-store-'), 'callers.json');
-    const store = new SessionCallerStore(path);
+    const store = new SessionCallerStore(path, atomicWriteFile);
     const token = await store.issue({ providerId: 'claude', nativeSessionId: 'one' });
     expect(token).toMatch(/^[\w-]{43}$/);
     expect(await store.issue({ providerId: 'claude', nativeSessionId: 'one' })).toBe(token);
     const pending = store.prepare();
     expect(store.identify(pending.token)).toBeUndefined();
     await pending.bind({ providerId: 'codex', nativeSessionId: 'thread' });
-    const restarted = new SessionCallerStore(path);
+    const restarted = new SessionCallerStore(path, atomicWriteFile);
     await restarted.ready;
     expect(restarted.identify(token)).toEqual({ providerId: 'claude', nativeSessionId: 'one' });
     expect(restarted.identify(pending.token)).toEqual({ providerId: 'codex', nativeSessionId: 'thread' });
@@ -106,7 +107,7 @@ describe('session credentials', () => {
 
   it('revokes and never again issues a credential for a share recipient\'s session', async () => {
     const path = join(await temporary('session-store-'), 'callers.json');
-    const store = new SessionCallerStore(path);
+    const store = new SessionCallerStore(path, atomicWriteFile);
     const token = await store.issue({ providerId: 'claude', nativeSessionId: 'shared' });
     await store.markShared({ providerId: 'claude', nativeSessionId: 'shared' });
     expect(store.identify(token)).toBeUndefined();
@@ -114,7 +115,7 @@ describe('session credentials', () => {
     const pending = store.prepare();
     await pending.bind({ providerId: 'claude', nativeSessionId: 'shared' });
     expect(store.identify(pending.token)).toBeUndefined();
-    const restarted = new SessionCallerStore(path);
+    const restarted = new SessionCallerStore(path, atomicWriteFile);
     await restarted.ready;
     expect(restarted.isShared({ providerId: 'claude', nativeSessionId: 'shared' })).toBe(true);
     expect(await readFile(path, 'utf8')).not.toContain(token!);
@@ -271,7 +272,7 @@ describe('session commands', () => {
     const removed = await runtime.control({ method: 'POST', path: '/remote/session/refs', body: JSON.stringify({ providerId: 'claude', nativeSessionId: 'old', action: 'remove', target: { providerId: 'codex', nativeSessionId: 'thread' } }) });
     expect(JSON.parse(removed.body)).toMatchObject({ revision: 2, refs: [] });
     expect((await run(['read', 'self'])).output.session).not.toHaveProperty('refs');
-    expect(await new SessionRefStore(join(state, 'session-refs.json')).read({ providerId: 'claude', nativeSessionId: 'old' })).toMatchObject({ revision: 2, refs: [] });
+    expect(await new SessionRefStore(join(state, 'session-refs.json'), atomicWriteFile).read({ providerId: 'claude', nativeSessionId: 'old' })).toMatchObject({ revision: 2, refs: [] });
   });
 
   it('reports why a command cannot be answered', async () => {

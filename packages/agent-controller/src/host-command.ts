@@ -1,6 +1,6 @@
 import { createConnection } from 'node:net';
-import { commandChannel, type CommandAnswer, type ManagementAccess } from './cli-client.js';
-import { CliError, EXIT_OK, operationId, operationUuid, parseOptions, printError, printResult, usage } from './cli-output.js';
+import { commandChannel, type CommandAnswer, type ManagementAccess } from './command-client.js';
+import { CliError, EXIT_OK, operationId, operationUuid, parseOptions, printError, printResult, usage } from './command-output.js';
 import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 
 const help = `Usage: agent-remote-controller host <command>

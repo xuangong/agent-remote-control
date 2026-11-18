@@ -5,7 +5,7 @@ import {mkdir, realpath} from 'node:fs/promises';
 import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { CopilotAgentProvider, type CopilotAgentProviderOptions } from '@orchardworks/agent-provider-copilot';
+import { CopilotAgentProvider, type CopilotAgentProviderOptions } from './providers.js';
 import { copilotExecutable } from './copilot-executable.js';
 import { createCopilotSessionDirectory } from './copilot-directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';

@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ it('releases a Claude session a raw terminal turn moved on, reads it again at th
   const fixture = await nativeFixture((body, response) => nativeReply(response, [{ type: 'text', text: JSON.stringify(body.messages).includes('SECOND_PROMPT') ? 'TERMINAL_SECOND_REPLY' : 'TERMINAL_FIRST_REPLY' }]));
   try {
     const provider = new ClaudeAgentProvider({ ...fixture.options, catalog: createClaudeCatalog(fixture.options.env, 15000) });
-    const directory = createClaudeSessionDirectory(provider, [], undefined, undefined, new SessionCreationStore(join(fixture.home, 'creations'), 'claude'));
+    const directory = createClaudeSessionDirectory(provider, [], undefined, undefined, new SessionCreationStore(join(fixture.home, 'creations'), atomicWriteFile, atomicWriteFile, 'claude'));
     const relay = await startRelayHost({ registrations: [{ adapter: provider, directory }], idleGraceMs: 100 });
     const id = randomUUID();
     expect(await terminal(fixture, ['--session-id', id, 'First prompt'])).toContain('TERMINAL_FIRST_REPLY');

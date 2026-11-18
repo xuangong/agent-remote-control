@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { hostRequest, relayHostAccess, runHostRequest, type HostAccess, type HostResponse } from './host-command.js';
-import { CliError } from './cli-output.js';
+import { CliError } from './command-output.js';
 
 function access(routes: Record<string, (body?: unknown) => HostResponse>, registered: string | null = 'host-1') {
   const id = registered ?? undefined;

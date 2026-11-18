@@ -5,42 +5,6 @@
     {
       "rule": "layer",
       "from": [
-        "packages/agent-controller/src/**"
-      ],
-      "to": [
-        "controller-process"
-      ],
-      "max": 29,
-      "owner": "M10",
-      "reason": "The Controller session code still calls the command and process modules (cli output, executables, daemon runner, tunnel) that belong to its process shell; M10 splits session-core from process/ so the dependency runs one way."
-    },
-    {
-      "rule": "layer",
-      "from": [
-        "packages/agent-controller/src/**"
-      ],
-      "to": [
-        "platform"
-      ],
-      "max": 11,
-      "owner": "M10",
-      "reason": "State files are written through the platform helper directly; M10 puts them behind the StateStore port."
-    },
-    {
-      "rule": "layer",
-      "from": [
-        "packages/agent-controller/src/**"
-      ],
-      "to": [
-        "tunnel-node"
-      ],
-      "max": 1,
-      "owner": "M10",
-      "reason": "previews.ts opens the Node tunnel registry itself; M10 moves it behind the Controller process composition."
-    },
-    {
-      "rule": "layer",
-      "from": [
         "packages/agent-session-runtime/src/**"
       ],
       "to": [
@@ -49,18 +13,6 @@
       "max": 2,
       "owner": "M10",
       "reason": "The resource stores write files through the platform helper; they move behind the same StateStore port as the Controller state."
-    },
-    {
-      "rule": "controller-concrete-provider",
-      "from": [
-        "packages/agent-controller/src/**"
-      ],
-      "to": [
-        "provider-*"
-      ],
-      "max": 17,
-      "owner": "M10",
-      "reason": "Provider registration, discovery and the provider commands each import their concrete provider; M10 leaves one providers.ts composition root."
     },
     {
       "rule": "controller-knows-relay",

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicWriteFile } from '@orchardworks/agent-platform';
+import type { StateFileWriter } from './state-file.js';
 import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 
 /** How long a creation handle is kept; a session that has not received input by then no longer reopens empty. */
@@ -14,7 +14,7 @@ export const SESSION_CREATION_RETENTION_MS = 30 * 24 * 60 * 60_000;
  */
 export class SessionCreationStore {
   private writes = Promise.resolve();
-  constructor(private readonly directory: string, private readonly providerId: string, private readonly now: () => number = Date.now) {}
+  constructor(private readonly directory: string, private readonly providerId: string, private readonly writeState: StateFileWriter, private readonly now: () => number = Date.now) {}
   private path(sessionId: string) { return join(this.directory, `${createHash('sha256').update(sessionId).digest('hex')}.json`); }
   async get(sessionId: string): Promise<AgentPersistenceHandle | undefined> {
     const saved = await this.read(this.path(sessionId));
@@ -25,7 +25,7 @@ export class SessionCreationStore {
     const saved = { handle: { providerId: handle.providerId, sessionId: handle.sessionId, opaque: handle.opaque }, createdAt: this.now() };
     return this.serialize(async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      await atomicWriteFile(this.path(handle.sessionId), JSON.stringify(saved));
+      await this.writeState(this.path(handle.sessionId), JSON.stringify(saved));
       for (const name of await readdir(this.directory)) {
         if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
         const existing = await this.read(join(this.directory, name));

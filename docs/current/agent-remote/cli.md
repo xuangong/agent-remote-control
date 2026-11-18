@@ -27,7 +27,7 @@ Replaced commands are gone: `share` (`session list` and `session link --qr`), `c
 
 ## Who asks
 
-Each command resolves its caller once, in this order (`cli-client.ts`):
+Each command resolves its caller once, in this order (`command-client.ts`):
 
 1. **A session's shell** (`AGENT_REMOTE_SESSION_TOKEN` and `AGENT_REMOTE_SESSION_SOCKET`): the session socket, as that session.
 2. **An ordinary terminal** of a computer whose Controller runs: the management socket with the daemon token, as the Host owner.

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readWindowsCodexDaemon, requestWindowsCodexDaemon, windowsCodexDaemonDirectory } from '@orchardworks/agent-provider-codex';
+import { readWindowsCodexDaemon, requestWindowsCodexDaemon, windowsCodexDaemonDirectory } from './providers.js';
 
 export async function manageWindowsCodexDaemon(action: string, executable: string, home: string, env: NodeJS.ProcessEnv): Promise<number> {
   if (!['start', 'restart', 'stop', 'status', 'version', '--help', '-h'].includes(action)) throw new Error('Use codex daemon start, restart, stop, or status.');

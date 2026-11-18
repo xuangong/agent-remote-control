@@ -1,3 +1,5 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
+import { loadClaudeProvider } from './providers.js';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {homedir} from 'node:os';
@@ -34,16 +36,16 @@ export async function createClaudeHostRegistration(options: ClaudeHostRegistrati
   const supported = match && (Number(match[1]) > 2 || Number(match[1]) === 2 &&
     (Number(match[2]) > 1 || Number(match[2]) === 1 && Number(match[3]) >= 247));
   if (!supported) throw new Error(`Claude executable must be version 2.1.247 or newer; got ${stdout.trim() || 'unknown'}.`);
-  const { ClaudeAgentProvider, isResumableClaudePermissionMode } = await import('@orchardworks/agent-provider-claude');
+  const { ClaudeAgentProvider, isResumableClaudePermissionMode } = await loadClaudeProvider();
   const profile = env.CLAUDE_CONFIG_DIR ?? join(env.HOME ?? env.USERPROFILE ?? homedir(), '.claude');
   await mkdir(profile, {recursive: true});
   const canonicalProfile = await realpath(profile);
   const scope = createHash('sha256').update(canonicalProfile).digest('hex');
-  const permissionModes = new SessionPermissionModeStore(options.permissionModeDirectory ?? join(homedir(), '.agent-remote-control', 'session-permissions', 'claude', scope), isResumableClaudePermissionMode);
+  const permissionModes = new SessionPermissionModeStore(options.permissionModeDirectory ?? join(homedir(), '.agent-remote-control', 'session-permissions', 'claude', scope), isResumableClaudePermissionMode, atomicWriteFile);
   const provider = new ClaudeAgentProvider({ executable, env, restrictedNative: options.restrictedNative, requestTimeoutMs: options.requestTimeoutMs, onDiagnostic: options.onDiagnostic, permissionModes });
   const ownership = {root: join(canonicalProfile, '.arc-session-owners'), onDiagnostic: (event: unknown) => options.onDiagnostic?.(JSON.stringify(event))};
   const references = new SessionReferenceStore(options.referenceDirectory ?? join(homedir(), '.agent-remote-control', 'session-references', 'claude', scope), 'claude');
   // Claude saves a session only with its first message.
-  const creations = new SessionCreationStore(options.creationDirectory ?? join(homedir(), '.agent-remote-control', 'session-creations', 'claude', scope), 'claude');
+  const creations = new SessionCreationStore(options.creationDirectory ?? join(homedir(), '.agent-remote-control', 'session-creations', 'claude', scope), 'claude', atomicWriteFile);
   return { nativePermissionControl: true, nativeVersion: `${match[1]}.${match[2]}.${match[3]}`, adapter: provider, directory: createClaudeSessionDirectory(provider, options.workspaces ?? [], ownership, references, creations) };
 }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import type { CommandChannel } from './cli-client.js';
+import type { CommandChannel } from './command-client.js';
 import { handoffSession, namedSession, starSession } from './session-relay.js';
 
 const credentials = { serverUrl: 'https://relay.example', basePath: '/u/alice/', cookieName: 'arc_session', token: 't'.repeat(43), expiresAt: 0 };

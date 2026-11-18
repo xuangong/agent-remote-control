@@ -3,7 +3,7 @@ import { AgentSessionInUseError, serializeAgentEmptyCreationResult, resolveAgent
 import { NativeSessionOwnerError } from './native-session-owner.js';
 import { SessionReferenceStore, disposeAfterSourceGrantFailure, setSourceReferenceRemoved, sourceReferenceGuard, sourceReferenceState, sourceSessionExtensions, type SourceBindingReader } from './session-reference.js';
 import { randomUUID } from 'node:crypto';
-import type { CodexAppServerProvider, CodexSessionSummary } from '@orchardworks/agent-provider-codex';
+import type { CodexAppServerProvider, CodexSessionSummary } from './providers.js';
 import type { AgentProviderAdapter, AgentPersistenceHandle, AgentSession, AgentHistoryQuery } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostWorkspace } from './host.js';
 import { requireSessionExtensionIdentity, sessionExtensionIdentity } from './session-extension-identity.js';

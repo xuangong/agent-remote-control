@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { CliError, EXIT_OK, parseOptions, printError, printResult, usage } from './cli-output.js';
+import { CliError, EXIT_OK, parseOptions, printError, printResult, usage } from './command-output.js';
 import { relayError, relayRequest, type CliCredentials } from './relay-client.js';
 
 const help = `Usage: agent-remote-controller api <GET|POST|PUT|DELETE> <path> [--body JSON | --body-file PATH|-]

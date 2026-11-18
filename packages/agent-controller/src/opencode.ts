@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SessionReferenceStore } from './session-reference.js';
 import { createOpenCodeSessionDirectory } from './opencode-directory.js';
-import type { OpenCodeAgentProviderOptions } from '@orchardworks/agent-provider-opencode';
+import { loadOpenCodeProvider, type OpenCodeAgentProviderOptions } from './providers.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 
 export interface OpenCodeHostRegistrationOptions extends OpenCodeAgentProviderOptions {
@@ -13,7 +13,7 @@ export interface OpenCodeHostRegistrationOptions extends OpenCodeAgentProviderOp
 }
 
 export async function createOpenCodeHostRegistration(options: OpenCodeHostRegistrationOptions = {}): Promise<AgentHostProviderRegistration> {
-  const { OpenCodeAgentProvider } = await import('@orchardworks/agent-provider-opencode');
+  const { OpenCodeAgentProvider } = await loadOpenCodeProvider();
   const { workspaces = [], referenceDirectory, probe, ...providerOptions } = options;
   const provider = new OpenCodeAgentProvider({ ...providerOptions, restrictedNative: options.restrictedNative ?? false });
   let callbacksAvailable = false;

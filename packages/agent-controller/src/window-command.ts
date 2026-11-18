@@ -3,7 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { createWindowView, decodeWorkspaceWindow, isWindowOperation, isWindowOperationResult, isWindowSessionBinding,
   type WindowOperation, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 
-import { CliError, printError } from './cli-output.js';
+import { CliError, printError } from './command-output.js';
 import { relayRequest, type CliCredentials } from './relay-client.js';
 
 class CommandError extends Error {

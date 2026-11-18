@@ -6,7 +6,7 @@ import { sanitizeNativeEnvironment } from './execution-policy.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { nativeInvocation, resolveNativeExecutable } from './platform/executables/index.js';
-import { CodexAppServerProvider, type CodexAppServerProviderOptions } from '@orchardworks/agent-provider-codex';
+import { CodexAppServerProvider, type CodexAppServerProviderOptions } from './providers.js';
 import { createCodexSessionDirectory } from './directory.js';
 import type { AgentHostProviderRegistration, AgentHostWorkspace } from './host.js';
 

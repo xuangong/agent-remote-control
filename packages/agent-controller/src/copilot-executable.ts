@@ -4,7 +4,7 @@ import {dirname, basename} from 'node:path';
 import {access, realpath} from 'node:fs/promises';
 import {constants} from 'node:fs';
 import {delimiter, isAbsolute, join, resolve} from 'node:path';
-import {resolveCopilotExecutable} from '@orchardworks/agent-provider-copilot';
+import {resolveCopilotExecutable} from './providers.js';
 import {resolveNativeExecutable} from './platform/executables/index.js';
 
 /** Keep terminal and SDK launches on the same configured native installation. */

@@ -1,3 +1,4 @@
+import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { ClaudeAgentProvider } from '@orchardworks/agent-provider-claude';
@@ -13,7 +14,7 @@ it('reopens a Claude session that never received input after a Controller restar
   const policy = (await createHostExecutionPolicy({ AGENT_HOST_WORKSPACE: f.cwd }))!;
   const controller = () => protectHostDirectory(createClaudeSessionDirectory(
     new ClaudeAgentProvider({ ...f.options, catalog: createClaudeCatalog(f.options.env, 15000) }), [], undefined, undefined,
-    new SessionCreationStore(join(f.home, 'creations'), 'claude')), policy);
+    new SessionCreationStore(join(f.home, 'creations'), atomicWriteFile, atomicWriteFile, 'claude')), policy);
   let directory = controller();
   try {
     const id = await directory.create({ cwd: f.cwd, model: 'claude-sonnet-4-5-20250929' });

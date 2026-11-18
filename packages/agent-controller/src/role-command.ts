@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { commandChannel } from './cli-client.js';
-import { CliError, EXIT_OK, printError, printResult, usage } from './cli-output.js';
+import { commandChannel } from './command-client.js';
+import { CliError, EXIT_OK, printError, printResult, usage } from './command-output.js';
 import { SESSION_SOCKET_VARIABLE, SESSION_TOKEN_VARIABLE } from './session-callers.js';
 
 const help = `Usage: agent-remote-controller role <command>

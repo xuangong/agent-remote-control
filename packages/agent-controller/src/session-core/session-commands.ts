@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { bindAgentSessionTools, type AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import type { SessionWireAgent, SessionWireOperation } from '@orchardworks/agent-session-runtime';
 
-import { operationUuid } from '../cli-output.js';
+import { operationUuid } from '../operation-uuid.js';
 import { handleRoleRequest } from '../role-routes.js';
 import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from '../session-routes.js';
 import type { SessionRefContext } from '../session-refs.js';

@@ -1,4 +1,4 @@
-import { openCodeVersionIssue } from '@orchardworks/agent-provider-opencode';
+import { openCodeVersionIssue } from './providers.js';
 import { atomicWriteFile } from '@orchardworks/agent-platform';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, link, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';

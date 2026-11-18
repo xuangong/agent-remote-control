@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicWriteFile } from '@orchardworks/agent-platform';
+import type { StateFileWriter } from './state-file.js';
 
 /**
  * The permission mode each native session's owner last confirmed, kept on this Host so the session reopens in it
@@ -9,7 +9,7 @@ import { atomicWriteFile } from '@orchardworks/agent-platform';
  */
 export class SessionPermissionModeStore<Mode extends string> {
   private writes = Promise.resolve();
-  constructor(private readonly directory: string, private readonly accepts: (mode: unknown) => mode is Mode) {}
+  constructor(private readonly directory: string, private readonly accepts: (mode: unknown) => mode is Mode, private readonly writeState: StateFileWriter) {}
   private path(sessionId: string) { return join(this.directory, `${createHash('sha256').update(sessionId).digest('hex')}.json`); }
   async read(sessionId: string): Promise<Mode | undefined> {
     let value: unknown;
@@ -20,7 +20,7 @@ export class SessionPermissionModeStore<Mode extends string> {
   write(sessionId: string, permissionMode: Mode): Promise<void> {
     const write = this.writes.then(async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
-      await atomicWriteFile(this.path(sessionId), JSON.stringify({ sessionId, permissionMode }));
+      await this.writeState(this.path(sessionId), JSON.stringify({ sessionId, permissionMode }));
     });
     this.writes = write.catch(() => {});
     return write;

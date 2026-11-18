@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { SessionJournal, type JournalRowInput } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 export const row = (itemKey: string, text: string): JournalRowInput => ({
   itemKey, providerId: 'copilot', sourceKey: `source:${itemKey}:${text}`, occurredAt: 1_725_000_000_000, turnId: 'turn-1',
@@ -10,7 +11,7 @@ export const row = (itemKey: string, text: string): JournalRowInput => ({
 
 /** A journal of complete rows in `epoch`, as a Controller would have published them. */
 export function journalOf(epoch: string, rows: ReadonlyArray<readonly [string, string]>): SessionJournal {
-  const journal = SessionJournal.create('host:copilot:one', epoch);
+  const journal = SessionJournal.create('host:copilot:one', epoch, sequentialEpochs());
   const { generation } = journal.claim('controller');
   let sequence = 0;
   for (const [key, text] of rows) {

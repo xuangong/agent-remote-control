@@ -5,6 +5,7 @@ import { MemoryJournalStore } from './journal-store.js';
 import { SessionJournal } from './session-journal.js';
 import { utf8ByteLength } from './utf8-size.js';
 import type { JournalItemInput, JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 const ROOM = 1_000_000;
 const row = (key: string, text: string, extra: Partial<JournalRowInput> = {}): JournalRowInput => ({
@@ -161,7 +162,7 @@ describe('open items', () => {
 describe('the room', () => {
   it('counts the meta and the live-only items, and nothing else, as what a replacement keeps', () => {
     const { journal } = seeded([live('l'), done('a', 'a'.repeat(300))]);
-    const meta = new SessionJournal({ meta: journal.state().meta, items: [] }).residentBytes();
+    const meta = new SessionJournal({ meta: journal.state().meta, items: [] }, sequentialEpochs()).residentBytes();
     expect(journal.keptBytes()).toBe(meta + journal.liveOnlyBytes());
     expect(journal.liveOnlyBytes()).toBeGreaterThan(0);
   });
@@ -190,7 +191,7 @@ describe('no write for a restatement', () => {
   it('is unchanged when a journal restored from its state is synced again', () => {
     const { journal, sync } = seeded([done('a'), live('l'), open('o', 'streaming')]);
     sync([done('a'), open('o', 'streaming')]);
-    const restored = new SessionJournal(journal.state());
+    const restored = new SessionJournal(journal.state(), sequentialEpochs());
     const { generation, watermark } = restored.claim(PUBLISHER);
     expect(restored.sync({ publisherId: PUBLISHER, generation, sequence: watermark + 1 }, [done('a'), open('o', 'streaming')], { roomBytes: ROOM })).toEqual({ outcome: 'unchanged' });
   });

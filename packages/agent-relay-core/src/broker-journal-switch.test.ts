@@ -3,6 +3,7 @@ import { afterEach, expect, it } from 'vitest';
 
 import { createHostBroker, type RemoteHostBrokerState } from './index.js';
 import { DIGEST, HOST_ID, PUBLIC_ID, row, SESSION_KEY, seedJournal, sleep, snapshot, socketPair, startRelay, STORE_KEY, type Wire } from './test-utils/journal-session-fixture.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const started: Array<{ dispose(): Promise<void> }> = [];
 afterEach(async () => { for (const relay of started.splice(0)) await relay.dispose(); });
@@ -111,7 +112,7 @@ const revoke = (broker: ReturnType<typeof revocation>) => broker.handleRequest(n
   method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://relay.example' }, body: '{}' }), {});
 
 async function otherHostJournal(store: MemoryJournalStore) {
-  const other = SessionJournal.create('other-host:codex:native-session');
+  const other = SessionJournal.create('other-host:codex:native-session', 'epoch-1', sequentialEpochs());
   const { generation } = other.claim('controller-1');
   other.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
   await store.apply(other.takeChanges()!);
@@ -159,7 +160,7 @@ it('keeps a deletion the store failed in the saved state and finishes it when th
 it('finishes the deletion of a Host revoked while another deletion runs, without waiting for the next start', async () => {
   const memory = new MemoryJournalStore();
   await seedJournal(memory);
-  const other = SessionJournal.create('host-2:codex:native-session');
+  const other = SessionJournal.create('host-2:codex:native-session', 'epoch-1', sequentialEpochs());
   const { generation } = other.claim('controller-1');
   other.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
   await memory.apply(other.takeChanges()!);
@@ -219,7 +220,7 @@ function storeDeleting(memory: MemoryJournalStore, decide: (prefix: string) => '
     } } };
 }
 async function goneJournal(store: MemoryJournalStore, hostId: string) {
-  const journal = SessionJournal.create(`${hostId}:codex:native-session`);
+  const journal = SessionJournal.create(`${hostId}:codex:native-session`, 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   journal.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
   await store.apply(journal.takeChanges()!);

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { SessionJournal, type JournalRowInput } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 /**
  * The real client over a real WebSocket, reading pages that a real `SessionJournal` and `pageJournal` produce. The journal updates its
@@ -20,7 +21,7 @@ const closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
 
 it('keeps older history reachable when a reconnect brings an item updated above the rows the client holds', async () => {
-  const journal = SessionJournal.create('host:copilot:one', 'epoch-one');
+  const journal = SessionJournal.create('host:copilot:one', 'epoch-one', sequentialEpochs());
   const { generation } = journal.claim('controller');
   let sequence = 0;
   const publication = () => ({ publisherId: 'controller', generation, sequence: ++sequence });

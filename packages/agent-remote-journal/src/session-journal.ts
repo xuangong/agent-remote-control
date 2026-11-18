@@ -38,13 +38,18 @@ export class SessionJournal {
   protected readonly liveOnlySizes = new Map<string, number>();
   protected liveOnlyTotal = 0;
 
-  static create(sessionKey: string, epoch: string = crypto.randomUUID()): SessionJournal {
-    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null }, items: [] });
+  /** `epoch` is the new journal's, drawn by the caller; `newEpoch` supplies the epochs of later replacements. */
+  static create(sessionKey: string, epoch: string, newEpoch?: () => string): SessionJournal {
+    const journal = new SessionJournal({ meta: { sessionKey, epoch, nextSeq: 1, minSeq: 1, publisher: null }, items: [] }, newEpoch);
     journal.metaDirty = true;
     return journal;
   }
 
-  constructor(state: JournalState) {
+  /**
+   * `newEpoch` is where the epoch of a replacement comes from: the journal draws no random value itself, so the caller (the Relay's
+   * ids, or a test's sequence) decides it. A journal without one cannot replace its window.
+   */
+  constructor(state: JournalState, private readonly newEpoch: () => string = () => { throw new Error('A journal needs an epoch source to replace its window.'); }) {
     this.meta = structuredClone(state.meta);
     this.items = structuredClone(state.items).sort((left, right) => left.seqStart - right.seqStart);
     for (const item of this.items) this.byKey.set(item.itemKey, item);
@@ -384,7 +389,7 @@ export class SessionJournal {
 
   /** Starts the new epoch of a replacement: the items in order with the carried ones, and resets what depended on the old epoch. */
   protected rebuild(publication: JournalPublication, items: readonly JournalItemInput[]): string {
-    const epoch = crypto.randomUUID();
+    const epoch = this.newEpoch();
     const next = replacementOrder(this.items, items).map((entry, offset): JournalItem => {
       const seq = offset + 1;
       if (entry.kind === 'carried') {

@@ -4,6 +4,7 @@ import { afterEach, expect, it } from 'vitest';
 import { createHostBroker, type RelaySocket } from './index.js';
 import { createDiagnosticJournal } from './diagnostic-journal.js';
 import type { RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const close: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); });
@@ -167,7 +168,7 @@ it('keeps the journals of two Hosts apart even for the same session', async () =
 });
 it('asks the Controller for bodies and resolves with what the journal took', async () => {
   const { broker, host, open, send, take, store, storeKey } = await connectedHost();
-  const seeded = SessionJournal.create(storeKey);
+  const seeded = SessionJournal.create(storeKey, 'epoch-1', sequentialEpochs());
   const { generation } = seeded.claim('controller-1');
   seeded.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Hello'));
   seeded.complete({ publisherId: 'controller-1', generation, sequence: 2 }, 'm1', DIGEST);

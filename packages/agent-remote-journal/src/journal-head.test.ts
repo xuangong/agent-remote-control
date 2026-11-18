@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { expectNoChange, openJournal, PUBLISHER, scribble } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import { JournalFencedError, JournalInvalidPublicationError } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 const snapshot = (status: AgentSnapshotPayload['status']): AgentSnapshotPayload => ({
   id: 'session-1', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status, activeTurn: null,
@@ -42,7 +43,7 @@ describe('journal head', () => {
   it('survives a store round trip and does not alias the stored value', () => {
     const { journal, publish } = openJournal();
     journal.setHead(publish(), { snapshot: snapshot('running'), observedAt: 5 });
-    const restored = new SessionJournal(journal.state());
+    const restored = new SessionJournal(journal.state(), sequentialEpochs());
     expect(restored.head).toEqual(journal.head);
     const copy = journal.head!;
     copy.observedAt = 99;
@@ -54,7 +55,7 @@ describe('journal head', () => {
     expect(journal.publisher).toEqual({ publisherId: PUBLISHER, generation: 1, watermark: 0 });
     journal.setHead(publish(), { snapshot: snapshot('idle'), observedAt: 1 });
     expect(journal.publisher).toEqual({ publisherId: PUBLISHER, generation: 1, watermark: 1 });
-    expect(SessionJournal.create('host-1:codex:other').publisher).toBeNull();
+    expect(SessionJournal.create('host-1:codex:other', 'epoch-1', sequentialEpochs()).publisher).toBeNull();
   });
 
   it('changes nothing when the publication is refused', () => {

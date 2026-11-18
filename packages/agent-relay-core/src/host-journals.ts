@@ -5,6 +5,7 @@ import {
 import { JOURNAL_MESSAGE_MAX_BYTES, type BackgroundActivity, type CompleteItemInput, type JournalPublishEntry, type JournalRefusalReason, type ResourceBinding, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
 
 import { JournalHeadIndex } from './journal-head-index.js';
+import { systemIds, type RelayIds } from './relay-ids.js';
 
 /** Journals kept in memory, for the whole Relay. */
 const CACHE_MAX_JOURNALS = 64;
@@ -23,6 +24,8 @@ const RETAIN_MIN_ITEMS = 200;
 
 export interface HostJournalsOptions {
   store: JournalStore;
+  /** Where the epochs of new journals and of replaced windows come from; defaults to the system's secure source. */
+  ids?: RelayIds;
   /** How much the service keeps in memory; a journal is read from the store again when it is needed after it was dropped. */
   cache?: { maxJournals?: number; maxBytes?: number };
   /** Safety bounds on growth. They are not the retention policy. */
@@ -196,6 +199,7 @@ type HostUsage = { total: number; sessions: Map<string, number> };
 
 export function createHostJournals(options: HostJournalsOptions): HostJournals {
   const { store } = options;
+  const ids = options.ids ?? systemIds;
   const cacheLimits = {
     maxJournals: wholeNumber('Journal cache journals', options.cache?.maxJournals ?? CACHE_MAX_JOURNALS),
     maxBytes: wholeNumber('Journal cache bytes', options.cache?.maxBytes ?? CACHE_MAX_BYTES),
@@ -264,7 +268,7 @@ export function createHostJournals(options: HostJournalsOptions): HostJournals {
       return cached.journal;
     }
     const saved = await store.load(key);
-    const journal = saved ? new SessionJournal(saved) : create ? SessionJournal.create(key) : undefined;
+    const journal = saved ? new SessionJournal(saved, ids.uuid) : create ? SessionJournal.create(key, ids.uuid(), ids.uuid) : undefined;
     if (journal) {
       windows.set(journal, windowOf(journal));
       remember(hostId, sessionKey, journal);

@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
 import { createDiagnosticJournal } from '@orchardworks/agent-relay-core/diagnostic-journal';
 import { createAgentHost, type AgentHostProviderRegistration } from '../host.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const closers: Array<() => Promise<void> | void> = [];
 /** Closes every host this file's tests started; call it from `afterEach`. */
@@ -62,7 +63,7 @@ export async function startRelayHost(options: { registrations: AgentHostProvider
     attach: async (providerId: string, nativeSessionId: string) => { expect((await request('attach', { method: 'POST', body: JSON.stringify({ providerId, nativeSessionId }) }))?.status).toBe(200); },
     /** What the page's directory does: a listing, or the revision check it repeats every five seconds. */
     listing: async (providerId: string, revision = false) => { expect((await request(`${revision ? 'catalog/revision' : 'catalog'}?providerId=${providerId}`))?.status).toBe(200); },
-    journal: async (providerId: string, nativeSessionId: string): Promise<SessionJournal | undefined> => { const stored = await store.load(`${hostId}:${providerId}:${nativeSessionId}`); return stored ? new SessionJournal(stored) : undefined; },
+    journal: async (providerId: string, nativeSessionId: string): Promise<SessionJournal | undefined> => { const stored = await store.load(`${hostId}:${providerId}:${nativeSessionId}`); return stored ? new SessionJournal(stored, sequentialEpochs()) : undefined; },
     windows: () => recorded.filter(entry => entry.event === 'journal_window').map(entry => entry.reason),
     released: () => lifecycle.filter(event => event === 'session_idle_released').length,
     restart: async () => { await state.host.close(); state.host = create(); await state.host.ready; },

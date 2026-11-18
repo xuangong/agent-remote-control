@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
 import { createJournalSessionStream, type JournalReads } from './journal-session-stream.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 type Wire = Record<string, any>;
 const request = { kind: 'question' as const, requestId: 'question-1', questions: [{ questionId: 'q', header: 'Pick', prompt: 'Which?', required: true, selection: 'single' as const, options: [{ value: 'a', label: 'A', description: 'a' }], allowCustomText: false, allowDismiss: false }] };
@@ -16,7 +17,7 @@ const snapshot = (pending: unknown[] = []): AgentSnapshotPayload => ({
 const frame = (fields: Wire) => JSON.stringify({ protocolVersion: PROTOCOL_VERSION, ...fields });
 
 function fixture() {
-  const journal = SessionJournal.create('host-1:codex:thread-1');
+  const journal = SessionJournal.create('host-1:codex:thread-1', 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });

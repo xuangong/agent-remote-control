@@ -9,6 +9,7 @@ import { relayLink, relayPlayer } from '@orchardworks/agent-session-runtime/test
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 import type { JournalPublisherDiagnostic } from './publisher/journal-publisher.js';
 import { boundary, item, ScriptedSession, untilReal as until } from './test-utils/journal-scripted-session.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const closers: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); });
@@ -57,7 +58,7 @@ async function start(options: { capable: boolean; relayKeepsJournals?: false; id
   };
   const journal = async (): Promise<SessionJournal | undefined> => {
     const state = await store.load(`${hostId}:${SESSION}`);
-    return state ? new SessionJournal(state) : undefined;
+    return state ? new SessionJournal(state, sequentialEpochs()) : undefined;
   };
   return { host, store, attach, journal, sessions, relay, lifecycle };
 }

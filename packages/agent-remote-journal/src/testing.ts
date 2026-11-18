@@ -5,6 +5,12 @@ import { SessionJournal } from './session-journal.js';
 import type { JournalCatalog, JournalPublication, JournalRowInput } from './types.js';
 
 export { MemoryJournalStore };
+
+/** Epochs for a journal under test: `epoch-1`, `epoch-2`, ... */
+export function sequentialEpochs(): () => string {
+  let count = 0;
+  return () => `test-epoch-${++count}`;
+}
 export { describeDecision, heldTail, vectorText, windowItems, windowVectors } from './window-vectors.js';
 export type { VectorDigest, VectorExpectation, VectorItem, WindowVector } from './window-vectors.js';
 
@@ -81,7 +87,7 @@ const tail = { requestId: 'r', agentId: 'a', direction: 'tail' as const, limit: 
 
 /** A journal claimed by one publisher, with a function that numbers its publications. */
 function openJournal(sessionKey = 'host-1:codex:session-1') {
-  const journal = SessionJournal.create(sessionKey, 'epoch-1');
+  const journal = SessionJournal.create(sessionKey, 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = (): JournalPublication => ({ publisherId: 'controller-1', generation, sequence: ++sequence });
@@ -91,7 +97,7 @@ function openJournal(sessionKey = 'host-1:codex:session-1') {
 async function restore(store: JournalStore, sessionKey: string): Promise<SessionJournal> {
   const state = await store.load(sessionKey);
   if (!state) throw new Error(`${sessionKey} was not stored`);
-  return new SessionJournal(state);
+  return new SessionJournal(state, sequentialEpochs());
 }
 
 const keysOf = async (store: JournalStore, sessionKey: string) => (await store.load(sessionKey))?.items.map(({ itemKey }) => itemKey);

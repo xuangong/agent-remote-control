@@ -3,6 +3,7 @@ import type { JournalPublishEntry } from '@orchardworks/agent-remote-protocol';
 import { describe, expect, it } from 'vitest';
 
 import { createHostJournals, type HostJournals, type JournalOpened } from './host-journals.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -91,7 +92,7 @@ describe('createHostJournals', () => {
 
   it('refuses an append to an item whose body was evicted', async () => {
     const store = new MemoryJournalStore();
-    const seeded = SessionJournal.create(KEY);
+    const seeded = SessionJournal.create(KEY, 'epoch-1', sequentialEpochs());
     const { generation } = seeded.claim('controller-1');
     const publication = (sequence: number) => ({ publisherId: 'controller-1', generation, sequence });
     seeded.append(publication(1), row('m1', 'Hello'));
@@ -265,7 +266,7 @@ describe('createHostJournals', () => {
 
   it('puts bodies back only when their digest matches the recorded one', async () => {
     const store = new MemoryJournalStore();
-    const seeded = SessionJournal.create(KEY);
+    const seeded = SessionJournal.create(KEY, 'epoch-1', sequentialEpochs());
     const { generation } = seeded.claim('controller-1');
     const publication = (sequence: number) => ({ publisherId: 'controller-1', generation, sequence });
     seeded.append(publication(1), row('m1', 'Hello'));
@@ -292,7 +293,7 @@ describe('createHostJournals', () => {
 
   it('drops the cached journal and propagates an unexpected error, leaving the stored state', async () => {
     const store = new MemoryJournalStore();
-    const seeded = SessionJournal.create(KEY);
+    const seeded = SessionJournal.create(KEY, 'epoch-1', sequentialEpochs());
     seeded.claim('controller-1');
     const changes = seeded.takeChanges()!;
     await store.apply({ ...changes, meta: { ...changes.meta, minSeq: Number.MIN_SAFE_INTEGER + 1 } });
@@ -355,7 +356,7 @@ describe('createHostJournals', () => {
 
   it('refuses publications queued behind one whose journal could not be loaded, until the session is opened again', async () => {
     const memory = new MemoryJournalStore();
-    const seeded = SessionJournal.create(KEY);
+    const seeded = SessionJournal.create(KEY, 'epoch-1', sequentialEpochs());
     const { generation } = seeded.claim('controller-1');
     seeded.append({ publisherId: 'controller-1', generation, sequence: 1 }, row('m1', 'Stored'));
     seeded.complete({ publisherId: 'controller-1', generation, sequence: 2 }, 'm1', 'digest-m1');

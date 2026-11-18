@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { expectNoChange, indexOf, openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import { JournalInvalidPublicationError, type JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 const DIGEST = 'a'.repeat(64);
 const one: ResourceBinding = { locator: 'one.md', resourceId: 'r1', status: 'available' };
@@ -85,7 +86,7 @@ describe('a late row of a content-replacing type reaching an evicted item', () =
   it('still accepts a late row for an item stored without a type', () => {
     const state = withEvictedTool().journal.state();
     delete state.items[0]!.keptBody!.itemType;
-    const restored = new SessionJournal(state);
+    const restored = new SessionJournal(state, sequentialEpochs());
     const { generation } = restored.claim('controller-2');
     restored.append({ publisherId: 'controller-2', generation, sequence: 1 }, tool('completed'));
     expect(indexOf(restored)[0]).toMatchObject({ itemKey: 'tool:w1', resident: true, state: 'open' });

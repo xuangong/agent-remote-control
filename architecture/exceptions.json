@@ -27,15 +27,6 @@
       "reason": "The update commands read Controller releases through the helper in relay-core; M10 moves release lookup to a module both sides import."
     },
     {
-      "rule": "domain-impure",
-      "from": [
-        "packages/agent-remote-journal/src/**"
-      ],
-      "max": 1,
-      "owner": "M11",
-      "reason": "The journal draws its epoch with crypto.randomUUID; the Relay's Ids port arrives with BrokerState in M11, and the journal then receives its epochs from it."
-    },
-    {
       "rule": "root-too-large",
       "from": [
         "packages/agent-relay-core/src/broker.ts"

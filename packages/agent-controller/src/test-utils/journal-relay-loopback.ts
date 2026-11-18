@@ -5,6 +5,7 @@ import type { JournalRelayMessage, RemoteHostUplinkMessage } from '@orchardworks
 
 import type { JournalPublisher } from '../publisher/journal-publisher.js';
 import type { VirtualClock } from './journal-scripted-session.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 export const HOST_ID = 'host-1';
 
@@ -84,14 +85,14 @@ export function relayLoopback(clock: VirtualClock, options: RelayLoopbackOptions
     /** Marks the stored journal of a session incomplete, as a quota refusal of a live row does while the Controller is away. */
     async makeIncomplete(sessionKey: string): Promise<void> {
       const state = await store.load(`${HOST_ID}:${sessionKey}`);
-      const journal = new SessionJournal(state!);
+      const journal = new SessionJournal(state!, sequentialEpochs());
       journal.markIncomplete();
       await store.apply(journal.takeChanges());
     },
     /** The journal the Relay holds for a session. */
     async journal(sessionKey: string): Promise<SessionJournal | undefined> {
       const state = await store.load(`${HOST_ID}:${sessionKey}`);
-      return state ? new SessionJournal(state) : undefined;
+      return state ? new SessionJournal(state, sequentialEpochs()) : undefined;
     },
   };
 }

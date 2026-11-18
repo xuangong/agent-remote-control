@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { expectNoChange, indexOf, openJournal, PUBLISHER, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import { JournalInvalidPublicationError, JournalFencedError, JournalSequenceGapError, type JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 describe('SessionJournal', () => {
   it('stamps dense sequences and folds deltas into one item', () => {
@@ -128,7 +129,7 @@ describe('SessionJournal', () => {
       const state = journal.state();
       state.meta.minSeq = Number.MIN_SAFE_INTEGER + 1;
       state.items[0]!.seqStart = Number.MIN_SAFE_INTEGER + 1;
-      const exhausted = new SessionJournal(state);
+      const exhausted = new SessionJournal(state, sequentialEpochs());
       const publication = { publisherId: PUBLISHER, generation: 1, sequence: 2 };
       expectNoChange(exhausted, () => exhausted.prepend(publication, ['a', 'b', 'c'].map(key => ({ row: text(key, key, key), digest: key }))), /exhausted/);
     });
@@ -214,7 +215,7 @@ describe('publication sequences', () => {
     journal.append(publish(), text('m1', 'd1', 'one'));
     expect(journal.append(at(1), text('m1', 'd9', 'again'))).toBeUndefined();
     expect(() => journal.complete(at(2), 'unknown', 'digest')).toThrow();
-    const reloaded = new SessionJournal(journal.state());
+    const reloaded = new SessionJournal(journal.state(), sequentialEpochs());
     expect(() => reloaded.append(at(3), text('m2', 'd2', 'two'))).toThrow(JournalSequenceGapError);
     expect(indexOf(reloaded).map(entry => entry.itemKey)).toEqual(['m1']);
   });

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { HostStream, HostStreamOpener } from './journal-host-stream.js';
 import { createJournalSessions, type JournalGate } from './journal-sessions.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const headSnapshot = { id: 'native-id', providerId: 'codex', createdAt: '2026-11-15T00:00:00.000Z', updatedAt: '2026-11-15T00:00:01.000Z', status: 'idle', activeTurn: null, capabilities: { history: true, sendMessage: true, steer: true, cancel: true, readResource: true, interactions: { question: true, planApproval: true, toolApproval: true } }, pendingInteractions: [], runtimeInfo: { providerId: 'codex', sessionId: 'native-id', status: 'idle' } } as AgentSnapshotPayload;
 
@@ -21,7 +22,7 @@ function socket() {
 describe('the journal sessions of a Relay', () => {
   /** A session over a real journal whose bodies can be evicted, with fills and older reads that wait for the test. */
   async function journalSessions(options: { evict?: boolean; anchored?: boolean } = {}) {
-    const journal = SessionJournal.create('host-1:codex:thread-1');
+    const journal = SessionJournal.create('host-1:codex:thread-1', 'epoch-1', sequentialEpochs());
     const { generation } = journal.claim('controller-1');
     let sequence = 0;
     const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openNodeJournalDatabase } from './node-sqlite.js';
 import { SqlJournalStore } from './sql-journal-store.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -20,7 +21,7 @@ const row = (itemKey: string, text: string, turnId = 'turn-1'): JournalRowInput 
 
 /** A journal claimed by one publisher, with a function that numbers its publications. */
 function openJournal(sessionKey = 'host-1:codex:session-1') {
-  const journal = SessionJournal.create(sessionKey, 'epoch-1');
+  const journal = SessionJournal.create(sessionKey, 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   return { journal, at: () => ({ publisherId: 'controller-1', generation, sequence: ++sequence }) };

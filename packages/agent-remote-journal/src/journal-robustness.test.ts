@@ -5,6 +5,7 @@ import { MemoryJournalStore } from './journal-store.js';
 import { expectNoChange, openJournal, PUBLISHER, scribble, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import { JournalFencedError, JournalInvalidPublicationError, type JournalHead, type JournalPublication, type JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 describe('appending at scale', () => {
   it('folds 20,000 deltas into one item', () => {
@@ -161,7 +162,7 @@ describe('a store that replays the changes', () => {
   it('restores the journal that a few thousand mixed operations produced', async () => {
     const random = seeded(20_261_115);
     const pick = <T,>(values: readonly T[]): T => values[Math.floor(random() * values.length)] as T;
-    const journal = SessionJournal.create('host-1:codex:session-1', 'epoch-1');
+    const journal = SessionJournal.create('host-1:codex:session-1', 'epoch-1', sequentialEpochs());
     let publisherId = PUBLISHER;
     let { generation, watermark: sequence } = journal.claim(publisherId);
     const store = new MemoryJournalStore();
@@ -214,6 +215,6 @@ describe('a store that replays the changes', () => {
     const changes = journal.takeChanges();
     if (changes) await store.apply(changes);
     for (const operation of ['append', 'complete', 'alias', 'window', 'prepend', 'evict', 'fill', 'claim', 'stale', 'head']) expect(counts.get(operation)).toBeGreaterThan(20);
-    expect(new SessionJournal((await store.load(journal.sessionKey))!).state()).toEqual(journal.state());
+    expect(new SessionJournal((await store.load(journal.sessionKey))!, sequentialEpochs()).state()).toEqual(journal.state());
   });
 });

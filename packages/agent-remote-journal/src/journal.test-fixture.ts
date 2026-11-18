@@ -2,12 +2,13 @@ import { expect } from 'vitest';
 
 import { SessionJournal } from './session-journal.js';
 import type { JournalItemInput, JournalPublication, JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 export const PUBLISHER = 'controller-1';
 
 /** A journal claimed by one publisher, with a function that numbers its publications: each is the one after the journal's watermark, as a publisher that retries a refused entry numbers it. */
 export function openJournal() {
-  const journal = SessionJournal.create('host-1:codex:session-1', 'epoch-1');
+  const journal = SessionJournal.create('host-1:codex:session-1', 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim(PUBLISHER);
   const publish = (): JournalPublication => ({ publisherId: PUBLISHER, generation, sequence: (journal.publisher?.watermark ?? 0) + 1 });
   return { journal, publish };

@@ -7,6 +7,7 @@ import type { BoundedSuccessionAssociationFreeze, NativePrefixSuccessionAssociat
 import type { SuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import type { SourceRelation } from '@orchardworks/agent-remote-protocol/model';
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
+import type { RelayIds } from './relay-ids.js';
 import type { DiagnosticJournal } from './diagnostic-journal.js';
 import type { controllerReleases } from './controller-releases.js';
 import type { ControllerIdentity } from '@orchardworks/agent-remote-protocol';
@@ -133,5 +134,7 @@ export interface HostBrokerOptions {
   onSessionStates?(): void;
   now?(): number;
   scheduler?: BrokerScheduler;
+  /** Where ids and secrets come from; defaults to the system's secure source. */
+  ids?: RelayIds;
 }
 

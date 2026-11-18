@@ -3,6 +3,7 @@ import { SessionJournal, type JournalItemInput, type ReplacementReason, type Syn
 
 import { digestOf, groupItems, mergedRow, type TimelineItem } from '../publisher/journal-items.js';
 import { attachScripted, boundary, item, ScriptedSession, untilReal as until } from './journal-scripted-session.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 /** What one native session produced: everything it emitted while it ran, and what the adapter returns after it is reopened. */
 export interface ContinuityRun {
@@ -59,7 +60,7 @@ const outcomeOf = (result: SyncResult): ContinuityOutcome => result.outcome === 
  * opened again and read again. Items the reread leaves open (a tool with no completion) are allowed: they are sent without a digest.
  */
 export async function journalOfRun(live: readonly ProviderObservation[]) {
-  const journal = SessionJournal.create('host-1:continuity');
+  const journal = SessionJournal.create('host-1:continuity', 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   const roomBytes = Number.MAX_SAFE_INTEGER;
   let sequence = 0;

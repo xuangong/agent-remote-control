@@ -4,6 +4,7 @@ import { bodyFromRow } from './journal-items.js';
 import { openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
 import type { JournalRowInput } from './types.js';
+import { sequentialEpochs } from './testing.js';
 
 const encoder = new TextEncoder();
 const utf8 = (value: unknown) => encoder.encode(JSON.stringify(value)).length;
@@ -19,7 +20,7 @@ function expectSizeToHold(journal: SessionJournal, label: string): void {
   const expected = recomputed(journal);
   expect(journal.residentBytes(), `${label}: residentBytes`).toBe(expected);
   expect(journal.takeChanges()?.bytes ?? expected, `${label}: changes.bytes`).toBe(expected);
-  expect(new SessionJournal(journal.state()).residentBytes(), `${label}: after a reload`).toBe(expected);
+  expect(new SessionJournal(journal.state(), sequentialEpochs()).residentBytes(), `${label}: after a reload`).toBe(expected);
 }
 
 const snapshot = {

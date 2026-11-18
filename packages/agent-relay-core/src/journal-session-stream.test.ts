@@ -6,6 +6,7 @@ import type { JournalPublished } from './host-journals.js';
 import type { HostStream, HostStreamOpener, HostStreamSink } from './journal-host-stream.js';
 import { createJournalSessionStream, type JournalReads } from './journal-session-stream.js';
 import { BROKER_MAX_FRAME_BYTES } from './transport.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 type Wire = Record<string, any>;
 const DIGEST = 'a'.repeat(64);
@@ -49,7 +50,7 @@ interface FixtureOptions {
 }
 
 function fixture(options: FixtureOptions = {}) {
-  const journal = SessionJournal.create('host-1:codex:thread-1');
+  const journal = SessionJournal.create('host-1:codex:thread-1', 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });

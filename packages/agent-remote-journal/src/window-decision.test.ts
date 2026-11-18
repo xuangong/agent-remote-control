@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionJournal } from './session-journal.js';
 import { decideWindow } from './window-decision.js';
 import { describeDecision, heldTail, windowItems, windowVectors } from './window-vectors.js';
+import { sequentialEpochs } from './testing.js';
 
 describe('SessionJournal.sync over the window vectors', () => {
   it.each(windowVectors.map(vector => [vector.name, vector] as const))('%s', (_name, vector) => {
@@ -10,7 +11,7 @@ describe('SessionJournal.sync over the window vectors', () => {
     const journal = new SessionJournal({
       meta: { sessionKey: 'host-1:codex:session-1', epoch: 'epoch-1', nextSeq: tail.items.length + 1, minSeq: 1, publisher: { publisherId: 'p', generation: 1, watermark: 0 }, ...(vector.incomplete ? { incomplete: true as const } : {}) },
       items: [...tail.items],
-    });
+    }, sequentialEpochs());
     const roomBytes = vector.room === undefined ? Number.MAX_SAFE_INTEGER : journal.residentBytes() + vector.room.roomBytes - vector.room.resident;
     const result = journal.sync({ publisherId: 'p', generation: 1, sequence: 1 }, windowItems(vector), { roomBytes });
     const { expect: wanted } = vector;

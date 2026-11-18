@@ -5,6 +5,7 @@ import { decodeServerMessage } from '@orchardworks/agent-remote-protocol';
 import { indexOf, openJournal, text } from './journal.test-fixture.js';
 import type { JournalRowInput } from './types.js';
 import { SessionJournal } from './session-journal.js';
+import { sequentialEpochs } from './testing.js';
 
 const toolCall = (itemKey: string, sourceKey: string): JournalRowInput => ({
   itemKey, providerId: 'codex', sourceKey, occurredAt: 0,
@@ -134,7 +135,7 @@ describe('journal pages', () => {
         body: { item: { type: 'assistant_message' as const, text: 'x', messageId: `k${seq}` }, timestamp: '2025-01-01T00:00:00.000Z', collapsed: [], resources: [] },
       };
     });
-    const journal = new SessionJournal({ meta: { ...source.meta, nextSeq: count + 1 }, items });
+    const journal = new SessionJournal({ meta: { ...source.meta, nextSeq: count + 1 }, items }, sequentialEpochs());
     const result = journal.page({ requestId: 'r', agentId: 'a', direction: 'tail', limit: count }, { olderBeyondJournal: false });
     expect(result.kind === 'page' && result.page.payload.endCursor).toEqual({ epoch: 'epoch-1', seq: count });
   });

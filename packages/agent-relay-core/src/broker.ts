@@ -26,7 +26,8 @@ import { relayDiagnosticsForVersion, RELAY_DIAGNOSTIC_PATH, type RelayDiagnostic
 import { controllerReleases } from './controller-releases.js';
 import { decodeClientMessage, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { systemIds } from './relay-ids.js';
 import { decodeRemoteHostUplinkMessage, type RemoteHostUplinkMessage, isPairingPurpose } from '@orchardworks/agent-remote-protocol';
 import { SESSION_STATE_LIMIT, type HostSessionState } from '@orchardworks/agent-remote-protocol';
 import { sessionAttachFailure } from '@orchardworks/agent-remote-protocol/model';
@@ -49,10 +50,11 @@ export function createHostBroker(options: HostBrokerOptions) {
   const origin = new URL(options.origin).origin;
   if (options.successionEnrollment && (!accountBacked || !options.onStateChange || !isSuccessionAssociationAuthority(options.successionEnrollment) || options.successionEnrollment.origin !== origin || options.successionEnrollment.ownerSubject !== options.ownerSubject)) throw new Error('Succession enrollment requires a durable authenticated tenant authority.');
   const now = options.now ?? Date.now;
+  const ids = options.ids ?? systemIds;
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
   const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
-  const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals }));
+  const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals, ids }));
   const heartbeat = { intervalMs: options.heartbeatIntervalMs ?? 30_000, timeoutMs: options.heartbeatTimeoutMs ?? 10_000 };
   if (!Number.isSafeInteger(heartbeat.intervalMs) || !Number.isSafeInteger(heartbeat.timeoutMs) || heartbeat.timeoutMs < 1 || heartbeat.timeoutMs >= heartbeat.intervalMs || heartbeat.intervalMs > 600_000) {
     throw new RangeError('Host heartbeat deadlines require 0 < timeout < interval <= 600000 milliseconds.');
@@ -255,7 +257,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           for (const ref of described.lineage as NativeSessionRef[]) assertAssociationOpen(ref);
           if (action === 'cancel') {
             // A new v1 receipt cannot prepare a native candidate; retain it before asking the Host to cancel.
-            const receipt: SuccessionAssociationFreeze = { ...(preparation ? { version: 3 as const, maxProjectionBytes: 1 } : { version: 1 as const }), token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
+            const receipt: SuccessionAssociationFreeze = { ...(preparation ? { version: 3 as const, maxProjectionBytes: 1 } : { version: 1 as const }), token: ids.uuid(), authority: options.successionEnrollment!, controllerId: host.installationId,
               request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}), ...(preparation ? { preparation } : {}) },
               associationRevision: state.revision, lineage: described.lineage, relations: [] };
             if (state.revision >= Number.MAX_SAFE_INTEGER) throw new BrokerError(409, 'association_capacity', 'Association revision is exhausted.');
@@ -267,7 +269,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (state.admissions.some(admission => described.lineage.some((ref: NativeSessionRef) => nativeSessionRefKey(ref) === nativeSessionRefKey(admission.source)))) throw new BrokerError(409, 'association_outcome_unknown', 'Settle source creation before succession.');
           teams.assertReplacementSupported(source, host.id, !preparation);
           if (teams.hasUnsettledRecipient(source)) throw new BrokerError(409, 'team_delivery_unsettled', 'Settle Team delivery before succession.');
-          const proposal: Omit<BoundedSuccessionAssociationFreeze | NativePrefixSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: preparation ? 3 : 2, token: randomUUID(), authority: options.successionEnrollment!, controllerId: host.installationId,
+          const proposal: Omit<BoundedSuccessionAssociationFreeze | NativePrefixSuccessionAssociationFreeze, 'maxProjectionBytes'> = { version: preparation ? 3 : 2, token: ids.uuid(), authority: options.successionEnrollment!, controllerId: host.installationId,
             request: { operationId, roleId: described.role.id, expectedRevision: input.expectedRevision as number, from: source, ...(targetProviderId ? { targetProviderId } : {}), ...(preparation ? { preparation } : {}) },
             associationRevision: state.revision, lineage: described.lineage,
             relations: [...brokerState.bindings.values()].filter(binding => binding.hostId === host.id && binding.sourceRelation).map(binding => ({
@@ -491,7 +493,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const binding = brokerState.nativeBindings.get(JSON.stringify([host.id,input.providerId,input.nativeSessionId])), relation = binding?.sourceRelation;
       if (!relation || relation.id !== input.id || relation.kind !== 'side' || relation.sourceNativeSessionId !== input.sourceNativeSessionId || (relation.revision ?? 0) !== input.expectedRevision) throw new SharingError(409, 'relation_conflict', 'This side relationship changed.');
       const sourceRef = relation.nativeSourceRef ?? associationSource(host, binding!.providerId, relation.sourceNativeSessionId);
-      const reservation: RelationChangeReservation = { version:1,operationId:input.operationId!,token:randomUUID(),authority:options.successionEnrollment!,hostId:host.id,controllerId:host.installationId,roleId:described.role.id,expectedRoleRevision:described.role.revision,origin:described.role.origin,current:described.role.current,lineage:described.lineage,associationRevision:described.associationRevision,catalogRevision:state.revision,
+      const reservation: RelationChangeReservation = { version:1,operationId:input.operationId!,token:ids.uuid(),authority:options.successionEnrollment!,hostId:host.id,controllerId:host.installationId,roleId:described.role.id,expectedRoleRevision:described.role.revision,origin:described.role.origin,current:described.role.current,lineage:described.lineage,associationRevision:described.associationRevision,catalogRevision:state.revision,
         relationId:relation.id,kind:relation.kind,readerRef:associationSource(host,binding!.providerId,binding!.nativeSessionId),sourceRef,expectedRelationRevision:input.expectedRevision,previousLinked:relation.linked??true,linked:input.linked,previousMember:described.sourceParticipants.some((row:{readerRef:NativeSessionRef})=>nativeSessionRefKey(row.readerRef)===nativeSessionRefKey(associationSource(host,binding!.providerId,binding!.nativeSessionId))),
         relations:[...brokerState.bindings.values()].filter(row=>row.hostId===host.id&&row.sourceRelation).map(row=>({relationId:row.sourceRelation!.id,kind:row.sourceRelation!.kind,readerRef:associationSource(host,row.providerId,row.nativeSessionId),sourceRef:row.sourceRelation!.nativeSourceRef??associationSource(host,row.providerId,row.sourceRelation!.sourceNativeSessionId),linked:row.sourceRelation!.linked??true,revision:row.sourceRelation!.revision??0})) };
       relationAccess(subject,reservation);
@@ -617,7 +619,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     brokerState.assertHostCurrent(host);
     const generation = host.generation;
     if (host.pending.size >= 128) return Promise.reject(new BrokerError(429, 'host_busy', 'Too many pending Remote Host requests.', true));
-    const requestId = randomUUID(), startedAt = now();
+    const requestId = ids.uuid(), startedAt = now();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         host.pending.delete(requestId);
@@ -688,7 +690,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     const current = () => !retired && host?.socket === socket && host.ready === true;
     function sendHeartbeat() {
       if (!current()) return;
-      const nonce = randomUUID(); pendingNonce = nonce;
+      const nonce = ids.uuid(); pendingNonce = nonce;
       heartbeatDeadline = setTimeout(() => {
         if (current() && pendingNonce === nonce) closeConnection(1012, 'Host heartbeat timed out');
       }, heartbeat.timeoutMs);
@@ -710,7 +712,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         void deleteOne(ownId).then(resume);
         return;
       }
-      host.tunnelToken ??= randomBytes(32).toString('base64url');
+      host.tunnelToken ??= ids.token();
       const journalHost = host;
       host.journal ??= journalRequested && journals && !brokerState.journalDeletions.includes(host.id)
         ? createJournalConnection({ hostId: host.id, journals, current, scheduler, requestTimeoutMs: options.journalRequestTimeoutMs,
@@ -793,7 +795,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             ? existing.pairingPurpose ?? (existing.gatewayKeyRequested ? 'gateway-setup' : 'host-only')
             : credential.purpose ?? 'host-only';
           const providers = 'providers' in message ? [...message.providers] : [{ providerId: 'dsh', displayName: 'DeepSeek DSH' }];
-          const next = { id: existing?.id ?? recovery?.hostId ?? randomUUID(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, callForSupport: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? 1 as const : undefined,
+          const next = { id: existing?.id ?? recovery?.hostId ?? ids.uuid(), installationId: message.installationId, name: message.name, environment: message.environment, controller: message.controller, providerManagement: message.providerManagement, tpmManagement: message.tpmManagement, teamManagement: teamRequested ? true as const : undefined, teamRecipients: teamRequested && recipientsRequested ? 1 as const : undefined, teamSuccession: teamRequested && recipientsRequested && successionRequested ? 1 as const : undefined, callForSupport: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? 1 as const : undefined,
             readOnlyProviders: teamRequested && recipientsRequested && successionRequested && callForSupportRequested ? callForSupportRequested : undefined, pairingPurpose: purpose,
             outbox: outboxRequested && options.outbox ? 1 as const : undefined,
             ...(existing?.gatewayKeyRequested ? { gatewayKeyRequested: true } : {}),
@@ -814,7 +816,7 @@ export function createHostBroker(options: HostBrokerOptions) {
             host = existing ?? { ...next, generation: 0, pending: new Map(), streams: new Map() };
             brokerState.hosts.set(host.id, host);
             if (host.socket) { const previous = host.socket; disconnected(host, previous, 'connection_replaced', 1012); previous.close(1012, 'Host connection replaced'); }
-            Object.assign(host, next); host.successionEnrollmentVersion = options.successionEnrollment ? enrollmentRequested : undefined; host.connectionId=randomUUID(); host.generation += 1; clearTimeout(timer);
+            Object.assign(host, next); host.successionEnrollmentVersion = options.successionEnrollment ? enrollmentRequested : undefined; host.connectionId=ids.uuid(); host.generation += 1; clearTimeout(timer);
             if (!retired && socket.readyState === RELAY_SOCKET_OPEN) {
               host.socket = socket;
               host.issueCredential = message.credentialRotation ? () => issueCredential(false, true) : undefined;
@@ -915,7 +917,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     async function issueCredential(consumeInvitation: boolean, preEffect = false): Promise<void> {
       if (issuing) return issuing;
       if (pendingCredential) throw new BrokerError(409, 'rotation_pending', 'A device credential is awaiting confirmation.');
-      const value = `arc_device_${randomBytes(32).toString('base64url')}`;
+      const value = `arc_device_${ids.token()}`;
       const nextHash = keyHash(value);
       const currentHost = host, generation = host?.generation;
       const operation = brokerState.commit(draft => {
@@ -1042,7 +1044,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     if (host.legacyDsh && action === 'child/attach') throw new BrokerError(400, 'unsupported_operation', 'This Host does not support native child attachment.');
     const attaching = action !== 'create';
-    const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : randomUUID();
+    const nativeSessionId = attaching ? required(body.nativeSessionId, 'nativeSessionId') : ids.uuid();
     const parentNativeSessionId = action === 'child/attach' ? required(body.parentNativeSessionId, 'parentNativeSessionId') : undefined;
     if (parentNativeSessionId) creatorSubject ??= brokerState.nativeBindings.get(JSON.stringify([host.id, providerId, parentNativeSessionId]))?.creatorSubject;
     const key = JSON.stringify([host.id, providerId, action === 'create' ? required(body.operationId, 'operationId') : nativeSessionId]);
@@ -1087,7 +1089,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           try { assertSessionSlots(); } catch (error) { pendingBindingSlots.delete(slot); throw error; }
           return { value: undefined, unchanged: true, publish() {} };
         });
-        const proposedAgentId = existingBinding?.agentId ?? randomUUID();
+        const proposedAgentId = existingBinding?.agentId ?? ids.uuid();
         const generation = host.generation;
         // A share recipient's session is marked, so the Controller hides it from the owner's session commands.
         const recipient = creatorSubject !== undefined && !owner(creatorSubject) ? { shared: true } : {};
@@ -1692,9 +1694,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (recoverHostId && (recoverHostId.length > 512 || purpose !== 'host-only' || !accountBacked || !options.ownerSubject || !options.successionEnrollment)) throw new BrokerError(400, 'host_recovery_unavailable', 'Recovery requires an authenticated owner and a retained succession identity.');
       if (options.gatewaySetup === false && purpose !== 'host-only') throw new BrokerError(403, 'unsupported_purpose', 'Gateway setup is unavailable for this authentication provider.');
       if (!accountBacked && purpose !== 'host-only') throw new BrokerError(400, 'unsupported_purpose', 'Gateway setup requires an account-backed Relay.');
-      const key = `arc_${randomBytes(32).toString('base64url')}`;
+      const key = `arc_${ids.token()}`;
       const createdAt = now(); const expires = createdAt + (options.keyLifetimeMs ?? (accountBacked ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
-      const item: SavedPairingKey = { id: randomUUID(), purpose, createdAt, expiresAt: expires };
+      const item: SavedPairingKey = { id: ids.uuid(), purpose, createdAt, expiresAt: expires };
       await brokerState.commit(draft => {
         let recovery: HostRecoverySelection | undefined;
         if (recoverHostId) {
@@ -1702,7 +1704,7 @@ export function createHostBroker(options: HostBrokerOptions) {
           if (!installationId || brokerState.hosts.has(recoverHostId) || [...brokerState.hosts.values()].some(host => host.installationId === installationId)) throw new BrokerError(409, 'host_recovery_unavailable', 'The selected historical Host is unavailable for recovery.');
           let marker = draft.revokedHosts?.find(host => host.hostId === recoverHostId);
           if (!marker) {
-            marker = { hostId: recoverHostId, installationId, revocationId: randomUUID() };
+            marker = { hostId: recoverHostId, installationId, revocationId: ids.uuid() };
             (draft.revokedHosts ??= []).push(marker);
           }
           recovery = { hostId: marker.hostId, installationId: marker.installationId, revocationId: marker.revocationId };
@@ -1809,7 +1811,7 @@ export function createHostBroker(options: HostBrokerOptions) {
         droppedDeletion = undefined;
         brokerState.assertHostCurrent(host);
         if (brokerState.retainedIdentities().get(host.id) === host.installationId) {
-          const marker: RevokedHost = { hostId: host.id, installationId: host.installationId, revocationId: randomUUID(), revokedAt: now() };
+          const marker: RevokedHost = { hostId: host.id, installationId: host.installationId, revocationId: ids.uuid(), revokedAt: now() };
           draft.revokedHosts = [...(draft.revokedHosts ?? []).filter(item => item.hostId !== host.id), marker];
         }
         if (draft.sharing) for (const grant of draft.sharing.grants) if (grant.hostId === host.id) grant.revoked = true;
@@ -2101,7 +2103,7 @@ export function createHostBroker(options: HostBrokerOptions) {
       const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
       expire(client, expiry);
       if (client.readyState !== RELAY_SOCKET_OPEN) return;
-      const streamId = randomUUID(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [],
+      const streamId = ids.uuid(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [],
         control: createStreamControl({ agentId: binding.agentId, readNativeOwner: () => readNativeOwner(host, binding), send: frame => { if (client.readyState === RELAY_SOCKET_OPEN) client.send(JSON.stringify(frame)); } }) };
       host.streams.set(streamId, stream);
       diagnostic(host,{event:'stream_opening',streamId,agentId:binding.agentId});

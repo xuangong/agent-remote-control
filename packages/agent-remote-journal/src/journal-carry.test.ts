@@ -4,6 +4,7 @@ import { bodyFromRow } from './journal-items.js';
 import { indexOf, openJournal, text } from './journal.test-fixture.js';
 import type { JournalItemInput, JournalPublication, JournalRowInput } from './types.js';
 import { SessionJournal } from './session-journal.js';
+import { sequentialEpochs } from './testing.js';
 
 /** One window that differs from what the journal holds, so the journal starts a new epoch from it. */
 function replaceWith(journal: SessionJournal, publication: JournalPublication, window: readonly JournalItemInput[]): void {
@@ -64,7 +65,7 @@ describe('filling', () => {
     journal.append(publish(), text('m1', 'd1', 'one'));
     const state = journal.state();
     (state.items[0] as { body: null }).body = null;
-    const restored = new SessionJournal(state);
+    const restored = new SessionJournal(state, sequentialEpochs());
     journal.takeChanges();
     expect(restored.fill('m1', bodyFromRow(text('m1', 'h1', 'one')), 'any')).toBe('mismatch');
     expect(indexOf(restored)[0]).toMatchObject({ resident: false });

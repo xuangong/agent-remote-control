@@ -9,6 +9,7 @@ import { attachScripted, historyBoundary, observationsOf, ScriptedSession } from
 import type { FrameRecorder } from './relay-harness.js';
 import type { PlayerPeer } from './transcript.js';
 import { driver, virtualClock } from './virtual-clock.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const HOST_ID = 'host-1';
 const PROVIDER = 'codex';
@@ -51,9 +52,12 @@ export function uplinkHarness(recorder: FrameRecorder, options: UplinkOptions = 
   };
   let publisher: JournalPublisher | undefined;
   let online = true;
+  const seen = new Map<string, number>();
+  const note = (message: { type: string }) => { seen.set(message.type, (seen.get(message.type) ?? 0) + 1); };
   const connection = createJournalConnection({
     hostId: HOST_ID, journals, current: () => online, scheduler: clock,
     send: (message: RemoteHostUplinkMessage) => {
+      note(message);
       recorder.frame('relay->controller', JSON.stringify(message));
       queueMicrotask(() => publisher?.receive(message as JournalRelayMessage));
     },
@@ -62,6 +66,7 @@ export function uplinkHarness(recorder: FrameRecorder, options: UplinkOptions = 
   });
   const writer = {
     send(json: string): void {
+      note(JSON.parse(json));
       recorder.frame('controller->relay', json);
       queueMicrotask(() => { void connection.receive(JSON.parse(json)).catch(() => undefined); });
     },
@@ -88,11 +93,13 @@ export function uplinkHarness(recorder: FrameRecorder, options: UplinkOptions = 
 
   const journal = async (): Promise<SessionJournal | undefined> => {
     const state = await store.load(`${HOST_ID}:${UPLINK_SESSION}`);
-    return state ? new SessionJournal(state) : undefined;
+    return state ? new SessionJournal(state, sequentialEpochs()) : undefined;
   };
 
   return {
     clock, settle, until, start, follow, journal,
+    /** How many frames of a type either side has sent, so a scenario waits for what it recorded rather than for a span of time. */
+    count: (type: string): number => seen.get(type) ?? 0,
     /** Waits until the Relay holds a head for the session: the publication of a window finished. */
     async settled(): Promise<void> {
       await until(async () => (await journal())?.head !== undefined, 'the head');

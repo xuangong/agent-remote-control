@@ -106,7 +106,8 @@ export const uplinkScenarios: Scenario[] = [
       recorder.step('open a window larger than the quota');
       const publisher = uplink.start();
       await uplink.follow(publisher, Array.from({ length: 8 }, (_, at) => item('history', `m${at}`, `Item ${at} ${'y'.repeat(2000)}`)));
-      await uplink.settle(60);
+      await uplink.until(() => uplink.count('journal_refused') >= 3, 'the third refusal');
+      await uplink.settle(5);
     }),
   },
   {

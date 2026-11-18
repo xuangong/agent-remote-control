@@ -3,6 +3,7 @@ import type { AgentSnapshotPayload, JournalPublishEntry, ResourceBinding } from 
 import { describe, expect, it } from 'vitest';
 
 import { createHostJournals } from './host-journals.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 const HOST = 'host-1';
 const SESSION = 'codex:thread-1';
@@ -22,7 +23,7 @@ const snapshot: AgentSnapshotPayload = {
 
 async function seeded(limits?: { liveOnlyItems?: number; sessionBytes?: number }) {
   const store = new MemoryJournalStore();
-  const journal = SessionJournal.create(KEY);
+  const journal = SessionJournal.create(KEY, 'epoch-1', sequentialEpochs());
   journal.claim(PUBLISHER);
   await store.apply(journal.takeChanges()!);
   return { store, journals: createHostJournals({ store, ...(limits ? { limits } : {}) }) };

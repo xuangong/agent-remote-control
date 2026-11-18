@@ -3,12 +3,15 @@ import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent
 import { createHostBroker, type RelaySocket, type RemoteHostBrokerState } from '@orchardworks/agent-relay-core';
 
 import type { Direction, PlayerPeer } from './transcript.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 export type Wire = Record<string, any>;
 export const HOST_ID = 'host';
 export const PUBLIC_ID = 'agent';
 export const SESSION_KEY = 'codex:native-session';
 export const STORE_KEY = `${HOST_ID}:${SESSION_KEY}`;
+/** The epoch of a journal written straight into the store; UUID-shaped, as the Relay's own epochs are, so transcripts normalize it the same way. */
+const SEEDED_EPOCH = '5eed0000-0000-4000-8000-000000000001';
 export const DIGEST = 'a'.repeat(64);
 export const OPERATION = '00000000-0000-4000-8000-000000000001';
 export const TERMINAL_OWNER = { kind: 'native_cli', generation: '11111111-1111-4111-8111-111111111111' };
@@ -172,7 +175,7 @@ export type Relay = Awaited<ReturnType<typeof startRelay>>;
 
 /** A journal of one complete row `m1` ("Hello") under the fixture's session, written straight into the store. */
 export async function seedJournal(store: MemoryJournalStore): Promise<void> {
-  const journal = SessionJournal.create(STORE_KEY);
+  const journal = SessionJournal.create(STORE_KEY, SEEDED_EPOCH, sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });

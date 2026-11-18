@@ -2,6 +2,7 @@ import { MemoryJournalStore, SessionJournal, type JournalStore } from '@orchardw
 import { PROTOCOL_VERSION, type AgentSnapshotPayload } from '@orchardworks/agent-remote-protocol';
 
 import { createHostBroker, createHostJournals, type BrokerRequestContext, type HostBrokerOptions, type HostJournalsOptions, type RelaySocket, type RemoteHostBrokerState } from '../index.js';
+import { sequentialEpochs } from '@orchardworks/agent-remote-journal/testing';
 
 export type Wire = Record<string, any>;
 export const HOST_ID = 'host';
@@ -81,7 +82,7 @@ export function collect(native: RelaySocket) {
 
 /** A journal of one complete row `m1` ("Hello") under the fixture's session, written straight into the store. */
 export async function seedJournal(store: MemoryJournalStore, options: { head?: boolean; evict?: boolean } = {}): Promise<void> {
-  const journal = SessionJournal.create(STORE_KEY);
+  const journal = SessionJournal.create(STORE_KEY, 'epoch-1', sequentialEpochs());
   const { generation } = journal.claim('controller-1');
   let sequence = 0;
   const at = () => ({ publisherId: 'controller-1', generation, sequence: ++sequence });

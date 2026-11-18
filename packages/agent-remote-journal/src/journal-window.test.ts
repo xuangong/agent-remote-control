@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { indexOf, openJournal, text } from './journal.test-fixture.js';
 import { SessionJournal } from './session-journal.js';
+import { sequentialEpochs } from './testing.js';
 
 /** `count` complete items, each its own turn unless `turn` says otherwise. */
 function completeItems(count: number, turn: (at: number) => string | undefined = at => `turn-${at}`) {
@@ -60,7 +61,7 @@ describe('an incomplete journal', () => {
     journal.takeChanges();
     journal.markIncomplete();
     expect(journal.takeChanges()?.meta.incomplete).toBe(true);
-    expect(new SessionJournal(journal.state()).incomplete).toBe(true);
+    expect(new SessionJournal(journal.state(), sequentialEpochs()).incomplete).toBe(true);
     journal.sync(publish(), [], { roomBytes: Number.MAX_SAFE_INTEGER });
     expect(journal.incomplete).toBe(false);
   });

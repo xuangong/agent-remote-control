@@ -2,6 +2,7 @@ import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
 import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { createBrokerState } from './broker-state.js';
+import { createAccess } from './access.js';
 import { createJournalDeletion } from './journal-deletion.js';
 import { JOURNAL_DELETION_LIMIT } from './state.js';
 import { committed, detached } from './drafts.js';
@@ -42,9 +43,13 @@ import { createJournalConnection, isJournalHostMessage } from './journal-uplink.
 import { createHostStreamOpener } from './journal-host-stream.js';
 import { createStreamControl } from './stream-control.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
+import { required, requiredHostIdentity, creationFingerprintSettings, optionalSettings, sameBinding, readBody, readOnlyProviders } from './request-input.js';
+import { json, rawJson, rejectUpgrade, HOST_STREAM_LIMIT, USER_STREAM_LIMIT, capacityRefusal } from './http-replies.js';
+import { diagnosticOperation, diagnosticCloseReason } from './host-diagnostics.js';
 import { BrokerError, type Binding, type DeviceCredential, type Host, type HostBrokerOptions, type HostStates, type RemoteHostBrokerState, type RpcResponse, type SharedCreation, type VisibleHostStates } from './broker-types.js';
 
 export type { HostBrokerOptions, RemoteHostBrokerState, VisibleHostStates } from './broker-types.js';
+export { USER_STREAM_LIMIT } from './http-replies.js';
 
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
@@ -512,16 +517,8 @@ export function createHostBroker(options: HostBrokerOptions) {
   }
   const sharedCreates = new Map<string, { fingerprint: string; result: Promise<Binding> }>();
   const principal = (context: BrokerRequestContext) => context.principalSubject?.();
-  const owner = (subject?: string) => options.ownerSubject === undefined || subject === options.ownerSubject;
-  const hostAllowed = (hostId: string, subject?: string) => !brokerState.unavailable && brokerState.hosts.has(hostId) && (owner(subject) || (subject !== undefined && brokerState.sharing.allowed(hostId, subject)));
-  const sessionAllowed = (binding: Binding, subject?: string) => brokerState.bindings.get(binding.agentId) === binding && hostAllowed(binding.hostId, subject) && (owner(subject) || binding.creatorSubject === subject);
-  function requireOwner(subject?: string) {
-    if (!owner(subject)) throw new SharingError(403, 'owner_required', 'Only the Host owner can manage this Host.');
-  }
-  function requireAccess(hostId: string, subject?: string) {
-    if (!brokerState.hosts.has(hostId)) throw new SharingError(404, 'host_not_found', 'Host is unavailable.');
-    if (!hostAllowed(hostId, subject)) throw new SharingError(403, 'host_forbidden', 'Host access is unavailable.');
-  }
+  const access = createAccess({ state: brokerState, ownerSubject: options.ownerSubject });
+  const { owner, hostAllowed, sessionAllowed, requireOwner, requireAccess, requireHost } = access;
   function notifySessionStates() {
     try { options.onSessionStates?.(); } catch { /* Sharing states never affects the Host connection. */ }
   }
@@ -584,13 +581,6 @@ export function createHostBroker(options: HostBrokerOptions) {
     return cleanup;
   }
   const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
-  const requireHost = (id: string) => {
-    const host = brokerState.hosts.get(id);
-    if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-    brokerState.assertAvailable();
-    if (!host.ready || host.socket?.readyState !== RELAY_SOCKET_OPEN) throw new BrokerError(503, 'host_offline', 'The Remote Host is offline.', true);
-    return host;
-  };
   const requireJournal = (hostId: string) => {
     const connection = requireHost(hostId).journal;
     if (!connection) throw new BrokerError(501, 'journal_unavailable', 'The Controller on this Host does not publish journals.');
@@ -2382,103 +2372,4 @@ export function createHostBroker(options: HostBrokerOptions) {
       brokerState.keys.clear(); brokerState.hosts.clear(); brokerState.bindings.clear(); runtimeBindings.clear(); brokerState.nativeBindings.clear(); attached.clear(); creations.clear();
     },
   };
-}
-function required(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > 512) throw new BrokerError(400, 'invalid_request', `${name} must be a nonempty string.`);
-  return value;
-}
-function requiredHostIdentity(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !value.trim() || value.length > 512) throw new BrokerError(502, 'invalid_host_response', `The Remote Host returned an invalid ${name}.`);
-  return value;
-}
-function creationFingerprintSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean | CreationSource> {
-  const settings = optionalSettings(body, names);
-  // Validated legacy source/edit fields already uniquely determine provenance.
-  // Keep their persisted identity unchanged, including redundant explicit input.
-  if (body.sourceNativeSessionId !== undefined || body.editNativeSessionId !== undefined) delete settings.creationSource;
-  return settings;
-}
-function optionalSettings(body: Record<string, unknown>, names: readonly string[]): Record<string, string | boolean | CreationSource> {
-  const result: Record<string, string | boolean | CreationSource> = {};
-  for (const name of names) {
-    const value = body[name];
-    if (value === undefined) continue;
-    if (name === 'planning') {
-      if (typeof value !== 'boolean') throw new BrokerError(400, 'invalid_request', 'planning must be a boolean.');
-      result[name] = value;
-    } else if (name === 'creationSource') {
-      if (!isCreationSource(value)) throw new BrokerError(400, 'invalid_request', 'A strict creation source is required.');
-      result[name] = { providerId: value.providerId, nativeSessionId: value.nativeSessionId };
-    } else result[name] = required(value, name);
-  }
-  return result;
-}
-function sameBinding(binding: Binding, hostId: string, providerId: string, nativeSessionId: string): boolean {
-  return binding.hostId === hostId && binding.providerId === providerId && binding.nativeSessionId === nativeSessionId;
-}
-async function readBody(request: Request): Promise<Record<string, unknown>> {
-  const parts: Uint8Array[] = []; let size = 0;
-  const reader = request.body?.getReader();
-  if (reader) {
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > BROKER_MAX_BODY_BYTES) {
-          void reader.cancel().catch(() => undefined);
-          throw new BrokerError(413, 'request_too_large', 'The request body is too large.');
-        }
-        parts.push(value);
-      }
-    } finally { reader.releaseLock(); }
-  }
-  let value: unknown;
-  try { value = JSON.parse(Buffer.concat(parts).toString() || '{}'); } catch { throw new BrokerError(400, 'invalid_json', 'The request body must be JSON.'); }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BrokerError(400, 'invalid_request', 'The request body must be an object.');
-  return value as Record<string, unknown>;
-}
-function json(status: number, value: unknown) { return rawJson({ status, body: JSON.stringify(value) }); }
-function rawJson(result: RpcResponse) {
-  const body = [204, 205, 304].includes(result.status) ? null : result.body;
-  return new Response(body, { status: result.status, headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
-}
-function rejectUpgrade(status: number) { return new Response(null, { status }); }
-/** The read-only providers a Host named with its Call For Support request: at most 64 valid identities, the rest ignored. */
-function readOnlyProviders(values: string[]): string[] {
-  return [...new Set(values.filter(value => value.trim() && value.length <= 512))].slice(0, 64);
-}
-/**
- * Every open session view and tracked session holds one stream. A Host serves at most HOST_STREAM_LIMIT;
- * an account holds at most USER_STREAM_LIMIT across all its browsers, devices and Hosts.
- */
-const HOST_STREAM_LIMIT = 128;
-export const USER_STREAM_LIMIT = 64;
-/** Open views of every browser and device share these limits, so the refusal says what frees a slot. */
-function capacityRefusal(host: boolean) {
-  return new Response(JSON.stringify({ code: 'session_stream_capacity', error: host
-    ? `This Host has too many sessions open in browsers (limit ${HOST_STREAM_LIMIT}). Close session views you no longer use; this session connects again automatically.`
-    : `Too many sessions are open across your browsers and devices (limit ${USER_STREAM_LIMIT}). Close tabs, windows or session views you no longer use; this session connects again automatically.` }),
-  { status: 429, headers: { 'content-type': 'application/json' } });
-}
-
-function diagnosticOperation(path: string): RelayDiagnostic['operation'] {
-  const pathname=path.split('?')[0]!;
-  if(pathname.startsWith('/remote/catalog'))return 'catalog';
-  if(pathname.endsWith('/attach'))return 'attach';
-  if(pathname==='/remote/create')return 'create';
-  if(pathname==='/remote/controller-update')return 'controller_update';
-  if(pathname.startsWith('/remote/previews'))return 'preview';
-  if(pathname.startsWith('/v1/sessions/'))return 'session_read';
-  return 'other';
-}
-function diagnosticCloseReason(reason:string): RelayDiagnostic['reason'] {
-  switch(reason) {
-    case 'Host heartbeat timed out': return 'heartbeat_timeout';
-    case 'Host heartbeat delivery failed': return 'heartbeat_delivery_failed';
-    case 'Host transport failed': return 'transport_error';
-    case 'Credential expired': return 'credential_expired';
-    case 'Device credential revoked': return 'access_revoked';
-    default: return 'protocol_error';
-  }
 }

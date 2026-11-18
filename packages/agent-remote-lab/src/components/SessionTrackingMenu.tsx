@@ -6,7 +6,7 @@ import type { SessionCatchUp } from '../hooks/useSessionCatchUp.js';
 import type { SessionTracking } from '../hooks/useSessionTracking.js';
 import type { SessionStar } from '../session-stars-client.js';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
-import { observationLabel } from '../tracking-state.js';
+import { observationLabel, trackingAlert } from '../tracking-state.js';
 import { activityGroups } from '../session-activity-status.js';
 import { SessionPopover } from './SessionPopover.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
@@ -35,9 +35,7 @@ export function SessionTrackingMenu({ tracking, catchUp, teams = [], knownSessio
     count: sessions.filter(session => group.activities.includes(tracking.observations[sessionKey(session)]?.activity ?? 'unknown')).length,
   })).filter(group => group.count > 0);
   const changes = sessions.filter(session => tracking.observations[sessionKey(session)]?.changed).length;
-  const reminders = sessions.map(session => tracking.observations[sessionKey(session)]).filter(value => value?.connection === 'ready');
-  const alert = reminders.some(value => value?.attention === 'pending') ? 'pending'
-    : reminders.some(value => value?.attention === 'idle') ? 'idle' : undefined;
+  const alert = trackingAlert(sessions.map(sessionKey), tracking.observations);
   const alertLabel = alert === 'pending' ? 'New pending sessions need attention.' : alert === 'idle' ? 'A working session is now idle.' : '';
   const attention = sessions.some(session => ['waiting', 'failed'].includes(tracking.observations[sessionKey(session)]?.activity ?? ''));
   return <div ref={root} {...rootProps} data-attention={attention} data-alert={alert} {...(inert ? { inert: '' } : {})}>

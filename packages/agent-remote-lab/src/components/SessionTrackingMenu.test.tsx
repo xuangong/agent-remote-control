@@ -62,3 +62,17 @@ it('preserves keyboard reordering and drag gestures on rows with new content', a
   await act(async () => row.click());
   expect(open).toHaveBeenCalledWith(session);
 });
+
+it('draws the strongest reminder of its list on the capsule and none when the list has no unread session', async () => {
+  const pending = { hostId: 'h', providerId: 'codex', nativeSessionId: 'p', title: 'Needs input', starredAt: 1 };
+  const finished = { hostId: 'h', providerId: 'codex', nativeSessionId: 'f', title: 'Finished work', starredAt: 1 };
+  const observations = {
+    [sessionKey(pending)]: { connection: 'ready', activity: 'waiting', changed: true, attention: 'pending' },
+    [sessionKey(finished)]: { connection: 'ready', activity: 'idle', changed: true, attention: 'idle' },
+  };
+  const menu = (background: unknown[]) => <SessionTrackingMenu tracking={{ sessions: [pending, finished], backgroundSessions: background, observations } as unknown as SessionTracking} busy={false} inert={false} onOpen={vi.fn()} />;
+  const capsule = async (background: unknown[]) => (await render(menu(background))).querySelector('.lab-tracking-floating, .lab-sidebar-shortcut-track')!;
+  expect((await capsule([pending, finished])).getAttribute('data-alert')).toBe('pending');
+  expect((await capsule([finished])).getAttribute('data-alert')).toBe('idle');
+  expect((await capsule([])).hasAttribute('data-alert')).toBe(false);
+});

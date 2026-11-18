@@ -5,7 +5,7 @@ import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { DirectoryError, SessionDirectoryClient } from '../directory-client.js';
 import { useSessionTracking, type SessionTracking } from './useSessionTracking.js';
-import { readTrackedSessions, saveTrackedSessions, trackingEditRevision } from '../tracking-state.js';
+import { readTrackedSessions, saveTrackedSessions, trackingAlert, trackingEditRevision } from '../tracking-state.js';
 import { useSessionStars } from './useSessionStars.js';
 import { SessionStarsClient, type SessionStar } from '../session-stars-client.js';
 import { sessionKey } from '../session-tree.js';
@@ -388,11 +388,15 @@ it('acknowledges only the selected session and clears reminders when that sessio
   await act(async () => tracking.acknowledge(sessionKey(star)));
   expect(tracking.observations[sessionKey(star)]).toMatchObject({ changed: false, attention: undefined });
   expect(tracking.observations[sessionKey(second)]).toMatchObject({ changed: false, attention: 'idle' });
+  const alert = () => trackingAlert(tracking.backgroundSessions.map(sessionKey), tracking.observations);
+  expect(alert()).toBe('idle');
   await emit('native', 'waiting');
   expect(tracking.observations[sessionKey(star)]?.changed).toBe(false);
   await act(async () => select(sessionKey(second)));
   expect(tracking.observations[sessionKey(second)]).toMatchObject({ activity: 'idle', changed: false, attention: undefined });
   expect(tracking.backgroundSessions).toEqual([star]);
+  // The last unread session was opened: the capsule has nothing left to alert.
+  expect(alert()).toBeUndefined();
 });
 
 

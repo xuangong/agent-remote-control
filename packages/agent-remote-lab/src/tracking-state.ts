@@ -4,6 +4,16 @@ import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 import { validSessionStar, starKey, type SessionStar } from '@orchardworks/agent-remote-protocol/model';
 export interface SessionObservation { connection: RemoteSessionStatus; activity?: AgentStatus; background?: import('@orchardworks/agent-remote-protocol').BackgroundActivity; cursor?: TimelineCursor; changed?: boolean; attention?: 'pending' | 'idle'; error?: string; agentId?: string }
 export const MAX_TRACKED_SESSIONS = 8;
+
+/**
+ * The reminder the Track capsule shows: pending work outranks completed work, and only sessions of the capsule's list count
+ * (the sessions on screen are not in it, so opening the last unread session clears the alert). A session that is not connected
+ * does not remind.
+ */
+export function trackingAlert(sessions: readonly string[], observations: Readonly<Record<string, SessionObservation | undefined>>): 'pending' | 'idle' | undefined {
+  const reminders = sessions.map(key => observations[key]).filter(value => value?.connection === 'ready');
+  return reminders.some(value => value?.attention === 'pending') ? 'pending' : reminders.some(value => value?.attention === 'idle') ? 'idle' : undefined;
+}
 export function nextObservation(previous: SessionObservation | undefined, next: SessionObservation, readCursor?: TimelineCursor): SessionObservation {
   const activity = next.connection === 'ready' ? next.activity : undefined;
   const runtimeChanged = previous?.connection === 'ready' && next.connection === 'ready' && previous.activity !== undefined && activity !== undefined && previous.activity !== activity;

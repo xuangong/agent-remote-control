@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { nextObservation, observationLabel, readTrackedSessions, saveTrackedSessions, readTrackedSessionsChecked, patchTrackedSessions, trackingEditRevision } from './tracking-state.js';
+import { nextObservation, observationLabel, readTrackedSessions, saveTrackedSessions, readTrackedSessionsChecked, patchTrackedSessions, trackingEditRevision, trackingAlert } from './tracking-state.js';
 const session = { hostId: 'host', providerId: 'codex', nativeSessionId: 'native', title: 'My session', starredAt: 1 };
 it('keeps tracking on this client and isolates different user namespaces', () => {
   saveTrackedSessions('alice', [session]);
@@ -144,4 +144,20 @@ it('suppresses quiet review completion while preserving input requests and visib
 it('labels a refused tracking subscription as unavailable rather than a connection failure', () => {
   expect(observationLabel({ connection: 'unavailable', error: 'A native CLI owns this session.' })).toBe('Unavailable');
   expect(observationLabel({ connection: 'disconnected', error: 'Tracking could not connect.' })).toBe('Connection failed');
+});
+
+it('shows the strongest reminder of the capsule list, and nothing once the list holds no unread session', () => {
+  const observations = {
+    a: { connection: 'ready' as const, activity: 'waiting' as const, attention: 'pending' as const },
+    b: { connection: 'ready' as const, activity: 'idle' as const, attention: 'idle' as const },
+    c: { connection: 'ready' as const, activity: 'idle' as const },
+    d: { connection: 'failed' as const, attention: 'pending' as const },
+  };
+  expect(trackingAlert(['a', 'b', 'c'], observations)).toBe('pending');
+  expect(trackingAlert(['b', 'c'], observations)).toBe('idle');
+  // Opening the last unread session takes it out of the list: nothing alerts.
+  expect(trackingAlert(['c'], observations)).toBeUndefined();
+  expect(trackingAlert([], observations)).toBeUndefined();
+  // A session that is not connected does not remind, and a session without an observation counts for nothing.
+  expect(trackingAlert(['d', 'missing'], observations)).toBeUndefined();
 });

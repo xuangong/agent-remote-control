@@ -61,13 +61,12 @@ it('E2: a message sent while the Controller is away is queued, then delivered on
   const { context, page } = await openPage(browser, stack.sessionUrl('welcome'));
   await waitForEntries(page, 2);
   await stack.stopController();
-  await showsText(page, 'Reconnect');
   await send(page, 'Sent while away');
-  await expect.poll(() => page.getByTestId('pending-send').count()).toBe(1);
+  await page.waitForFunction(() => [...document.querySelectorAll('.agent-outgoing-message')].some(node => /Sent while away.*Waiting for E2E Host/.test(node.textContent ?? '')));
   expect(stack.provider.session('welcome')!.sent).not.toContain('Sent while away');
   await stack.startController();
   await showsText(page, 'Echo: Sent while away');
-  await expect.poll(() => page.getByTestId('pending-send').count()).toBe(0);
+  await expect.poll(() => page.locator('.agent-outgoing-message').count()).toBe(0);
   expect(await userRows(page, 'Sent while away').count()).toBe(1);
   expect(stack.provider.session('welcome')!.sent.filter(text => text === 'Sent while away')).toHaveLength(1);
   await context.close();

@@ -23,6 +23,8 @@ export interface StackOptions extends ScriptedProviderOptions {
   /** Where the built Workbench is; the default is the checkout's. */
   webDist?: string;
   installationId?: string;
+  /** Serve the sessions of the scripted providers from the Relay's journal, as a Host with smart reading turned on is served. On by default. */
+  smartReading?: boolean;
   /** More providers of the same Controller, for a flow that hands a session from one provider to another. */
   otherProviders?: ScriptedProviderOptions[];
 }
@@ -53,11 +55,29 @@ export async function startStack(options: StackOptions = {}) {
   let credential: string | undefined;
   const startController = async () => {
     if (controller) throw new Error('The Controller is already running.');
-    controller = createAgentHost({ registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
+    // The state directory is what gives the Controller its outbox (receipts of the messages it took), so a message sent while it is away waits at the Relay.
+    controller = createAgentHost({ preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
     hostId = (await controller.ready).hostId;
   };
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
   await startController();
+
+  /** Acts as the local user for one call: signs in, runs it with the cookie and the user's base path, and signs out. */
+  const asOwner = async <T>(call: (request: (method: string, path: string, body?: unknown) => Promise<Response>) => Promise<T>): Promise<T> => {
+    const status = await fetch(origin + '/auth/status', { signal: AbortSignal.timeout(10_000) });
+    const { basePath } = await status.json() as { basePath: string };
+    const headers = { cookie: status.headers.getSetCookie().map(value => value.split(';')[0]).join('; '), origin, 'content-type': 'application/json' };
+    try { return await call((method, path, body) => fetch(origin + basePath + path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000) })); }
+    finally { await (await fetch(origin + '/auth/logout', { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(10_000) })).body?.cancel(); }
+  };
+  if (options.smartReading !== false) {
+    await asOwner(async request => {
+      for (const each of [provider, ...otherProviders]) {
+        const response = await request('PUT', `v1/remote/hosts/${hostId}/smart-reading`, { providerId: each.providerId, enabled: true });
+        if (!response.ok) throw new Error(`Smart reading could not be turned on for ${each.providerId} (${response.status}).`);
+      }
+    });
+  }
 
   return {
     origin, provider, otherProviders, state,

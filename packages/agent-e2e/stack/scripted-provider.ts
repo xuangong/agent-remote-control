@@ -16,7 +16,8 @@ import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
 
 export const SCRIPTED_PROVIDER = 'scripted';
 
-export interface ScriptedRow { role: 'user' | 'assistant'; text: string }
+/** `key` names the row for good: it keeps its item key when the rows before it change. Without one the key is the row's position. */
+export interface ScriptedRow { role: 'user' | 'assistant'; text: string; key?: string }
 /** One entry of a native history: a plain row, or an observation a real CLI produced (see `recordedHistory`). */
 export type HistoryEntry = ScriptedRow | { observation: ProviderObservation };
 
@@ -66,7 +67,7 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   let held: Promise<void> | undefined;
 
   const observation = (id: string, entry: HistoryEntry, at: number, delivery: 'history' | 'live'): ProviderObservation =>
-    'observation' in entry ? { ...entry.observation, delivery } : row(providerId, delivery, `${id}:h${at}`, entry, at);
+    'observation' in entry ? { ...entry.observation, delivery } : row(providerId, delivery, `${id}:${entry.key ?? `h${at}`}`, entry, at);
 
   const open = (nativeSessionId: string): ScriptedSession => {
     const saved = known.get(nativeSessionId);

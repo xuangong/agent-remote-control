@@ -1,6 +1,6 @@
-import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
-import { emptyCallForSupportState, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
-import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
+import { createTeamService } from './team-service.js';
+import { createSocketEdge } from './socket-edge.js';
+import { createClientAdmission } from './client-admission.js';
 import { createBrokerState } from './broker-state.js';
 import { createControllerRoutes } from './controller-routes.js';
 import { createTeamRoutes } from './team-routes.js';
@@ -18,17 +18,12 @@ import { createSessionBindings } from './session-bindings.js';
 import { createSuccession } from './succession-service.js';
 import { createRelations } from './relation-service.js';
 import { createJournalDeletion } from './journal-deletion.js';
-import { committed, detached } from './drafts.js';
-import { sessionIdentityMessage, withoutItemKeysFlag } from './session-identity.js';
-import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
 import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
-import { isDeepStrictEqual } from 'node:util';
-import { resolveRoleSuccession, nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from '@orchardworks/agent-remote-protocol/model';
-import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
 import { controllerReleases } from './controller-releases.js';
-import { decodeClientMessage, PROTOCOL_VERSION, type ControllerRelease } from '@orchardworks/agent-remote-protocol';
+import { type ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createHash } from 'node:crypto';
 import { systemIds } from './relay-ids.js';
 import { HostSharing, SharingError } from './host-sharing.js';
@@ -36,12 +31,9 @@ import { createHostPreviews } from './host-previews.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
 import { defaultBrokerScheduler, RELAY_SOCKET_OPEN, type BrokerRequestContext, type RelaySocket } from './transport.js';
 import { createHostJournals, type JournalReadRequest } from './host-journals.js';
-import { createHostStreamOpener } from './journal-host-stream.js';
-import { createStreamControl } from './stream-control.js';
-import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
-import { required, readOnlyProviders } from './request-input.js';
-import { json, rejectUpgrade, HOST_STREAM_LIMIT, USER_STREAM_LIMIT, capacityRefusal } from './http-replies.js';
-import { BrokerError, type Binding, type Host, type HostBrokerOptions, type RemoteHostBrokerState, type VisibleHostStates } from './broker-types.js';
+import { createJournalSessions } from './journal-sessions.js';
+import { json, rejectUpgrade, HOST_STREAM_LIMIT } from './http-replies.js';
+import { BrokerError, type Binding, type HostBrokerOptions } from './broker-types.js';
 
 export type { HostBrokerOptions, RemoteHostBrokerState, VisibleHostStates } from './broker-types.js';
 export { USER_STREAM_LIMIT } from './http-replies.js';
@@ -57,7 +49,6 @@ export function createHostBroker(options: HostBrokerOptions) {
   const hostStreamLimit = options.hostStreamLimit ?? HOST_STREAM_LIMIT;
   const ids = options.ids ?? systemIds;
   const scheduler = options.scheduler ?? defaultBrokerScheduler;
-  const setTimeout = scheduler.setTimeout.bind(scheduler);
   const clearTimeout = scheduler.clearTimeout.bind(scheduler);
   const journals = options.journalService ?? (options.journals && createHostJournals({ store: options.journals, ids }));
   const heartbeat = { intervalMs: options.heartbeatIntervalMs ?? 30_000, timeoutMs: options.heartbeatTimeoutMs ?? 10_000 };
@@ -93,70 +84,9 @@ export function createHostBroker(options: HostBrokerOptions) {
   });
   const access = createAccess({ state: brokerState, ownerSubject: options.ownerSubject });
   const { owner, hostAllowed, sessionAllowed, requireOwner, requireAccess, requireHost } = access;
-  /** The session that holds the role of a session on a Host now, across handoffs. */
-  function resolveRole(hostId: string, providerId: string, anchorNativeId: string): NativeSessionRef {
-    const host = brokerState.hosts.get(hostId);
-    if (!host) throw new Error('Team recipient Host is unavailable.');
-    return resolveRoleSuccession(associationSource(host, providerId, anchorNativeId), prefixRecords(host)).target;
-  }
-  function callForSupportChange<T>(update: (state: CallForSupportState) => T): Promise<T> {
-    return brokerState.commit(draft => {
-      const next = structuredClone(brokerState.callForSupport ?? emptyCallForSupportState()), value = structuredClone(update(next));
-      if (isDeepStrictEqual(next, brokerState.callForSupport ?? emptyCallForSupportState())) return { value, unchanged: true, publish() {} };
-      if (!validCallForSupportState(next)) throw new Error('Invalid Call For Support state.');
-      draft.callForSupport = next; return { value, publish() { brokerState.callForSupport = next; } };
-    });
-  }
-  const teams = new TeamBroker({
-    resolveSession: resolveRole,
-    assertRecipient: target => assertAssociationOpen(target),
-    assertRecipientSupport(hostId, generic) {
-      const host = requireHost(hostId);
-      if (host.teamRecipients !== 1) throw new BrokerError(409, 'team_recipients_upgrade_required', 'Update the Controller before replacing a Team recipient.');
-      if (generic && host.teamSuccession !== 1) throw new BrokerError(409, 'team_succession_upgrade_required', 'Update the Controller to hand off Team members.');
-    },
-    resources: options.teamResources,
-    now, read: () => brokerState.teams,
-    ...(options.stateRoom ? { retention: () => options.stateRoom!().retention } : {}),
-    change: update => brokerState.commit(draft => {
-      // Only the Teams a change touches are copied, measured and validated; the others stay the committed objects.
-      let value!: ReturnType<typeof update>;
-      let next = committed.produce(brokerState.teams, teams => { value = structuredClone(detached(update(teams))); });
-      const previous = new Map(brokerState.teams.map(team => [team.id, team]));
-      const changed = (team: SavedTeam) => team !== previous.get(team.id);
-      // A Team over its bound first loses its oldest settled receipts.
-      if (next.some(team => changed(team) && teamBytes(team) > TEAM_RECORD_BYTES)) next = committed.produce(next, teams => {
-        next.forEach((team, index) => { if (changed(team)) trimTeamDeliveryReceipts(teams[index]!, TEAM_RECORD_BYTES, teamBytes(team)); });
-      });
-      if (next === brokerState.teams || next.length === brokerState.teams.length && next.every((team, index) => team === brokerState.teams[index] || isDeepStrictEqual(team, brokerState.teams[index]))) return { value, unchanged: true, publish() {} };
-      if (!next.every(team => brokerState.validTeams.has(team) || validSavedTeam(team) && teamMessageBudgetBytes(team) <= 128 * 1024 && brokerState.validTeams.add(team))) throw new Error('Team storage capacity reached.');
-      // A change may not grow a Team beyond its bound, nor the Relay beyond its own; it may still shrink either.
-      const grown = (team: SavedTeam) => teamBytes(team) > (previous.has(team.id) ? teamBytes(previous.get(team.id)!) : 0);
-      if (next.some(team => changed(team) && teamBytes(team) > TEAM_RECORD_BYTES && grown(team))) throw new Error('Team storage capacity reached.');
-      const growth = teamStateBytes(next) - teamStateBytes(brokerState.teams);
-      if (growth > 0 && options.stateRoom && growth > options.stateRoom().growth) throw new Error('Team storage capacity reached.');
-      draft.teams = next; return { value, publish() { brokerState.teams = next; } };
-    }),
-    assertHost(hostId, providerId) { const host = requireHost(hostId); if (!host.teamManagement) throw new Error('Update the Controller to use Teams.'); if (!host.providers.some(provider => provider.providerId === providerId)) throw new Error('Provider is unavailable on this Host.'); },
-    async createSeat(hostId, seat) {
-      const result = await rpc(requireHost(hostId), 'POST', '/remote/team/create-seat', undefined, JSON.stringify(seat));
-      const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'Team session creation failed.'); return value;
-    },
-    callForSupport: {
-      state: () => brokerState.callForSupport,
-      capable: hostId => brokerState.hosts.get(hostId)?.callForSupport === 1,
-      assertHost(hostId) { if (requireHost(hostId).callForSupport !== 1) throw new BrokerError(409, 'call_for_support_upgrade_required', 'Update the Controller to use Call For Support.'); },
-      readOnly: (hostId, providerId) => { const host = brokerState.hosts.get(hostId); return host?.callForSupport === 1 && !!host.readOnlyProviders?.includes(providerId) && host.providers.some(provider => provider.providerId === providerId); },
-      async supportPatch(hostId, input) {
-        const result = await rpc(requireHost(hostId), 'POST', '/remote/team/support-patch', undefined, JSON.stringify(input));
-        const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'The supporter patch failed.'); return value;
-      },
-      async supportBundle(hostId, input) {
-        const result = await rpc(requireHost(hostId), 'POST', '/remote/team/support-bundle', undefined, JSON.stringify(input));
-        const value = JSON.parse(result.body); if (result.status !== 200) throw new Error(value.error ?? 'The support bundle failed.'); return value;
-      },
-    },
-  });
+  const { teams, callForSupportChange, resolveRole } = createTeamService({ brokerState, options, now, requireHost,
+    rpc: (...args) => rpc(...args), assertAssociationOpen: target => assertAssociationOpen(target),
+    associationSource: (...args) => associationSource(...args), prefixRecords: host => prefixRecords(host) });
   const succession = createSuccession({ brokerState, enrollment: options.successionEnrollment, projectionAllowance: options.successionProjectionAllowance, ids, rpc: (...args: Parameters<typeof rpc>) => rpc(...args),
     teams: { assertReplacementSupported: (...args) => teams.assertReplacementSupported(...args), hasUnsettledRecipient: (...args) => teams.hasUnsettledRecipient(...args) },
     creations: { has: key => sessionBindings.hasCreation(key) } });
@@ -228,179 +158,9 @@ export function createHostBroker(options: HostBrokerOptions) {
     }
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
-  /**
-   * The limits and authorization every message of a browser session stream passes before anything else happens to it.
-   * Returns a function that is true when the message may proceed; otherwise it already closed the stream or answered.
-   */
-  function admitClientMessages(client: RelaySocket, context: BrokerRequestContext, subject: string | undefined, expiry: () => number | undefined): (raw: string, binary: boolean) => boolean {
-    let messageWindow = now(); let messageCount = 0; let timelineCount = 0; let imageChunkCount = 0; let imageChunkBytes = 0; let resourceCount = 0; let resourceBytes = 0;
-    const refuse = (code: number, reason: string) => { client.close(code, reason); return false; };
-    return (raw, binary) => {
-      if (binary) return refuse(1003, 'Text protocol required');
-      if (now()-messageWindow >= 60_000) { messageWindow=now(); messageCount=0; timelineCount=0; imageChunkCount=0; imageChunkBytes=0; resourceCount=0; resourceBytes=0; }
-      let publicMessage: { type?: string; payload?: { locator?: unknown } };
-      try { publicMessage = JSON.parse(raw.toString()); } catch { return refuse(1008, 'Invalid session message'); }
-      if (publicMessage?.type === 'image_upload_chunk') {
-        const bytes = Buffer.byteLength(raw.toString());
-        imageChunkBytes += bytes;
-        if (bytes > 48 * 1024 || ++imageChunkCount > 2048 || imageChunkBytes > 48 * 1024 * 1024) return refuse(1008, 'Image upload rate exceeded');
-      } else if (publicMessage?.type === 'resource_upload_chunk' || publicMessage?.type === 'resource_download_request'
-        // A conversation's images and a previewed file's local resources resolve and read one message each.
-        || publicMessage?.type === 'resource_resolve_request' || publicMessage?.type === 'resource_request') {
-        const bytes = Buffer.byteLength(raw.toString()); resourceBytes += bytes;
-        if (bytes > 48 * 1024 || ++resourceCount > 8192 || resourceBytes > 192 * 1024 * 1024) return refuse(1008, 'Resource transfer rate exceeded');
-      } else if (publicMessage?.type === 'timeline_request') {
-        // Searching and reading older history take one page per request over the session wire; they are reads, not control messages.
-        if (++timelineCount > 600) return refuse(1008, 'Timeline request rate exceeded');
-      } else if (++messageCount > 120) return refuse(1008, 'Control message rate exceeded');
-      if (context.authorizeMessage?.(raw.toString()) === false) {
-        const decoded = decodeClientMessage(raw.toString());
-        if (decoded.status !== 'ok' || !('payload' in decoded.value) || !('requestId' in decoded.value.payload)) return refuse(1008, 'Invalid session message');
-        client.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'protocol_error', payload: {
-          requestId: decoded.value.payload.requestId, code: 'reauthentication_required',
-          message: 'Sign in again before changing session permissions. Then retry the change.', recoverable: true,
-        } }));
-        return false;
-      }
-      if (!owner(subject)) {
-        try { if (publicMessage.type === 'resource_resolve_request' && !(typeof publicMessage.payload?.locator === 'string' && /^input-image:[a-f0-9-]{36}$/.test(publicMessage.payload.locator))) return refuse(1008, 'Only the Host owner can resolve local files'); }
-        catch { return refuse(1008, 'Invalid session message'); }
-      }
-      const expiresAt = expiry();
-      if (expiresAt !== undefined && expiresAt <= now()) return refuse(1008, 'Credential expired');
-      return true;
-    };
-  }
-  /**
-   * Makes the Controller know the session before a stream opens. A Host whose uplink was replaced while the attach was in
-   * flight rejects the attach as offline although it is connected again; that is retryable, not a wait for the Host.
-   */
-  async function recoverForJournalStream(host: Host, binding: Binding): Promise<void> {
-    requireHost(host.id);
-    try { await recoverBinding(host, binding); }
-    catch (error) {
-      if (error instanceof BrokerError && error.code === 'host_offline' && host.ready && host.socket?.readyState === RELAY_SOCKET_OPEN) {
-        throw new BrokerError(503, 'host_reconnected', 'The Host reconnected while the session was opening. Reconnect to continue.');
-      }
-      throw error;
-    }
-  }
-  /** Asks the Controller to attach the session again, which refuses with the native owner when a terminal holds it; any other refusal is thrown. */
-  async function readNativeOwner(host: Host, binding: Binding): Promise<NativeSessionOwner | undefined> {
-    try { await recoverBinding(host, binding, true); return undefined; }
-    catch (error) { if (error instanceof BrokerError && error.nativeOwner) return error.nativeOwner; throw error; }
-  }
-  /**
-   * A browser stream whose session is read from its journal. Reads and control never touch the Controller; the Controller
-   * stream for operations opens at the first message that needs it, through the Host's stream table, so limits, revocation
-   * and Host disconnects apply to it like to any other stream.
-   */
-  function acceptJournalServed(host: Host, binding: Binding, context: BrokerRequestContext) {
-    const subject = principal(context);
-    return { accept(client: RelaySocket) {
-      if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
-      // The switch may have been turned off after the upgrade was prepared.
-      if (brokerState.hosts.get(host.id)?.smartReading?.includes(binding.providerId) !== true) { client.close(1012, 'Smart reading turned off'); return; }
-      track(client);
-      const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
-      credentialExpiry.expire(client, expiry);
-      if (client.readyState !== RELAY_SOCKET_OPEN) return;
-      client.onError(() => undefined);
-      const admit = admitClientMessages(client, context, subject, expiry);
-      const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
-      const stream = journalSessions!.attach({
-        hostId: host.id, providerId: binding.providerId, sessionKey: journalSessionKey(binding.providerId, binding.nativeSessionId), publicAgentId: binding.agentId, client,
-        readNativeOwner: () => readNativeOwner(host, binding),
-        hostStreams: createHostStreamOpener({
-          streams: host.streams, publicAgentId: binding.agentId, runtimeAgentId: () => runtimeAgentId(host, binding), subject,
-          authorized: () => { const end = expiry(); return end === undefined || end > now(); },
-          recover: () => recoverForJournalStream(host, binding),
-          capacity: () => host.streams.size >= hostStreamLimit ? 'host' : userStreams() >= USER_STREAM_LIMIT ? 'account' : undefined,
-          write: message => send(host, message), scheduler, openTimeoutMs: options.rpcTimeoutMs ?? 30_000,
-          diagnostic: details => diagnostic(host, details),
-        }),
-      });
-      client.onMessage((raw, binary) => { if (admit(raw, binary)) stream.receive(raw); });
-      client.onClose(() => stream.close());
-    } };
-  }
-  async function upgrade(request: Request, context: BrokerRequestContext, url: URL) {
-    brokerState.assertAvailable();
-    if (url.pathname === '/ws/remote-host') {
-      const header = request.headers.get('authorization');
-      const hash = header?.startsWith('Bearer ') ? keyHash(header.slice(7)) : undefined;
-      const key = hash ? brokerState.keys.get(hash) : undefined;
-      if (!key || key.claimedAt !== undefined || key.expires <= now()) return rejectUpgrade(401);
-      return { accept(client: RelaySocket) {
-        if (brokerState.unavailable || brokerState.keys.get(hash!) !== key || key.claimedAt !== undefined || key.expires <= now()) { client.close(1008, 'Device credential revoked'); return; }
-        track(client);
-        const asked = (name: string) => url.searchParams.get(name) === '1';
-        const enrollment = url.searchParams.get('successionEnrollment');
-        register(client, key, context, hash!, { enrollmentRequested: enrollment === '3' ? 3 : enrollment === '2' ? 2 : enrollment === '1' ? 1 : undefined,
-          teamRequested: asked('team'), resourcesRequested: asked('teamResources'), recipientsRequested: asked('teamRecipients'), inboxRequested: asked('teamInbox'),
-          statesRequested: !asked('sessionStates') ? false : asked('sessionReplyFacts') ? 2 : 1, successionRequested: asked('teamSuccession'),
-          callForSupportRequested: asked('callForSupport') && readOnlyProviders(url.searchParams.getAll('readOnlyProvider')), statusRequested: asked('hostStatus'), outboxRequested: asked('outbox'),
-          journalRequested: url.searchParams.get('journal') === String(JOURNAL_VERSION) ? JOURNAL_VERSION : 0, controlRequested: asked('control') });
-      } };
-    }
-    const match = /^\/v1\/sessions\/([^/]+)\/events$/.exec(url.pathname);
-    const binding = match && brokerState.bindings.get(match[1]!);
-    if (!binding || !sessionAllowed(binding, principal(context)) || !await permitted(context) || request.headers.get('origin') !== origin) return rejectUpgrade(403);
-    // Authorization above is the same for both modes. A session with a journal head is read from it, whether or not its Host is online.
-    const journalHost = journalSessions && brokerState.hosts.get(binding.hostId);
-    // A store that cannot be read must not stop the session from opening: the Controller path still works.
-    const journaled = journalHost && await journalSessions!.serves(journalHost.id, binding.providerId, journalSessionKey(binding.providerId, binding.nativeSessionId)).catch(() => {
-      diagnostic(journalHost, { event: 'journal_store_failed' });
-      return false;
-    });
-    if (journalHost && journaled) return acceptJournalServed(journalHost, binding, context);
-    let host: Host;
-    try { host = requireHost(binding.hostId); await recoverBinding(host, binding); }
-    catch (error) {
-      // A Host refusal such as native ownership is permanent until the user acts; only unknown failures stay retryable.
-      return error instanceof BrokerError ? new Response(JSON.stringify({ code: error.code, error: error.message }), { status: error.status, headers: { 'content-type': 'application/json' } }) : rejectUpgrade(503);
-    }
-    const subject = principal(context);
-    const userStreams = () => subject === undefined ? 0 : options.userStreamCount?.(subject) ?? activeStreamCount(subject);
-    if (host.streams.size >= hostStreamLimit || userStreams() >= USER_STREAM_LIMIT) return capacityRefusal(host.streams.size >= hostStreamLimit, hostStreamLimit);
-    return { accept(client: RelaySocket) {
-      if (!sessionAllowed(binding, principal(context))) { client.close(1008, 'Session access is unavailable'); return; }
-      if (host.streams.size >= hostStreamLimit || userStreams() >= USER_STREAM_LIMIT) { client.close(1013, 'Remote stream capacity reached'); return; }
-      track(client);
-      const expiry = () => sessionAllowed(binding, principal(context)) ? context.connectionExpiresAt?.() : 0;
-      credentialExpiry.expire(client, expiry);
-      if (client.readyState !== RELAY_SOCKET_OPEN) return;
-      const streamId = ids.uuid(); const stream: Host['streams'] extends Map<string, infer Value> ? Value : never = { publicAgentId: binding.agentId, runtimeAgentId: runtimeAgentId(host, binding), socket: client, subject: principal(context), authorized: () => { const end = expiry(); return end === undefined || end > now(); }, ready: false, buffered: [],
-        control: createStreamControl({ agentId: binding.agentId, readNativeOwner: () => readNativeOwner(host, binding), send: frame => { if (client.readyState === RELAY_SOCKET_OPEN) client.send(JSON.stringify(frame)); } }) };
-      host.streams.set(streamId, stream);
-      diagnostic(host,{event:'stream_opening',streamId,agentId:binding.agentId});
-      const opening = setTimeout(() => { diagnostic(host,{event:'stream_open_timeout',streamId}); client.close(1013, 'Remote stream opening timed out'); }, options.rpcTimeoutMs ?? 30_000);
-      stream.timer = opening;
-      client.onError(() => undefined);
-      const admit = admitClientMessages(client, context, subject, expiry);
-      client.onMessage((raw, binary) => {
-        if (!admit(raw, binary)) return;
-        if (stream.control!.admitRaw(raw.toString())) return;
-        let outgoing: string;
-        try { outgoing = withoutItemKeysFlag(sessionIdentityMessage(raw.toString(), stream.publicAgentId, stream.runtimeAgentId, 'client')); }
-        catch { return client.close(1008, 'Invalid session target'); }
-        if (!stream.ready) {
-          if (stream.buffered.length >= 32 || stream.buffered.reduce((sum, value) => sum + Buffer.byteLength(value), 0) + Buffer.byteLength(raw.toString()) > 1024 * 1024) return client.close(1013, 'Remote stream is not ready');
-          stream.buffered.push(outgoing); return;
-        }
-        clearTimeout(opening);
-        try { send(host, { uplinkVersion: 2, type: 'stream_message', streamId, message: outgoing }); } catch { client.close(1012, 'Remote Host disconnected'); }
-      });
-      client.onClose(() => {
-        clearTimeout(opening);
-        if (!host.streams.delete(streamId)) return;
-        diagnostic(host,{event:'stream_closed',streamId});
-        try { send(host, { uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }); } catch { /* The host may already be offline. */ }
-      });
-      try { send(host, { uplinkVersion: 2, type: 'stream_open', streamId, sessionId: stream.runtimeAgentId }); }
-      catch { client.close(1012, 'Remote Host disconnected'); }
-    } };
-  }
+  const socketEdge = createSocketEdge({ brokerState, options, now, ids, scheduler, origin, hostStreamLimit, sessionAllowed, requireHost, permitted, keyHash, track, credentialExpiry,
+    register, send, diagnostic, journalSessions, runtimeAgentId, recoverBinding, activeStreamCount,
+    admitClientMessages: createClientAdmission({ now, owner }) });
   const routes: RouteGroup[] = [
     createControllerRoutes({ access, brokerState, rpc, successionAction: succession.action, options }),
     createTeamRoutes({ access, brokerState, now, teams, callForSupportChange, resolveRole }),
@@ -647,7 +407,7 @@ export function createHostBroker(options: HostBrokerOptions) {
     async prepareUpgrade(request: Request, context: BrokerRequestContext = {}): Promise<{ accept(socket: RelaySocket): void } | Response | undefined> {
       const url = new URL(request.url);
       if (!handlesUpgrade(url)) return undefined;
-      try { return await upgrade(request, context, url); }
+      try { return await socketEdge.upgrade(request, context, url); }
       catch { return rejectUpgrade(503); }
     },
     close() {

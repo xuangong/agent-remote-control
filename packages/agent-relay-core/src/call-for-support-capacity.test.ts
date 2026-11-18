@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { afterEach, expect, test } from 'vitest';
-import { WebSocket, WebSocketServer } from 'ws';
 import { CALL_FOR_SUPPORT_GROUP_BYTES, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { CALL_FOR_SUPPORT_RECENT_MS } from './call-for-support.js';
-import { relaySocket } from '../../agent-remote-lab/src/server/remote-host-broker.js';
+import { memoryHostClient } from './test-utils/ws-relay-socket.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
 import { TEAM_RECORD_BYTES, validSavedTeam, type SavedTeam } from './team-delivery.js';
 
@@ -34,18 +33,11 @@ async function connectedBroker(teams: SavedTeam[], query: string, now = 100, sta
     hosts: [{ id: 'host', installationId, name: 'Host', legacyDsh: false, teamManagement: true, providers: [{ providerId: 'codex', displayName: 'Codex' }] }],
     bindings: [], creations: [], teams,
   };
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await once(server, 'listening', { signal: AbortSignal.timeout(3000) });
-  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const origin = 'https://relay.example';
   const broker = createHostBroker({ origin, initialState: saved, now: () => now, ...(stateRoom ? { stateRoom } : {}), onStateChange(state) { saved = structuredClone(state); } });
-  server.on('connection', (socket, request) => {
-    void broker.prepareUpgrade(new Request(origin + request.url, { headers: { authorization: 'Bearer key' } })).then(upgrade => {
-      if (!upgrade || upgrade instanceof Response) socket.close();
-      else upgrade.accept(relaySocket(socket));
-    }).catch(() => socket.close(1011));
-  });
-  close.push(async () => { broker.close(); for (const socket of server.clients) socket.terminate(); await broker.settled(); await new Promise<void>(resolve => server.close(() => resolve())); });
-  const socket = new WebSocket(`${origin.replace('http:', 'ws:')}/ws/remote-host?${query}`);
+  close.push(async () => { broker.close(); await broker.settled(); });
+  const socket = memoryHostClient(broker, `${origin}/ws/remote-host?${query}`);
+  close.push(() => { socket.terminate(); });
   await once(socket, 'open', { signal: AbortSignal.timeout(3000) });
   const registered = once(socket, 'message', { signal: AbortSignal.timeout(3000) });
   socket.send(JSON.stringify({ uplinkVersion: 2, type: 'register', installationId, name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }] }));

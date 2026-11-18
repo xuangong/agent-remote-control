@@ -8,7 +8,7 @@ import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { isTeam as isLegacyTeam } from '../../agent-remote-protocol/test/fixtures/legacy-team/team.js';
 import { decodeRemoteHostUplinkMessage as decodeLegacy } from '../../agent-remote-protocol/test/fixtures/legacy-team/remote-host-uplink.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
-import { relaySocket } from '../../agent-remote-lab/src/server/remote-host-broker.js';
+import { relaySocket } from './test-utils/ws-relay-socket.js';
 import { deliveryFingerprint, type SavedTeam } from './team-delivery.js';
 
 const close: Array<() => void | Promise<void>> = [];

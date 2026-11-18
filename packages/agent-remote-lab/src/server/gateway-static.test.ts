@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { mkdtemp, cp, copyFile, rm } from 'node:fs/promises';
+import { mkdtemp, cp, copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, URL } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
+import { BUILT_ASSET_CACHE_CONTROL } from '@orchardworks/agent-relay-core';
 import { createGatewayStaticPages } from './gateway-static.js';
 
 const close: Array<() => Promise<void>> = [];
@@ -48,4 +49,24 @@ it('serves public install assets through the Docker static handler without expos
   }
   const index = await fetch(base);
   expect(await index.text()).toContain('/app/manifest.webmanifest');
+});
+
+it('lets a returning page keep its built bundles but never its index', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'arc-static-'));
+  close.push(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, 'assets'));
+  await writeFile(join(root, 'index.html'), '<html><head></head><body></body></html>');
+  await writeFile(join(root, 'assets', 'App-1a2b3c.js'), 'export {};');
+  const serve = await createGatewayStaticPages(root);
+  const server = createServer((request, response) => {
+    response.setHeader('cache-control', 'no-store');
+    void serve(request, response).then((handled) => { if (!handled) { response.writeHead(404); response.end(); } });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  close.push(() => new Promise<void>((resolve, reject) => { server.close((error) => error ? reject(error) : resolve()); server.closeAllConnections(); }));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing address');
+  const base = `http://127.0.0.1:${address.port}`;
+  expect((await fetch(base + '/assets/App-1a2b3c.js')).headers.get('cache-control')).toBe(BUILT_ASSET_CACHE_CONTROL);
+  expect((await fetch(base + '/')).headers.get('cache-control')).toBe('no-store');
 });

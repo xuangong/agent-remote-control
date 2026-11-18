@@ -1,4 +1,4 @@
-import { isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
+import { BUILT_ASSET_CACHE_CONTROL, isPreviewDomain, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
 import type { RelayEnvironment } from './relay-object.js';
 export { RelayObject } from './relay-object.js';
 
@@ -29,7 +29,10 @@ export default {
         const asset = await env.ASSETS.fetch(request);
         // Static asset fallback must never expose the ordinary unauthenticated workbench index.
         if (asset.headers.get('content-type')?.includes('text/html')) return new Response(null, { status: 404 });
-        return asset;
+        if (!url.pathname.startsWith('/assets/') || !asset.ok) return asset;
+        const built = new Response(asset.body, asset);
+        built.headers.set('cache-control', BUILT_ASSET_CACHE_CONTROL);
+        return built;
       }
     }
     return env.RELAY.getByName('primary').fetch(request);

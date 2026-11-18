@@ -20,3 +20,6 @@ export const fileFrameHeaders: Readonly<Record<string, string>> = {
   'content-security-policy': `${FILE_CONTENT_POLICY}; frame-ancestors 'self'; sandbox ${FILE_FRAME_SANDBOX}`,
   'cache-control': 'no-cache', 'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff',
 };
+
+/** The cache policy of the website's built bundles under `/assets/`. Their names carry a content hash, so a returning page loads its code from the browser and does not wait on the network. */
+export const BUILT_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';

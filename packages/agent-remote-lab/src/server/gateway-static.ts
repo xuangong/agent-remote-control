@@ -1,4 +1,4 @@
-import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
+import { BUILT_ASSET_CACHE_CONTROL, controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -20,6 +20,6 @@ export async function createGatewayStaticPages(directory: string, options?: { or
     try { file = await realpath(resolve(root, '.' + decodeURIComponent(path))); } catch { return false; }
     if (!file.startsWith(root + sep) || !(await stat(file)).isFile()) return false;
     const type = types[extname(file)]; if (!type) return false;
-    response.writeHead(200, { 'content-type': type }); response.end(await readFile(file)); return true;
+    response.writeHead(200, { 'content-type': type, ...(path.startsWith('/assets/') ? { 'cache-control': BUILT_ASSET_CACHE_CONTROL } : {}) }); response.end(await readFile(file)); return true;
   };
 }

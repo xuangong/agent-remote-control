@@ -27,11 +27,14 @@ export interface ClaudeCatalog {
 }
 
 /** SDK catalog APIs read process.env; a helper isolates each configured native home. */
+/** The worker runs from the build; a test that loads this module from the sources finds it beside them. */
+const catalogWorker = new URL(import.meta.url.endsWith('.ts') ? '../dist/catalog-worker.js' : './catalog-worker.js', import.meta.url);
+
 export function createClaudeCatalog(env: NodeJS.ProcessEnv, timeout: number): ClaudeCatalog {
   async function execute<T>(operation: string, sessionId?: string, argument?: string): Promise<T> {
     if (operation === 'history' && (!Number.isFinite(timeout) || timeout <= 0)) throw new Error('Claude source history requires a positive process deadline.');
     const { stdout } = await promisify(execFile)(process.execPath,
-      [...(operation === 'history' ? ['--max-old-space-size=192'] : []), fileURLToPath(new URL('./catalog-worker.js', import.meta.url)), operation, ...(sessionId ? [sessionId] : []), ...(argument ? [argument] : [])],
+      [...(operation === 'history' ? ['--max-old-space-size=192'] : []), fileURLToPath(catalogWorker), operation, ...(sessionId ? [sessionId] : []), ...(argument ? [argument] : [])],
       { env: { ...process.env, ...env }, timeout, maxBuffer: operation === 'history' ? 512 * 1024 : 32 * 1024 * 1024, encoding: 'utf8' })
       .catch(() => { throw new Error('Claude native catalog is unavailable.'); });
     return JSON.parse(stdout) as T;

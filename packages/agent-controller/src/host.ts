@@ -54,7 +54,7 @@ import { type SessionRefContext } from './session-refs.js';
 import { type SessionCaller, type SessionCallResult } from './session-routes.js';
 import { CliError } from './command-output.js';
 import { runHostRequest } from './host-command.js';
-import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, RemoteHostCatalog, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
+import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type RemoteHostUplinkClientOptions, RemoteHostCatalog, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type SessionWireAgent, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
 export type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRequestDiagnostic, AgentHostRuntime, AgentHostRuntimeOptions, AgentHostWorkspace } from './session-core/types.js';
 
@@ -73,6 +73,8 @@ export interface AgentHostOptions extends AgentHostRuntimeOptions {
   onRelayDiagnostics?: (entries: RelayDiagnostic[]) => void | Promise<void>;
   onDiagnostic?: (diagnostic: AgentHostUplinkDiagnostic) => void | Promise<void>;
   uplink: { url: string; remoteKey: string; onCredential?: (credential: string) => Promise<void> };
+  /** The Controller's link to the Relay: builds the uplink client of one connection. A test plays the Relay's side with a fake. */
+  uplinkClient?: (options: RemoteHostUplinkClientOptions) => RemoteHostUplinkClient;
   /** Sends a command naming another Host there, through the Relay as the signed-in command line. */
   forwardCommand?(scope: string, hostId: string, request: Record<string, unknown>): Promise<SessionCallResult>;
   /** A request to the Relay as the signed-in command line, for what only the Relay keeps. */
@@ -143,7 +145,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     runtime.setRelayConnected(false);
     runtime.journals.available(undefined);
     const current = fence.begin();
-    return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
+    return { superseded: false, client: (options.uplinkClient ?? createRemoteHostUplinkClient)({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       ...(options.team ? { teamManagement: true, callForSupport: true,
         readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),

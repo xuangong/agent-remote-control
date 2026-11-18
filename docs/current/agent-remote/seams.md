@@ -52,6 +52,16 @@ Recording at an older commit: check it out in a temporary worktree under `.workt
 - **Tests today.** `packages/agent-remote-seams/tests/S2` (16): each scenario is run again, with the real publisher over a scripted provider from a Codex recording and the real journal service over in-memory hand-offs and a virtual clock, and must equal its transcript; and the Controller role of each transcript is played against the real journal service, which must answer with the transcript's Relay frames.
 - **Not yet.** Registration, heartbeat expiry, rpc, outbox and native owner frames (they need the Controller's uplink client to accept an injected `RelaySocket`; transcripts for them come with that port in the Controller session-core step); one transcript for each of `fenced`, `incomplete`, `sequence_gap`, `not_followed`, `not_ready` and `unavailable`; a player for the Relay role against the Controller side.
 
+### Controller modules on the uplink side
+
+The Controller's side of S2 is three modules in `agent-controller/src`; each module's contract is written at the top of its files and the tests beside them run on fake ports under 300 ms each.
+
+- **`publisher/`** (module `controller-publisher`). `journal-publisher.ts` is the connection-wide publisher (`createJournalPublisher`; the package export `./journal-publisher`), `journal-publication.ts` the publication of one session (at most 20 mutable fields, 6 recovery outcomes), `journal-items.ts` and `journal-reconcile.ts` build windows and ops from timeline rows. `terminal-refresh.ts` is the rule that keeps the journal of a released session current when a terminal wrote to it: it remembers the native update time each released session's journal covers, and when a listing shows a newer one that has been quiet for 30 s, attaches the session once and releases it again. Ports: clock, directories, runtimes, the journal and the attach.
+- **`session-core/`** (module `controller-session-core`). Decisions of the session lifecycle as pure functions or one small state, with ports where the world is touched: `admission.ts` (open, draining, closed and what each refuses), `family.ts` (native families, the quiescence rule of a succession), `idle-release.ts` (when an idle session may give up its runtime), `lineage.ts` (what succession records say about how a session came to exist), `requests.ts` (reading control requests and answering their failures), `catalog.ts` (the sessions as pages, the Relay and session commands read them), `uplink-fence.ts` (which uplink connection may still change state, and the ordering of credential writes). `host.ts` composes them with the provider registrations, the operation cache, the succession service and the uplink client.
+- **Uplink client.** `createRemoteHostUplinkClient` stays in `agent-session-runtime` with the wire; the Controller reaches it through `AgentHostOptions.uplinkClient`, a function that takes the client's options and returns the client, so a unit test plays the Relay's side with a fake (the `RelayLink` port).
+
+Terminal refresh scenario: `terminal-write-refresh` in the S2 transcripts, a session published, released, written by a terminal, listed and attached again; the Relay answers `extend` and no other frame is new.
+
 ## S3 Relay to browser session wire
 
 - **Parties.** Relay `edge` and `journal-service`; client `connection` and `session-client`.

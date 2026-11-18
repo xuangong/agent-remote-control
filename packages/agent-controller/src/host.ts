@@ -1,223 +1,71 @@
 import { TeamRuntime } from './team.js';
 import { isTeamSeat, type JournalRelayMessage, type OutboxHostCall, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { directoryNativeEffect, directoryOperationId, type DirectoryMutationEvidence } from './directory-mutation.js';
+import { directoryNativeEffect, directoryOperationId } from './directory-mutation.js';
 import { admitNativeOwnerTransfer } from './native-owner-admission.js';
 import { isCreationSource } from '@orchardworks/agent-remote-protocol';
 import { SessionSuccessionEnrollment } from './session-succession-enrollment.js';
 import { successionTpmRouting } from './session-succession-tpm.js';
-import { SessionSuccessionService, type SessionSuccessionPorts, type SessionExecutionRouting } from './session-succession-service.js';
+import { SessionSuccessionService } from './session-succession-service.js';
 import { captureSuccessionTimeline } from './session-succession-capture.js';
-import { SuccessionPreparationRejected, successionCreationHandle, nativePrefixResumeHandle, type NativePromptEditTarget, type RetainedSuccessionVerification } from './local-succession-preparation.js';
+import { SuccessionPreparationRejected, nativePrefixResumeHandle, type RetainedSuccessionVerification } from './local-succession-preparation.js';
 import { SessionSuccessionBoundary } from './session-succession-boundary.js';
 import { SOURCE_WITNESS_RESULT_BYTES, validSourceWitnessIdentity, type SessionSuccessionStore } from './session-succession-store.js';
 import { jsonBytes } from './succession-persistence.js';
 import type { SessionSuccessionContextStore } from './session-succession-context.js';
 import type { SessionSuccessionCoordinator } from './session-succession.js';
 import { nativeSessionRefKey, nativePrefixSegmentAncestors, isNativeSessionRef, isSuccessionRequest, type NativeSessionRef, type NativePrefixSelection, type TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import { TpmCoordinator, type TpmOptions, type TpmSessionAccess } from './tpm.js';
+import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import { isTpmCreate, isTpmAction } from '@orchardworks/agent-remote-protocol';
-import { SessionBindings, SessionBindingError } from '@orchardworks/agent-session-runtime';
+import { SessionBindings } from '@orchardworks/agent-session-runtime';
 import { createNativeStartBackoff, nativeStartTarget } from './native-start-backoff.js';
 import type { HostProviderDiscovery } from './provider-discovery.js';
-import {NativeSessionOwnerError, type NativeOwnerIdentity, type NativeHandoffGrant} from './native-session-owner.js';
+import { NativeSessionOwnerError } from './native-session-owner.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
-import { browseWorkspaceFolders, createWorkspaceFolder, WorkspaceFolderError } from './workspace-folders.js';
+import { browseWorkspaceFolders, createWorkspaceFolder } from './workspace-folders.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
-import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory, type HostExecutionPolicy } from './execution-policy.js';
+import { allowedWorkspace, HostExecutionPolicyError, protectHostDirectory } from './execution-policy.js';
 import { SessionRoles, type SessionRole } from './session-role-succession.js';
 import { roleSessionConfig } from './role-session-creation.js';
 import { WorkerSupport } from './call-for-support-worker.js';
 import { createControllerPreviews } from './previews.js';
 import { createVscodeTunnelManager, type VscodeTunnelOptions } from './vscode-tunnel.js';
-import { createOperationCache, OperationCacheError, type OperationCacheOptions } from '@orchardworks/agent-session-runtime';
+import { createOperationCache, OperationCacheError } from '@orchardworks/agent-session-runtime';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentEmptyCreationResult, AgentNativeValidityToken, AgentPersistenceHandle, AgentSessionResumeOptions, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
-import { AgentOperationRejectedError, bindAgentSessionTools, AgentSessionInUseError, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
-import { PROTOCOL_VERSION, type HostEnvironment, type HostSessionState } from '@orchardworks/agent-remote-protocol';
-import { createSessionStatePublisher, liveSessionState, type SessionStatePublisher } from './session-state-publisher.js';
+import type { AgentProviderAdapter, AgentSession, AgentSessionConfig, AgentSessionExtensions, AgentNativeValidityToken, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
+import { AgentOperationRejectedError, bindAgentSessionTools, AgentRuntimeError, serializeAgentEmptyCreationResult, serializeAgentInputMaterialization } from '@orchardworks/agent-provider-sdk';
+import { PROTOCOL_VERSION, type HostEnvironment } from '@orchardworks/agent-remote-protocol';
+import { createSessionStatePublisher, liveSessionState } from './session-state-publisher.js';
 import { createSessionReplies } from './session-replies.js';
 import { SessionOutbox } from './session-outbox.js';
-import { createJournalPublisher, type JournalPublisher, type JournalPublisherDiagnostic } from './publisher/journal-publisher.js';
+import { createTerminalRefresh } from './publisher/terminal-refresh.js';
+import { createAdmission } from './session-core/admission.js';
+import { createSessionCatalog, catalogSessionStates } from './session-core/catalog.js';
+import { handoffRefusal, nativeFamily as familyOf } from './session-core/family.js';
+import { hasHeldChild, mayReconcileIdle, mayReleaseIdle } from './session-core/idle-release.js';
+import * as lineage from './session-core/lineage.js';
+import { bounded, failureResponse, HostRequestError, json, boundedSourceIdentity, parseBody as body, positiveTimeout, publicBinding, requiredString as string } from './session-core/requests.js';
+import type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRequestDiagnostic, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
+import { createUplinkFence } from './session-core/uplink-fence.js';
+import { createJournalPublisher } from './publisher/journal-publisher.js';
 import { loadResourceIdKey } from './resource-id-key.js';
 import { FileResourceIdIndex } from './resource-id-index-file.js';
-import { sessionHostAccess, type SessionCallerCatalog, type SessionCallerEndpoint, type SessionCallerStore, type SessionHostAccessSource } from './session-callers.js';
-import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext, type SessionRefStore } from './session-refs.js';
+import { sessionHostAccess, type SessionCallerCatalog } from './session-callers.js';
+import { changeSessionRef, describeSessionRefs, pendingReferenceNote, SessionRefError, validTarget, type SessionRefContext } from './session-refs.js';
 import { withReferenceNotes } from './session-reference-notes.js';
 import { handleSessionRequest, type SessionActions, type SessionCaller, type SessionCallerRef, type SessionCallResult } from './session-routes.js';
 import { CliError, operationUuid } from './cli-output.js';
 import { runHostRequest } from './host-command.js';
 import { handleRoleRequest } from './role-routes.js';
-import { InputImageStore, type InputImageStoreOptions, InputResourceStore, type InputResourceStoreOptions, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, type AgentRemoteRelay,
-  RemoteHostCatalog, RemoteHostCatalogError, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteSessionSummary,
-  type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
+import { InputImageStore, InputResourceStore, createAgentRemoteRelay, createRemoteHostUplinkClient, type AgentRemoteHttpResult, RemoteHostCatalog, UnsupportedAgentCapabilityError, type RemoteHostControlRequest, type RemoteHostUplinkClient, type RemoteHostUplinkDiagnostic, type RemoteHostSessionLease, type SessionWireAgent, type SessionWireOperation, type SessionWireOperationExecutor } from '@orchardworks/agent-session-runtime';
 
-export interface AgentHostWorkspace { id: string; name: string; path: string }
-export interface AgentHostDirectory {
-  readonly providerId: string;
-  readonly listing?: import('./session-listing.js').HostSessionListing;
-  sessionSummary?(nativeSessionId: string): Promise<RemoteSessionSummary | undefined>;
-  readonly supportsSourceReferences?: boolean;
-  /** Adapter-owned pre-effect promise for this exact create mode: the authoritative native reader ID
-   * has nonempty trim, <=512 UTF-16 units and a valid same-controller/provider NativeSessionRef.
-   * Must cover every selected downstream mode while create can run; mutable uncertified modes return false.
-   * Independent of source-tool availability, projection certification and source-grant durability. */
-  supportsBoundedSourceCreate?(input: Parameters<AgentHostDirectory['create']>[0]): Promise<boolean>;
-  validateSessionRename?(nativeSessionId: string, title: string): Promise<void>;
-  sessionTitle?(nativeSessionId: string): Promise<string | undefined>;
-  renameSession?(nativeSessionId: string, title: string): Promise<string>;
-  readonly supportsPromptEditing?: boolean;
-  validatePromptEdit?(target: { nativeSessionId: string; turnId: string; messageId: string }): Promise<void>;
-  supportsNativePrefix?(target: NativePromptEditTarget): Promise<boolean>;
-  createNativePrefix?(target: NativePromptEditTarget, extensions: AgentSessionExtensions, evidence: DirectoryMutationEvidence | undefined, candidateKnown: (handle: AgentPersistenceHandle) => Promise<void>): Promise<AgentPersistenceHandle>;
-  verifyNativePrefix?(target: NativePromptEditTarget, handle: AgentPersistenceHandle): Promise<void>;
-  /** Active work uses tools served by the Controller process. */
-  requiresController?(nativeSessionId: string): boolean;
-  /** Must guarantee disposal only detaches this client's idle runtime connection. */
-  canReleaseSession?(nativeSessionId: string): boolean;
-  /** When this process last wrote to a session whose transcript something else has written to since; none when it did not diverge. */
-  divergedAt?(nativeSessionId: string): number | undefined;
-  /** Reads the transcript's update time now: true when something else wrote to a session that is otherwise quiet. */
-  checkDivergence?(nativeSessionId: string): Promise<boolean>;
-  reconcileIdleSession?(nativeSessionId: string): Promise<boolean>;
-  sessionReleased?(nativeSessionId: string): Promise<void> | void;
-  sessionWorkspace?(nativeSessionId: string, handle?: AgentPersistenceHandle): Promise<string | undefined>;
-  setSourceAccessCheck?(check: (nativeSessionId: string) => Promise<void>): void;
-  /** What the sessions this directory creates and resumes may use of the Host; set only for adapters that apply it. */
-  setSessionHostAccess?(source: SessionHostAccessSource): void;
-  setSourceBindingReader?(reader: import('./session-reference.js').SourceBindingReader): void;
-  /** Host validates committed ancestry; exact saved prefix handles may reconstruct preparation attachments. */
-  setSourceReferenceAncestors?(resolve: (nativeSessionId: string, preparationHandle?: AgentPersistenceHandle) => Promise<readonly string[]>): void;
-  sourceReferences?(): Promise<Array<{ nativeSessionId: string; sourceNativeSessionId: string }>>;
-  /** The source a session references through the grant it holds or inherits; none for a session without one. */
-  sourceReference?(nativeSessionId: string): Promise<import('./session-reference.js').SourceReferenceState | undefined>;
-  /** Removes or restores a session's source reference; true when that changed it. */
-  setSourceReferenceRemoved?(nativeSessionId: string, removed: boolean): Promise<boolean>;
-  /** Native history copy only; role succession and task ownership are separate. */
-  forkSession?(nativeSessionId: string): Promise<string>;
-  list(): Promise<readonly RemoteSessionSummary[]> | readonly RemoteSessionSummary[];
-  workspaces(): Promise<readonly AgentHostWorkspace[]> | readonly AgentHostWorkspace[];
-  models?(): Promise<unknown> | unknown;
-  create(input: Omit<AgentSessionConfig, 'sessionId'> & { workspaceId?: string; sourceNativeSessionId?: string; editNativeSessionId?: string; editTurnId?: string; editMessageId?: string }, evidence?: DirectoryMutationEvidence): Promise<string>;
-  setSessionHandoffAdmission?(handler: (nativeSessionId: string, current: NativeOwnerIdentity, next: NativeOwnerIdentity) => NativeHandoffGrant): void;
-  setSessionHandoffHandler?(handler: (nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>): void;
-  open(nativeSessionId: string, options?: { takeOver?: string; extensions?: AgentSessionExtensions; nativeCreation?: AgentEmptyCreationResult; nativePrefix?: AgentPersistenceHandle; resumeHandle?: AgentPersistenceHandle; resumeOptions?: AgentSessionResumeOptions }): Promise<AgentSession>;
-  openChild?(parentNativeSessionId: string, nativeSessionId: string): Promise<AgentSession>;
-  close(): Promise<void> | void;
-}
-export interface AgentHostProviderRegistration {
-  adapter: AgentProviderAdapter;
-  directory: AgentHostDirectory;
-  preservesWorkOnDisconnect?: boolean;
-  /** Trust native permission controls without disabling Host workspace admission. */
-  nativePermissionControl?: boolean;
-  /** Version reported by the native CLI this registration runs. */
-  nativeVersion?: string;
-}
-export interface AgentHostRuntimeOptions {
-  /** Trusted process configuration; never read from a create request. */
-  controllerId?: string;
-  registrations: readonly AgentHostProviderRegistration[];
-  providerEnabled?: (providerId: string) => boolean;
-  onRequestDiagnostic?: (diagnostic: AgentHostRequestDiagnostic) => void;
-  idleGraceMs?: number;
-  idleReconcileMs?: number;
-  onSessionLifecycleDiagnostic?: (diagnostic: { event: 'session_idle_released' | 'session_idle_restored' | 'session_idle_reconciled'; agentId: string; providerId: string }) => void;
-  /** Told what the journal publisher could not publish. The entries carry no conversation content. */
-  onJournalDiagnostic?: (diagnostic: JournalPublisherDiagnostic) => void;
-  shutdownTimeoutMs?: number;
-  cancelTimeoutMs?: number;
-  executionPolicy?: HostExecutionPolicy;
-  operationCache?: OperationCacheOptions;
-  tpm?: TpmOptions;
-  team?: { stateDirectory: string; request?: (call: TeamHostCall) => Promise<unknown>; tickMs?: number;
-    /** The Relay routes Team recipients across a generic succession of their session. */
-    genericSuccession?(): boolean;
-    /** The Relay sends this Controller Call For Support groups. */
-    callForSupport?(): boolean };
-  /** Internal wiring until provider readiness and product projection are certified together. */
-  succession?: { controllerId: string; enrollment?: true } & ({
-    stateDirectory: string;
-    /** Adapter-owned evidence. No provider is inferred to support succession from idle status. */
-    native?: Pick<SessionSuccessionPorts, 'supports' | 'supportsBoundedProjection' | 'createIdle' | 'reconcileDelivery'> & {
-      inspect: (source: NativeSessionRef) => Promise<Omit<import('./local-succession-preparation.js').SuccessionReadiness, 'boundary' | 'inFlightInputs'>>;
-    };
-  } | {
-    store: SessionSuccessionStore;
-    contexts: SessionSuccessionContextStore;
-    coordinator: SessionSuccessionCoordinator;
-  });
-  inputImages?: InputImageStoreOptions;
-  inputResources?: InputResourceStoreOptions;
-  /** Where each session's latest reply is kept across restarts; without it, replies are known only while this process runs. */
-  sessionRepliesFile?: string;
-  /** Where the secret of stable resource ids is kept; without it resource ids are random per process. */
-  resourceIdKeyFile?: string;
-  /** Where the resources that stay readable across a restart are remembered; used only with `resourceIdKeyFile`. */
-  resourceIdIndexFile?: string;
-  /** Delivers messages that waited on the Relay for this Host; receipts of claimed messages are kept in file. */
-  outbox?: { file: string; request(call: OutboxHostCall): Promise<unknown> };
-  /** Credentials through which sessions' shell commands reach this Controller as themselves. */
-  sessionCallers?: { store: SessionCallerStore; endpoint: SessionCallerEndpoint; skills?: string; sessionBin?: string };
-  /** The sessions each session refers to; without it, sessions have only their source. */
-  sessionRefs?: SessionRefStore;
-  /** This Host's identity at the Relay, once registered; session addresses start with it. */
-  hostId?: () => Promise<string | undefined>;
-  /** The website's origin, where session links open. */
-  siteOrigin?: () => string | undefined;
-}
-export interface AgentHostRequestDiagnostic {
-  event: 'host_request_started' | 'host_request_completed';
-  requestId: string;
-  operation: 'session_attach' | 'session_create' | 'catalog_read' | 'host_control';
-  elapsedMs: number;
-  status?: number;
-  code?: string;
-  /**
-   * The native session an attach opens, so a repeating failure names its session. Like Codex request
-   * diagnostics, the log carries a digest of the native identity rather than the identity itself.
-   */
-  providerId?: string;
-  sessionRef?: string;
-  /** The result repeats an earlier native start failure instead of starting the session again. */
-  backoff?: true;
-  /** The class and code of the error behind a generic failure; native error text can carry content, so it is never recorded. */
-  cause?: string;
-}
-export interface AgentHostRuntime {
-  readonly executionRouting?: SessionExecutionRouting;
-  /** Role routing, which Team recipients follow across every committed succession. */
-  readonly roleRouting?: SessionExecutionRouting;
-  readonly relay: AgentRemoteRelay;
-  /** Session states the Relay shares with the owner's pages. */
-  readonly sessionStates: SessionStatePublisher;
-  /** Publishes the sessions of providers that declare journal support to their journals on the Relay. */
-  readonly journals: JournalPublisher;
-  /** The Host's sessions as session commands read them. */
-  readonly sessionCatalog: SessionCallerCatalog;
-  /** The sessions each session refers to, for session commands; absent without a reference store. */
-  readonly sessionRefs?: SessionRefContext;
-  /** Messages that waited on the Relay for this Host, delivered while the Relay acknowledges the outbox. */
-  readonly outbox?: SessionOutbox;
-  /** Answers one session command; forward sends requests naming other Hosts to them. */
-  callSession(request: unknown, caller: SessionCaller, forward?: (hostId: string, request: Record<string, unknown>) => Promise<SessionCallResult>): Promise<SessionCallResult>;
-  /** Answers one role command of the session that asks. */
-  callRole(request: unknown, caller: SessionCaller): Promise<SessionCallResult>;
-  addRegistration(registration: AgentHostProviderRegistration): void;
-  control(request: RemoteHostControlRequest): Promise<AgentRemoteHttpResult>;
-  enrollFromRelay(request: RemoteHostControlRequest, context: TrustedSuccessionContext): Promise<AgentRemoteHttpResult>;
-  executeOperation(scope: string): SessionWireOperationExecutor;
-  acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
-  setRelayConnected(connected: boolean): void;
-  beginControllerRestart(): boolean;
-  cancelControllerRestart(): void;
-  resolveSession(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
-  close(): Promise<void>;
-}
+export type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostRequestDiagnostic, AgentHostRuntime, AgentHostRuntimeOptions, AgentHostWorkspace } from './session-core/types.js';
+
+/** The Controller's host: the runtime of its sessions with the uplink, the updater and the processes around it. */
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
   providerDiscovery?: HostProviderDiscovery;
   codexDaemon?: { stateDir: string; restart(operationId: string): Promise<void> };
@@ -254,7 +102,7 @@ export interface AgentHost {
 export function createAgentHost(options: AgentHostOptions): AgentHost {
   if (options.succession?.enrollment && options.succession.controllerId !== options.installationId) throw new Error('Succession Controller identity must match the installed Controller.');
   const stateDirectory = options.preview?.stateDirectory ?? options.vscodeTunnel?.stateDirectory;
-  const registeredHostId = async () => closed || state !== 'registered' ? undefined : (await connection.client.ready).hostId;
+  const registeredHostId = async () => fence.closed || state !== 'registered' ? undefined : (await connection.client.ready).hostId;
   let uplinkUrl = options.uplink.url;
   const siteOrigin = () => { const url = new URL(uplinkUrl); url.protocol = url.protocol === 'ws:' ? 'http:' : 'https:'; return url.origin; };
   const runtime = createAgentHostRuntime({ ...options, hostId: registeredHostId, siteOrigin, ...(options.team ? { team: { ...options.team, request: (call: TeamHostCall) => connection.client.teamRequest(call),
@@ -272,11 +120,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
   const previews = options.preview ? createControllerPreviews(options.preview) : undefined;
   const vscodeTunnel = options.vscodeTunnel ? createVscodeTunnelManager({ ...options.vscodeTunnel, installationId: options.installationId }) : undefined;
   let state: AgentHost['state'] = 'connecting';
-  let generation = 0;
-  let closed = false;
+  const fence = createUplinkFence();
   interface Connection { client: RemoteHostUplinkClient; superseded: boolean }
   let connection: Connection;
-  let credentialPersistence: Promise<void> = Promise.resolve();
   const describeProviders = () => options.registrations.filter(item => options.providerEnabled?.(item.directory.providerId) !== false).map(({ adapter, directory }) => ({ providerId: adapter.descriptor.providerId, displayName: adapter.descriptor.displayName, ...(codexDaemon && adapter.descriptor.providerId === 'codex' ? { daemonControl: true as const } : {}), ...(directory.renameSession ? { sessionRename: true as const } : {}), ...(directory.supportsPromptEditing ? { promptEditing: true as const } : {}),
     // References are an attribute of every session on a Host that keeps them, whatever created the session, and the
     // Host tells each session's agent when they change.
@@ -303,36 +149,29 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     uplinkUrl = config.url;
     runtime.setRelayConnected(false);
     runtime.journals.available(undefined);
-    const current = ++generation;
+    const current = fence.begin();
     return { superseded: false, client: createRemoteHostUplinkClient({ relay: runtime.relay, installationId: options.installationId, name: options.name, environment: options.environment, controller: options.controller?.identity,
       ...(options.team ? { teamManagement: true, callForSupport: true,
         readOnlyProviders: options.registrations.filter(({ adapter }) => adapter.descriptor.sessionAccess?.readOnly).map(({ adapter }) => adapter.descriptor.providerId) } : {}),
       ...(options.tpm ? { tpmManagement: true } : {}),
       hostStatus: true,
       ...(runtime.outbox ? { outbox: {
-        onAvailable: (available: boolean) => { if (generation === current && !closed) runtime.outbox!.setAvailable(available); },
-        onReady: () => { if (generation === current && !closed) runtime.outbox!.wake(); } } } : {}),
+        onAvailable: (available: boolean) => { fence.whenCurrent(current, () => runtime.outbox!.setAvailable(available)); },
+        onReady: () => { fence.whenCurrent(current, () => runtime.outbox!.wake()); } } } : {}),
       ...(options.succession?.enrollment ? { successionEnrollment: { control: runtime.enrollFromRelay } } : {}),
       // A Controller with no journal-capable provider does not ask for the grant, and a Relay without it never offers one.
       ...(runtime.journals.capable() ? { journal: {
-        available: (writer: { send(json: string): void } | undefined) => { if (generation === current && !closed) runtime.journals.available(writer); },
-        receive: (message: JournalRelayMessage) => { if (generation === current && !closed) runtime.journals.receive(message); } } } : {}),
+        available: (writer: { send(json: string): void } | undefined) => { fence.whenCurrent(current, () => runtime.journals.available(writer)); },
+        receive: (message: JournalRelayMessage) => { fence.whenCurrent(current, () => runtime.journals.receive(message)); } } } : {}),
       sessionStates: runtime.sessionStates,
       providers: describeProviders(), ...(options.providerDiscovery ? { providerChanges: { current: describeProviders, subscribe: options.providerDiscovery.subscribe } } : {}), url: config.url, remoteKey: config.remoteKey,
-      onCredential: config.onCredential ? credential => {
-        const pending = credentialPersistence.catch(() => undefined).then(async () => {
-          if (generation !== current || closed) throw new Error('Host credential persistence was superseded.');
-          await config.onCredential!(credential);
-        });
-        credentialPersistence = pending;
-        return pending;
-      } : undefined,
+      onCredential: config.onCredential ? credential => fence.persistCredential(current, config.onCredential!, credential) : undefined,
       resolveSession: runtime.resolveSession, acquireSession: runtime.acquireSession, control: hostControl,
       operationExecutor: scope => runtime.executeOperation(scope),
       previews: previews ? { snapshot: previews.snapshot, subscribe: previews.subscribe, disconnected: previews.disconnected,
         registered: info => previews.registered({ ...info, url: config.url }) } : undefined,
-      onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current }) : undefined,
-      onStateChange(next) { if (generation === current && !closed) { state = next; runtime.setRelayConnected(next === 'registered'); vscodeTunnel?.setRelayConnected(next === 'registered'); } } }) };
+      onDiagnostic: options.onDiagnostic ? diagnostic => options.onDiagnostic!({ ...diagnostic, uplinkGeneration: current.generation }) : undefined,
+      onStateChange(next) { fence.whenCurrent(current, () => { state = next; runtime.setRelayConnected(next === 'registered'); vscodeTunnel?.setRelayConnected(next === 'registered'); }); } }) };
   };
   connection = connect(options.uplink);
   const ready = connection.client.ready;
@@ -369,11 +208,11 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
     },
     async controllerInfo() { return { identity: options.controller?.identity, status: await updater?.status() }; },
     async updateController(version, operationId, clean) {
-      if (!updater || closed) throw new Error('Controller updates are unavailable.');
+      if (!updater || fence.closed) throw new Error('Controller updates are unavailable.');
       return updater.request(version, operationId, clean);
     },
     async replaceUplink(config) {
-      if (closed) throw new Error('Agent Host is closed.');
+      if (fence.closed) throw new Error('Agent Host is closed.');
       const prior = connection;
       const requested = connect(config);
       connection = requested;
@@ -384,7 +223,7 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
         throw error;
       }
     },
-    close() { return closePromise ??= (async () => { closed = true; generation += 1; state = 'closed';
+    close() { return closePromise ??= (async () => { fence.close(); state = 'closed';
       connection.superseded = true;
       await bounded(Promise.allSettled([updater?.close(), connection.client.close(), previews?.close(), vscodeTunnel?.close(), runtime.close()]), options.shutdownTimeoutMs ?? 5000);
     })(); },
@@ -393,24 +232,9 @@ export function createAgentHost(options: AgentHostOptions): AgentHost {
 
 /** Browsers poll catalog revisions every few seconds; a full native listing can take seconds, so checks reuse one this recent. */
 const catalogRevisionMaxAgeMs = 15_000;
-/** A refresh of terminal-written sessions reads at most this many sessions at once, from at most this many released most recently, and waits for a quiet session. */
-const JOURNAL_REFRESH_READS = 4;
-const JOURNAL_REFRESH_SESSIONS = 20;
-const JOURNAL_REFRESH_QUIET_MS = 30_000;
 
 function hasCurrentNativeEvidence(owner: Pick<AgentProviderAdapter | AgentSession, 'nativeEvidence'>): boolean {
   const evidence = owner.nativeEvidence?.availability(); return evidence?.status === 'configured' && evidence.version === 2;
-}
-
-interface Binding { agentId: string; providerId: string; nativeSessionId: string; parentNativeSessionId?: string }
-
-/** Catalog states worth sharing; an unknown state is left out. */
-function catalogSessionStates(summaries: readonly RemoteSessionSummary[]): HostSessionState[] {
-  return summaries.flatMap(summary => {
-    const state = summary.state === 'unavailable' ? 'failed' : summary.state === 'unknown' ? undefined : summary.state;
-    const updatedAt = Date.parse(summary.updatedAt);
-    return state ? [{ providerId: summary.providerId, nativeSessionId: summary.nativeSessionId, state, ...(Number.isFinite(updatedAt) && updatedAt >= 0 ? { updatedAt } : {}) }] : [];
-  });
 }
 
 export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentHostRuntime {
@@ -421,16 +245,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const registrations = new Map<string, AgentHostProviderRegistration>();
   const prepared = new Map<string, AgentSession>();
   const nativeAttachments = new WeakMap<SessionWireAgent, { session: AgentSession; nativeCreation?: string; nativePrefix?: string }>();
-  /** The native update time that the journal of each session this process published already covers; a listing newer than it says something else wrote the session. */
-  const journalWindowAt = new Map<string, number>();
-  let journalRefreshing = false;
   /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
   const observeListing = (registration: AgentHostProviderRegistration): AgentHostProviderRegistration => ({ ...registration, directory: new Proxy(registration.directory, {
     get(target, key) {
       if (key === 'list') return async () => {
         const summaries = await target.list();
         // A refresh never fails the listing it rides on.
-        try { listed(target.providerId, summaries); } catch { /* The next listing tries again. */ }
+        try { terminalRefresh.listed(target.providerId, summaries); } catch { /* The next listing tries again. */ }
         return summaries;
       };
       const value = Reflect.get(target, key, target);
@@ -578,7 +399,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const relay = createAgentRemoteRelay({ providers: relayAdapters, ...(resourceIdKey === undefined ? {} : { resourceIdKey }), ...(resourceIdIndex ? { resourceIdIndex } : {}), operationCache, operationLifecycle: {
     settingIntent: (agent, accept) => successionBoundary ? successionBoundary.settingIntent(nativeRef(bindingFor(agent)), accept) : accept(),
     target: agent => { const binding = bindingFor(agent); return JSON.stringify([binding.providerId, binding.nativeSessionId]); },
-    admit: () => { if (draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
+    admit: () => { if (admission.draining) throw new OperationCacheError('controller_updating', 'Controller is updating. Reconnect before retrying.'); },
     beforeDispatch: agent => { if (succession) succession.coordinator.assertAdmission(nativeRef(bindingFor(agent))); },
     mutationTargets: agent => succession ? [nativeSessionRefKey(nativeRef(bindingFor(agent)))] : [],
     admission: (agent, _operation, _scope, entry) => {
@@ -622,36 +443,33 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const uncertainAgents = new Set<string>();
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
-  let draining = false;
-  let closed = false;
+  const admission = createAdmission();
   let closePromise: Promise<void> | undefined;
+  const terminalRefresh = createTerminalRefresh({
+    now: () => Date.now(),
+    directory: providerId => registrations.get(providerId)?.directory,
+    bindings: () => bindings.values(),
+    bindingOf: (providerId, nativeSessionId) => bindings.getByNative(providerId, nativeSessionId),
+    isLive: agentId => !!liveAgent(agentId),
+    hasDemand: agentId => idle.hasDemand(agentId),
+    expire: agentId => idle.expire(agentId),
+    granted: () => journals.granted(),
+    stopped: () => admission.stopped,
+    attachAndRelease: async agentId => { const lease = await acquireSession(agentId); lease?.release(); idle.expire(agentId); },
+    releaseJournal: agentId => journals.release(agentId),
+  });
 
   function assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing = false): void {
     const family = nativeFamily(target.providerId, target.nativeSessionId);
     const own = family.find(binding => binding.nativeSessionId === target.nativeSessionId);
-    if (!own && allowMissing) return;
-    const state = own && liveAgent(own.agentId)?.handoffAdmissionState();
-    if (!state || !state.connected || !state.synchronized || state.closed || state.status !== 'idle' || state.activeTurn
-      || state.pendingInteractions || state.commandWork || state.settingWork || (tpm?.hasUnsettledRecipient(target) || team?.hasUnsettledRecipient(target))) {
-      throw new SuccessionPreparationRejected('succession_not_quiescent', 'Session has active, unknown or unsynchronized Host work.');
-    }
-    const cursor = own && liveAgent(own.agentId)?.timelineCursor();
-    if (captured && (!cursor || cursor.epoch !== captured.epoch || cursor.seq !== captured.seq)) throw new SuccessionPreparationRejected('succession_boundary_changed', 'Source history changed beyond the captured handoff boundary.');
-    for (const child of family.filter(binding => binding !== own)) {
-      const childState = liveAgent(child.agentId)?.handoffAdmissionState();
-      if (!childState || !childState.connected || !childState.synchronized || childState.activeTurn || childState.status !== 'idle'
-        || childState.pendingInteractions || childState.commandWork || childState.settingWork) throw new SuccessionPreparationRejected('succession_not_quiescent', 'Session has unresolved child work.');
-    }
+    const live = own && liveAgent(own.agentId);
+    const refusal = handoffRefusal({ bound: !!own, own: live?.handoffAdmissionState(), ownCursor: live?.timelineCursor(), ...(captured ? { captured } : {}), allowMissing,
+      children: family.filter(binding => binding !== own).map(child => liveAgent(child.agentId)?.handoffAdmissionState()),
+      unsettledRecipient: !!(tpm?.hasUnsettledRecipient(target) || team?.hasUnsettledRecipient(target)) });
+    if (refusal) throw new SuccessionPreparationRejected(refusal.code, refusal.message);
   }
   function nativeFamily(providerId: string, nativeSessionId: string): Binding[] {
-    const ids = new Set([nativeSessionId]);
-    const family: Binding[] = [];
-    for (;;) {
-      const found = [...bindings.values()].filter(binding => binding.providerId === providerId && !family.includes(binding)
-        && (binding.nativeSessionId === nativeSessionId || binding.parentNativeSessionId && ids.has(binding.parentNativeSessionId)));
-      if (!found.length) return family;
-      for (const binding of found) {family.push(binding); ids.add(binding.nativeSessionId);}
-    }
+    return familyOf(bindings.values(), providerId, nativeSessionId);
   }
   function mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[] {
     return [...new Map(targets.flatMap(target => [target, ...nativeFamily(target.providerId, target.nativeSessionId).map(nativeRef)])
@@ -708,45 +526,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return [...new Set([...ancestry.map(ref => ref.nativeSessionId), id])];
     });
   }
-  function originalCreation(target: NativeSessionRef): AgentEmptyCreationResult | undefined {
-    let result: AgentEmptyCreationResult | undefined;
-    for (const state of succession?.store.all() ?? []) for (const operation of state.operations) {
-      const progress = succession!.store.progress(operation.operationId);
-      const candidate = operation.to ?? progress?.orphanCandidate;
-      if (!candidate || nativeSessionRefKey(candidate) !== nativeSessionRefKey(target)) continue;
-      const evidence = progress?.nativeCreation;
-      if (!evidence) continue;
-      const outcome = evidence.outcome;
-      if (!outcome || outcome.status === 'not_dispatched') throw new Error('Native creation evidence is not resumable.');
-      successionCreationHandle(target.providerId, target.nativeSessionId, outcome);
-      if (result && serializeAgentEmptyCreationResult(result) !== serializeAgentEmptyCreationResult(outcome)) throw new Error('Native creation attachment identity conflicts.');
-      result = outcome;
-    }
-    return result;
-  }
-  function originalNativePrefix(target: NativeSessionRef): { handle: AgentPersistenceHandle; source: NativeSessionRef } | undefined {
-    let result: { handle: AgentPersistenceHandle; source: NativeSessionRef } | undefined;
-    for (const state of succession?.store.all() ?? []) for (const operation of state.operations) {
-      const progress = succession!.store.progress(operation.operationId), candidate = operation.to ?? progress?.orphanCandidate;
-      if (!candidate || nativeSessionRefKey(candidate) !== nativeSessionRefKey(target) || !operation.preparation) continue;
-      if (!progress?.nativePrefix?.handle || progress.nativeCreation) throw new Error('Original native prefix evidence is unavailable.');
-      const handle = nativePrefixResumeHandle(target.providerId, target.nativeSessionId, progress.nativePrefix.handle);
-      if (result && (JSON.stringify(result.handle) !== JSON.stringify(handle) || nativeSessionRefKey(result.source) !== nativeSessionRefKey(operation.from))) throw new Error('Native prefix attachment identity conflicts.');
-      result = { handle, source: operation.from };
-    }
-    return result;
-  }
-  /** The source a generic successor took its role over from, while that succession is pending or once it committed. */
-  function genericSuccessionSource(target: NativeSessionRef): NativeSessionRef | undefined {
-    let result: NativeSessionRef | undefined;
-    for (const state of succession?.store.all() ?? []) for (const operation of state.operations) {
-      const progress = succession!.store.progress(operation.operationId), candidate = operation.to ?? progress?.orphanCandidate;
-      if (!candidate || nativeSessionRefKey(candidate) !== nativeSessionRefKey(target) || operation.preparation) continue;
-      if (result && nativeSessionRefKey(result) !== nativeSessionRefKey(operation.from)) throw new Error('Generic succession source identity conflicts.');
-      result = operation.from;
-    }
-    return result;
-  }
+  const originalCreation = (target: NativeSessionRef) => lineage.originalCreation(succession?.store, target);
+  const originalNativePrefix = (target: NativeSessionRef) => lineage.originalNativePrefix(succession?.store, target);
+  const genericSuccessionSource = (target: NativeSessionRef) => lineage.genericSuccessionSource(succession?.store, target);
   /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
   async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
     const directory = registration(source.providerId).directory;
@@ -892,96 +674,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     try { options.onSessionLifecycleDiagnostic?.({ event, agentId: binding.agentId, providerId: binding.providerId }); }
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
-  /** Publishes what the session still holds and stops following it; when the journal served it, the Relay holds everything up to this moment. */
-  async function releaseJournal(binding: Binding): Promise<void> {
-    const startedAt = Date.now();
-    // A session released because something else wrote to its transcript is behind it: its journal covers only what this process wrote.
-    const diverged = registration(binding.providerId).directory.divergedAt?.(binding.nativeSessionId);
-    if (!await journals.release(binding.agentId)) return;
-    const key = `${binding.providerId}:${binding.nativeSessionId}`;
-    // Never earlier than what a listing already told: a clock behind the native one must not make the same write look new again.
-    const covered = diverged ?? Math.max(journalWindowAt.get(key) ?? 0, startedAt);
-    // Re-inserted so the map keeps the sessions released most recently, and no more of them than a refresh may read.
-    journalWindowAt.delete(key);
-    journalWindowAt.set(key, covered);
-    while (journalWindowAt.size > JOURNAL_REFRESH_SESSIONS) journalWindowAt.delete(journalWindowAt.keys().next().value!);
-  }
-  /**
-   * A summary newer than the window the journal covers says a session was written by something else (a terminal CLI that has exited). The
-   * session is attached once, like a browser's open, so the Relay's journal reads the native history, and released at once. A session that is
-   * held (a manager follows it, or a browser reads it) follows itself; one a terminal still owns waits for the next listing. A directory
-   * whose listing is read only on request does not move when a terminal writes, so the sessions this process published are read one by one.
-   */
-  function listed(providerId: string, summaries: readonly RemoteSessionSummary[]): void {
-    if (journalRefreshing || closed || draining) return;
-    journalRefreshing = true;
-    void refreshOutdated(providerId, summaries).catch(() => undefined).finally(() => { journalRefreshing = false; });
-  }
-  async function refreshOutdated(providerId: string, listedSummaries: readonly RemoteSessionSummary[]): Promise<void> {
-    const directory = registrations.get(providerId)?.directory;
-    if (!directory) return;
-    // A resident session whose transcript something else wrote to is released, and the attach below reads it again.
-    for (const binding of bindings.values()) {
-      if (binding.providerId === providerId && !binding.parentNativeSessionId && liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) && directory.canReleaseSession?.(binding.nativeSessionId) && directory.divergedAt?.(binding.nativeSessionId) !== undefined) idle.expire(binding.agentId);
-    }
-    if (!journals.granted()) return;
-    const unheld = [...journalWindowAt.keys()].flatMap(key => {
-      const binding = key.startsWith(`${providerId}:`) ? bindings.getByNative(providerId, key.slice(providerId.length + 1)) : undefined;
-      return binding && !liveAgent(binding.agentId) && !idle.hasDemand(binding.agentId) ? [binding] : [];
-    });
-    if (!unheld.length) return;
-    let summaries: readonly RemoteSessionSummary[] = listedSummaries;
-    if (directory.listing && directory.sessionSummary) {
-      const read: RemoteSessionSummary[] = [];
-      for (let at = 0; at < unheld.length; at += JOURNAL_REFRESH_READS) {
-        const batch = await Promise.all(unheld.slice(at, at + JOURNAL_REFRESH_READS).map(binding => directory.sessionSummary!(binding.nativeSessionId).catch(() => undefined)));
-        for (const summary of batch) if (summary) read.push(summary);
-      }
-      summaries = read;
-    }
-    const due = summaries.flatMap(summary => {
-      const updatedAt = Date.parse(summary.updatedAt), key = `${providerId}:${summary.nativeSessionId}`, known = journalWindowAt.get(key);
-      const binding = unheld.find(candidate => candidate.nativeSessionId === summary.nativeSessionId);
-      // A terminal that is still writing is left alone until it has been quiet for a while, so a session is not attached between its turns.
-      return known !== undefined && binding && Number.isFinite(updatedAt) && updatedAt > known && Date.now() - updatedAt >= JOURNAL_REFRESH_QUIET_MS ? [{ binding, key, known, updatedAt }] : [];
-    }).sort((a, b) => b.updatedAt - a.updatedAt);
-    for (const { binding, key, known, updatedAt } of due) {
-      if (closed || draining) return;
-      // Taken before the attach: a failed attach waits for the next change, and a session written meanwhile is newer again.
-      journalWindowAt.set(key, updatedAt);
-      try {
-        const lease = await acquireSession(binding.agentId);
-        lease?.release();
-        idle.expire(binding.agentId);
-      } catch (error) {
-        if (error instanceof NativeSessionOwnerError || error instanceof AgentSessionInUseError) journalWindowAt.set(key, known);
-      }
-    }
-  }
   function watch(binding: Binding) {
-    idle.watch(binding.agentId, () => {
-      if (closed || uncertainAgents.has(binding.agentId) || bindings.isPending(binding.providerId, binding.nativeSessionId)) return false;
-      const source = registration(binding.providerId).directory;
-      if (!source.canReleaseSession?.(binding.nativeSessionId) || !liveAgent(binding.agentId)?.canReleaseIdle()) return false;
-      // A native child projection shares its ancestor's connection, even with no browser currently attached.
-      for (const child of bindings.values()) {
-        if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
-          && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
-      }
-      return true;
-    }, async () => {
-      await releaseJournal(binding);
+    const childHeld = () => hasHeldChild(bindings.values(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
+    idle.watch(binding.agentId, () => mayReleaseIdle({
+      closed: admission.closed, uncertain: uncertainAgents.has(binding.agentId), pending: bindings.isPending(binding.providerId, binding.nativeSessionId),
+      directoryCanRelease: !!registration(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
+      childHeld: childHeld(),
+    }), async () => {
+      await terminalRefresh.releaseJournal(binding);
       await relay.closeAgent(binding.agentId);
       await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
       lifecycle('session_idle_released', binding);
     }, async isCurrent => {
       const source = registration(binding.providerId).directory;
       const agent = liveAgent(binding.agentId);
-      if (!source.reconcileIdleSession || !agent?.canReleaseIdle()) return false;
-      for (const child of bindings.values()) {
-        if (child.providerId === binding.providerId && child.parentNativeSessionId === binding.nativeSessionId
-          && (liveAgent(child.agentId) || idle.hasDemand(child.agentId))) return false;
-      }
+      if (!source.reconcileIdleSession || !mayReconcileIdle({ directoryCanReconcile: true, runtimeCanReleaseIdle: !!agent?.canReleaseIdle(), childHeld: childHeld() }) || !agent) return false;
       // Discovery can resolve a child before the complete family check finishes.
       // Keep that partial progress protected if the check fails or becomes stale.
       uncertainAgents.add(binding.agentId);
@@ -999,13 +706,13 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     if (!directory.checkDivergence || binding.parentNativeSessionId || !liveAgent(binding.agentId) || !await directory.checkDivergence(binding.nativeSessionId)) return;
     const agent = liveAgent(binding.agentId);
     if (!agent?.canReleaseIdle()) return;
-    await releaseJournal(binding);
+    await terminalRefresh.releaseJournal(binding);
     await relay.closeAgent(binding.agentId);
     await directory.sessionReleased?.(binding.nativeSessionId);
   }
   async function acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined> {
     const binding = bindings.getByAgent(agentId);
-    if (closed || !binding) return undefined;
+    if (admission.closed || !binding) return undefined;
     const release = idle.retain(agentId);
     let parent: RemoteHostSessionLease | undefined;
     try {
@@ -1020,7 +727,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       // A send must not continue from a conversation a terminal has moved on: a diverged, quiet session is released and read again first.
       await releaseIfDiverged(binding);
       await tracked(project(binding.providerId, agentId, binding.nativeSessionId, binding.parentNativeSessionId));
-      const agent = closed ? undefined : liveAgent(agentId);
+      const agent = admission.closed ? undefined : liveAgent(agentId);
       if (!agent) { release(); parent?.release(); return undefined; }
       let released = false;
       return { agent, release() { if (released) return; released = true; release(); parent?.release(); } };
@@ -1086,7 +793,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         }) : nativeSession;
         const annotated = tpm ? await tpm.annotateSession(providerId, nativeSessionId, noted) : noted;
         const session = successionBoundary ? successionBoundary.wrap(nativeRef(binding), annotated) : annotated;
-        if (closed) {
+        if (admission.closed) {
           await session.dispose().catch(() => undefined);
           throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
         }
@@ -1203,12 +910,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const nativeStarts = createNativeStartBackoff();
   // Generic failure responses do not describe their cause; the Controller log records its class and code.
   const failureCauses = new WeakMap<AgentRemoteHttpResult, string>();
-  const describeFailure = (result: AgentRemoteHttpResult, error: unknown) => {
-    const name = error instanceof Error && /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(error.name) ? error.name : typeof error;
-    const code = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(error.code) ? error.code : undefined;
-    failureCauses.set(result, code ? `${name} ${code}` : name);
-    return result;
-  };
   async function control(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     const requestId = request.requestId && /^[a-zA-Z0-9-]{1,80}$/.test(request.requestId) ? request.requestId : randomUUID();
     const operation = request.path === '/remote/attach' || request.path === '/remote/child/attach' ? 'session_attach'
@@ -1234,8 +935,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
     try {
       await successionReady;
-      if (closed) throw new HostRequestError(503, 'host_closed', 'Agent Host is closed.');
-      if (draining && request.method === 'POST') throw new HostRequestError(503, 'controller_updating', 'Controller is updating. Reconnect before retrying.');
+      const refusal = admission.refuse(request.method);
+      if (refusal) throw new HostRequestError(503, refusal.code, refusal.message);
       const url = new URL(request.path, 'http://agent-host.local');
       const payload = request.method === 'POST' ? body(request.body) : undefined;
       if (request.method === 'GET' && url.pathname === '/remote/host-status') return json(200, await hostStatus.read());
@@ -1488,19 +1189,9 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       }
       throw new HostRequestError(400, 'invalid_request', 'Remote Host request is invalid.');
     } catch (error) {
-      if (error instanceof AgentOperationRejectedError) return json(operationErrorStatus(error.code), { error: error.message, code: error.code });
-      if (error instanceof NativeSessionOwnerError) return json(409, {error: error.message, code: error.code, ...(error.owner ? {nativeOwner: error.owner} : {})});
-      if (error instanceof AgentRuntimeError) return json(error.code === 'native_session_unavailable' ? 404 : 503, { error: error.message, code: error.code });
-      if (error instanceof AgentSessionInUseError) return json(409, { error: error.message, code: 'session_in_use' });
-      if (error instanceof HostExecutionPolicyError) return json(403, { error: error.message, code: 'local_execution_policy' });
-      if (error instanceof WorkspaceFolderError) return json(error.status, { error: error.message, code: error.code });
-      if (error instanceof OperationCacheError) return json(operationErrorStatus(error.code), { error: error.message, code: error.code });
-      if (error instanceof SessionBindingError) return json(error.status, { error: error.message, code: error.code });
-      if (error instanceof HostRequestError) return json(error.status, { error: error.message, code: error.code });
-      if (error instanceof RemoteHostCatalogError) return json(error.status, { error: error.message, code: error.code });
-      if (request.method === 'GET') return json(503, { error: 'The Remote Host catalog is unavailable.', code: 'catalog_unavailable' });
-      if (request.path === '/remote/attach' || request.path === '/remote/child/attach') return describeFailure(json(503, { error: 'The Host could not open the native session. Check the Controller log and reopen it from the session list.', code: 'session_attach_failed' }), error);
-      return describeFailure(json(503, { error: 'Remote Host operation outcome is unknown.', code: 'mutation_outcome_unknown' }), error);
+      const { result, cause } = failureResponse(error, request);
+      if (cause) failureCauses.set(result, cause);
+      return result;
     }
   }
   async function cancelAgent(agentId: string) {
@@ -1518,7 +1209,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     } finally { clearTimeout(timer); release(); }
   }
   function addRegistration(value: AgentHostProviderRegistration): void {
-    if (closed || draining) throw new Error('Host cannot register a provider while stopping.');
+    if (admission.stopped) throw new Error('Host cannot register a provider while stopping.');
     const id = value.adapter.descriptor.providerId;
     if (id !== value.directory.providerId || registrations.has(id)) throw new Error('Invalid or duplicate provider registration.');
     const registration = options.executionPolicy ? { ...value, directory: protectHostDirectory(value.directory, {
@@ -1537,36 +1228,17 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     bindSourceReferenceAncestry(observed.directory);
     bindHostAccess(observed);
   }
-  const sessionCatalog: SessionCallerCatalog = {
-    providers: () => [...registrations.keys()].filter(id => options.providerEnabled?.(id) !== false),
-    async sessions(providerId) {
-      const catalog = catalogs.get(providerId);
-      if (!catalog || options.providerEnabled?.(providerId) === false) return [];
-      const sessions: RemoteSessionSummary[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await catalog.page({ limit: 100, ...(cursor ? { cursor } : {}) });
-        sessions.push(...page.items);
-        cursor = page.nextCursor;
-      } while (cursor);
-      return sessions;
+  const sessionCatalog: SessionCallerCatalog = createSessionCatalog({
+    providerIds: () => registrations.keys(),
+    enabled: providerId => options.providerEnabled?.(providerId) !== false,
+    catalog: providerId => catalogs.get(providerId),
+    directory: providerId => registrations.get(providerId)?.directory,
+    adapter: providerId => registration(providerId).adapter,
+    runtimeState: (providerId, nativeSessionId) => {
+      const binding = bindings.getByNative(providerId, nativeSessionId), live = binding && liveAgent(binding.agentId);
+      return live?.handoffAdmissionState();
     },
-    async session(ref) {
-      if (options.providerEnabled?.(ref.providerId) === false) return undefined;
-      const directory = registrations.get(ref.providerId)?.directory;
-      return directory?.sessionSummary ? directory.sessionSummary(ref.nativeSessionId) : catalogs.get(ref.providerId)?.session(ref.nativeSessionId);
-    },
-    async history(ref, query) {
-      if (options.providerEnabled?.(ref.providerId) === false) throw new AgentRuntimeError('native_session_unavailable', 'The provider is disabled.');
-      const adapter = registration(ref.providerId).adapter;
-      if (!adapter.readSessionHistory) throw new Error('Native history is unavailable for this provider.');
-      return adapter.readSessionHistory(ref.nativeSessionId, query);
-    },
-    liveState(ref) {
-      const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), live = binding && liveAgent(binding.agentId);
-      return live ? liveSessionState(live.handoffAdmissionState()) : undefined;
-    },
-  };
+  });
   /** A command line's operation identity as the operation cache takes it: a UUID, derived when the caller chose another form. */
   const cliOperation = operationUuid;
   async function holding<T>(ref: SessionCallerRef, work: (agent: SessionWireAgent) => Promise<T>): Promise<T> {
@@ -1626,7 +1298,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       const binding = bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && liveAgent(binding.agentId);
       if (!binding || !agent) return true;
       if (idle.hasDemand(binding.agentId) || !registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
-      await releaseJournal(binding);
+      await terminalRefresh.releaseJournal(binding);
       await relay.closeAgent(binding.agentId);
       await registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
       return true;
@@ -1669,14 +1341,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     controllerId: successionConfig?.controllerId ?? options.controllerId ?? 'local',
     sessionRouting: successionService?.executionRouting ?? {
       resolve: anchor => ({ anchor, target: anchor, operationIds: [] }),
-      assertCurrent: (anchor, actual) => { if (closed || draining || nativeSessionRefKey(anchor) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is unavailable.'); },
+      assertCurrent: (anchor, actual) => { if (admission.stopped || nativeSessionRefKey(anchor) !== nativeSessionRefKey(actual)) throw new Error('Execution recipient is unavailable.'); },
     },
     ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, acquireNative) } : {}),
-    available: () => !closed && !draining,
+    available: () => !admission.stopped,
     supportedProviders: () => [...registrations.values()].filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
       && adapter.descriptor.sessionExtensions?.instructions && adapter.descriptor.sessionExtensions?.tools).map(({ adapter }) => adapter.descriptor.providerId),
     async acquire(providerId, nativeSessionId) {
-      if (closed || draining || options.providerEnabled?.(providerId) === false) throw new Error('TPM session provider is unavailable.');
+      if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM session provider is unavailable.');
       const binding = await tracked(project(providerId, randomUUID(), nativeSessionId));
       const lease = await acquireSession(binding.agentId);
       if (!lease) throw new Error('TPM native session is unavailable.');
@@ -1685,7 +1357,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return lease;
     },
     async recover(providerId, nativeSessionId, extensions) {
-      if (closed || draining || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
+      if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
       const existing = bindings.getByNative(providerId, nativeSessionId);
       if (existing && (liveAgent(existing.agentId) || bindings.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
       const session = await directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => registration(providerId).directory.open(nativeSessionId, { extensions }));
@@ -1720,11 +1392,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     stateDirectory: options.team.stateDirectory, title: async ref => await registration(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
   const workerToolsApplied = new Map<string, boolean>();
   workerSupport?.onChange(() => { void applyWorkerTools().catch(() => undefined); });
-  const workerSupportTimer = workerSupport ? setInterval(() => { if (!closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
+  const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();
   const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
-    if (!options.succession?.enrollment || !enrollment || closed || draining) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
+    if (!options.succession?.enrollment || !enrollment || admission.stopped) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
     await tpm?.ready;
     if (request.path === '/remote/create') {
       if (request.method !== 'POST' || context.installationId !== successionConfig!.controllerId) return json(403, { code: 'succession_enrollment_unavailable', error: 'Succession Controller authority does not match.' });
@@ -1733,17 +1405,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return enrollment.control(request, context);
   };
   return { relay, sessionStates, journals, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
-    beginControllerRestart() {
-      if (closed || draining) return false;
-      // An owner-confirmed update closes admission immediately. Shutdown and the
-      // launcher bound cleanup time; session state must not indefinitely defer it.
-      draining = true;
-      return true;
-    },
-    cancelControllerRestart() { if (!closed) draining = false; },
+    // An owner-confirmed update closes admission immediately. Shutdown and the launcher bound cleanup time; session state must not indefinitely defer it.
+    beginControllerRestart: () => admission.beginDrain(),
+    cancelControllerRestart() { admission.cancelDrain(); },
     resolveSession(agentId) { idle.touch(agentId); return liveAgent(agentId); },
     close(): Promise<void> { return closePromise ??= (async () => {
-      closed = true; draining = true;
+      admission.close();
       await bounded(successionReady, shutdownTimeoutMs).catch(() => undefined);
       if (workerSupportTimer) clearInterval(workerSupportTimer);
       await bounded(team?.close() ?? Promise.resolve(), shutdownTimeoutMs).catch(() => undefined);
@@ -1764,28 +1431,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         resourceIdIndex?.flush();
       }
     })(); } };
-}
-
-class HostRequestError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
-function publicBinding(binding: Binding): Omit<Binding, 'providerId'> {
-  const { providerId: _providerId, ...value } = binding;
-  return value;
-}
-function operationErrorStatus(code: string): number {
-  if (code === 'operation_conflict') return 409;
-  if (code === 'operation_capacity_exceeded') return 429;
-  if (code === 'native_file_limit' || code === 'operation_outcome_unknown' || code === 'operation_cache_closed' || code === 'operation_clock_invalid') return 503;
-  return 400;
-}
-function string(value: unknown, field: string): string { if (typeof value !== 'string' || !value) throw new HostRequestError(400, 'invalid_request', `${field} is required.`); return value; }
-function boundedSourceIdentity(value: unknown): value is string { return typeof value === 'string' && !!value.trim() && value.length <= 512; }
-function body(value: string | undefined): Record<string, unknown> { try { const parsed: unknown = JSON.parse(value ?? ''); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>; } catch {} throw new HostRequestError(400, 'invalid_request', 'Remote Host body is invalid.'); }
-function json(status: number, value: unknown): AgentRemoteHttpResult { return { status, body: JSON.stringify(value) }; }
-function positiveTimeout(value: number): number { if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Agent Host shutdown timeout must be a positive integer.'); return value; }
-async function bounded(operation: Promise<unknown>, timeoutMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try { await Promise.race([operation, new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); timer.unref?.(); })]); }
-  finally { clearTimeout(timer); }
 }
 
 async function receiveRelayDiagnostics(body: string | undefined, sink: AgentHostOptions['onRelayDiagnostics']): Promise<AgentRemoteHttpResult> {

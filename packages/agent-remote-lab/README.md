@@ -215,7 +215,7 @@ test -n "$BORGEE_CODEX_TEST_EXECUTABLE" && test "${BORGEE_CODEX_TEST_EXECUTABLE#
 env -u DSH_REPO /usr/bin/perl -e 'alarm 240; exec @ARGV' "$LAB_PNPM" --filter @orchardworks/agent-remote-lab exec playwright test e2e/codex.spec.ts --project=chromium-desktop --project=chromium-mobile --timeout=180000
 ```
 
-The executable check must print `codex-cli 0.162.0`; a suffix such as `nightly` is intentionally rejected by the Lab before the Provider is built (`src/server/codex.ts:30-49`). The visible flow selects `Codex (fixture)`, answers the rendered question, observes its continuation, reloads, and asserts one copy of the transcript (`e2e/codex.spec.ts:9-35`).
+The executable check must print `codex-cli 0.162.0`; a suffix such as `nightly` is intentionally rejected by the Lab before the Provider is built (`src/codex.ts:30-49`). The visible flow selects `Codex (fixture)`, answers the rendered question, observes its continuation, reloads, and asserts one copy of the transcript (`e2e/codex.spec.ts:9-35`).
 
 ### Standalone DSH source-fixture verification
 
@@ -256,7 +256,7 @@ Create the DSH session in the Lab, then select that same native session in DSH W
 
 Choose the model and reasoning effort in DSH Web. Shared mode rejects explicit Lab creation overrides and installs the host's default model selection during native Agent setup, before mounting the preset. Web model selection also updates that isolated host's default selection according to native Web behavior. The Lab's `Snapshot.runtimeInfo.model` reflects the effective model after the next native request header, not immediately after selecting an option. Only the safe model identifier enters the public runtime update; native request configuration, headers, and system prompts remain private.
 
-The shared interaction adapter observes the Web host's native interaction services and accepted responses. Its typed resolution history survives a Lab reload while this host remains alive. Model selection and preset composition complete in native Agent setup before the Relay receives a new or resumed session. Stopping the live plugin closes its Relay sessions before releasing the shared adapter (`src/server/live-plugin.ts`).
+The shared interaction adapter observes the Web host's native interaction services and accepted responses. Its typed resolution history survives a Lab reload while this host remains alive. Model selection and preset composition complete in native Agent setup before the Relay receives a new or resumed session. Stopping the live plugin closes its Relay sessions before releasing the shared adapter (`src/live-plugin.ts`).
 
 ## Failure and recovery semantics
 
@@ -268,7 +268,7 @@ Resolved Question and Approval records remain available to browser reload while 
 
 ## Safety and capability boundary
 
-The Relay and Vite listener bind to loopback. The Lab WebSocket authorizer accepts only loopback traffic with the exact Lab origin and grants only attach/read-resource actions (`src/server/local-authorizer.ts:7-22`). The DSH launcher validates absolute executable/checkout paths and creates plugin output plus session persistence below its own temporary directories (`scripts/run-live-dsh.sh:7-75`, `scripts/run-live-dsh.sh:127-205`). Do not use the Lab as a network service, credential discovery tool, or product authorization substitute.
+The Relay and Vite listener bind to loopback. The Lab WebSocket authorizer accepts only loopback traffic with the exact Lab origin and grants only attach/read-resource actions (`src/local-authorizer.ts:7-22`). The DSH launcher validates absolute executable/checkout paths and creates plugin output plus session persistence below its own temporary directories (`scripts/run-live-dsh.sh:7-75`, `scripts/run-live-dsh.sh:127-205`). Do not use the Lab as a network service, credential discovery tool, or product authorization substitute.
 
 The DSH resource reader authorizes only a successful write from the current session, and the Relay persists the acquired bytes in its injected validation store. It does not grant arbitrary workspace file, directory, absolute path, traversal, URL, or symlink access (`packages/agent-provider-dsh/src/generated-resource.ts:36-108`, `packages/agent-session-runtime/src/resources/resource-store.ts:24-94`). The in-memory store demonstrates post-reader-stop and reload behavior; it is not a product blob-store, retention, garbage-collection, or secrecy-policy implementation.
 

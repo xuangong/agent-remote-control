@@ -1,238 +1,309 @@
 {
- "description": "Tests over 1 s that wait for a fix or a module extraction. Remove an entry when its test is fast; never add one.",
+ "description": "Tests over 1 s in the unit, contract and integration tiers, each with the reason it is slow. An entry leaves when its test is fast; none is added without a reason and an owner step in the open items of the target architecture.",
  "tests": [
-  "packages/agent-controller/src/call-for-support-runtime.test.ts > delivers calls to the coordinator and reports to the worker as framed, waiting for the worker's next turn while it works",
-  "packages/agent-controller/src/call-for-support-runtime.test.ts > starts a remote supporter in its repository from a bundle of the call's commit",
-  "packages/agent-controller/src/call-for-support-workspaces.test.ts > bundles the commit with and without a base and fetches it into a clone that lacks it",
-  "packages/agent-controller/src/call-for-support-workspaces.test.ts > collects committed, uncommitted and new files as one patch that applies at the commit",
-  "packages/agent-controller/src/call-for-support-workspaces.test.ts > creates a detached worktree at the commit inside the repository and excludes it once",
-  "packages/agent-controller/src/call-for-support-workspaces.test.ts > works on the repository of its directory when the environment names another, as a git hook's does",
-  "packages/agent-controller/src/claude.test.ts > Claude Host registration > enables native permission settings with the restricted Host policy",
-  "packages/agent-controller/src/claude.test.ts > reads an explicit provider-scoped source store through native profile aliases",
-  "packages/agent-controller/src/codex-command.test.ts > keeps a website restart operation identifiable and appends failures instead of overwriting evidence",
-  "packages/agent-controller/src/codex-command.test.ts > preserves configured daemon API keys and supplies only a missing fallback for \"app-server\"",
-  "packages/agent-controller/src/codex-command.test.ts > preserves configured daemon API keys and supplies only a missing fallback for \"daemon\"",
-  "packages/agent-controller/src/controller-launcher.test.ts > switches and rolls back real children: {\"failure\":true,\"container\":false,\"clean\":true}",
-  "packages/agent-controller/src/controller-shutdown.test.ts > cleans up a managed _serve Controller after launcher disconnect",
-  "packages/agent-controller/src/controller-shutdown.test.ts > cleans up a managed _serve Controller after launcher request",
-  "packages/agent-controller/src/controller-shutdown.test.ts > cleans up a managed foreground Controller after launcher disconnect",
-  "packages/agent-controller/src/controller-shutdown.test.ts > cleans up a managed foreground Controller after launcher request",
-  "packages/agent-controller/src/controller-update.test.ts > installs a verified package without lifecycle scripts and preserves the active version",
-  "packages/agent-controller/src/copilot.test.ts > Copilot registration executable preflight > allows the native CLI to finish a cold version probe before advertising",
-  "packages/agent-controller/src/environment.test.ts > finishes detection when an environment probe stalls",
-  "packages/agent-controller/src/journal-continuity.recordings.test.ts > journal continuity of claude, from the recordings of the real CLI > every recording > opened five times adds no item after the first, and leaves none open",
-  "packages/agent-controller/src/journal-continuity.recordings.test.ts > journal continuity of codex, from the recordings of the real CLI > every recording > opened five times adds no item after the first, and leaves none open",
-  "packages/agent-controller/src/journal-window.journal.test.ts > a window that the Relay compares with its journal > replaces once, and then settles, for every other change > settles after a rewrite, carrying a provider live-only item the window does not hold",
-  "packages/agent-controller/src/journal-window.journal.test.ts > a window that the Relay compares with its journal > replaces once, and then settles, for every other change > settles after a rewrite, with an interrupted open item the journal holds beside the window",
-  "packages/agent-controller/src/native-prefix-opencode-recovery.test.ts > OpenCode first=false saves the candidate before failed HTTP readback and recovers without another fork",
-  "packages/agent-controller/src/native-prefix-opencode-recovery.test.ts > OpenCode first=true saves the candidate before failed HTTP readback and recovers without another fork",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > claude first prefix attachment restores leader tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > claude first prefix attachment restores member tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > claude first prefix attachment restores tpm tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores leader tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores member tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores tpm tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > opencode first prefix attachment restores leader tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > opencode first prefix attachment restores member tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-role-runtime.test.ts > opencode first prefix attachment restores tpm tools with exact recipient and release fencing",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > claude default-policy Host preserves ask source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > claude default-policy Host preserves side source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > codex default-policy Host preserves ask source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > codex default-policy Host preserves side source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > opencode default-policy Host preserves ask source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source-runtime.test.ts > opencode default-policy Host preserves side source tools, release fencing and restart",
-  "packages/agent-controller/src/native-prefix-source.test.ts > claude prefix readers reconstruct extensions without copying grants, keep cursors, and reject stale/precommit tools",
-  "packages/agent-controller/src/native-prefix-source.test.ts > codex prefix readers reconstruct extensions without copying grants, keep cursors, and reject stale/precommit tools",
-  "packages/agent-controller/src/native-prefix-source.test.ts > opencode prefix readers reconstruct extensions without copying grants, keep cursors, and reject stale/precommit tools",
-  "packages/agent-controller/src/session-setting-mutation.test.ts > native completion remains settled when local acceptance receipt publication fails",
-  "packages/agent-controller/src/session-source-create.test.ts > private role-file capacity refusal is authoritative before directory create and leaves no witness admission",
-  "packages/agent-controller/src/session-source-witness.test.ts > qualified admission respects its complete future witness at 0 bytes below exact fit",
-  "packages/agent-controller/src/session-source-witness.test.ts > qualified admission respects its complete future witness at 1 bytes below exact fit",
-  "packages/agent-controller/src/session-source-witness.test.ts > several pending witnesses survive restart and completion order [0,1,2] from an empty result array",
-  "packages/agent-controller/src/session-source-witness.test.ts > several pending witnesses survive restart and completion order [1,0,2] from an empty result array",
-  "packages/agent-controller/src/session-source-witness.test.ts > several pending witnesses survive restart and completion order [2,1,0] from an empty result array",
-  "packages/agent-controller/src/session-succession-boundary.test.ts > an unreadable store at restart settlement keeps its markers without an uncaught error",
-  "packages/agent-controller/src/session-succession-boundary.test.ts > clears restored markers of sessions nobody reopens once the restart settles",
-  "packages/agent-controller/src/session-succession-boundary.test.ts > close cancels a pending restart settlement",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > a large input rejected at admission keeps context pending for a smaller explicit input",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > cancelled creation retains capacity for a maximum created envelope after restart and unrelated writes",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > cancelled creation retains capacity for a maximum known_rejected envelope after restart and unrelated writes",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > concurrent preparations cannot spend each other target-binding reservation",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > concurrent unrelated role writes preserve actual participant, terminal and enrollment-release capacity",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > initial role capacity failure publishes neither operation nor source reservation",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > native prefix reserves the complete handle envelope before any native effect",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > optional accepted keeps a complete positive-proof reserve at the eight-MiB boundary",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > optional restart keeps a complete positive-proof reserve at the eight-MiB boundary",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > optional unknown keeps a complete positive-proof reserve at the eight-MiB boundary",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > reserves actual escaped one-MiB input and finite accepted settlement near capacity",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > reserves actual escaped one-MiB input and finite rejected settlement near capacity",
-  "packages/agent-controller/src/session-succession-capacity.test.ts > reserves actual escaped one-MiB input and finite unknown settlement near capacity",
-  "packages/agent-controller/src/session-succession-durability.test.ts > coordinator holds verification until its actual queued success commit finishes",
-  "packages/agent-controller/src/session-succession-runtime.test.ts > lost source creation response recovers its original durable result without native replay",
-  "packages/agent-controller/src/session-succession-runtime.test.ts > real Host TPM prepared late execution evidence releases the next handoff gate, lost response false",
-  "packages/agent-controller/src/session-succession-runtime.test.ts > real Host TPM prepared late execution evidence releases the next handoff gate, lost response true",
-  "packages/agent-controller/src/team-codex-delivery.test.ts > delivers to Codex during question, preserves native interactions and settles only the correlated input",
-  "packages/agent-controller/src/team-host.test.ts > registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle",
-  "packages/agent-controller/src/tpm-host.test.ts > restores a TPM-owned main session after Host restart through attach without changing the public identity",
-  "packages/agent-controller/src/tpm-host.test.ts > restores a TPM-owned main session after Host restart through relay-restart without changing the public identity",
-  "packages/agent-controller/src/tpm-host.test.ts > restores a TPM-owned main session after Host restart through snapshot without changing the public identity",
-  "packages/agent-controller/src/tpm-review.test.ts > paginates bounded catalog summaries without losing work identities or exposing large artifacts",
-  "packages/agent-controller/src/tpm.test.ts > keeps TPM prefix recipients and pauses the current native takeover (restart before takeover: true)",
-  "packages/agent-provider-claude/src/catalog-history.native.test.ts > projects isolated public SDK history in the real worker without opening or resuming a session",
-  "packages/agent-provider-claude/src/catalog.native.test.ts > persists one native custom title in the configured Claude home without spawning a session",
-  "packages/agent-provider-copilot/tests/handoff-capabilities.test.ts > cannot prevent native prompt admission by rejecting the submitted-prompt hook",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > approval: a question and a session-scope tool approval",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > partial-tool: a tool that streams output before it completes",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > reasoning: a streamed reasoning the native history does not keep",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > restart: the same session read again by a new CLI process",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > settled: streamed text, a tool call with its result and a second turn, released and reopened",
-  "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > todos: two changes of the todo list",
-  "packages/agent-provider-copilot/tests/native-evidence.test.ts > reports a native pending approval and only reopens admission after the turn completes",
-  "packages/agent-provider-copilot/tests/native-evidence.test.ts > retains a zero-input descriptor across native server lifetimes and resumes materialized history without replay",
-  "packages/agent-provider-copilot/tests/native.test.ts > native MCP form roundtrip uses the normalized interaction contract",
-  "packages/agent-provider-copilot/tests/native.test.ts > native SDK preserves immediate interactions through live and resumed history",
-  "packages/agent-provider-copilot/tests/native.test.ts > native SDK preserves next_turn interactions through live and resumed history",
-  "packages/agent-provider-copilot/tests/native.test.ts > native apply_patch retains file diffs through Relay projection and saved resume",
-  "packages/agent-provider-copilot/tests/native.test.ts > native child repeat input and successful child tool approval survive root cancellation",
-  "packages/agent-provider-copilot/tests/native.test.ts > native skills expand body and arguments; multi-step questions and approvals finish one turn",
-  "packages/agent-provider-copilot/tests/reference-history.test.ts > reads actual native history through the loaded SDK and a cold profile without resuming or changing ownership",
-  "packages/agent-provider-copilot/tests/session-rename.test.ts > persists a native Copilot rename during a turn without adding prompts or interrupting it",
-  "packages/agent-provider-copilot/tests/usage-native.test.ts > normalizes native cache writes without adding them twice to the session total",
-  "packages/agent-provider-copilot/tests/usage-native.test.ts > reads native session totals across turns and saved resume without counting cache tokens twice",
-  "packages/agent-provider-copilot/tests/worker-tools.test.ts > native resume gives a session started without them the tools of a namespace, which the model calls without a prompt",
-  "packages/agent-provider-opencode/src/settings.test.ts > discovers enabled models, primary agents and exact native model variants",
-  "packages/agent-provider-opencode/src/settings.test.ts > keeps a catalog timeout explicit when no fresh catalog was observed",
-  "packages/agent-provider-opencode/src/settings.test.ts > settles a missing option from observed catalogs when the final bounded read expires",
-  "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > a commit costs what it changes, not the size of the Relay",
-  "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting",
-  "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of M stores exactly its complete encoding, and the caches agree with complete accounting",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > acknowledges send and reconstructs its user and assistant Timeline from a fresh process",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > drives steer, cancel, and idle, interaction, and failed waits through Replica state",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > lets a concurrent Web headless Replica and CLI observer converge on the same public Timeline",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > lists the recorded Provider, creates a Session, and emits a ready baseline",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > maps malformed JSON, stale requests, unavailable Agents, and timeout to stable categories",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > resolves Question, Plan Approval, Tool allow, and Tool deny in order",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > returns exact resource bytes, public trace records, and terminal resource errors",
-  "packages/agent-remote-debugger/src/cli-process.test.ts > restores an owned native prefix from the CLI state directory without forking twice",
-  "packages/agent-remote-dsh/src/agent-remote.test.ts > DSH Remote Host plugin > closes a pending borrowed projection without breaking a subsequent pairing",
-  "packages/agent-relay-core/src/authority.test.ts > distinguishes an authority deadline from HTTP errors without changing denial behavior",
-  "packages/agent-relay-core/src/broker-journal-sessions.test.ts > refuses the message, not the stream, when the Host has no stream slot left",
-  "packages/agent-relay-core/src/broker-journal-switch.test.ts > deletes 40 pending Hosts one after another in one pass, with one commit for each",
-  "packages/agent-relay-core/src/call-for-support-capacity.test.ts > a Team already over its bound may still shrink, but not grow",
-  "packages/agent-relay-core/src/call-for-support-capacity.test.ts > lets an account's Teams exceed what one Team may hold, while no change grows a Team beyond its own bound",
-  "packages/agent-relay-core/src/journal-session-stream.test.ts > a journal-served stream under load > answers every page failure with the fixed timeline_unavailable error and no raw code",
-  "packages/agent-relay-core/src/journal-session-stream.test.ts > the reasons a Controller stream cannot open > refuses a request that cannot succeed for good, and one that can for a retry",
-  "packages/agent-relay-core/src/session-drafts.test.ts > refuses a new draft once the Relay keeps its most",
-  "packages/agent-relay-core/src/succession-replay.test.ts > durable source claims protect bindings from ordinary dispatch and exclude their own exact retry once",
-  "packages/agent-relay-core/src/succession-replay.test.ts > durable source claims protect creations from ordinary dispatch and exclude their own exact retry once",
-  "packages/agent-relay-core/src/succession-replay.test.ts > in-flight source and ordinary claims cannot both spend the last binding slot",
-  "packages/agent-relay-core/src/succession-replay.test.ts > maps ordinary star capacity refusal without losing the admitted freeze or closing either queue",
-  "packages/agent-relay-core/src/succession-replay.test.ts > refuses a stale immutable quote after an ordinary star overtakes it and keeps both queues usable",
-  "packages/agent-relay-core/src/succession-replay.test.ts > retains oversized legacy exact recovery while fresh preparation has no accounting runtime",
-  "packages/agent-relay-core/src/teams.test.ts > evicts a Team's oldest retry receipts when it reaches its bound, without discarding queued work",
-  "packages/agent-remote-journal/src/journal-pages.test.ts > journal pages > pages over a very large selection",
-  "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",
-  "packages/agent-remote-lab/src/App.attach-budget.test.tsx > asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause",
-  "packages/agent-remote-lab/src/App.bot-mode.test.tsx > keeps Window A/A2 and both display settings while Bot B1 shares its exact view draft",
-  "packages/agent-remote-lab/src/App.bot-succession.test.tsx > captures Bot B while Window A stays selected and changing bots cannot retarget its chooser",
-  "packages/agent-remote-lab/src/App.command-palette.test.tsx > opens with Control-K from the composer, switches Windows and opens pages, and closes on Escape",
-  "packages/agent-remote-lab/src/App.command-palette.test.tsx > selects a bot from Bot mode, and opens a Window from Bot mode in Window mode",
-  "packages/agent-remote-lab/src/App.compact-sleep.test.tsx > keeps a sleeping primary bot released on a phone and wakes it from its Asleep bar",
-  "packages/agent-remote-lab/src/App.outbox.test.tsx > does not ask an offline Host for a bot it holds, and opens the conversation once the Host is back",
-  "packages/agent-remote-lab/src/App.render-budget.test.tsx > a change of a bot elsewhere renders its roster row, not App and not a conversation",
-  "packages/agent-remote-lab/src/App.render-budget.test.tsx > in Window mode a change in one pane renders the visible panes at most once and no hidden conversation",
-  "packages/agent-remote-lab/src/App.render-budget.test.tsx > switching bots renders the conversations that change and leaves the others alone",
-  "packages/agent-remote-lab/src/App.shared-drafts.test.tsx > shares a bot's draft across devices: saved while typing, taken when idle, cleared once sent",
-  "packages/agent-remote-lab/src/App.side-migration.test.tsx > follows an edited Side without retargeting its original delivery (local: false)",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > edits a real App managed Team window into its retained origin owner and admits input only to the successor",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > keeps a synchronized native binding alive while composition replay is pending",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > keeps one global Ask launcher and retains the original Ask draft when another primary root is selected",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > keeps post-upgrade view preferences and owners when opening the same Window in a new tab",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > reconnects automatically when the initial snapshot does not arrive before the public deadline",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > restores an open Ask with its original source after rebinding main and opening a fresh page",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > tracks Ask read state from its global presentation when global-hidden",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > tracks Ask read state from its global presentation when source-collapsed",
-  "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > tracks Ask read state from its global presentation when source-rebound",
-  "packages/agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx > refreshes successor context after Composer delivery without waiting for a native timeline echo",
-  "packages/agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx > retains an authorized desired B after its replay endpoint becomes unavailable",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > does not restore the confirmed locator after a refresh timeout",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > hands off a current attached view with pending-input protection and advances every live binding",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > hands off a current dock view with pending-input protection and advances every live binding",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > hands off a current float view with pending-input protection and advances every live binding",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > hands off a current primary view with pending-input protection and advances every live binding",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay",
-  "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > shows A-B-C handoff history once in reverse order while ordinary A navigation still resolves current C",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > leaves a focused unlinked Side through Track navigation and keeps its independent view",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > leaves a focused unlinked Side through ordinary navigation and keeps its independent view",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > opens retained B and the role through local view entries without sharing their owners or replacing the native connection",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > reattaches a restored Side to its new runtime binding while preserving the view and draft owners",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > reconciles metadata on page resume without retrying an HTTP attachment failure",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > rejects a retired source after awaiting Ask relations before creating any native target",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > restores the selected Window owner while a new B Window keeps independent owners",
-  "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > restores the selected Window owner while a new D Window keeps independent owners",
-  "packages/agent-remote-lab/src/App.succession.windows-and-teams.test.tsx > opens a directory session beside the selected bot as a new primary group and keeps every other group",
-  "packages/agent-remote-lab/src/App.unlink.test.tsx > does not reopen a side unlinked during configuration, while still delivering its requested first message",
-  "packages/agent-remote-lab/src/GatewayController.background.test.tsx > keeps five background sessions live across two authorization lease lifetimes",
-  "packages/agent-remote-lab/src/components/SessionDirectory.test.tsx > lists native sessions only after the explicit button and retains partial results after failure",
-  "packages/agent-remote-lab/src/operation-settlement.transport.test.ts > checks authority before cached receipts and binds intent to native identity across public bindings",
-  "packages/agent-remote-lab/src/operation-settlement.transport.test.ts > dsh settles once across lost receipts, fresh connections and uplink reconnect",
-  "packages/agent-remote-lab/src/operation-settlement.transport.test.ts > host retains handled acceptance across a lost receipt and reconnect",
-  "packages/agent-remote-lab/src/operation-settlement.transport.test.ts > host settles once across lost receipts, fresh connections and uplink reconnect",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > delivers bounded business timeout metadata without request payloads or query strings",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > discovers the independent diagnostic capability even when updater status fails",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > does not send the new RPC to a legacy Controller and retains its evidence without disrupting catalog requests",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after close through reconnect into the Host log",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after terminate through reconnect into the Host log",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > records browser stream opening, readiness and closure without conversation content",
-  "packages/agent-relay-node/src/connection-diagnostics.test.ts > replays original disconnect evidence into the correct Host file after reconnect and Server restart",
-  "packages/agent-relay-node/src/devbox-preview.test.ts > opens Devbox through a root preview and retains its browser identity, Window writes and session channel",
-  "packages/agent-relay-node/src/devbox.test.ts > keeps permission changes available on the same Devbox WebSocket after eleven minutes of renewal",
-  "packages/agent-relay-node/src/dsh-plugin-package.test.ts > installable DSH Lab plugin > packs an independently verifiable profile bundle with native host peers",
-  "packages/agent-relay-node/src/gateway-host-bootstrap.test.ts > bootstraps only an enrolled device using its persisted owner and Host identity across restart",
-  "packages/agent-relay-node/src/gateway-lifecycle.test.ts > does not extend access during an authority outage",
-  "packages/agent-relay-node/src/gateway-lifecycle.test.ts > enforces authority leases on Host upgrades that include a query string",
-  "packages/agent-relay-node/src/gateway-lifecycle.test.ts > keeps browser access through a short authority outage when configured with grace",
-  "packages/agent-relay-node/src/gateway-lifecycle.test.ts > lets the production Host uplink reconnect after an authority outage without pairing again",
-  "packages/agent-relay-node/src/gateway-relay.test.ts > expires an idle hosted channel and rejects unauthenticated channel upgrades",
-  "packages/agent-relay-node/src/gateway-relay.test.ts > stops an already-open browser stream when its grant expires",
-  "packages/agent-relay-node/src/gateway-state.test.ts > rejects oversized encoded snapshots before replacing previously acknowledged recoverable state",
-  "packages/agent-relay-node/src/hosted-runtime.test.ts > Node entrypoint resolves google authentication from environment",
-  "packages/agent-relay-node/src/hosted-runtime.test.ts > protects an admitted near-ceiling reserve from ordinary writes and completes durable replay",
-  "packages/agent-relay-node/src/hosted-runtime.test.ts > refuses a near-ceiling handoff before the native effect while keeping the Relay readable",
-  "packages/agent-relay-node/src/live-launcher.test.ts > live DSH launcher > runs the caller-supplied pnpm executable",
-  "packages/agent-relay-node/src/live-launcher.test.ts > live DSH launcher > validates compatibility when launched outside the Lab directory",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > does not renew for unauthorized traffic, list polling, or an idle WebSocket",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on http traffic without an iframe and expires after traffic stops",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on sse traffic without an iframe and expires after traffic stops",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on upload traffic without an iframe and expires after traffic stops",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on websocket traffic without an iframe and expires after traffic stops",
-  "packages/agent-relay-node/src/preview-tunnel.test.ts > renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival",
-  "packages/agent-relay-node/src/vscode-tunnel.test.ts > manages a real child over authenticated HTTP and the Host WebSocket uplink",
-  "packages/agent-session-runtime/src/transport/activity-content.test.ts > coalesces accepted timeline rows over a real socket without turning connection metadata or duplicates into content",
-  "packages/agent-session-runtime/src/transport/activity-content.test.ts > delivers the replacement baseline before immediately queued live content on the real activity socket",
-  "packages/agent-session-runtime/src/transport/activity-content.test.ts > reconnects at the same content boundary and publishes one complete baseline for replacement history",
-  "packages/agent-session-runtime/src/transport/activity-content.test.ts > restores historical outcomes without making an old review the current attention",
-  "packages/agent-session-runtime/src/transport/image-input.test.ts > image input over real session WebSocket > resumes JPEG with auxiliary image uploads across reconnect, preserves order and ownership, and denies read-only/activity uploads",
-  "packages/agent-remote-tunnel/src/node/peer-backpressure.test.ts > backpressures concurrent uploads and downloads on a slow real socket without losing bytes",
-  "packages/agent-client/src/client/image-upload.test.ts > keeps A, B and C image receipts scoped to their concrete recipients over a real WebSocket",
-  "packages/agent-client/src/client/message-echo-sync.transport.test.ts > recovers an omitted live echo through HTTP without reconnecting or resending (prepared text: false)",
-  "packages/agent-client/src/client/message-echo-sync.transport.test.ts > recovers an omitted live echo through HTTP without reconnecting or resending (prepared text: true)",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'control' ('recover')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'control' ('timeout')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'history' ('recover')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'history' ('timeout')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'snapshot' ('recover')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > keeps the same session wire while suspended waiting for 'snapshot' ('timeout')",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > falls back for an unanswered ready handshake without disabling multiplexing for later sessions",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > keeps multiplexing when the first channel ready frame takes 3500 ms to arrive",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > preserves a healthy foreground channel when mobile latency delays pong by 1500 ms",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > preserves healthy content and activity channels through a 0 ms page suspension",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > preserves healthy content and activity channels through a 60000 ms page suspension",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > session channel transport > retires an unresponsive resumed channel promptly and only once",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > settles a slow send over a real session channel: slow_resume_then_acknowledge",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > shared read positions > starts the account, shares positions and sends advanced ones once, coalesced",
-  "packages/agent-client/src/client/session-channel-transport.test.ts > shared session states > keeps one activity channel open while states are watched, applies snapshots and reopens it after a loss",
-  "packages/agent-client-web/src/react/MarkdownContent.test.tsx > MarkdownContent > resolves a missing image once while the conversation receives resource updates",
-  "packages/agent-client-web/src/react/useImageDraft.test.tsx > fences same-key A and B held receipts before sending C through a real WebSocket"
+  {
+   "test": "packages/agent-controller/src/team-host.test.ts > registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle",
+   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
+  },
+  {
+   "test": "packages/agent-controller/src/copilot.test.ts > Copilot registration executable preflight > allows the native CLI to finish a cold version probe before advertising",
+   "reason": "Waits for a fix or an extraction named in the open items of the target architecture."
+  },
+  {
+   "test": "packages/agent-controller/src/session-source-create.test.ts > private role-file capacity refusal is authoritative before directory create and leaves no witness admission",
+   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
+  },
+  {
+   "test": "packages/agent-controller/src/session-succession-runtime.test.ts > lost source creation response recovers its original durable result without native replay",
+   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
+  },
+  {
+   "test": "packages/agent-controller/src/session-succession-capacity.test.ts > optional unknown keeps a complete positive-proof reserve at the eight-MiB boundary",
+   "reason": "Serializes, validates and clones an 8 MiB succession state several times; CPU bound by the ceiling under test, no disk."
+  },
+  {
+   "test": "packages/agent-controller/src/tpm-review.test.ts > paginates bounded catalog summaries without losing work identities or exposing large artifacts",
+   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
+  },
+  {
+   "test": "packages/agent-controller/src/controller-update.test.ts > installs a verified package without lifecycle scripts and preserves the active version",
+   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
+  },
+  {
+   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > close cancels a pending restart settlement",
+   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
+  },
+  {
+   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > clears restored markers of sessions nobody reopens once the restart settles",
+   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
+  },
+  {
+   "test": "packages/agent-controller/src/environment.test.ts > finishes detection when an environment probe stalls",
+   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
+  },
+  {
+   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > an unreadable store at restart settlement keeps its markers without an uncaught error",
+   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
+  },
+  {
+   "test": "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores tpm tools with exact recipient and release fencing",
+   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
+  },
+  {
+   "test": "packages/agent-provider-claude/src/catalog-history.native.test.ts > projects isolated public SDK history in the real worker without opening or resuming a session",
+   "reason": "Starts the real Claude catalog worker process; a native-tier test in the unit project, to move to a .local test."
+  },
+  {
+   "test": "packages/agent-provider-claude/src/catalog.native.test.ts > persists one native custom title in the configured Claude home without spawning a session",
+   "reason": "Starts the real Claude catalog worker process; a native-tier test in the unit project, to move to a .local test."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/native.test.ts > native MCP form roundtrip uses the normalized interaction contract",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/native-evidence.test.ts > retains a zero-input descriptor across native server lifetimes and resumes materialized history without replay",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/usage-native.test.ts > reads native session totals across turns and saved resume without counting cache tokens twice",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > partial-tool: a tool that streams output before it completes",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > settled: streamed text, a tool call with its result and a second turn, released and reopened",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/worker-tools.test.ts > native resume gives a session started without them the tools of a namespace, which the model calls without a prompt",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/session-rename.test.ts > persists a native Copilot rename during a turn without adding prompts or interrupting it",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/reference-history.test.ts > reads actual native history through the loaded SDK and a cold profile without resuming or changing ownership",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/handoff-capabilities.test.ts > cannot prevent native prompt admission by rejecting the submitted-prompt hook",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/native.test.ts > native apply_patch retains file diffs through Relay projection and saved resume",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-copilot/tests/journal-recording.test.ts > the recordings of the real Copilot CLI > restart: the same session read again by a new CLI process",
+   "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
+  },
+  {
+   "test": "packages/agent-provider-opencode/src/settings.test.ts > discovers enabled models, primary agents and exact native model variants",
+   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
+  },
+  {
+   "test": "packages/agent-provider-opencode/src/settings.test.ts > settles a missing option from observed catalogs when the final bounded read expires",
+   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
+  },
+  {
+   "test": "packages/agent-provider-opencode/src/settings.test.ts > keeps a catalog timeout explicit when no fresh catalog was observed",
+   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
+  },
+  {
+   "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting",
+   "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
+  },
+  {
+   "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > a commit costs what it changes, not the size of the Relay",
+   "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
+  },
+  {
+   "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of M stores exactly its complete encoding, and the caches agree with complete accounting",
+   "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
+  },
+  {
+   "test": "packages/agent-relay-core/src/succession-replay.test.ts > retains oversized legacy exact recovery while fresh preparation has no accounting runtime",
+   "reason": "Builds and validates a Relay state at its byte ceiling through the whole broker; CPU bound by serializing the ceiling state."
+  },
+  {
+   "test": "packages/agent-relay-core/src/call-for-support-capacity.test.ts > lets an account's Teams exceed what one Team may hold, while no change grows a Team beyond its own bound",
+   "reason": "Builds and validates a Relay state at its byte ceiling through the whole broker; CPU bound by serializing the ceiling state."
+  },
+  {
+   "test": "packages/agent-relay-core/src/succession-replay.test.ts > refuses a stale immutable quote after an ordinary star overtakes it and keeps both queues usable",
+   "reason": "Builds and validates a Relay state at its byte ceiling through the whole broker; CPU bound by serializing the ceiling state."
+  },
+  {
+   "test": "packages/agent-relay-node/src/devbox-preview.test.ts > opens Devbox through a root preview and retains its browser identity, Window writes and session channel",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/hosted-runtime.test.ts > refuses a near-ceiling handoff before the native effect while keeping the Relay readable",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/hosted-runtime.test.ts > protects an admitted near-ceiling reserve from ordinary writes and completes durable replay",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on upload traffic without an iframe and expires after traffic stops",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on websocket traffic without an iframe and expires after traffic stops",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on sse traffic without an iframe and expires after traffic stops",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews on http traffic without an iframe and expires after traffic stops",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > does not renew for unauthorized traffic, list polling, or an idle WebSocket",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > replays original disconnect evidence into the correct Host file after reconnect and Server restart",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-relay.test.ts > stops an already-open browser stream when its grant expires",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > lets the production Host uplink reconnect after an authority outage without pairing again",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-relay.test.ts > expires an idle hosted channel and rejects unauthenticated channel upgrades",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > does not extend access during an authority outage",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > keeps browser access through a short authority outage when configured with grace",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > enforces authority leases on Host upgrades that include a query string",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > does not send the new RPC to a legacy Controller and retains its evidence without disrupting catalog requests",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after terminate through reconnect into the Host log",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > records browser stream opening, readiness and closure without conversation content",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > preserves the native close code after close through reconnect into the Host log",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > discovers the independent diagnostic capability even when updater status fails",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-relay-node/src/live-launcher.test.ts > live DSH launcher > runs the caller-supplied pnpm executable",
+   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
+  },
+  {
+   "test": "packages/agent-relay-node/src/connection-diagnostics.test.ts > delivers bounded business timeout metadata without request payloads or query strings",
+   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
+  },
+  {
+   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > resolves Question, Plan Approval, Tool allow, and Tool deny in order",
+   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
+  },
+  {
+   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > maps malformed JSON, stale requests, unavailable Agents, and timeout to stable categories",
+   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
+  },
+  {
+   "test": "packages/agent-remote-debugger/src/cli-process.test.ts > built ardb against the recorded Relay > drives steer, cancel, and idle, interaction, and failed waits through Replica state",
+   "reason": "Starts the built debugger CLI as a child process against the recorded Relay; a process-tier test."
+  },
+  {
+   "test": "packages/agent-remote-dsh/src/agent-remote.test.ts > DSH Remote Host plugin > closes a pending borrowed projection without breaking a subsequent pairing",
+   "reason": "Waits a real borrowed-projection deadline in the DSH host; needs the deadline as an option."
+  },
+  {
+   "test": "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",
+   "reason": "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
+  },
+  {
+   "test": "packages/agent-remote-journal/src/journal-pages.test.ts > journal pages > pages over a very large selection",
+   "reason": "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > does not restore the confirmed locator after a refresh timeout",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.succession.handoff-and-discovery.test.tsx > refreshes successor context after Composer delivery without waiting for a native timeline echo",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.succession.ask-and-reconnect.test.tsx > edits a real App managed Team window into its retained origin owner and admits input only to the successor",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.shared-drafts.test.tsx > shares a bot's draft across devices: saved while typing, taken when idle, cleared once sent",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/components/SessionDirectory.test.tsx > lists native sessions only after the explicit button and retains partial results after failure",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.render-budget.test.tsx > switching bots renders the conversations that change and leaves the others alone",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.render-budget.test.tsx > in Window mode a change in one pane renders the visible panes at most once and no hidden conversation",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.render-budget.test.tsx > a change of a bot elsewhere renders its roster row, not App and not a conversation",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.succession.opening-and-refresh.test.tsx > keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.succession.owners-and-attachment.test.tsx > restores the selected Window owner while a new D Window keeps independent owners",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-remote-lab/src/App.attach-budget.test.tsx > asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause",
+   "reason": "Mounts the whole Workbench App; composition test that waits for the Workbench state module (M13)."
+  },
+  {
+   "test": "packages/agent-session-runtime/src/transport/activity-content.test.ts > coalesces accepted timeline rows over a real socket without turning connection metadata or duplicates into content",
+   "reason": "Real WebSocket with real coalescing timers; moves to the in-memory browserStream once the timers are injected."
+  },
+  {
+   "test": "packages/agent-session-runtime/src/transport/activity-content.test.ts > reconnects at the same content boundary and publishes one complete baseline for replacement history",
+   "reason": "Real WebSocket with real coalescing timers; moves to the in-memory browserStream once the timers are injected."
+  }
  ]
 }

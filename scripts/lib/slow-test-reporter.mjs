@@ -9,9 +9,14 @@ const failMs = 1000;
 const allowlistPath = join(root, 'scripts/slow-test-allowlist.json');
 
 
-/** Tests known to exceed the limit, keyed by `<path from the repository root> > <full test name>`; each waits for a fix or an extraction. */
+/**
+ * Tests known to exceed the limit, as `{ test, reason }` where `test` is `<path from the repository root> > <full test name>` and `reason`
+ * says why the test takes over a second and what would make it faster. A plain string is read as a test without a reason (the allowlist
+ * check in `slow-test-reporter.test.mjs` refuses it).
+ */
 function readAllowlist() {
-  return existsSync(allowlistPath) ? new Set(JSON.parse(readFileSync(allowlistPath, 'utf8')).tests) : new Set();
+  if (!existsSync(allowlistPath)) return new Set();
+  return new Set(JSON.parse(readFileSync(allowlistPath, 'utf8')).tests.map(entry => typeof entry === 'string' ? entry : entry.test));
 }
 
 /**

@@ -775,7 +775,7 @@ pnpm dev
 
 Open `http://127.0.0.1:6175`. The default server at `http://127.0.0.1:5910` owns the labeled Recorded fixture and the Agent Host pairing broker. Native Codex, Claude Code, and Copilot run only in the independent Agent Host. Existing listeners are not replaced; choose free ports with `AGENT_REMOTE_PORT` and `AGENT_REMOTE_WEB_PORT` when needed. `AGENT_REMOTE_BIND` can expose the broker on an explicit interface; local management authorization remains unchanged.
 
-The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.162.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-remote-lab/compatibility.json). The [Provider support baseline](docs/current/agent-remote/provider-support.md) compares DSH, Codex, Claude and Copilot, including endpoint gaps, verification and workarounds; use its [onboarding checklist](docs/current/agent-remote/provider-onboarding.md) for a new Provider.
+The scoped npm registry in `.npmrc` resolves the pinned DSH prerelease packages through the Tencent mirror. The lockfile pins the dependency graph. Native DSH services target `0.1.2-rc.1`; the Codex fixture targets `codex-cli 0.162.0`. Provider constraints and supported degradations are recorded in [compatibility.json](packages/agent-relay-node/compatibility.json). The [Provider support baseline](docs/current/agent-remote/provider-support.md) compares DSH, Codex, Claude and Copilot, including endpoint gaps, verification and workarounds; use its [onboarding checklist](docs/current/agent-remote/provider-onboarding.md) for a new Provider.
 
 ## Connect a real Codex CLI
 
@@ -883,7 +883,9 @@ The root test runner probes each selected native executable with a five-second `
 | `agent-client-web` | React views and hooks, IndexedDB database, browser page binding and styles for the headless client. |
 | `agent-remote-debugger` | Headless Session View protocol/state debugging and scripted regression through `ardb`. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |
-| `@orchardworks/agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |
+| `@orchardworks/agent-remote-lab` | The Workbench: the web app and its tests. It carries no server. |
+| `@orchardworks/agent-relay-node` | The Node host of the Relay: gateway, local authorizer, Devbox, static serving, the pairing broker, directory and validation fixtures. |
+| `@orchardworks/agent-e2e` | The e2e stack (Relay, Controller with a scripted provider, built Workbench), main-flow tests, fault injection and smoke. |
 
 All workspace packages use the `@orchardworks` scope. The standalone DSH runtime uses `@orchardworks/dsh`; its installable profile bundle is `@orchardworks/dsh-host`.
 

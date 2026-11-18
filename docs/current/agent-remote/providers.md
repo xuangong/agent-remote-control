@@ -80,7 +80,7 @@ The process launcher verifies an explicitly selected working directory before sp
 
 The Controller connects its Codex Provider to the shared native app-server daemon through a local Unix socket or an authenticated Windows loopback WebSocket. Controller registration uses shared mode even when legacy configuration requests private mode. Direct Provider construction still supports a private stdio app-server for embedded/debugging use; this is a separate native connection mode, and its Remote clients can still share the owning Host/Relay session. See [shared Codex setup and ownership](codex-shared-runtime.md).
 
-The default Lab backend composes Recorded and the Host broker without constructing Codex. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-controller/src/directory.ts`, `packages/agent-remote-lab/src/server/local.ts`).
+The default Lab backend composes Recorded and the Host broker without constructing Codex. Discovery uses `thread/list` for up to 500 recent unarchived root threads; selection resumes the original ID and hydrates `thread/read` history. Newly created unpersisted threads remain in the Host directory until attached. `turn/steer` and `turn/interrupt` target the current native turn ID; the public schema is unchanged (`packages/agent-provider-codex/src/catalog.ts`, `packages/agent-provider-codex/src/session.ts`, `packages/agent-controller/src/directory.ts`, `packages/agent-relay-node/src/local.ts`).
 
 ## Claude process and native directory
 
@@ -107,7 +107,7 @@ Agent Host can register Codex and Claude together through `AGENT_HOST_PROVIDERS=
 
 - The SDK is not a universal native-event ontology or a public wire schema; its Timeline values are event-specific strings and typed tool or task structures (`packages/agent-provider-sdk/src/observation.ts:3-76`).
 - The adapter layer does not own public-wire encoding or browser projection; its session contract stays above the Relay and Web package boundaries (`packages/agent-provider-sdk/src/provider.ts:4-58`, `packages/agent-session-runtime/src/agent-manager.ts:71-180`, `packages/agent-client/src/index.ts:1-7`).
-- An injected-message representation and general Codex filesystem access are not claimed. Codex thread names remain native metadata, and terminal-interaction activity remains a command side channel until the common Snapshot and tool detail gain matching state; the exact limitations are declared in the compatibility manifest (`packages/agent-remote-lab/compatibility.json:28-94`).
+- An injected-message representation and general Codex filesystem access are not claimed. Codex thread names remain native metadata, and terminal-interaction activity remains a command side channel until the common Snapshot and tool detail gain matching state; the exact limitations are declared in the compatibility manifest (`packages/agent-relay-node/compatibility.json:28-94`).
 
 ## Current vs Target
 

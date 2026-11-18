@@ -8,7 +8,7 @@ Agent Remote is the independent session-control and validation boundary that car
 
 This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-session-runtime`, `@orchardworks/agent-client`, `@orchardworks/agent-client-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-session-runtime/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
 
-The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-controller/src/host.ts`, `packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
+The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-controller/src/host.ts`, `packages/agent-relay-node/src/local.ts`, `packages/agent-relay-node/src/remote-host-broker.ts`).
 
 ## Collaborators
 
@@ -99,8 +99,8 @@ flowchart LR
 - `packages/agent-remote-lab/src/server.ts:11-23`
 
 - `packages/agent-remote-dsh/src/agent-remote.ts:1`
-- `packages/agent-remote-lab/src/server/remote-host-broker.ts:20`
-- `packages/agent-remote-lab/src/server/session-directory.ts:16`
+- `packages/agent-relay-node/src/remote-host-broker.ts:20`
+- `packages/agent-relay-node/src/session-directory.ts:16`
 
 Provider feasibility and delivery order: [Paseo comparison and gap ledger](provider-gap-analysis.md).
 

@@ -6,7 +6,7 @@ Distinguish [native sharing from sharing through the Host](providers.md#native-s
 
 ## Baseline and interpretation
 
-Source audit: **2026-09-11**, initial implementation commit **`614d9fe`**, updated by the native parity implementation following **`821d1c6`**, branch **`feat/claude-provider`**. At audit time `main` was `b016e46`; this is a feature-branch inventory, not a claim that all changes are on main or published. Current compatibility targets (updated 2026-10-09): Public Remote protocol is **1.7.0**, Remote Host uplink is **2**. Native targets come from [compatibility.json](../../../packages/agent-remote-lab/compatibility.json): DSH `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`, Codex CLI `0.162.0`, Claude Code `2.1.247` with Agent SDK `0.3.247`. Copilot admission adds CLI `1.0.83` and official SDK `1.0.11` on `feat/copilot-provider`; see its audit for separate evidence. Newer native releases are not covered automatically.
+Source audit: **2026-09-11**, initial implementation commit **`614d9fe`**, updated by the native parity implementation following **`821d1c6`**, branch **`feat/claude-provider`**. At audit time `main` was `b016e46`; this is a feature-branch inventory, not a claim that all changes are on main or published. Current compatibility targets (updated 2026-10-09): Public Remote protocol is **1.7.0**, Remote Host uplink is **2**. Native targets come from [compatibility.json](../../../packages/agent-relay-node/compatibility.json): DSH `0.1.2-rc.1` / `a66e4702047846cdaa10c66c9d3df3951f5ea70d`, Codex CLI `0.162.0`, Claude Code `2.1.247` with Agent SDK `0.3.247`. Copilot admission adds CLI `1.0.83` and official SDK `1.0.11` on `feat/copilot-provider`; see its audit for separate evidence. Newer native releases are not covered automatically.
 
 DSH means the live adapter **through the standalone DSH plugin**, currently `packages/agent-remote-dsh` (`@orchardworks/dsh`). It does not mean Recorded fixtures, an uncompleted `plugins/dsh` move, or Borgee's separate integration. Codex, Claude and Copilot mean their adapters through Agent Host. Native product capabilities that have no exposed Remote path are not counted.
 
@@ -181,7 +181,7 @@ When behavior changes: update the affected row IDs, the Provider audit and tests
 [Wire]: ../../../packages/agent-remote-protocol/src/messages.ts
 [Relay]: ../../../packages/agent-session-runtime/src/agent-manager.ts
 [Host]: ../../../packages/agent-controller/src/host.ts
-[Broker]: ../../../packages/agent-remote-lab/src/server/remote-host-broker.ts
+[Broker]: ../../../packages/agent-relay-node/src/remote-host-broker.ts
 [Client]: ../../../packages/agent-client/src/client/remote-session-client.ts
 [Composer]: ../../../packages/agent-client-web/src/react/AgentComposer.tsx
 [Lab]: ../../../packages/agent-remote-lab/src/App.tsx

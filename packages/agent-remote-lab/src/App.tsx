@@ -1,3 +1,4 @@
+import { availableProvidersOf, chosenProviderId, creationUnavailableReason as creationUnavailableReasonOf, requestedHostUnavailableReason, hostProviders, providerAfterHostChange, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from './state/creation-choice.js';
 import { usePanels } from './hooks/usePanels.js';
 import { contextVisible as contextVisibleOf, pageOpen as pageOpenOf, supportingRailOpen as supportingRailOpenOf, windowStageVisible as windowStageVisibleOf, sessionsPageTitle as sessionsPageTitleOf, type MainView, type SessionPanel } from './state/panels.js';
 import { useLiveBudget, LiveConnectionsContext } from './hooks/useLiveBudget.js';
@@ -671,10 +672,8 @@ function AppContent({
       else if (offlineHosts.current.delete(host.id)) { unavailableSessions(transport).forgetHost(host.id); announceHostReturned(host.id); }
     }
   }, [remoteHosts, transport]);
-  const availableProviders = selectedHost.id === 'local' ? providers : hostProviders(currentHost);
-  const preferredProviderId = selectedHost.id === 'local' ? localProviderId : selectedHost.providerId;
-  const providerId = availableProviders.find((provider) => provider.providerId === preferredProviderId)?.providerId
-    ?? availableProviders[0]?.providerId ?? '';
+  const availableProviders = availableProvidersOf(selectedHost.id, providers, currentHost);
+  const providerId = chosenProviderId(availableProviders, selectedHost.id === 'local' ? localProviderId : selectedHost.providerId);
   useEffect(() => {
     if (!currentHost || !restoredHostSelection.current || creationLocked || transitioning || selectedHost.providerId === providerId) return;
     setSelectedHost((host) => ({ ...host, providerId }));
@@ -788,26 +787,14 @@ function AppContent({
   }, [pageOpen]);
 
   useEffect(() => {
-    if (restoredHostSelection.current || remoteHosts.length === 0) return;
-    if (requestedHostId) {
-      const host = remoteHosts.find((item) => item.id === requestedHostId);
-      if (!host) return;
-      restoredHostSelection.current = true;
-      const descriptor = host.providers?.find((provider) => provider.providerId === requested.target?.providerId) ?? host.providers?.[0];
-      const selectedProviderId = requested.target?.providerId ?? descriptor?.providerId ?? host.providerId ?? 'dsh';
-      setSelectedHost({ ...host, providerId: selectedProviderId });
-      setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : selectedProviderId);
-      return;
-    }
+    if (restoredHostSelection.current) return;
     const activeId = state?.agent?.id ?? rememberedAgent();
-    const saved = openedSessions.find((item) => item.agentId === activeId && item.hostId && item.hostId !== 'local');
-    if (!saved) { restoredHostSelection.current = true; return; }
-    const host = remoteHosts.find((item) => item.id === saved.hostId);
-    if (!host) return;
+    const saved = requestedHostId ? undefined : openedSessions.find((item) => item.agentId === activeId && item.hostId && item.hostId !== 'local');
+    const restoration = restoreHostSelection({ requested: { hostId: requestedHostId, providerId: requested.target?.providerId }, hosts: remoteHosts,
+      remembered: saved?.hostId ? { hostId: saved.hostId, providerId: saved.providerId } : undefined });
+    if (restoration.type === 'wait') return;
     restoredHostSelection.current = true;
-    setSelectedHost({ ...host, providerId: saved.providerId });
-    const descriptor = host.providers?.find((provider) => provider.providerId === saved.providerId);
-    setProviderName(descriptor ? `${descriptor.displayName} · ${host.name}` : saved.providerId);
+    if (restoration.type === 'select') { setSelectedHost({ ...restoration.host, providerId: restoration.providerId }); setProviderName(restoration.providerName); }
   }, [openedSessions, remoteHosts, requestedHostId, state?.agent?.id]);
 
   const loadProviders = useCallback(async (): Promise<void> => {
@@ -839,35 +826,18 @@ function AppContent({
     return () => document.removeEventListener('pointerdown', dismiss);
   }, []);
 
-  const providerChoices = availableProviders.map((provider) => ({
-    ...provider,
-    hostId: selectedHost.id,
-    selectionId: selectedHost.id === 'local' ? provider.providerId : JSON.stringify([selectedHost.id, provider.providerId]),
-  }));
-  const selectedProviderChoice = providerChoices.find((choice) => choice.hostId === selectedHost.id && choice.providerId === providerId);
-  const selectedHostOffline = selectedHost.id !== 'local' && remoteHosts.find((host) => host.id === selectedHost.id)?.online !== true;
-  const selectedQuota = remoteHosts.find((host) => host.id === selectedHost.id)?.sessionQuota;
-  const creationQuotaExhausted = selectedQuota !== undefined && selectedQuota.used >= selectedQuota.limit && !creationReservation.current;
-  const requestedHostUnavailable = hostsLoaded && requestedHostId && requestedHostId !== 'local' && !restoredHostSelection.current && !remoteHosts.some((host) => host.id === requestedHostId)
-    ? 'Requested Host is unavailable or is not shared with you. Retry Hosts or select another Host.' : undefined;
-  const creationUnavailableReason = requestedHostUnavailable ?? (selectedHost.id !== 'local' && !hostsLoaded && !hostError ? 'Loading Hosts…'
-    : selectedHostOffline ? 'This Host is offline. Reconnect it or select another Host.'
-    : creationQuotaExhausted ? 'Session creation limit reached. Existing sessions remain available. Ask the owner to raise your limit.'
-    : selectedHost.id !== 'local' && !providerId ? 'No providers available on this Host. Check installed agents and provider settings.' : undefined);
+  const providerChoiceList = providerChoices(selectedHost.id, availableProviders);
+  const selectedProviderChoice = providerChoiceList.find((choice) => choice.hostId === selectedHost.id && choice.providerId === providerId);
+  const creationFacts = { selectedHostId: selectedHost.id, requestedHostId, hosts: remoteHosts, hostsLoaded, hostError: !!hostError,
+    hostSelectionRestored: restoredHostSelection.current, providerId, reserved: !!creationReservation.current };
+  const creationUnavailableReason = creationUnavailableReasonOf(creationFacts);
 
-  function providerConnectionName(hostId: string, selectedProviderId: string): string {
-    if (hostId === 'local') return providers.find((provider) => provider.providerId === selectedProviderId)?.displayName ?? selectedProviderId;
-    const host = remoteHosts.find((candidate) => candidate.id === hostId);
-    const descriptor = host?.providers?.find((provider) => provider.providerId === selectedProviderId);
-    return descriptor && host ? `${descriptor.displayName} · ${host.name}` : selectedProviderId;
-  }
+  const providerConnectionName = (hostId: string, selectedProviderId: string) => providerConnectionNameOf(hostId, selectedProviderId, providers, remoteHosts);
 
   function selectHost(host: RemoteHost, preferredId = providerId): void {
     if (creationLocked || transitionRef.current && !sidebarWindow) return;
     restoredHostSelection.current = true;
-    const advertised = host.id === 'local' ? providers : hostProviders(host);
-    const nextProviderId = advertised.find((provider) => provider.providerId === preferredId)?.providerId
-      ?? advertised[0]?.providerId ?? '';
+    const nextProviderId = providerAfterHostChange(host, providers, preferredId);
     setSelectedHost({ ...host, providerId: nextProviderId });
     if (host.id === 'local') setLocalProviderId(nextProviderId);
     setSessionOptions({});
@@ -875,7 +845,7 @@ function AppContent({
   }
 
   function selectProvider(selectionId: string): void {
-    const choice = providerChoices.find((item) => item.selectionId === selectionId);
+    const choice = providerChoiceList.find((item) => item.selectionId === selectionId);
     if (!choice) return;
     selectHost(currentHost ?? selectedHost, choice.providerId);
   }
@@ -3151,22 +3121,22 @@ function AppContent({
       {directory && userScoped && sessionPanel === 'hosts' ? <HostOverview hosts={remoteHosts} service={hostClient} visible={windowMode && (compactLayout ? contextOpen : pageOpen)}
         compact={compactLayout} actionsTarget={compactLayout ? undefined : pageActionsTarget}
         onOpenHost={id => { const host = remoteHosts.find(item => item.id === id); if (host) selectHost(host); if (compactLayout) dispatchPanels({ type: 'sessionPanel.set', panel: 'settings' }); else openPage('settings'); }} /> : null}
-      {directory && sessionPanel !== 'favorites' && sessionPanel !== 'hosts' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
+      {directory && sessionPanel !== 'favorites' && sessionPanel !== 'hosts' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailableReason(creationFacts)} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel key={selectedRemoteHost?.id} />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={windowMode && (compactLayout ? contextOpen : pageOpen)}>
           <HostVscodeTunnel key={selectedRemoteHost?.id} />
         </VscodeTunnelScope> : null}
       {directory && userScoped ? <div hidden={sessionPanel !== 'settings'}><ControllerUpdates service={hostClient} hosts={remoteHosts} /></div> : null}
       <div className="lab-directory-panel" hidden={sessionPanel !== 'list'}>
-      {directory || providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoices.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.length === 0 ? <option value="">No providers available</option> : null}{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
+      {directory || providerChoiceList.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoiceList.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoiceList.length === 0 ? <option value="">No providers available</option> : null}{providerChoiceList.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label="Scan session QR code" onClick={() => setScanOpen(true)}>Scan</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={focusedMenuSession?.agentId} opened={openedSessions} known={sessionEntries} sideStore={forkStore} askStore={ask.store} hostId={selectedHost.id} onOpenRelated={(item) => void openDirectorySession(item)} busy={!sidebarWindow && (transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openDirectorySession(item)} onSelect={(item) => void openDirectorySession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
       {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={windowMode && (compactLayout ? contextOpen : pageOpen)} onOpen={() => { if (compactLayout) { dispatchPanels({ type: 'context.close', focusInPage: false }); closeInspector(); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
-        providers={providerChoices}
+        providers={providerChoiceList}
         selectedProviderId={selectedProviderChoice?.selectionId ?? ''}
-        catalogStatus={selectedHost.id !== 'local' || (catalogStatus === 'empty' && providerChoices.length > 0) ? 'ready' : catalogStatus}
+        catalogStatus={selectedHost.id !== 'local' || (catalogStatus === 'empty' && providerChoiceList.length > 0) ? 'ready' : catalogStatus}
         catalogError={catalogError}
         creating={transitioning}
         unavailableReason={creationUnavailableReason}
@@ -3622,7 +3592,7 @@ function AppContent({
     {!windowMode && directory && newBot.open ? <NewBotSheet open onClose={() => setNewBot({ open: false })}
       hosts={selectableHosts.map(host => ({ id: host.id, name: host.name, disabled: host.online === false }))} hostId={selectedHost.id}
       onHostChange={id => { const host = selectableHosts.find(item => item.id === id); if (host) selectHost(host as RemoteHost); }}
-      providers={providerChoices.map(choice => ({ id: choice.selectionId, name: choice.displayName }))} providerId={selectedProviderChoice?.selectionId ?? ''} nativeProviderId={selectedProviderChoice ? providerId : ''} onProviderChange={selectProvider}
+      providers={providerChoiceList.map(choice => ({ id: choice.selectionId, name: choice.displayName }))} providerId={selectedProviderChoice?.selectionId ?? ''} nativeProviderId={selectedProviderChoice ? providerId : ''} onProviderChange={selectProvider}
       directory={directory} options={sessionOptions} onOptionsChange={setSessionOptions} canBrowse={remoteHosts.find(host => host.id === selectedHost.id)?.access !== 'shared'}
       unavailableReason={windowWorkspace.sectionCreationState.state === 'unknown' ? 'A new group is not confirmed yet. Retry it in the roster first.' : creationUnavailableReason}
       starting={transitioning} failure={newBot.failure} onStart={() => void createAgent(true)} /> : null}
@@ -3704,11 +3674,6 @@ function openedSessionMetadata(item: OpenedSession): OpenedSession {
     ...(typeof item.parentAgentId === 'string' ? { parentAgentId: item.parentAgentId } : {}),
     ...(typeof item.parentNativeSessionId === 'string' ? { parentNativeSessionId: item.parentNativeSessionId } : {}),
     ...(typeof item.createdAt === 'string' ? { createdAt: item.createdAt } : {}) };
-}
-
-function hostProviders(host: RemoteHost | undefined): readonly AgentProviderDescriptor[] {
-  if (!host) return [];
-  return host.providers ?? [{ providerId: host.providerId ?? 'dsh', displayName: host.providerId && host.providerId !== 'dsh' ? host.providerId : 'DeepSeek Harness' }];
 }
 
 function viewKey(session: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>): string {

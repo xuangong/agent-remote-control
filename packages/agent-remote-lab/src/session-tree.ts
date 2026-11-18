@@ -1,4 +1,5 @@
 import type { AgentChildSession } from '@orchardworks/agent-remote-protocol';
+import { sessionKey } from '@orchardworks/agent-client';
 import type { OpenedSession } from './directory-client.js';
 
 export interface SessionEntry extends Partial<AgentChildSession> {
@@ -22,9 +23,7 @@ export function knownTitle(session: Pick<SessionEntry, 'title' | 'nativeSessionI
   const title = session.title.trim();
   return title && title !== session.nativeSessionId ? title : undefined;
 }
-export function sessionKey(item: Pick<SessionEntry, 'hostId' | 'providerId' | 'nativeSessionId'>): string {
-  return JSON.stringify([item.hostId ?? 'local', item.providerId, item.nativeSessionId]);
-}
+export { sessionKey };
 
 /** Retain native identity when a parent view is closed or its catalog page is absent. */
 export function sessionForest(entries: readonly SessionEntry[], known: readonly SessionEntry[] = []): SessionNode[] {

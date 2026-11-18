@@ -3,6 +3,7 @@ import { conversationLocalStorage, conversationSessionStorage, storageKeys } fro
 import { recoveryGeneration } from './conversation-recovery.js';
 import { flushRecoveryWrites, queueRecoveryWrite, type RecoveryWriteHandle } from './recovery-writes.js';
 import type { OpenedSession } from './directory-client.js';
+import { canonicalJson, roleKey } from '@orchardworks/agent-client';
 import { sessionKey, type SessionEntry } from './session-tree.js';
 import { parseCompositionWindows, type CompositionWindow } from './composition-views.js';
 
@@ -157,13 +158,8 @@ export function parseComposition(value: unknown, scope: string): CompositionDocu
 export function createCompositionDocument(scope: string, slots: CompositionSlot[] = []): CompositionDocument {
   return { version: 2, scope, editRevision: 0, slots: slots.map(slot), roles: [], edges: [], collapsed: [], retained: [], asks: [], tracks: [], ...(slots[0] ? { primary: slots[0].id, address: slots[0].id } : {}) };
 }
-export function compositionRoleKey(value: Pick<RoleCheckpoint, 'scope' | 'hostId' | 'controllerId' | 'roleId'>): string { return JSON.stringify([value.scope, value.hostId, value.controllerId, value.roleId]); }
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (record(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
-  if (value === undefined || typeof value === 'function' || typeof value === 'symbol' || typeof value === 'bigint' || (typeof value === 'number' && !Number.isFinite(value))) throw new Error('Invalid canonical value.');
-  return JSON.stringify(value);
-}
+export const compositionRoleKey: (value: Pick<RoleCheckpoint, 'scope' | 'hostId' | 'controllerId' | 'roleId'>) => string = roleKey;
+export { canonicalJson };
 export async function createRoleCheckpoint(scope: string, replay: SessionSuccessionReplay): Promise<RoleCheckpoint> {
   if (!isSessionSuccessionReplay(replay)) throw new Error('Invalid succession replay.');
   const bytes = new TextEncoder().encode(canonicalJson(replay.projection));

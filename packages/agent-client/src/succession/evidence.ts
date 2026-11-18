@@ -126,7 +126,7 @@ export type SourceStaleness = 'inactive' | 'view' | 'connecting' | 'agent' | 'na
  */
 export function sourceStaleness({ inactive, viewMatches, bound, agent, source }: {
   inactive: boolean; viewMatches: boolean; bound: boolean;
-  agent?: { id: string; providerId: string; runtimeInfo: { providerId: string; sessionId: string } };
+  agent?: { id: string; providerId: string; runtimeInfo: { providerId: string; sessionId: string | null } } | null;
   source: SessionLocator & { agentId?: string };
 }): SourceStaleness | undefined {
   if (inactive) return 'inactive';

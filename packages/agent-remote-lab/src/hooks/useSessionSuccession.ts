@@ -3,8 +3,8 @@ import type { WindowSessionBinding, WorkspaceWindow } from '@orchardworks/agent-
 import { applyConversationLayout, type ConversationLayout } from '../conversation-layout.js';
 import { flushSync } from 'react-dom';
 import { useEffect, useMemo, useReducer, useRef } from 'react';
-import { isSessionSuccessionCurrent, isSessionSuccessionReplay, nativeSessionRefKey, resolveNativePrefix, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
-import { remoteSessionState, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState } from '@orchardworks/agent-client';
+import { nativeSessionRefKey, type SessionSuccessionCurrent, type SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
+import { canPruneSession, canonicalJson, classifyFailure, committedRefreshOf, compositionStillChanging, continuesRole, handoffOutcome, latestReplayByRole, nativeNotConfirmed, newerFavoritesHints, reduceRefresh, remoteSessionState, resolveLocator, restoredSourceOf, roleContextOf, sessionSuccessionHistory, settlementOf, sourceStaleness, successionDeadlines, unconfirmedOutcome, watchFeedRefresh, watchPageResume, type AgentReplica, type AgentReplicaState, type RefreshEffect, type RefreshEvent, type RemoteAgentTransport, type RemoteSessionClient, type RemoteSessionState, type RoleProgress, type SessionSuccessionHistoryNavigation, type SourceStaleness } from '@orchardworks/agent-client';
 import type { ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
 import type { ControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession, type SuccessionActionResult } from '../directory-client.js';
@@ -20,7 +20,6 @@ import type { TrackedSessionView } from '../tracked-session-views.js';
 import type { SessionTracking } from './useSessionTracking.js';
 import { isAskAttached, askParticipantKey, type useAskConversations } from './useAskConversations.js';
 import type { SessionStars } from './useSessionStars.js';
-import { canonicalJson } from '../session-composition.js';
 import { readStoredDisplay, workspaceDisplayState } from '../stored-display.js';
 import { storedRowsRelay } from '../workspace-access.js';
 
@@ -52,49 +51,8 @@ interface SuccessionOptions {
   failed(error: unknown, selection: Selection, retrying?: boolean): void;
 }
 const selectionFor = compositionSelection;
-/**
- * The request never reached the Relay: the network failed or the browser is offline. A timeout is not: a slow Relay
- * that is online may be answering with a succession this page has not seen yet.
- */
-const unreachable = (error: unknown) => !(error instanceof DOMException && error.name === 'TimeoutError')
-  && (!!error && typeof error === 'object' && 'code' in error && error.code === 'network_error' || globalThis.navigator?.onLine === false);
-/** Delays before refreshing locators restored from an unreachable Relay. */
-const staleRetryDelays = [1000, 2000, 5000, 10000, 30000];
 const identityConfirmationError = 'The native session identity could not be confirmed.';
 const unavailable = (code: string): CompositionParticipantResult => ({ status: 'pending', retention: 'page', code });
-
-/** Why a view's source is not its current native session: the page lost authority, the view moved, or the session is still connecting or reattached. */
-export type SourceStaleness = 'inactive' | 'view' | 'connecting' | 'agent' | 'native';
-export interface SessionSuccessionHistoryNavigation {
-  roleKey: string; history: boolean; session: SessionEntry; current: SessionEntry;
-  predecessor?: SessionEntry; ancestors: SessionEntry[];
-}
-/** Historical addresses require a complete, authorized chain through its confirmed current role. */
-export function sessionSuccessionHistory({ scope, replays, current, selected, intent, titles }: {
-  scope: string; replays: readonly SessionSuccessionReplay[]; current?: SessionSuccessionCurrent;
-  selected: SessionEntry; intent?: 'history'; titles?: ReadonlyMap<string, string>;
-}): SessionSuccessionHistoryNavigation | undefined {
-  if (!isSessionSuccessionCurrent(current)) return;
-  const chain = replays.filter(replay => replay.projection.role.id === current.role.id && replay.to.hostId === current.locator.hostId
-    && replay.projection.role.current.controllerId === current.role.current.controllerId).sort((left, right) => left.projection.role.revision - right.projection.role.revision);
-  if (!chain.length || !chain.every(isSessionSuccessionReplay)) return;
-  for (let index = 0; index < chain.length; index++) {
-    const replay = chain[index]!, previous = chain[index - 1];
-    if (canonicalJson(replay.projection.role.origin) !== canonicalJson(current.role.origin)
-      || canonicalJson(replay.projection.role.workspace) !== canonicalJson(current.role.workspace)) return;
-    if (previous ? previous.projection.role.revision !== replay.projection.receipt.expectedRevision
-      || nativeSessionRefKey(previous.projection.role.current) !== nativeSessionRefKey(replay.projection.receipt.from)
-      : replay.projection.receipt.expectedRevision !== 1 || nativeSessionRefKey(replay.projection.receipt.from) !== nativeSessionRefKey(current.role.origin)) return;
-  }
-  if (canonicalJson(chain.at(-1)!.projection.role) !== canonicalJson(current.role)) return;
-  const targets = [chain[0]!.from, ...chain.map(replay => replay.to)];
-  const keys = targets.map(sessionKey), index = keys.indexOf(sessionKey(selected));
-  if (new Set(keys).size !== keys.length || index < 0 || intent !== 'history' && index !== targets.length - 1) return;
-  const resolve = (target: typeof targets[number]): SessionEntry => ({ ...target, title: titles?.get(sessionKey(target))?.trim() || target.nativeSessionId });
-  return { roleKey: compositionRoleKey({ scope, hostId: current.locator.hostId, controllerId: current.role.current.controllerId, roleId: current.role.id }),
-    history: intent === 'history' && index < targets.length - 1, session: resolve(targets[index]!), current: resolve(current.locator),
-    predecessor: index > 0 ? resolve(targets[index - 1]!) : undefined, ancestors: targets.slice(0, Math.max(0, index - 1)).reverse().map(resolve) };
-}
 
 /** Product ownership and binding glue. Composition participants perform no native work. */
 export function useSessionSuccession(options: SuccessionOptions) {
@@ -141,10 +99,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     runtime.authority.active = false;
     runtime.authority = { active: options.enabled };
     runtime.applications.clear();
-    runtime.discovered = false;
     // Evidence confirmed under another authority does not speak for this one.
-    runtime.confirmedEvidence = undefined; runtime.evidenceStale = false;
-    clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.staleAttempts = 0;
+    runtime.confirmedEvidence = undefined;
+    applyRefreshEffects(refreshWith({ type: 'authority_changed' }));
   }
   const live = () => currentRuntime.current === runtime && runtime.mounted && runtime.authority.active
     && latest.current.scope === options.scope && latest.current.transport === options.transport
@@ -153,13 +110,39 @@ export function useSessionSuccession(options: SuccessionOptions) {
     for (const observer of runtime.refreshObservers) observer();
     if (currentRuntime.current === runtime && runtime.mounted) render();
   };
+  /** Feeds an event to the refresh model; its state fields live on the runtime under the same names. */
+  function refreshWith(event: RefreshEvent): RefreshEffect[] {
+    const { state, effects } = reduceRefresh({ discovered: runtime.discovered, evidenceStale: runtime.evidenceStale, staleAttempts: runtime.staleAttempts, unsupported: runtime.unsupported }, event);
+    Object.assign(runtime, state);
+    return effects;
+  }
+  /** Runs what the refresh model asked for: the shell owns the timer, the evidence maps and the discovery itself. */
+  function applyRefreshEffects(effects: RefreshEffect[], rediscover: () => void = () => void discover()) {
+    for (const effect of effects) {
+      switch (effect.type) {
+        case 'cancel_stale_retry': clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; break;
+        case 'restore_confirmed_evidence': for (const [key, evidence] of runtime.confirmedEvidence ?? []) runtime.historyEvidence.set(key, evidence); break;
+        case 'schedule_stale_retry': runtime.staleRetry = setTimeout(() => {
+          runtime.staleRetry = undefined;
+          if (live()) applyRefreshEffects(refreshWith({ type: 'stale_retry_due', evidenceStale: runtime.evidenceStale }));
+        }, effect.delayMs); break;
+        case 'rediscover': rediscover(); break;
+        case 'report_failure':
+          runtime.error = runtime.discoveryError = effect.message;
+          if (!effect.keepResult) runtime.result = unavailable('replay_unavailable');
+          break;
+      }
+    }
+  }
+  const roleProgress = (): RoleProgress[] => runtime.document.roles.map(role => ({
+    key: compositionRoleKey(role), appliedRevision: role.appliedRevision, committedRevision: role.desired.committedRevision, operationId: role.desired.operationId }));
   function retireBinding(next?: Selection) {
     const key = next && sessionKey(next), previous = runtime.binding;
     if (runtime.navigationLease?.key !== key) { runtime.navigationLease?.release(); runtime.navigationLease = undefined; }
     if (key && previous?.isCurrent() && sessionKey(previous.session) === key && !runtime.navigationLease) {
       const lease = latest.current.connections.acquire(previous.session.agentId, previous.replica, previous.session);
       const held = { key, release() { clearTimeout(deadline); lease.release(); if (runtime.navigationLease === held) runtime.navigationLease = undefined; } };
-      const deadline = setTimeout(() => held.release(), 20000);
+      const deadline = setTimeout(() => held.release(), successionDeadlines.navigationLease);
       runtime.navigationLease = held;
     }
     runtime.binding?.stop(); runtime.binding = undefined; runtime.attachment?.abort(); runtime.attachment = undefined; runtime.activeAttempt = undefined;
@@ -315,7 +298,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.sideAttempted.add(attempt);
       const request = new AbortController(), target = JSON.stringify(slot.intent.target);
       runtime.sideRequests.set(slot.id, request);
-      void resolveNative(slot, slotTitle(slot), AbortSignal.any([request.signal, AbortSignal.timeout(15000)])).then(session => {
+      void resolveNative(slot, slotTitle(slot), AbortSignal.any([request.signal, AbortSignal.timeout(successionDeadlines.attach)])).then(session => {
         if (!live() || request.signal.aborted || JSON.stringify(slot.intent.target) !== target) return;
         runtime.sides.set(slot.id, session); slot.metadata = compositionSessionMetadata(session);
         runtime.document.editRevision++; save();
@@ -409,7 +392,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       const targetSlot = { ...desired.slot, intent: { kind: desired.sessionIntent ?? 'fixed', target: desired.target } } as CompositionSlot;
       const resolve = (signal: AbortSignal) => resolveNative(targetSlot, desired.title, signal, takeover?.generation);
       const session = desired.roleKey || desired.sessionIntent === 'history' || takeover
-        ? await resolve(AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]))
+        ? await resolve(AbortSignal.any([controller.signal, AbortSignal.timeout(successionDeadlines.attach)]))
         : await new Promise<OpenedSession & { viewId: string }>((accept, reject) => {
           let stop = () => {};
           const finish = (settle: () => void) => { controller.signal.removeEventListener('abort', abort); stop(); settle(); };
@@ -514,7 +497,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const sequence = ++runtime.sequence, authority = runtime.authority;
     runtime.metadata?.abort(); const controller = new AbortController(); runtime.metadata = controller;
     const current = () => live() && runtime.authority === authority && runtime.sequence === sequence && !controller.signal.aborted;
-    const request = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(20000)]) };
+    const request = { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(successionDeadlines.discoveryRequest)]) };
     runtime.discovering = true; runtime.discovered = false; runtime.historyEvidence.clear();
     rememberHistoryTitles(runtime.document.slots.map(selectionFor)); publish();
     let replayRead = false;
@@ -534,19 +517,14 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.replays = all; replayRead = true;
       if (runtime.selection && runtime.intent !== 'history' && !runtime.selectedSlot) runtime.selectedSlot = ensureView(runtime.selection).id;
       if (runtime.selectedSlot && !runtime.document.slots.some(slot => slot.id === runtime.selectedSlot)) throw new Error('The selected session view is no longer available.');
-      const latestByRole = new Map<string, SessionSuccessionReplay>();
       const windowSlots = new Set(runtime.document.windowBindings?.map(binding => binding.slotId));
-      for (const replay of all) {
-        const key = compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id });
-        if (runtime.intent === 'history' && !runtime.document.slots.some(slot => {
-          if (!windowSlots.has(slot.id)) return false;
-          const intent = slot.intent, origin = replay.projection.role.origin;
-          return intent.kind === 'role' && intent.roleKey === key || intent.kind === 'fixed' && intent.target.hostId === replay.from.hostId
-            && intent.target.native.providerId === origin.providerId && intent.target.native.nativeSessionId === origin.nativeSessionId
-            && (!intent.target.native.controllerId || intent.target.native.controllerId === origin.controllerId);
-        })) continue;
-        if ((latestByRole.get(key)?.projection.role.revision ?? 0) < replay.projection.role.revision) latestByRole.set(key, replay);
-      }
+      const latestByRole = latestReplayByRole(options.scope, all, (replay, key) => runtime.intent !== 'history' || runtime.document.slots.some(slot => {
+        if (!windowSlots.has(slot.id)) return false;
+        const intent = slot.intent, origin = replay.projection.role.origin;
+        return intent.kind === 'role' && intent.roleKey === key || intent.kind === 'fixed' && intent.target.hostId === replay.from.hostId
+          && intent.target.native.providerId === origin.providerId && intent.target.native.nativeSessionId === origin.nativeSessionId
+          && (!intent.target.native.controllerId || intent.target.native.controllerId === origin.controllerId);
+      }));
       for (const replay of latestByRole.values()) admitReplay(replay);
       const local = runtime.intent !== 'history' && runtime.selectedSlot ? runtime.document.slots.find(slot => slot.id === runtime.selectedSlot) : undefined;
       if (local?.intent.kind === 'role' && runtime.desired?.slot.id !== local.id) throw new Error('The selected session view could not be recovered from the current role.');
@@ -631,8 +609,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
         }
       }
       if (!current()) return;
-      runtime.discovered = true; runtime.confirmedEvidence = new Map(runtime.historyEvidence);
-      runtime.evidenceStale = false; clearTimeout(runtime.staleRetry); runtime.staleRetry = undefined; runtime.staleAttempts = 0;
+      runtime.confirmedEvidence = new Map(runtime.historyEvidence);
+      applyRefreshEffects(refreshWith({ type: 'discovery_succeeded' }));
       if (!runtime.desired) runtime.active = false;
       if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
       else {
@@ -645,24 +623,11 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }
     } catch (error) {
       if (current()) {
-        if (!runtime.desired && !runtime.document.roles.length && error && typeof error === 'object' && 'code' in error && ['http_404', 'route_not_found'].includes(String(error.code))) {
-          runtime.unsupported = true;
-          queueMicrotask(() => { if (current()) void discover(); });
-        } else if (!notified && !replayRead && runtime.confirmedEvidence && unreachable(error)) {
-          // A refresh that cannot reach the Relay (offline after a resume, for instance) is not evidence that the
-          // locators changed: restore the ones the last discovery confirmed, marked stale, so views stay attached
-          // while input waits (resolveTarget). A retry with backoff, a resume or a succession notice refreshes them.
-          // A Relay answer, a timeout or a notified refresh still applies as before.
-          for (const [key, evidence] of runtime.confirmedEvidence) runtime.historyEvidence.set(key, evidence);
-          runtime.discovered = true; runtime.evidenceStale = true;
-          clearTimeout(runtime.staleRetry);
-          const delay = staleRetryDelays[Math.min(runtime.staleAttempts++, staleRetryDelays.length - 1)]!;
-          runtime.staleRetry = setTimeout(() => { runtime.staleRetry = undefined; if (live() && runtime.evidenceStale) void discover(); }, delay);
-        } else {
-          runtime.error = runtime.discoveryError = error instanceof Error ? error.message : 'Session succession could not be recovered.';
-          if (runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view') runtime.discovered = true;
-          else runtime.result = unavailable('replay_unavailable');
-        }
+        const failure = classifyFailure(error, globalThis.navigator?.onLine);
+        applyRefreshEffects(refreshWith({ type: 'discovery_failed', failure, notified, replayRead, hasConfirmedEvidence: !!runtime.confirmedEvidence,
+          hasDesired: !!runtime.desired, hasRoles: runtime.document.roles.length > 0,
+          invalidView: !!runtime.result && 'code' in runtime.result && runtime.result.code === 'invalid_view' }),
+        () => queueMicrotask(() => { if (current()) void discover(); }));
       }
     } finally {
       if (current()) {
@@ -694,7 +659,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       }, options.scope);
       try {
         attached = await resolveNative({ ...candidate, metadata: compositionSessionMetadata(selection) }, selection.title,
-          AbortSignal.any([request.signal, AbortSignal.timeout(15000)]));
+          AbortSignal.any([request.signal, AbortSignal.timeout(successionDeadlines.attach)]));
         if (!current()) return false;
         selection = { ...selection, agentId: attached.agentId };
       } catch (error) {
@@ -706,11 +671,8 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const takeover = takeOver || onRestoring ? { generation: takeOver, restored: onRestoring } : undefined;
     runtime.takeover = takeover;
     const desired = runtime.desired;
-    const sameRole = !slotId && intent !== 'history' && runtime.intent !== 'history' && desired?.roleKey && (
-      sessionKey(selection) === sessionKey({ hostId: desired.target.hostId, ...desired.target.native })
-      || runtime.replays.some(replay => compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId,
-        controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id }) === desired.roleKey
-        && [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection))));
+    const sameRole = continuesRole({ scope: options.scope, selection, explicitView: !!slotId, history: intent === 'history' || runtime.intent === 'history',
+      desired: desired && { roleKey: desired.roleKey, hostId: desired.target.hostId, ...desired.target.native }, replays: runtime.replays });
     const sameView = slotId && desired?.slot.id === slotId;
     const slot = intent === 'history' ? requestedSlot : ensureView(selection, slotId);
     const restorePrimary = restoreLayout && slot?.id === runtime.document.primary;
@@ -730,10 +692,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return runtime.active;
   }
   async function refreshComposition(): Promise<void> {
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + successionDeadlines.refresh;
     await discover();
     while (live() && runtime.settledDiscoverySequence !== runtime.sequence) {
-      if (Date.now() >= deadline) throw new Error('Session composition is still changing. Retry synchronization.');
+      if (Date.now() >= deadline) throw new Error(compositionStillChanging);
       if (!runtime.discovering) { await discover(); continue; }
       await new Promise<void>((resolve, reject) => {
         const finish = (error?: Error) => {
@@ -741,7 +703,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
           if (error) reject(error); else resolve();
         };
         const check = () => { if (!live() || !runtime.discovering) finish(); };
-        const timer = setTimeout(() => finish(new Error('Session composition is still changing. Retry synchronization.')), Math.max(1, deadline - Date.now()));
+        const timer = setTimeout(() => finish(new Error(compositionStillChanging)), Math.max(1, deadline - Date.now()));
         runtime.refreshObservers.add(check); check();
       });
     }
@@ -750,30 +712,22 @@ export function useSessionSuccession(options: SuccessionOptions) {
     if (!live()) throw new Error('Workspace access is required to refresh this Handoff.');
     await refreshComposition();
     if (!live()) throw new Error('Workspace access changed while refreshing this Handoff.');
-    const matches = [...runtime.historyEvidence.entries()].filter(([, evidence]) => evidence.replays.some(replay => replay.projection.receipt.operationId === operationId));
-    if (matches.length !== 1) throw new Error(runtime.error ?? 'The committed Handoff could not be verified. Refresh its current role again.');
-    const [roleKey, evidence] = matches[0]!;
-    const checkpoint = runtime.document.roles.find(role => compositionRoleKey(role) === roleKey);
-    if (!checkpoint || checkpoint.appliedRevision !== evidence.current.role.revision || checkpoint.desired.committedRevision !== evidence.current.role.revision) {
-      throw new Error(runtime.error ?? 'The committed Handoff still needs local synchronization.');
-    }
+    const verdict = committedRefreshOf({ operationId, evidence: runtime.historyEvidence, roles: roleProgress(), shown: runtime.error });
+    if (verdict.status === 'failed') throw new Error(verdict.message);
+    const { roleKey, evidence } = verdict;
     await confirmRestoredBinding(target => runtime.desired?.roleKey === roleKey
       || evidence.replays.some(replay => [replay.from, replay.to].some(locator => sessionKey(locator) === sessionKey(target))));
   }
   async function refreshSettled(result: SuccessionActionResult, source: OpenedSession): Promise<void> {
-    if (result.record.phase === 'committed') return refreshCommitted(result.record.operationId);
-    if (!['cancelled', 'rejected'].includes(result.record.phase)
-      || sessionKey({ hostId: source.hostId, ...result.record.from }) !== sessionKey(source)) {
-      throw new Error('The Handoff outcome does not confirm the original conversation.');
-    }
+    const outcome = handoffOutcome(result.record.phase, result.record.from, source);
+    if (outcome === 'committed') return refreshCommitted(result.record.operationId);
+    if (outcome === 'unconfirmed') throw new Error(unconfirmedOutcome);
     if (!live()) throw new Error('Workspace access is required to restore this conversation.');
     await refreshComposition();
     if (!live()) throw new Error('Workspace access changed while restoring this conversation.');
     const roleKey = compositionRoleKey({ scope: options.scope, hostId: source.hostId ?? 'local', controllerId: result.role.current.controllerId, roleId: result.role.id });
-    const evidence = runtime.historyEvidence.get(roleKey);
-    if (nativeSessionRefKey(result.role.current) !== nativeSessionRefKey(result.record.from) && !evidence) {
-      throw new Error('The original conversation has moved. Refresh its current role before continuing.');
-    }
+    const restored = restoredSourceOf({ roleCurrent: result.role.current, recordFrom: result.record.from, hasEvidence: !!runtime.historyEvidence.get(roleKey) });
+    if (restored.status === 'failed') throw new Error(restored.message);
     await confirmRestoredBinding(target => runtime.desired?.roleKey === roleKey || sessionKey(target) === sessionKey(source)
       || sessionKey(target) === sessionKey({ hostId: source.hostId, ...result.role.current }));
   }
@@ -785,16 +739,15 @@ export function useSessionSuccession(options: SuccessionOptions) {
         if (error) reject(error); else resolve();
       };
       const check = () => {
-        if (!live()) { finish(new Error('Workspace access changed while refreshing this Handoff.')); return; }
         const desired = runtime.desired;
         const target = desired && { hostId: desired.target.hostId, ...desired.target.native };
-        if (!target || !related(target)) { finish(options.mustRemain ? new Error('Session navigation changed before native restoration was confirmed.') : undefined); return; }
-        if (runtime.discovering) return;
-        if (runtime.error) { finish(new Error(runtime.error)); return; }
-        if (runtime.result?.status !== 'applied') { finish(new Error('The conversation layout still needs synchronization.')); return; }
-        if (runtime.binding?.isCurrent() && runtime.binding.isSynchronized() && sessionKey(runtime.binding.session) === sessionKey(target) && (options.settled?.() ?? true)) finish();
+        const verdict = settlementOf({ live: live(), target, related: !!target && related(target), discovering: runtime.discovering, error: runtime.error,
+          layoutApplied: runtime.result?.status === 'applied', mustRemain: !!options.mustRemain,
+          nativeSettled: !!target && !!runtime.binding?.isCurrent() && runtime.binding.isSynchronized() && sessionKey(runtime.binding.session) === sessionKey(target),
+          callerSettled: options.settled?.() ?? true });
+        if (verdict.status === 'settled') finish(); else if (verdict.status === 'failed') finish(new Error(verdict.message));
       };
-      const deadline = setTimeout(() => finish(new Error('The current native session has not been confirmed. Retry the session connection.')), 16000);
+      const deadline = setTimeout(() => finish(new Error(nativeNotConfirmed)), successionDeadlines.nativeConfirmation);
       runtime.refreshObservers.add(check); check();
     });
   }
@@ -836,30 +789,14 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   function canPrune(favorites: SessionStars, session: Selection): boolean {
     if (!live() || !runtime.discovered || runtime.discovering || !favorites.ready || favorites.scope !== options.scope) return false;
-    const roles = runtime.document.slots.filter(slot => slot.intent.kind === 'role' && sessionKey(selectionFor(slot)) === sessionKey(session));
-    const lineage = runtime.replays.filter(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(session)));
-    const keys = new Set([...roles.map(slot => slot.intent.kind === 'role' ? slot.intent.roleKey : ''), ...lineage.map(replay => compositionRoleKey({ scope: options.scope, hostId: replay.to.hostId, controllerId: replay.projection.role.current.controllerId, roleId: replay.projection.role.id }))]);
-    return [...keys].every(key => {
-      const role = runtime.document.roles.find(role => compositionRoleKey(role) === key);
-      return role && role.appliedRevision === role.desired.committedRevision && favorites.successionProgress?.roles.some(checkpoint => checkpoint.hostId === role.hostId
-        && checkpoint.controllerId === role.controllerId && checkpoint.roleId === role.roleId && checkpoint.roleRevision === role.desired.committedRevision
-        && checkpoint.operationId === role.desired.operationId && checkpoint.status === 'applied');
-    });
+    const viewRoleKeys = runtime.document.slots.flatMap(slot => slot.intent.kind === 'role' && sessionKey(selectionFor(slot)) === sessionKey(session) ? [slot.intent.roleKey] : []);
+    return canPruneSession({ scope: options.scope, session, viewRoleKeys, replays: runtime.replays, roles: roleProgress(), progress: favorites.successionProgress?.roles });
   }
   function observeFavorites(favorites: SessionStars) {
     if (!live() || !supported || !runtime.discovered || runtime.discovering || !favorites.ready || favorites.scope !== options.scope) return;
-    let newer = false;
-    for (const progress of favorites.successionProgress?.roles ?? []) {
-      const key = compositionRoleKey({ scope: options.scope, hostId: progress.hostId, controllerId: progress.controllerId, roleId: progress.roleId });
-      const role = runtime.document.roles.find(role => compositionRoleKey(role) === key);
-      if (!role || progress.roleRevision <= role.appliedRevision) continue;
-      const previous = runtime.favoritesHints.get(key);
-      if (previous && (previous.revision > progress.roleRevision || previous.revision === progress.roleRevision
-        && previous.operationId === progress.operationId && previous.status === progress.status)) continue;
-      runtime.favoritesHints.set(key, { revision: progress.roleRevision, operationId: progress.operationId, status: progress.status });
-      newer = true;
-    }
-    if (newer) void discover(false, true);
+    const hints = newerFavoritesHints({ scope: options.scope, roles: roleProgress(), progress: favorites.successionProgress?.roles ?? [], seen: runtime.favoritesHints });
+    for (const [key, hint] of hints) runtime.favoritesHints.set(key, hint);
+    if (hints.length) void discover(false, true);
   }
   function ownerFor(viewId: string): string {
     const owner = runtime.document.asks.find(owner => owner.sourceSlot === viewId);
@@ -867,28 +804,12 @@ export function useSessionSuccession(options: SuccessionOptions) {
     return owner.id;
   }
   function resolveTarget(selection: Selection, requested: { nativePrefixOnly?: boolean; viewId?: string } = {}) {
-    if (!live() || !runtime.discovered || runtime.discovering) throw new SessionLocatorSynchronizingError();
-    if (runtime.evidenceStale) throw new SessionLocatorSynchronizingError(true);
-    if (selection.parentNativeSessionId) return { target: selection };
     const slot = requested.viewId ? runtime.document.slots.find(slot => slot.id === requested.viewId) : undefined;
-    const matches = [...runtime.historyEvidence.values()].filter(evidence => evidence.replays.some(replay =>
-      [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection))));
-    if (!matches.length) {
-      if (runtime.replays.some(replay => [replay.from, replay.to].some(target => sessionKey(target) === sessionKey(selection)))) {
-        throw new Error('The current session locator could not be verified. The original history is preserved.');
-      }
-      return { target: selection };
-    }
-    if (matches.length !== 1) throw new Error('The session has conflicting current role identities.');
-    const evidence = matches[0]!;
-    if (slot?.intent.kind === 'history') return { target: selection, historyRoleId: evidence.current.role.id };
-    if (requested.nativePrefixOnly) {
-      const anchor = evidence.replays.flatMap(replay => [replay.projection.receipt.from, replay.projection.receipt.to!])
-        .find(ref => ref.providerId === selection.providerId && ref.nativeSessionId === selection.nativeSessionId)!;
-      const resolved = resolveNativePrefix(anchor, evidence.replays.map(replay => replay.projection.receipt));
-      if (nativeSessionRefKey(resolved.target) !== nativeSessionRefKey(evidence.current.role.current)) throw new Error('Native prefix execution routing is unavailable.');
-    }
-    return { target: { ...selection, ...evidence.current.locator } };
+    const resolution = resolveLocator({ ready: live() && runtime.discovered && !runtime.discovering, evidenceStale: runtime.evidenceStale, selection,
+      viewIsHistory: slot?.intent.kind === 'history', nativePrefixOnly: !!requested.nativePrefixOnly, evidence: [...runtime.historyEvidence.values()], replays: runtime.replays });
+    if (resolution.status === 'resolved') return resolution.historyRoleId ? { target: resolution.target, historyRoleId: resolution.historyRoleId } : { target: resolution.target };
+    if (resolution.refusal.kind === 'synchronizing') throw resolution.refusal.stale ? new SessionLocatorSynchronizingError(true) : new SessionLocatorSynchronizingError();
+    throw new Error(resolution.refusal.message);
   }
   useEffect(() => {
     if (!live()) return;
@@ -1048,12 +969,9 @@ export function useSessionSuccession(options: SuccessionOptions) {
     const slot = runtime.document.slots.find(slot => slot.id === slotId);
     if (slot?.intent.kind !== 'role') return;
     const intent = slot.intent, checkpoint = runtime.document.roles.find(role => compositionRoleKey(role) === intent.roleKey);
-    const evidence = runtime.historyEvidence.get(intent.roleKey);
-    if (!checkpoint || !evidence || evidence.current.role.revision !== intent.revision
-      || checkpoint.appliedRevision !== intent.revision || checkpoint.desired.committedRevision !== intent.revision
-      || sessionKey(evidence.current.locator) !== sessionKey(selectionFor(slot))
-      || nativeSessionRefKey(checkpoint.desired.to) !== nativeSessionRefKey(intent.target.native)) return;
-    return { operationId: checkpoint.desired.operationId, target: checkpoint.desired.to };
+    return roleContextOf({ viewRevision: intent.revision, viewTarget: intent.target.native, viewSession: selectionFor(slot), evidence: runtime.historyEvidence.get(intent.roleKey),
+      checkpoint: checkpoint && { key: intent.roleKey, appliedRevision: checkpoint.appliedRevision, committedRevision: checkpoint.desired.committedRevision,
+        operationId: checkpoint.desired.operationId, to: checkpoint.desired.to } });
   }
   function historyNavigationFor(source: SessionEntry & { viewId?: string }): SessionSuccessionHistoryNavigation | undefined {
     if (!live() || !runtime.discovered || runtime.discovering) return;
@@ -1078,13 +996,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
   }
   function sourceStale(source: OpenedSession & { viewId?: string }): SourceStaleness | undefined {
     const id = source.viewId, slot = runtime.document.slots.find(slot => slot.id === id);
-    if (!live() || id && latest.current.attachmentAllowed?.(id, runtime.document) === false) return 'inactive';
-    if (!slot || sessionKey(selectionFor(slot)) !== sessionKey(source)) return 'view';
-    if (id === desired?.slot.id && runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId) return;
-    const connection = latest.current.connections.find(source), agent = connection?.replica.getState().agent;
-    if (!agent) return 'connecting';
-    if (agent.id !== source.agentId) return 'agent';
-    if (agent.providerId !== source.providerId || agent.runtimeInfo.providerId !== source.providerId || agent.runtimeInfo.sessionId !== source.nativeSessionId) return 'native';
+    return sourceStaleness({ inactive: !live() || !!id && latest.current.attachmentAllowed?.(id, runtime.document) === false,
+      viewMatches: !!slot && sessionKey(selectionFor(slot)) === sessionKey(source),
+      bound: id === desired?.slot.id && !!runtime.binding?.isCurrent() && runtime.binding.session.agentId === source.agentId,
+      agent: latest.current.connections.find(source)?.replica.getState().agent, source });
   }
   return {
     /** Changes whenever this hook published a change; what follows locators reads it to resolve them again. */

@@ -2,7 +2,7 @@ import { act, useState } from 'react';
 import { expect, it } from 'vitest';
 import type { SessionSuccessionCurrent, SessionSuccessionReplay } from '@orchardworks/agent-remote-protocol';
 import { sessionKey, type SessionEntry } from '../session-tree.js';
-import { sessionSuccessionHistory } from '../hooks/useSessionSuccession.js';
+import { sessionSuccessionHistory } from '@orchardworks/agent-client';
 import { render } from '../test/setup.js';
 import { SessionSuccessionHistory } from './SessionSuccessionHistory.js';
 

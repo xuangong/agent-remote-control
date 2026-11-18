@@ -38,7 +38,24 @@ export interface RemoteHostUplinkDiagnostic {
 type DiagnosticDetails = Omit<RemoteHostUplinkDiagnostic, 'event'>;
 type DisconnectCause = Pick<RemoteHostUplinkDiagnostic, 'reason' | 'errorCode' | 'httpStatus'>;
 
+/**
+ * The socket of one uplink connection, as the client uses it: the events of a `ws` WebSocket and its two write operations.
+ * The default is a `ws` client; `connect` replaces it, so a Relay that plays the other end needs no listener.
+ */
+export interface UplinkSocket {
+  send(json: string, callback: (error?: Error) => void): void;
+  terminate(): void;
+  once(event: 'open', listener: () => void): unknown;
+  once(event: 'close', listener: (code: number, reason: { toString(): string }) => void): unknown;
+  on(event: 'error', listener: (error: Error) => void): unknown;
+  on(event: 'message', listener: (data: { toString(): string }, isBinary: boolean) => void): unknown;
+  on(event: 'unexpected-response', listener: (request: unknown, response: { statusCode?: number }) => void): unknown;
+}
+export interface UplinkSocketInit { readonly authorization: string; readonly maxPayload: number; readonly handshakeTimeout: number }
+
 export interface RemoteHostUplinkClientOptions {
+  /** Opens the socket of one connection to `endpoint`. Defaults to a WebSocket client; the Relay's side is then a listener. */
+  readonly connect?: (endpoint: URL, init: UplinkSocketInit) => UplinkSocket;
   readonly previews?: {
     snapshot(): PreviewRegistrationSnapshot | undefined;
     subscribe(listener: (snapshot: PreviewRegistrationSnapshot) => void): () => void;
@@ -114,6 +131,10 @@ export interface RemoteHostUplinkClient {
   close(): Promise<void>;
 }
 
+const connectWebSocket = (endpoint: URL, init: UplinkSocketInit): UplinkSocket => new WebSocket(endpoint, {
+  headers: { authorization: init.authorization }, maxPayload: init.maxPayload, handshakeTimeout: init.handshakeTimeout, perMessageDeflate: false, followRedirects: false,
+}) as unknown as UplinkSocket;
+
 /** Host calls only a Relay that acknowledged Call For Support understands. */
 const callForSupportActions = new Set<string>(['propose_roster', 'report_support', 'write_ledger', 'release_supporter', 'collect_supporter_patch', 'report_usage', 'call_for_support', 'support_status', 'support_enablement', 'support_group_states']);
 
@@ -185,13 +206,7 @@ export function createRemoteHostUplinkClient(options: RemoteHostUplinkClientOpti
     endpoint.searchParams.set('control', '1');
     if (options.journal) endpoint.searchParams.set('journal', String(JOURNAL_VERSION));
     if (options.teamManagement) { endpoint.searchParams.set('team', '1'); endpoint.searchParams.set('teamInbox', '1'); endpoint.searchParams.set('teamRecipients', '1'); endpoint.searchParams.set('teamSuccession', '1'); endpoint.searchParams.set('teamResources', '1'); if (options.callForSupport) { endpoint.searchParams.set('callForSupport', '1'); for (const providerId of options.readOnlyProviders ?? []) endpoint.searchParams.append('readOnlyProvider', providerId); } }
-    const socket = new WebSocket(endpoint, {
-      headers: { authorization: `Bearer ${remoteKey}` },
-      maxPayload: UPLINK_MAX_FRAME_BYTES,
-      handshakeTimeout: registrationTimeout,
-      perMessageDeflate: false,
-      followRedirects: false,
-    });
+    const socket: UplinkSocket = (options.connect ?? connectWebSocket)(endpoint, { authorization: `Bearer ${remoteKey}`, maxPayload: UPLINK_MAX_FRAME_BYTES, handshakeTimeout: registrationTimeout });
     let registered = false;
     let registeredHostId: string | undefined;
     /** The Relay acknowledged that it owns session control on this connection; without it no session opens. */

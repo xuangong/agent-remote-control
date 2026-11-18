@@ -51,7 +51,7 @@ type Tap = (direction: 'toPeer' | 'toRelay', json: string) => void;
 export function socketPair(closers: Array<() => void | Promise<void>>, tap?: Tap) {
   class Socket implements RelaySocket {
     readyState = 1; bufferedAmount = 0; peer!: Socket;
-    messages = new Set<(data: string, binary: boolean) => void | Promise<void>>(); closes = new Set<() => void>();
+    messages = new Set<(data: string, binary: boolean) => void | Promise<void>>(); closes = new Set<(details?: { code?: number; wasClean?: boolean }) => void>();
     readonly direction: 'toPeer' | 'toRelay';
     constructor(direction: 'toPeer' | 'toRelay') { this.direction = direction; }
     send(data: string) {
@@ -62,11 +62,11 @@ export function socketPair(closers: Array<() => void | Promise<void>>, tap?: Tap
     close(code?: number, reason?: string) {
       if (this.readyState !== 1) return;
       this.readyState = 3;
-      for (const listener of this.closes) listener();
+      for (const listener of this.closes) listener({ code, wasClean: true });
       this.peer.close(code, reason);
     }
     onMessage(listener: (data: string, binary: boolean) => void | Promise<void>) { this.messages.add(listener); return () => { this.messages.delete(listener); }; }
-    onClose(listener: () => void) { this.closes.add(listener); return () => { this.closes.delete(listener); }; }
+    onClose(listener: (details?: { code?: number; wasClean?: boolean }) => void) { this.closes.add(listener); return () => { this.closes.delete(listener); }; }
     onError() { return () => {}; }
   }
   const server = new Socket('toPeer'), native = new Socket('toRelay');

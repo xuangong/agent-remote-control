@@ -5,15 +5,14 @@ import { join } from 'node:path';
 import { controllerReleases } from '@orchardworks/agent-relay-core';
 import { isHostStatus } from '@orchardworks/agent-remote-protocol';
 import { AgentRuntimeError } from '@orchardworks/agent-provider-sdk';
-import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
+import { relayLink, relayPlayer } from '@orchardworks/agent-session-runtime/testing';
 import type { AgentCapabilities, AgentInteractionResponse, AgentProviderAdapter, AgentRuntimeInfo, AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
-import { WebSocketServer, type WebSocket } from 'ws';
 import { createRelayDiagnosticSink } from './relay-diagnostics.js';
 import { createCodexSessionDirectory } from './directory.js';
-import { createAgentHost, createAgentHostRuntime, type AgentHostDirectory, type AgentHostRequestDiagnostic, type AgentHostUplinkDiagnostic } from './host.js';
+import { createAgentHost as createController, createAgentHostRuntime, type AgentHostDirectory, type AgentHostRequestDiagnostic, type AgentHostUplinkDiagnostic } from './host.js';
 import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
 import { CodexAppServerTransport } from '@orchardworks/agent-provider-codex';
 import { createScriptedAppServer } from '@orchardworks/agent-provider-codex/testing';
@@ -81,6 +80,9 @@ function fixture(providerId: string, createSession: (nativeSessionId: string) =>
     async close() { await Promise.all([...sessions.values()].map((session) => session.dispose())); } };
   return { adapter, directory, sessions, createCount: () => creates };
 }
+
+/** The Controller with its uplink on `relayPlayer`s: a connection goes to the player that owns its URL. */
+const createAgentHost = (options: Parameters<typeof createController>[0]) => createController({ uplinkClient: relayLink, ...options });
 
 describe('Agent Host runtime', () => {
   it('reports its open sessions by state and the machine it runs on', async () => {
@@ -917,90 +919,9 @@ describe('Agent Host runtime', () => {
   });
 });
 
-async function uplinkBroker(hostId: string, autoRegister = true, heartbeat = { intervalMs: 30000, timeoutMs: 10000 }) {
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await new Promise<void>((resolve) => server.once('listening', resolve));
-  let socket: WebSocket | undefined;
-  let providers: unknown;
-  let pausedSocket: WebSocket | undefined;
-  const received: Array<Record<string, unknown>> = [];
-  let registrationCount = 0, heartbeatAcknowledgementCount = 0;
-  let resolveConnected!: () => void, upgrade: URL | undefined;
-  const connected = new Promise<void>((resolve) => { resolveConnected = resolve; });
-  server.on('connection', (connection, request) => {
-    socket = connection; upgrade = new URL(request.url ?? '/', 'http://broker');
-    resolveConnected();
-    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
-    connection.on('close', () => clearInterval(heartbeatTimer));
-    connection.on('message', (data) => {
-      const message = JSON.parse(data.toString()) as Record<string, unknown> & { type: string; providers?: unknown };
-      received.push(message);
-      if (message.type === 'register') { providers = message.providers; registrationCount += 1; }
-      if (message.type === 'heartbeat_ack') heartbeatAcknowledgementCount += 1;
-      if (message.type === 'register' && autoRegister) {
-        connection.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat, control: 1 }));
-        let nonce = 0;
-        heartbeatTimer = setInterval(() => {
-          if (connection !== pausedSocket && connection.readyState === 1)
-            connection.send(JSON.stringify({ uplinkVersion: 2, type: 'heartbeat', nonce: String(++nonce) }));
-        }, heartbeat.intervalMs);
-      }
-    });
-  });
-  const address = server.address() as { port: number };
-  let sequence = 0;
-  return {
-    url: `ws://127.0.0.1:${address.port}/ws/remote-host`,
-    connected,
-    advertisedProviders: () => providers,
-    /** What the Controller asked for when it connected. */
-    upgradeParameter: (name: string) => upgrade?.searchParams.get(name) ?? null,
-    registrations: () => registrationCount,
-    heartbeatAcknowledgements: () => heartbeatAcknowledgementCount,
-    pauseHeartbeat() { if (!socket) throw new Error('Broker has no Host connection.'); pausedSocket = socket; return socket; },
-    issueCredential(credential: string) { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_issued', credential })); },
-    register() { socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'registered', hostId, heartbeat, control: 1 })); },
-    openStream(streamId: string, sessionId: string) {
-      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_open', streamId, sessionId }));
-    },
-    closeStream(streamId: string) {
-      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_close', streamId, code: 1000, reason: 'Browser disconnected' }));
-    },
-    sendStream(streamId: string, message: object) {
-      socket?.send(JSON.stringify({ uplinkVersion: 2, type: 'stream_message', streamId, message: JSON.stringify(message) }));
-    },
-    streamOpened(streamId: string) {
-      return received.some(message => message.type === 'stream_opened' && message.streamId === streamId);
-    },
-    streamMessage(streamId: string, type: string, requestId?: string): Record<string, unknown> | undefined {
-      for (const frame of received) {
-        if (frame.type !== 'stream_message' || frame.streamId !== streamId || typeof frame.message !== 'string') continue;
-        const message = JSON.parse(frame.message) as Record<string, unknown>;
-        if (message.type !== type) continue;
-        const payload = message.payload;
-        if (requestId === undefined || (payload && typeof payload === 'object' && 'requestId' in payload
-          && (payload as { requestId?: unknown }).requestId === requestId)) return message;
-      }
-      return undefined;
-    },
-    rpc(method: 'GET' | 'POST', path: string, sessionId?: string, body?: unknown): Promise<{ status: number; body: string }> {
-      const requestId = `rpc-${++sequence}`;
-      return new Promise((resolve, reject) => {
-        if (!socket) { reject(new Error('Broker has no Host connection.')); return; }
-        const timeout = setTimeout(() => reject(new Error('RPC timed out.')), 5000);
-        const receive = (data: import('ws').RawData) => {
-          const response = JSON.parse(data.toString()) as { type: string; requestId?: string; status?: number; body?: string };
-          if (response.type !== 'rpc_response' || response.requestId !== requestId) return;
-          clearTimeout(timeout); socket!.off('message', receive); resolve({ status: response.status!, body: response.body! });
-        };
-        socket.on('message', receive);
-        socket.send(JSON.stringify({ uplinkVersion: 2, type: 'rpc_request', requestId, method, path,
-          ...(sessionId ? { sessionId } : {}), ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
-      });
-    },
-    close: () => new Promise<void>((resolve) => { for (const client of server.clients) client.terminate(); server.close(() => resolve()); }),
-  };
-}
+/** The Relay's side of the uplink, played by a script over an in-memory socket (see `relayPlayer`). */
+const uplinkBroker = async (hostId: string, autoRegister = true, heartbeat?: { intervalMs: number; timeoutMs: number }) =>
+  relayPlayer(hostId, { autoRegister, ...(heartbeat ? { heartbeat } : {}) });
 
 function summary(providerId: string, nativeSessionId: string) {
   return { providerId, nativeSessionId, title: nativeSessionId, createdAt: '2026-09-11T00:00:00.000Z',
@@ -1096,11 +1017,9 @@ it('delivers the owner stop operation over the real Host uplink transport', asyn
 });
 
 it('routes workspace browsing over the uplink without disrupting heartbeats', async () => {
-  const { realpath, mkdtemp, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
+  const { realpath } = await import('node:fs/promises');
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-folder-uplink-')));
-  const broker = await uplinkBroker('host', true, { intervalMs: 1000, timeoutMs: 500 });
+  const broker = await uplinkBroker('host', true, { intervalMs: 80, timeoutMs: 40 });
   const runtime = createAgentHost({ registrations: [fixture('codex')], installationId: 'folders', name: 'Host',
     uplink: { url: broker.url, remoteKey: 'key' },
     executionPolicy: { defaultWorkspace: root, allowedWorkspaceRoots: [root], lockPermissions: true } });
@@ -1159,113 +1078,8 @@ it('reports a confirmed attach failure over a real uplink without classifying it
   } finally { await host.close(); await broker.close(); }
 });
 
-it.each(['workspace', 'resume'] as const)('preserves confirmed native session unavailability from %s through the Host and Relay uplink', async stage => {
-  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000 });
-  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
-  const { key } = await pairing!.json();
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await once(server, 'listening');
-  server.on('connection', async (socket, upgrade) => {
-    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
-    if (!prepared || prepared instanceof Response) { socket.close(); return; }
-    prepared.accept({
-      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
-      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
-      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
-      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
-      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
-    });
-  });
-  const nativeSessionId = '00000000-0000-4000-8000-000000000031';
-  const apps: ReturnType<typeof createScriptedAppServer>[] = [];
-  const adapter = new CodexAppServerProvider({ spawn: () => {
-    const app = createScriptedAppServer({
-      'thread/read': () => { throw Object.assign(new Error(`thread not loaded: ${nativeSessionId}`), { code: -32600 }); },
-      'thread/resume': () => { throw Object.assign(new Error(`no rollout found for thread id ${nativeSessionId}`), { code: -32600 }); },
-    });
-    apps.push(app); return app.child;
-  } });
-  const diagnostics: unknown[] = [];
-  const host = createAgentHost({ registrations: [{ adapter, directory: createCodexSessionDirectory(adapter, []) }],
-    installationId: 'unavailable-host', name: 'Host',
-    ...(stage === 'workspace' ? { executionPolicy: { defaultWorkspace: '/workspace', allowedWorkspaceRoots: ['/workspace'], lockPermissions: true } } : {}),
-    uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: key },
-    onRequestDiagnostic(diagnostic) { diagnostics.push(diagnostic); } });
-  try {
-    const { hostId } = await host.ready;
-    const response = await broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/attach`, {
-      method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId }),
-    }));
-    expect(response?.status).toBe(404);
-    const failure = await response!.json();
-    expect(failure).toMatchObject({ code: 'native_session_unavailable', error: expect.stringContaining('could not find this session'), requestId: expect.any(String) });
-    expect(failure.error).not.toMatch(/00000000|rollout|empty|deleted/);
-    expect(diagnostics).toContainEqual(expect.objectContaining({ event: 'host_request_completed', requestId: failure.requestId,
-      operation: 'session_attach', code: 'native_session_unavailable', status: 404 }));
-    const methods = apps.flatMap(app => app.requests.map(request => request.method));
-    expect(methods).not.toContain('thread/start');
-    expect(methods).not.toContain('turn/start');
-    if (stage === 'workspace') expect(methods).toEqual(['initialize', 'thread/read']);
-    else expect(methods).toContain('thread/resume');
-    expect(broker.snapshot().bindings).toHaveLength(0);
-  } finally {
-    await host.close(); broker.close();
-    for (const socket of server.clients) socket.terminate();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  }
-}, 10_000);
 
 
-it('reuses a slow native opening after a Relay timeout over a real WebSocket', async () => {
-  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 50 });
-  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
-  const { key } = await pairing!.json();
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await once(server, 'listening');
-  server.on('connection', async (socket, upgrade) => {
-    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
-    if (!prepared || prepared instanceof Response) { socket.close(); return; }
-    const relaySocket: RelaySocket = {
-      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
-      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
-      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
-      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
-      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
-    };
-    prepared.accept(relaySocket);
-  });
-  const registration = fixture('codex');
-  const open = registration.directory.open;
-  let release!: () => void, completed!: () => void, openings = 0;
-  const gate = new Promise<void>(resolve => { release = resolve; });
-  const settled = new Promise<void>(resolve => { completed = resolve; });
-  registration.directory.open = async id => { openings++; await gate; return open(id); };
-  const diagnostics: Array<{ requestId: string; event: string }> = [];
-  const host = createAgentHost({ registrations: [registration], installationId: 'slow-host', name: 'Host',
-    uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: key },
-    onRequestDiagnostic(diagnostic) { diagnostics.push(diagnostic); if (diagnostic.event === 'host_request_completed') completed(); } });
-  try {
-    const { hostId } = await host.ready;
-    const request = () => broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/attach`, {
-      method: 'POST', body: JSON.stringify({ providerId: 'codex', nativeSessionId: 'slow-native' }),
-    }));
-    const timeout = await request();
-    expect(timeout?.status).toBe(504);
-    const failure = await timeout!.json();
-    expect(failure.code).toBe('session_attach_timeout');
-    expect(diagnostics).toContainEqual(expect.objectContaining({ requestId: failure.requestId, event: 'host_request_started' }));
-    release(); await settled;
-    const result = await request();
-    expect(result?.status).toBe(200);
-    expect(await result!.json()).toMatchObject({ nativeSessionId: 'slow-native' });
-    expect(openings).toBe(1);
-    expect(registration.sessions.get('slow-native')?.sentMessages).toEqual([]);
-  } finally {
-    release(); await host.close(); broker.close();
-    for (const socket of server.clients) socket.terminate();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  }
-}, 10000);
 
 
 it('preserves file-limit guidance across create retries without redispatching', async () => {
@@ -1830,60 +1644,3 @@ it('keeps daemon restart jobs alive across uplink replacement and reports the sa
   } finally { finish?.(); await host.close(); await broker.close(); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 }, 10000);
 
-it('discovers providers and persists owner preferences over a real uplink without interrupting sessions', async () => {
-  const { createHostProviderDiscovery } = await import('./provider-discovery.js');
-  const stateDir = await mkdtemp(join(tmpdir(), 'host-provider-live-'));
-  const broker = createHostBroker({ origin: 'http://relay.test', ownerSubject: 'owner', rpcTimeoutMs: 2000 });
-  const owner = { principalSubject: () => 'owner' };
-  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }), owner);
-  const { key } = await pairing!.json();
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(server, 'listening');
-  server.on('connection', async (socket, upgrade) => {
-    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${upgrade.url}`, { headers: { authorization: `Bearer ${key}` } }));
-    if (!prepared || prepared instanceof Response) { socket.close(); return; }
-    prepared.accept({
-      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
-      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
-      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
-      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
-      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
-    });
-  });
-  let available = false;
-  const codex = fixture('codex'), claude = fixture('claude');
-  const discovery = await createHostProviderDiscovery({ stateDir, env: { AGENT_HOST_PROVIDERS: 'codex' }, create: async id => {
-    if (id === 'codex') return codex;
-    if (id === 'claude' && available) return claude;
-    throw new Error('Not installed');
-  } });
-  const host = createAgentHost({ registrations: discovery.registrations, providerDiscovery: discovery, providerEnabled: discovery.enabled,
-    installationId: 'provider-host', name: 'Providers', uplink: { url: `ws://127.0.0.1:${(server.address() as {port: number}).port}/ws/remote-host`, remoteKey: key } });
-  try {
-    const { hostId } = await host.ready;
-    const request = async (path: string, input?: unknown, context = owner) => broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/${path}`, input ? { method: 'POST', body: JSON.stringify(input) } : {}), context);
-    const providers = () => broker.visibleHosts('owner')[0]!.providers.map(item => item.providerId);
-    expect(providers()).toEqual(['codex']);
-    const opened = await request('attach', { providerId: 'codex', nativeSessionId: 'active' });
-    expect(opened?.status).toBe(200);
-    const { agentId } = await opened!.json();
-    available = true;
-    expect((await request('provider-settings', { refresh: true }))?.status).toBe(200);
-    await expect.poll(providers).toEqual(['codex', 'claude']);
-    expect((await request('attach', { providerId: 'claude', nativeSessionId: 'new-provider' }))?.status).toBe(200);
-    const settings = await (await request('provider-settings'))!.json();
-    expect((await request('provider-settings', { providerId: 'codex', enabled: false, revision: settings.revision }))?.status).toBe(200);
-    await expect.poll(providers).toEqual(['claude']);
-    expect(codex.sessions.get('active')?.disposed).toBe(false);
-    expect((await request('attach', { providerId: 'codex', nativeSessionId: 'another' }))?.status).toBe(400);
-    expect((await request('provider-settings', undefined, { principalSubject: () => 'stranger' }))?.status).toBe(403);
-    expect(host.state).toBe('registered');
-    expect(broker.snapshot().hosts[0]).toMatchObject({ providerManagement: true, providers: [{ providerId: 'claude' }] });
-    const previous = [...server.clients][0]!;
-    previous.terminate();
-    await expect.poll(() => [...server.clients].some(socket => socket !== previous) && host.state === 'registered').toBe(true);
-    expect(providers()).toEqual(['claude']);
-    const recovered = await broker.handleRequest(new Request(`http://relay.test/v1/sessions/${agentId}/snapshot?protocolVersion=1.8.0`), owner);
-    expect(recovered?.status, await recovered?.text()).toBe(200);
-    expect(codex.sessions.get('active')?.disposed).toBe(false);
-  } finally { await discovery.stop(); await host.close(); await broker.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(stateDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
-});

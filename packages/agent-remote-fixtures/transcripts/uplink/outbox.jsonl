@@ -1,0 +1,12 @@
+{"kind":"transcript","producedBy":"transcripts:record","seam":"S2","scenario":"outbox","description":"A Controller that asked for the outbox is told when a message waits, polls for it, claims it and settles it; the Relay answers each call.","consumers":["packages/agent-remote-seams/tests/S2/uplink-wire.integration.test.ts"],"protocolVersion":"1.8.0","recordedAt":"e5f9dee0 (M11 start)"}
+{"n":1,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"register","installationId":"controller-1","name":"Controller","providers":[{"providerId":"codex","displayName":"Codex"}]}}
+{"n":2,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"registered","outbox":1,"control":1,"hostId":"<uuid:1>","pairingPurpose":"host-only","heartbeat":{"intervalMs":30000,"timeoutMs":10000},"tunnelToken":"<token:1>"}}
+{"step":"a message waits"}
+{"n":3,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"outbox_ready"}}
+{"step":"poll, claim and settle"}
+{"n":4,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"outbox_request","requestId":"<uuid:2>","call":{"action":"poll"}}}
+{"n":5,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"outbox_response","requestId":"<uuid:2>","status":200,"body":{"$json":{"entries":[{"id":"<uuid:3>","providerId":"codex","nativeSessionId":"native-1","text":"Run the suite.","createdAt":"<time>","status":"waiting"}]}}}}
+{"n":6,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"outbox_request","requestId":"<uuid:4>","call":{"action":"claim","id":"<uuid:3>"}}}
+{"n":7,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"outbox_response","requestId":"<uuid:4>","status":200,"body":{"$json":{"ok":true}}}}
+{"n":8,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"outbox_request","requestId":"<uuid:5>","call":{"action":"settle","id":"<uuid:3>","outcome":"accepted"}}}
+{"n":9,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"outbox_response","requestId":"<uuid:5>","status":200,"body":{"$json":{"ok":true}}}}

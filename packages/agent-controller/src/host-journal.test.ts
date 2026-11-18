@@ -1,11 +1,11 @@
-import { once } from 'node:events';
-import type { IncomingMessage } from 'node:http';
 import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { MemoryJournalStore, SessionJournal } from '@orchardworks/agent-remote-journal';
+import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WebSocketServer } from 'ws';
 
-import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
+import { createHostJournals } from '@orchardworks/agent-relay-core';
+import { createJournalConnection } from '@orchardworks/agent-relay-core/journal-uplink';
+import { relayLink, relayPlayer } from '@orchardworks/agent-session-runtime/testing';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 import type { JournalPublisherDiagnostic } from './publisher/journal-publisher.js';
 import { boundary, item, ScriptedSession, untilReal as until } from './test-utils/journal-scripted-session.js';
@@ -18,24 +18,15 @@ const history = () => [item('history', 'm1', 'Hello'), item('history', 'm2', 'Wo
 
 async function start(options: { capable: boolean; relayKeepsJournals?: false; idleGraceMs?: number; diagnostics?: unknown[] }) {
   const store = new MemoryJournalStore();
-  // A Relay built with default options keeps no journals.
-  const broker = createHostBroker({ origin: 'http://relay.test', rpcTimeoutMs: 1000, ...(options.relayKeepsJournals === false ? {} : { journals: store }) });
-  const pairing = await broker.handleRequest(new Request('http://relay.test/v1/remote/pairings', { method: 'POST', body: '{}' }));
-  const { key } = await pairing!.json();
-  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await once(server, 'listening');
-  const requests: IncomingMessage[] = [];
-  server.on('connection', async (socket, request) => {
-    requests.push(request);
-    const prepared = await broker.prepareUpgrade(new Request(`http://relay.test${request.url}`, { headers: { authorization: `Bearer ${key}` } }));
-    if (!prepared || prepared instanceof Response) { socket.close(); return; }
-    prepared.accept({
-      get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; },
-      send: data => socket.send(data), close: (code, reason) => socket.close(code, reason),
-      onMessage(listener) { const receive = (data: import('ws').RawData, binary: boolean) => { void listener(data.toString(), binary); }; socket.on('message', receive); return () => { socket.off('message', receive); }; },
-      onClose(listener) { socket.on('close', listener); return () => { socket.off('close', listener); }; },
-      onError(listener) { socket.on('error', listener); return () => { socket.off('error', listener); }; },
-    } satisfies RelaySocket);
+  const journals = createHostJournals({ store });
+  const scheduler = { setTimeout: (callback: () => void, delayMs: number) => setTimeout(callback, delayMs), clearTimeout: (timer: unknown) => clearTimeout(timer as ReturnType<typeof setTimeout>) };
+  // The Relay's real journal service answers the journal frames; a Relay built with default options keeps no journals and grants none.
+  const relay = relayPlayer('host-1', options.relayKeepsJournals === false ? {} : {
+    grants: query => query.get('journal') === String(JOURNAL_VERSION) ? { journal: JOURNAL_VERSION } : {},
+    service: send => {
+      const connection = createJournalConnection({ hostId: 'host-1', journals, current: () => true, scheduler, send: message => send(message), diagnostic: () => undefined, published: () => undefined });
+      return { receive: message => { void connection.receive(message as never).catch(() => undefined); return true; }, close: () => connection.close() };
+    },
   });
   const sessions: ScriptedSession[] = [];
   const adapter: AgentProviderAdapter = {
@@ -53,34 +44,29 @@ async function start(options: { capable: boolean; relayKeepsJournals?: false; id
   const lifecycle: string[] = [];
   const host = createAgentHost({
     registrations: [{ adapter, directory }], installationId: 'journal-installation', name: 'Host',
-    uplink: { url: `ws://127.0.0.1:${(server.address() as { port: number }).port}/ws/remote-host`, remoteKey: key },
+    uplink: { url: relay.url, remoteKey: 'key' }, uplinkClient: relayLink,
     ...(options.idleGraceMs ? { idleGraceMs: options.idleGraceMs, idleReconcileMs: 10_000 } : {}),
     onSessionLifecycleDiagnostic: diagnostic => { lifecycle.push(diagnostic.event); },
     ...(options.diagnostics ? { onJournalDiagnostic: (diagnostic: JournalPublisherDiagnostic) => { options.diagnostics!.push(diagnostic); } } : {}),
   });
-  closers.push(async () => {
-    await host.close();
-    broker.close();
-    for (const socket of server.clients) socket.terminate();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  });
+  closers.push(async () => { await host.close(); await relay.close(); });
   const { hostId } = await host.ready;
   const attach = async () => {
-    const response = await broker.handleRequest(new Request(`http://relay.test/v1/remote/hosts/${hostId}/attach`, { method: 'POST', body: JSON.stringify({ providerId: 'fake', nativeSessionId: 'thread-1' }) }));
-    expect(response?.status).toBe(200);
+    const response = await relay.rpc('POST', '/remote/attach', 'agent', { providerId: 'fake', nativeSessionId: 'thread-1' });
+    expect(response.status).toBe(200);
   };
   const journal = async (): Promise<SessionJournal | undefined> => {
     const state = await store.load(`${hostId}:${SESSION}`);
     return state ? new SessionJournal(state) : undefined;
   };
-  return { host, store, attach, journal, sessions, requests, lifecycle };
+  return { host, store, attach, journal, sessions, relay, lifecycle };
 }
 
 describe('the Controller publishing its sessions over the real uplink', () => {
   it('asks the Relay for journals and publishes an attached session, history and live rows, to its journal', async () => {
     const run = await start({ capable: true });
     await run.attach();
-    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('1');
+    expect(run.relay.upgradeParameter('journal')).toBe('1');
     await until(async () => (await run.journal())?.head !== undefined, 'the head');
     let journal = (await run.journal())!;
     expect(journal.state().items.map(entry => [entry.itemKey, entry.state])).toEqual([['m1', 'complete'], ['m2', 'complete']]);
@@ -111,7 +97,7 @@ describe('the Controller publishing its sessions over the real uplink', () => {
   it('does not ask for journals, and publishes nothing, when no provider declares support', async () => {
     const run = await start({ capable: false });
     await run.attach();
-    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBeNull();
+    expect(run.relay.upgradeParameter('journal')).toBeNull();
     await new Promise<void>(resolve => setTimeout(resolve, 150));
     expect(await run.journal()).toBeUndefined();
   });
@@ -119,7 +105,7 @@ describe('the Controller publishing its sessions over the real uplink', () => {
   it('asks for journals but publishes nothing when the Relay keeps none, as a Relay with default options does', async () => {
     const run = await start({ capable: true, relayKeepsJournals: false });
     await run.attach();
-    expect(new URL(run.requests[0]!.url!, 'http://relay').searchParams.get('journal')).toBe('1');
+    expect(run.relay.upgradeParameter('journal')).toBe('1');
     await new Promise<void>(resolve => setTimeout(resolve, 150));
     expect(await run.journal()).toBeUndefined();
     expect(run.sessions).toHaveLength(1);

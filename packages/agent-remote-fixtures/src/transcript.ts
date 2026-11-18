@@ -5,7 +5,7 @@
  */
 export type Seam = 'S2' | 'S3';
 export type Direction = 'controller->relay' | 'relay->controller' | 'browser->relay' | 'relay->browser';
-export type Role = 'controller' | 'browser';
+export type Role = 'controller' | 'browser' | 'relay';
 
 export interface TranscriptHeader {
   kind: 'transcript';
@@ -150,7 +150,12 @@ export function materialize(message: unknown, bindings: Bindings): unknown {
     if (typeof value === 'string') {
       if (value === '<time>') return 10_000;
       if (value === '<iso>') return '2026-11-15T00:00:00.000Z';
-      return value.replace(PLACEHOLDER_WITHIN, (_whole, kind: string, number: string) => bindings.get(`${kind}:${number}`) ?? (kind === 'uuid' ? `00000000-0000-4000-8000-${number.padStart(12, '0')}` : `${kind}-${number}`));
+      return value.replace(PLACEHOLDER_WITHIN, (_whole, kind: string, number: string) => {
+        // A stand-in is what this side said, so the other side's frame must echo it: it binds like a value seen on the wire.
+        const name = `${kind}:${number}`;
+        if (!bindings.has(name)) bindings.set(name, kind === 'uuid' ? `00000000-0000-4000-8000-${number.padStart(12, '0')}` : `${kind}-${number}`);
+        return bindings.get(name)!;
+      });
     }
     if (Array.isArray(value)) return value.map(walk);
     if (value !== null && typeof value === 'object') {
@@ -174,12 +179,15 @@ export interface PlayerPeer {
 /**
  * Plays one role of a transcript against a real module: it sends the role's frames in order and, before each of them, waits for
  * every frame the transcript has the other side send earlier. A frame that differs from the transcript fails with its position.
+ * `onStep` runs at each step marker, where a scenario's own action (a clock advance, a call) happens.
  * Throws on the first difference; resolves with the number of frames received.
  */
-export async function playRole(transcript: Transcript, role: Role, peer: PlayerPeer): Promise<number> {
+export async function playRole(transcript: Transcript, role: Role, peer: PlayerPeer, onStep?: (step: string) => void | Promise<void>): Promise<number> {
   const bindings: Bindings = new Map();
   let received = 0;
-  for (const frame of framesOf(transcript)) {
+  for (const line of transcript.lines) {
+    if (!isFrame(line)) { await onStep?.(line.step); continue; }
+    const frame = line;
     if (frame.direction.startsWith(role)) { peer.send(JSON.stringify(materialize(frame.message, bindings))); continue; }
     const actual = await peer.next();
     const difference = mismatch(frame.message, actual, bindings);

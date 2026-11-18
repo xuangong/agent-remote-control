@@ -817,6 +817,9 @@ importers:
       '@orchardworks/agent-relay-core':
         specifier: workspace:*
         version: link:../agent-relay-core
+      '@orchardworks/agent-remote-controller':
+        specifier: workspace:*
+        version: link:../agent-controller
       '@orchardworks/agent-remote-fixtures':
         specifier: workspace:*
         version: link:../agent-remote-fixtures

@@ -1,0 +1,4 @@
+{"kind":"transcript","producedBy":"transcripts:record","seam":"S2","scenario":"register","description":"A Controller connects with a pairing key and registers its providers; the Relay acknowledges with the Host id, its heartbeat deadlines, session control and a tunnel token.","consumers":["packages/agent-remote-seams/tests/S2/uplink-wire.integration.test.ts"],"protocolVersion":"1.8.0","recordedAt":"e5f9dee0 (M11 start)"}
+{"n":1,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"register","installationId":"controller-1","name":"Controller","providers":[{"providerId":"codex","displayName":"Codex"}]}}
+{"n":2,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"registered","control":1,"hostId":"<uuid:1>","pairingPurpose":"host-only","heartbeat":{"intervalMs":30000,"timeoutMs":10000},"tunnelToken":"<token:1>"}}
+{"step":"connect and register"}

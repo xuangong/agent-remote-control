@@ -1,0 +1,6 @@
+{"kind":"transcript","producedBy":"transcripts:record","seam":"S2","scenario":"rpc-native-owner","description":"A terminal owns the session: the Controller refuses the attach with the native owner in its answer.","consumers":["packages/agent-remote-seams/tests/S2/uplink-wire.integration.test.ts"],"protocolVersion":"1.8.0","recordedAt":"e5f9dee0 (M11 start)"}
+{"n":1,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"register","installationId":"controller-1","name":"Controller","providers":[{"providerId":"codex","displayName":"Codex"}]}}
+{"n":2,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"registered","control":1,"hostId":"<uuid:1>","pairingPurpose":"host-only","heartbeat":{"intervalMs":30000,"timeoutMs":10000},"tunnelToken":"<token:1>"}}
+{"step":"attach while a terminal owns the session"}
+{"n":3,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"rpc_request","requestId":"<uuid:2>","method":"POST","path":"/remote/attach","sessionId":"<uuid:3>","body":{"$json":{"providerId":"codex","nativeSessionId":"owned"}}}}
+{"n":4,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"rpc_response","requestId":"<uuid:2>","status":409,"body":{"$json":{"code":"native_session_owned","error":"A terminal holds this session.","nativeOwner":{"kind":"native_cli","generation":"<uuid:4>"}}}}}

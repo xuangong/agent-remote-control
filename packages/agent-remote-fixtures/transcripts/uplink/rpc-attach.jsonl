@@ -1,0 +1,9 @@
+{"kind":"transcript","producedBy":"transcripts:record","seam":"S2","scenario":"rpc-attach","description":"The Relay asks the Controller to attach a session and the Controller answers with the session; a second attach is refused and the answer carries the refusal.","consumers":["packages/agent-remote-seams/tests/S2/uplink-wire.integration.test.ts"],"protocolVersion":"1.8.0","recordedAt":"e5f9dee0 (M11 start)"}
+{"n":1,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"register","installationId":"controller-1","name":"Controller","providers":[{"providerId":"codex","displayName":"Codex"}]}}
+{"n":2,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"registered","control":1,"hostId":"<uuid:1>","pairingPurpose":"host-only","heartbeat":{"intervalMs":30000,"timeoutMs":10000},"tunnelToken":"<token:1>"}}
+{"step":"attach accepted"}
+{"n":3,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"rpc_request","requestId":"<uuid:2>","method":"POST","path":"/remote/attach","sessionId":"<uuid:3>","body":{"$json":{"providerId":"codex","nativeSessionId":"native-1"}}}}
+{"n":4,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"rpc_response","requestId":"<uuid:2>","status":200,"body":{"$json":{"agentId":"agent-1","nativeSessionId":"native-1"}}}}
+{"step":"attach refused"}
+{"n":5,"direction":"relay->controller","message":{"uplinkVersion":2,"type":"rpc_request","requestId":"<uuid:4>","method":"POST","path":"/remote/attach","sessionId":"<uuid:5>","body":{"$json":{"providerId":"codex","nativeSessionId":"native-2"}}}}
+{"n":6,"direction":"controller->relay","message":{"uplinkVersion":2,"type":"rpc_response","requestId":"<uuid:4>","status":404,"body":{"$json":{"code":"native_session_unavailable","error":"The Host could not find this session."}}}}

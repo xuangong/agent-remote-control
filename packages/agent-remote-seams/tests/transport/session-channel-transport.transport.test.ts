@@ -11,7 +11,7 @@ const response: RemoteServerMessage = {
   protocolVersion: version, type: 'protocol_error',
   payload: { code: 'session_not_found', message: 'Session unavailable.', recoverable: false },
 };
-const cleanups: (() => Promise<void> | void)[] = [];
+const cleanups: (() => unknown)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
 async function server(ready = true, fetchImplementation?: typeof fetch) {
@@ -37,7 +37,7 @@ async function server(ready = true, fetchImplementation?: typeof fetch) {
 function connect(transport: HttpWebSocketTransport, agentId: string, activity = false) {
   const messages: RemoteServerMessage[] = [];
   const disconnect = vi.fn();
-  const opened = vi.fn(() => connection.send(activity ? { ...negotiate, observation: 'activity' } : negotiate));
+  const opened = vi.fn(() => connection.send(activity ? ({ ...negotiate, observation: 'activity' } as ClientMessage) : negotiate));
   const connection: RemoteConnection = transport.connect(agentId, {
     onOpen: opened, onMessage: (message) => messages.push(message), onDisconnect: disconnect,
   });
@@ -864,7 +864,7 @@ class ControlledSocket implements WebSocketLike {
   onmessage: WebSocketLike['onmessage'] = null;
   onclose: WebSocketLike['onclose'] = null;
   onerror: WebSocketLike['onerror'] = null;
-  readonly sent: unknown[] = [];
+  readonly sent: { type?: string; subscriptionId?: string }[] = [];
   send(value: string) { this.sent.push(JSON.parse(value)); }
   close() { this.readyState = 3; this.onclose?.({}); }
   receive(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }

@@ -45,7 +45,8 @@ The shell (socket handling, React hooks, process spawning) stays thin and gets f
 | Unit | One module through its public functions; ports stubbed | Mock data (builders) | Every task: `pnpm test:unit <package> [file]` |
 | Contract and integration (seams) | Two or more real modules wired through a written seam contract; everything outside is mock | Recorded or constructed fixtures, golden transcripts | When either side of the seam changes: `agent-remote-seams`, `pnpm fixtures:check` |
 | Transport | A real socket or Worker where the transport itself is the subject | Mock data | With its package; keep it small |
-| E2E | The real client in a browser against a real Relay and Controller with a scripted provider | Main flows only, plus cases that `pnpm local` found | End of a step, before a merge or release |
+| Component (browser) | A Workbench fixture page in a real browser on builder states; no Relay, no Controller (`agent-remote-lab/e2e/components`, `e2e/*.browser.ts`) | Layout and component rules | After a layout or component change, and at the end of a step: `pnpm test:components`, `pnpm test:preview-browser` |
+| E2E | The real client in a browser against a real Relay and a Controller with a scripted provider (`agent-e2e/flows`, `pnpm test:e2e:flows`) | Main flows only, plus cases that `pnpm local` found | End of a step, before a merge or release |
 | Smoke | `pnpm local` with real CLIs under extreme conditions: latency, loss, half-open sockets, mid-turn restarts, quota, many sessions, terminal and page racing | Real | `pnpm smoke:quick` per step, `pnpm smoke` before a release |
 | Local/native | Real CLIs, models and terminals | Real | By hand or nightly |
 

@@ -6,7 +6,7 @@ Agent Remote is the independent session-control and validation boundary that car
 
 ## Boundary
 
-This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-session-runtime`, `@orchardworks/agent-remote-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-session-runtime/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
+This area covers `@orchardworks/agent-provider-sdk`, the DSH, Codex and Claude adapters, `@orchardworks/agent-remote-controller`, `@orchardworks/agent-remote-protocol`, `@orchardworks/agent-session-runtime`, `@orchardworks/agent-client`, `@orchardworks/agent-client-web`, `@orchardworks/agent-remote-debugger`, `@orchardworks/dsh`, and `agent-remote-lab`; Provider-native values end at the adapters and `AgentManagerEvent` remains Relay-internal (`packages/agent-session-runtime/src/agent-manager-events.ts:14-39`, `packages/agent-remote-debugger/src/runtime.ts:62-102`).
 
 The Agent Host owns native Provider directories, runtime lifetime, and outbound uplink replacement. The DSH runtime owns its native catalog and outbound plugin. The Lab production server owns only the Recorded fixture, pairing broker, and public-protocol workbench; temporary Host keys and public bindings have no account or Borgee service dependency (`packages/agent-controller/src/host.ts`, `packages/agent-remote-lab/src/server/local.ts`, `packages/agent-remote-lab/src/server/remote-host-broker.ts`).
 
@@ -16,7 +16,7 @@ The Agent Host owns native Provider directories, runtime lifetime, and outbound 
 | --- | --- | --- |
 | Provider adapters | Provider adapters → Agent Remote | Normalize native observations to `AgentStreamEvent` and declare session capabilities. |
 | Protocol package | Protocol package → Agent Remote | Defines strict versioned public request, response, snapshot, Timeline, interaction, and resource messages. |
-| Product surfaces | Agent Remote → Product surfaces | Offers a pure React DOM timeline without selecting a product layout (`packages/agent-remote-web/src/react/AgentTimeline.tsx:21-70`). |
+| Product surfaces | Agent Remote → Product surfaces | Offers a pure React DOM timeline without selecting a product layout (`packages/agent-client-web/src/react/AgentTimeline.tsx:21-70`). |
 | Agent Host | Agent Host → Local broker | Registers one or more Provider descriptors, serves native directories, and carries public session traffic over an outbound uplink. |
 | Terminal automation | Agent Remote → Terminal automation | Offers the same reconstructed public state and correlated operations through a CLI projection (`packages/agent-remote-debugger/src/commands.ts:148-267`). |
 
@@ -53,7 +53,7 @@ flowchart LR
 
 ## Invariants
 
-- The browser renderer has no provider-native or Relay-internal dependency (`packages/agent-remote-web/src/headless.ts:1-7`, `packages/agent-remote-web/src/react/AgentTimeline.tsx:1-18`).
+- The browser renderer has no provider-native or Relay-internal dependency (`packages/agent-client/src/index.ts:1-7`, `packages/agent-client-web/src/react/AgentTimeline.tsx:1-18`).
 - Snapshot holds current Agent state and pending interactions, while Timeline history is fetched and recovered separately (`packages/agent-remote-protocol/src/snapshot.ts:47-72`, `packages/agent-remote-protocol/src/history.ts:13-48`).
 - The lab observes the public serialized boundary rather than shared in-memory event objects (`packages/agent-remote-lab/src/server.ts:11-23`).
 - Declared capabilities, rather than Provider names, decide whether a generic Lab control is enabled (`packages/agent-remote-lab/src/components/LiveControlPanel.tsx:15-66`).
@@ -94,7 +94,7 @@ flowchart LR
 - `packages/agent-provider-sdk/src/observation.ts:59-108`
 - `packages/agent-remote-protocol/src/messages.ts:150-176`
 - `packages/agent-session-runtime/src/agent-manager.ts:250-380`
-- `packages/agent-remote-web/src/client/remote-session-client.ts:126-225`
+- `packages/agent-client/src/client/remote-session-client.ts:126-225`
 - `packages/agent-remote-debugger/src/runtime.ts:62-159`
 - `packages/agent-remote-lab/src/server.ts:11-23`
 

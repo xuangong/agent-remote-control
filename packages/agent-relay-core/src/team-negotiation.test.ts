@@ -5,7 +5,6 @@ import { afterEach, expect, test } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { isTeam, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
-import { RemoteTeamClient } from '@orchardworks/agent-client';
 import { isTeam as isLegacyTeam } from '../../agent-remote-protocol/test/fixtures/legacy-team/team.js';
 import { decodeRemoteHostUplinkMessage as decodeLegacy } from '../../agent-remote-protocol/test/fixtures/legacy-team/remote-host-uplink.js';
 import { createHostBroker, type RemoteHostBrokerState } from './broker.js';
@@ -176,7 +175,7 @@ test('legacy Controller ordinary claims, polls and cached browser responses stay
   for (const response of [await f.request(), await f.request('/action', { action: 'rename', teamId: 'team', title: 'Renamed' }), await f.request('/create', { operationId: 'create', source: savedTeam().source })]) {
     expect(response.status).toBe(200); const body = await response.json(); expect((body.teams ?? [body]).every(isLegacyTeam)).toBe(true);
   }
-  const current = await new RemoteTeamClient(f.origin).list(); expect(current.every(isTeam)).toBe(true); expect(current[0]!.messages[0]!.resolvedTarget).toEqual(ref('A'));
+  const current = (await (await f.request('', undefined, true)).json()).teams; expect(current.every(isTeam)).toBe(true); expect(current[0]!.messages[0]!.resolvedTarget).toEqual(ref('A'));
   await expect.poll(() => legacy.packets.some(p => p.type === 'heartbeat')).toBe(true);
   f.restart(); const modern = await f.connect(true); expect(modern.packets[0].teamRecipients).toBe(1);
   expect((await modern.call({ action: 'poll' })).value[0].messages[0].resolvedTarget).toEqual(ref('A'));

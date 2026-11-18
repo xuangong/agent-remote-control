@@ -4,7 +4,7 @@ A Window group is a Window document with two appearances: a **Window** (its layo
 
 ## Data
 
-The Relay stores a group's section (`bots`: a rank and, per bot, a label, a picture of a shape and a color, pinned, hidden and a rank) and its `presentation` (`{ window: false }` when it is not shown as a Window) beside the Window document, not inside it, so older pages and `agent-remote-controller window` still decode every Window (`packages/agent-relay-core/src/window-workspaces.ts`). Schemas and pure operations are in `packages/agent-remote-protocol/src/window-groups.ts`; the browser reads and changes groups through `WindowWorkspaceClient` in `packages/agent-remote-web/src/client/window-client.ts`.
+The Relay stores a group's section (`bots`: a rank and, per bot, a label, a picture of a shape and a color, pinned, hidden and a rank) and its `presentation` (`{ window: false }` when it is not shown as a Window) beside the Window document, not inside it, so older pages and `agent-remote-controller window` still decode every Window (`packages/agent-relay-core/src/window-workspaces.ts`). Schemas and pure operations are in `packages/agent-remote-protocol/src/window-groups.ts`; the browser reads and changes groups through `WindowWorkspaceClient` in `packages/agent-client/src/client/window-client.ts`.
 
 A **bot** is a view of a section that is not attached, shows a current session (not its history and not a subagent's), and is not an Ask, Team or TPM view. Details of views that stop being bots are dropped by every edit and ignored when a group is read.
 

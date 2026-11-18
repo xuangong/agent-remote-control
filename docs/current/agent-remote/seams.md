@@ -80,19 +80,22 @@ Recording at an older commit: check it out in a temporary worktree under `.workt
 
 ## S6 Client replica to renderer
 
-- **Parties.** The client `replica` and the views of `agent-remote-web` and the Workbench.
+- **Parties.** The client `replica` and the views of `agent-client-web` and the Workbench.
 - **Contract.** The renderer reads selectors only: the timeline of a session as rows keyed by item key with `hasOlder` and `epochPending`, and a session view with status, lease view and the send-state words. It issues commands: send, load older, acquire, retry. Views never read frames or raw state. Selectors return the same object when content is equal.
 - **Guarantees.** Keys are stable across a replacement; unchanged rows keep their identity; the reader's anchor survives a replacement.
-- **Send state.** What a reader sees of a message they sent is one pure table, `transition(state, event)` and `describe(state, delivery)` in `agent-remote-web/src/replica/send-state.ts` (contract written there). States: `sending`, `awaiting_echo`, `unconfirmed`, `failed`; a message leaves the pending list (`delivered`) by its echo or when the Host handled it as a command. An acknowledgement never lifts `unconfirmed` and never touches `failed`; an echo never settles `failed`; only `failed` and `unconfirmed` may be retried or deleted; a retry repeats the same operation only when the first attempt is uncertain, still has its place in the conversation and the Host can run it again. The pending list itself, matching echoes to messages, is `replica/pending-messages.ts`.
-- **Fixtures.** `buildReplica` and `replicaAfter(transcript, frame)` in `agent-remote-fixtures`, built with the client split; the S3 transcripts are their input.
-- **Tests.** None yet.
+- **Send state.** What a reader sees of a message they sent is one pure table, `transition(state, event)` and `describe(state, delivery)` in `agent-client/src/replica/send-state.ts` (contract written there). States: `sending`, `awaiting_echo`, `unconfirmed`, `failed`; a message leaves the pending list (`delivered`) by its echo or when the Host handled it as a command. An acknowledgement never lifts `unconfirmed` and never touches `failed`; an echo never settles `failed`; only `failed` and `unconfirmed` may be retried or deleted; a retry repeats the same operation only when the first attempt is uncertain, still has its place in the conversation and the Host can run it again. The pending list itself, matching echoes to messages, is `replica/pending-messages.ts`.
+- **Restored state.** A state restored from the device (`timeline.restoredFromDevice`) is a display: the timeline draws its rows by item key at once, and the composer takes a draft and offers no send until the first server page confirms the state.
+- **Fixtures.** `buildReplica`, `buildRestoredReplica`, `buildTailPage` and `replicaAfter(frames)` in `agent-client/testing`, with the builders `buildEntry`, `buildSnapshot` and `buildStoredRecord`.
+- **Tests.** `agent-remote-seams/tests/S6` (8): the real replica and the real timeline and composer with no connection; unchanged rows keep their nodes across a confirmation, a replacement and a live row; the send-state words; a restored composer. The unit tests of the views and of the replica reducers stay with their modules.
 
 ## S7 Device store to replica
 
 - **Parties.** The client `device-store` and `replica`; `DeviceDatabase` as the port.
 - **Contract.** Save and restore of a stored record: key, Relay URL, version, epoch, next sequence, whether older history exists, entries, Snapshot, update time, byte size. Writes follow a settled batch, bounded by a byte budget with least-recently-used eviction. A restored record seeds the replica marked restored and is never authoritative; the first server page replaces it by item key. A version mismatch discards the record.
-- **Fixtures.** `buildStoredRecord`; frozen `device-records/v<n>.json` for each stored version.
-- **Tests.** None yet.
+- **Display lease.** Rows of a record show only while the person's lease is valid (`displayLeaseValid`): confirmed by the Relay, or not yet past the end the Relay last reported; never after a refusal (which purges the records), while an expired lease is confirmed again, or after the workspace was retired.
+- **Ports.** `DeviceDatabase` (`readIndex`, `read`, `write` of one batch, `clear`) is the store's only storage; `PageLifecycle` tells it when the page is hidden. `agent-client-web` installs the IndexedDB database and the browser page when imported.
+- **Fixtures.** `buildStoredRecord`; `agent-remote-seams/tests/S7/fixtures/device-record.v1.json`, frozen for stored version 1 (a new version adds a file, never edits one).
+- **Tests.** `agent-remote-seams/tests/S7` (12): a restored record paints before any frame arrives; a restore carries no turn or interaction; the first server page confirms by item key, replaces, or starts a new epoch; a read replica ignores the device; version, person and session mismatches are discarded; purge; byte-budget eviction; the window limit; the frozen v1 record. The `DeviceDatabase` contract runs on the memory database (`agent-client`) and on IndexedDB (`agent-client-web`).
 
 ## Changing a seam
 

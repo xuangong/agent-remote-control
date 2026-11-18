@@ -1,7 +1,7 @@
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import * as remote from '../index.js';
+import * as remote from '@orchardworks/agent-session-runtime';
 
 const closeables: Array<() => Promise<void> | void> = [];
 afterEach(async () => { for (const close of closeables.splice(0).reverse()) await close(); });

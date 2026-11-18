@@ -221,11 +221,11 @@
     {
       "rule": "cross-package-relative",
       "from": [
-        "packages/agent-session-runtime/**"
+        "packages/agent-remote-seams/**"
       ],
       "max": 2,
       "owner": "M10",
-      "reason": "codex-images.test.ts drives the real provider and its scripted app server through the runtime; M10 gives the Codex package a ./testing entry for the scripted app server, and this test becomes an S1 run."
+      "reason": "runtime-codex-images.transport.test.ts drives the real Codex provider and its scripted app server; M10 gives the Codex package a ./testing entry for the scripted app server, and this test becomes an S1 run."
     }
   ]
 }

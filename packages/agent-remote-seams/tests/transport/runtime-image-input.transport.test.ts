@@ -7,9 +7,9 @@ import { describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { IMAGE_INPUT_CAPABILITIES, type AgentInputPart, type AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
-import { InputImageStore } from '../resources/input-image-store.js';
-import { createAgentRemoteRelay } from '../relay.js';
-import { createAgentRemoteHttpServer } from './http-server.js';
+import { InputImageStore } from '@orchardworks/agent-session-runtime';
+import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 import { uploadImage } from '@orchardworks/agent-client';
 
 function provider(sent: AgentInputPart[][]): AgentProviderAdapter {
@@ -67,7 +67,7 @@ describe('image input over real session WebSocket', () => {
           return next(message => message.type === 'protocol_error' || ('payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId));
         } };
       }
-      const primary = await readFile(new URL(`../resources/fixtures/${format === 'PNG' ? 'dimensions.png' : 'rotated.jpg'}`, import.meta.url));
+      const primary = await readFile(new URL(`./fixtures/${format === 'PNG' ? 'dimensions.png' : 'rotated.jpg'}`, import.meta.url));
       const bytes = format === 'PNG' ? primary : Buffer.concat(Array.from({ length: Math.ceil(400_000 / primary.length) }, () => primary));
       const declaration = { uploadId: 'upload', sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, mediaType: format === 'PNG' ? 'image/png' : 'image/jpeg' };
       let connection = await connect();

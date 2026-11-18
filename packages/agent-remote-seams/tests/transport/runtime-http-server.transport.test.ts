@@ -32,11 +32,11 @@ import {
   type RemoteSessionStatus,
   type WebSocketLike,
 } from '@orchardworks/agent-client';
-import type { AgentRemoteRelay } from '../relay.js';
-import { createAgentRemoteRelay } from '../relay.js';
-import type { AgentRemoteHttpServer } from './http-server.js';
-import { createAgentRemoteHttpServer } from './http-server.js';
-import type { AgentRemoteWebSocketAuthorizer } from './websocket-stream.js';
+import type { AgentRemoteRelay } from '@orchardworks/agent-session-runtime';
+import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
+import type { AgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
+import type { AgentRemoteWebSocketAuthorizer } from '@orchardworks/agent-session-runtime';
 
 const capabilities: AgentCapabilities = {
   history: true,

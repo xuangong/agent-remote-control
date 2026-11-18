@@ -15,8 +15,8 @@ import {
   type RemoteSessionStatus,
   type WebSocketLike,
 } from '@orchardworks/agent-client';
-import { createAgentRemoteRelay } from '../relay.js';
-import { createAgentRemoteHttpServer } from './http-server.js';
+import { createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
+import { createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
 
 const imageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZ1kAAAAASUVORK5CYII=';
 

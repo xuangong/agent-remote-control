@@ -90,7 +90,6 @@
     "postcss": "^8.5.24"
   },
   "devDependencies": {
-    "@orchardworks/agent-client": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-session-runtime": "workspace:*",
     "@types/node": "^24.3.0",

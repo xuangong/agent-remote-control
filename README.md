@@ -879,7 +879,8 @@ The root test runner probes each selected native executable with a five-second `
 | `agent-session-runtime` | The Controller's session execution, ordered public state, transport, and uplink clients. |
 | `agent-relay-core` | The Relay: brokering, account state, journals' fan-out, gateway and the HTTP and socket edge. |
 | `@orchardworks/agent-remote-controller` (`packages/agent-controller`) | The Controller: session core, publisher, native owner and the process shell. |
-| `agent-remote-web` | Browser transport, recovery, replica, and reusable React DOM rendering. |
+| `agent-client` | Headless client: connection, session client, replica, device store, pending messages, lease view and send state. |
+| `agent-client-web` | React views and hooks, IndexedDB database, browser page binding and styles for the headless client. |
 | `agent-remote-debugger` | Headless Session View protocol/state debugging and scripted regression through `ardb`. |
 | `agent-remote-dsh` | Native catalog, shared-session setup, and independent DSH Host bundle. |
 | `@orchardworks/agent-remote-lab` | Workbench, local server, pairing broker, directory, and validation fixtures. |

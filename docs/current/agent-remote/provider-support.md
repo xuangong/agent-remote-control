@@ -182,8 +182,8 @@ When behavior changes: update the affected row IDs, the Provider audit and tests
 [Relay]: ../../../packages/agent-session-runtime/src/agent-manager.ts
 [Host]: ../../../packages/agent-controller/src/host.ts
 [Broker]: ../../../packages/agent-remote-lab/src/server/remote-host-broker.ts
-[Client]: ../../../packages/agent-remote-web/src/client/remote-session-client.ts
-[Composer]: ../../../packages/agent-remote-web/src/react/AgentComposer.tsx
+[Client]: ../../../packages/agent-client/src/client/remote-session-client.ts
+[Composer]: ../../../packages/agent-client-web/src/react/AgentComposer.tsx
 [Lab]: ../../../packages/agent-remote-lab/src/App.tsx
 [Debugger]: ../../../packages/agent-remote-debugger/src/commands.ts
 

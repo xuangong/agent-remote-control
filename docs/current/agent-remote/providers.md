@@ -106,7 +106,7 @@ Agent Host can register Codex and Claude together through `AGENT_HOST_PROVIDERS=
 ## Non-Goals
 
 - The SDK is not a universal native-event ontology or a public wire schema; its Timeline values are event-specific strings and typed tool or task structures (`packages/agent-provider-sdk/src/observation.ts:3-76`).
-- The adapter layer does not own public-wire encoding or browser projection; its session contract stays above the Relay and Web package boundaries (`packages/agent-provider-sdk/src/provider.ts:4-58`, `packages/agent-session-runtime/src/agent-manager.ts:71-180`, `packages/agent-remote-web/src/headless.ts:1-7`).
+- The adapter layer does not own public-wire encoding or browser projection; its session contract stays above the Relay and Web package boundaries (`packages/agent-provider-sdk/src/provider.ts:4-58`, `packages/agent-session-runtime/src/agent-manager.ts:71-180`, `packages/agent-client/src/index.ts:1-7`).
 - An injected-message representation and general Codex filesystem access are not claimed. Codex thread names remain native metadata, and terminal-interaction activity remains a command side channel until the common Snapshot and tool detail gain matching state; the exact limitations are declared in the compatibility manifest (`packages/agent-remote-lab/compatibility.json:28-94`).
 
 ## Current vs Target

@@ -8,13 +8,13 @@ it('keeps A, B and C image receipts scoped to their concrete recipients over a r
   const { mkdtemp, readFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const { once } = await import('node:events');
+  const { default: events } = await import('node:events'); const once = events.once;
   const { default: WebSocket } = await import('ws');
   const { PROTOCOL_VERSION } = await import('@orchardworks/agent-remote-protocol');
   const { IMAGE_INPUT_CAPABILITIES } = await import('@orchardworks/agent-provider-sdk');
-  const { InputImageStore } = await import('../resources/input-image-store.js');
-  const { createAgentRemoteRelay } = await import('../relay.js');
-  const { createAgentRemoteHttpServer } = await import('./http-server.js');
+  const { InputImageStore } = await import('@orchardworks/agent-session-runtime');
+  const { createAgentRemoteRelay } = await import('@orchardworks/agent-session-runtime');
+  const { createAgentRemoteHttpServer } = await import('@orchardworks/agent-session-runtime');
   type ServerMessage = import('@orchardworks/agent-remote-protocol').ServerMessage;
   type InputPart = import('@orchardworks/agent-provider-sdk').AgentInputPart;
   const directory = await mkdtemp(join(tmpdir(), 'recipient-contract-'));
@@ -62,7 +62,7 @@ it('keeps A, B and C image receipts scoped to their concrete recipients over a r
         return next(message => 'payload' in message && 'requestId' in message.payload && message.payload.requestId === requestId);
       };
     }
-    const bytes = await readFile(new URL('../resources/fixtures/dimensions.png', import.meta.url));
+    const bytes = await readFile(new URL('./fixtures/dimensions.png', import.meta.url));
     const file = new Blob([new Uint8Array(bytes)], { type: 'image/png' });
     let previous: NonNullable<ImageUploadReceipt['attachment']> | undefined;
     for (const native of ['A', 'B', 'C']) {

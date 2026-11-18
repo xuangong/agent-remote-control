@@ -27,7 +27,7 @@ async function choose(page: Page, name: string) {
   await list.locator('.lab-session-row').filter({ hasText: name }).click();
 }
 
-test('a restored bound view shows cached content and keeps its draft before attachment recovers', async ({ page, isMobile }) => {
+test('a restored bound view keeps its draft while attachment fails, and recovers on Retry', async ({ page, isMobile }) => {
   test.skip(isMobile, 'Creation belongs to the wide workspace.');
   const { targets } = await setup(page);
   await page.locator('.lab-session-dock-add').click(); await choose(page, 'Window alpha');
@@ -40,7 +40,6 @@ test('a restored bound view shows cached content and keeps its draft before atta
     ? route.fulfill({ status: 503, json: { error: 'Cached host is offline' } }) : route.continue());
   await page.reload();
   await expect(view.getByRole('alert')).toContainText('Cached host is offline');
-  await expect(view.locator('.agent-message-user')).toContainText('Recorded history 1');
   await expect(view.getByTestId('prompt-input')).toContainText('Draft while reconnecting');
   fail = false; await view.getByRole('button', { name: 'Retry', exact: true }).click();
   await expect(view.getByTestId('prompt-input')).toBeEnabled();

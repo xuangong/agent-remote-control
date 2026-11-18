@@ -67,7 +67,7 @@ it('opens a root-mounted React Vite app with isolated login, manifest, API, navi
   backendPort = f.port;
   policy = controllerContentSecurityPolicy(f.url, 'arc.test');
   const bundle = await build({ stdin: { contents: `import React,{useState} from 'react';import{createRoot}from'react-dom/client';
-    import{HttpPreviewClient}from'../../agent-client/src/client/preview-client.ts';
+    import{HttpPreviewClient}from'@orchardworks/agent-client';
     import{PreviewBrowser}from'../../agent-client-web/src/react/PreviewBrowser.tsx';
     const client=new HttpPreviewClient(${JSON.stringify(f.url + f.alice.basePath)});
     function App(){const[url,setUrl]=useState();return <><button onClick={async()=>{try{setUrl(await client.enter(await client.open(${JSON.stringify(f.hostId)},${JSON.stringify(f.registration.id)},${JSON.stringify(f.target + '/')}),${JSON.stringify(f.registration.id)}))}catch(e){document.body.dataset.error=e.message}}}>Open tunnel</button>{url&&<PreviewBrowser url={url} target="Local app" visible browserKey="fixture" onClose={()=>setUrl(undefined)} onMinimize={()=>{}}/>}</>};createRoot(document.getElementById('root')).render(<App/>);`,

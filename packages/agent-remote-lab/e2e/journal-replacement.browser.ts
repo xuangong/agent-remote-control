@@ -23,8 +23,8 @@ beforeAll(async () => {
     import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
     import { AgentComposer } from '../../agent-client-web/src/react/AgentComposer.tsx';
     import { useTimelineScroll } from '../../agent-client-web/src/react/useTimelineScroll.ts';
-    import { remoteSessionState } from '../../agent-client/src/client/session-state.ts';
-    import { AgentReplica } from '../../agent-client/src/replica/store.ts';
+    import { remoteSessionState } from '@orchardworks/agent-client';
+    import { AgentReplica } from '@orchardworks/agent-client';
 
     const replica = new AgentReplica();
     window.replica = replica;

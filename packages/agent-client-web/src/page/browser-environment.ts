@@ -8,7 +8,7 @@ import { createBrowserDeviceDatabase } from '../browser-database.js';
 export function installBrowserEnvironment(): void {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
   installPageLifecycle(createPageLifecycle({ window, document }));
-  // The database looks for IndexedDB each time it opens, so a browser without it only costs the store its disk copies.
+  // The database reports whether IndexedDB exists each time the store asks, so a browser without it only costs the store its disk copies.
   deviceStore.useDatabase(createBrowserDeviceDatabase());
 }
 installBrowserEnvironment();

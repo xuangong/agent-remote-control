@@ -168,3 +168,16 @@ it('loads a record from disk that the preload budget left out', async () => {
   expect(second.read(scope, identity('big'))).toBeUndefined();
   expect((await second.load(scope, identity('big')))?.entries).toHaveLength(50);
 });
+
+it('keeps memory only while the database says its storage does not exist, and writes once it does', async () => {
+  let exists = false;
+  const store = new DeviceStore({ database: { ...database, available: () => exists }, writeBehindMs: 1 });
+  store.put(record(scope, 'a', 1));
+  await store.flush();
+  expect(database.keys()).toEqual([]);
+  expect(store.read(scope, identity('a'))).toBeDefined();
+  exists = true;
+  store.put(record(scope, 'b', 2));
+  await store.flush();
+  expect(database.keys()).toEqual([record(scope, 'b', 2).key]);
+});

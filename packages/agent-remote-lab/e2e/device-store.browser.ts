@@ -20,12 +20,13 @@ beforeAll(async () => {
     import React, { useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
+    import '../../agent-client-web/src/browser.ts';
     import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
     import { AgentActivityStatus } from '../../agent-client-web/src/react/AgentActivityStatus.tsx';
-    import { remoteSessionState } from '../../agent-client/src/client/session-state.ts';
-    import { AgentReplica } from '../../agent-client/src/replica/store.ts';
+    import { remoteSessionState } from '@orchardworks/agent-client';
+    import { AgentReplica } from '@orchardworks/agent-client';
     import { deviceStore } from '@orchardworks/agent-client/device-store';
-    import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '../../agent-client/src/session-record.ts';
+    import { createStoredRecord, decodeStoredRecord, DEFAULT_WINDOW_LIMITS } from '@orchardworks/agent-client';
 
     const scope = 'https://relay.example/u/alice/';
     const identity = ['host', 'copilot', 'one'];

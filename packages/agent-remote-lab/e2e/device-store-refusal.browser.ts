@@ -22,8 +22,9 @@ beforeAll(async () => {
     import { useStoredDisplay } from './hooks/useStoredDisplay.ts';
     import { saveStoredDisplay } from './stored-display.ts';
     import { startDeviceStore } from './device-store-start.ts';
+    import '../../agent-client-web/src/browser.ts';
     import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
-    import { AgentReplica } from '../../agent-client/src/replica/store.ts';
+    import { AgentReplica } from '@orchardworks/agent-client';
     import { deviceStore } from '@orchardworks/agent-client/device-store';
 
     const target = { hostId: 'host', providerId: 'copilot', nativeSessionId: 'one' };

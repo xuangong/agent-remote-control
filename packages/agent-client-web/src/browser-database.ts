@@ -55,6 +55,7 @@ export function createBrowserDeviceDatabase(factory: () => IDBFactory | undefine
     return pending;
   };
   return {
+    available: () => factory() !== undefined,
     async readIndex() {
       return request<IndexRow[]>((await open()).transaction(SESSION_INDEX_STORE, 'readonly').objectStore(SESSION_INDEX_STORE).getAll());
     },

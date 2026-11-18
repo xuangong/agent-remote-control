@@ -29,6 +29,8 @@ export interface IndexRow { readonly key: string; readonly relayUrl: string; rea
  * and reads back. Its failures are the store's to absorb: any rejection means the records stay in memory for this page.
  */
 export interface DeviceDatabase {
+  /** Whether the storage exists right now; a database without this method is always available. A browser without IndexedDB is not, and the store then keeps memory only. */
+  available?(): boolean;
   /** The index row of every record on disk. */
   readIndex(): Promise<IndexRow[]>;
   read(key: string): Promise<StoredRecord | undefined>;
@@ -205,7 +207,7 @@ export class DeviceStore {
     await this.enqueueDisk(database => database.clear(), undefined);
   }
 
-  private diskAllowed(): boolean { return this.persistent() && !!this.database; }
+  private diskAllowed(): boolean { return this.persistent() && !!this.database && this.database.available?.() !== false; }
 
   private trimMemory(): void {
     let bytes = 0;

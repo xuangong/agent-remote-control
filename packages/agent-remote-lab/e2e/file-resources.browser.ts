@@ -70,7 +70,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       import { PreviewWorkspace } from '../../agent-client-web/src/react/PreviewWorkspace.tsx';
       import { PreviewProvider } from '../../agent-client-web/src/react/PreviewContext.tsx';
       import { FilePreviewScope } from '../../agent-client-web/src/react/FilePreviewScope.tsx';
-      import { HttpPreviewClient } from '../../agent-client/src/client/preview-client.ts';
+      import { HttpPreviewClient } from '@orchardworks/agent-client';
       const replica = new AgentReplica();
       const client = new RemoteSessionClient(${JSON.stringify(fixture.agentId)}, new HttpWebSocketTransport(${JSON.stringify(fixture.url + fixture.alice.basePath)}), replica);
       const resolveResource = (locator, source) => client.resolveResource(locator, source);

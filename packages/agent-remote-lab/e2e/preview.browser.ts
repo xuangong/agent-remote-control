@@ -129,7 +129,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
     import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-client-web/src/react/PreviewContext.tsx';
     import {PreviewActions} from '../../agent-client-web/src/react/PreviewActions.tsx';
     import {PreviewWorkspace} from '../../agent-client-web/src/react/PreviewWorkspace.tsx';
-    import {HttpPreviewClient} from '../../agent-client/src/client/preview-client.ts';
+    import {HttpPreviewClient} from '@orchardworks/agent-client';
     import {trackFocusModality} from './focus-modality.ts';
     import {ViewOptions} from './components/ViewOptions.tsx';
     import {SupportingRail} from './components/SupportingRail.tsx';

@@ -11,6 +11,8 @@ export interface DevboxServerOptions {
   webDist: string;
   /** Store Host session journals in SQLite beside the Relay state. Off unless set. */
   journals?: boolean;
+  /** Where Controller releases are discovered; a test stack supplies fixed ones instead of GitHub. */
+  controllerReleases?: Parameters<typeof createGatewayRelay>[0]['controllerReleases'];
 }
 export interface DevboxConnection { serverUrl: string; remoteKey: string }
 
@@ -29,6 +31,7 @@ export async function createDevboxServer(options: DevboxServerOptions) {
     recentAuthentication: grant => grant.subject === 'devbox' ? true : undefined,
     // Return idle Window polls before an outer preview tunnel's response deadline.
     windowChangesWaitMs: 10000,
+    ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
     originAliases: ['localhost', 'localhost.', '127.0.0.1', '[::1]'].map(host => `http://${host}:${url.port}`),
     servePage: await createGatewayStaticPages(options.webDist, { origin: url.origin, devbox: true }),
   });

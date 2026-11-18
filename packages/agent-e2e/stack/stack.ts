@@ -8,18 +8,19 @@
  * state, and the Controller reconnects by itself. `close` stops everything and removes the state. Nothing reads the user's home, their
  * Controller or any credential; each stack has its own state directory and invitation.
  */
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createAgentHost, type AgentHost } from '@orchardworks/agent-remote-controller';
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
+import type { ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createDevboxServer } from '@orchardworks/agent-relay-node/devbox';
 import { scriptedProvider, type ScriptedProviderOptions } from './scripted-provider.js';
 
 const WORKBENCH_DIST = resolve(import.meta.dirname, '../../agent-remote-lab/dist');
 
-export interface StackOptions extends ScriptedProviderOptions {
+export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'> {
   /** Where the built Workbench is; the default is the checkout's. */
   webDist?: string;
   installationId?: string;
@@ -27,6 +28,17 @@ export interface StackOptions extends ScriptedProviderOptions {
   smartReading?: boolean;
   /** More providers of the same Controller, for a flow that hands a session from one provider to another. */
   otherProviders?: ScriptedProviderOptions[];
+  /**
+   * Gives the Controller its succession state and every scripted provider the evidence a successor needs, so the page can hand a session
+   * to a new one. `beforeCreate` runs before a successor session is created (a flow holds the handoff half done there).
+   */
+  succession?: { beforeCreate?(): Promise<void> };
+  /**
+   * A Controller that runs `runningVersion` and an update to `release`, with no GitHub and no download: the Relay discovers `release` as
+   * the latest, the Controller's updater records the install and asks to restart, and `finishUpdate()` plays the launcher by starting
+   * the Controller again as the new version.
+   */
+  controllerUpdate?: { runningVersion: string; release: ControllerRelease };
 }
 
 async function freePort(): Promise<number> {
@@ -41,22 +53,33 @@ export async function startStack(options: StackOptions = {}) {
   const state = await mkdtemp(join(tmpdir(), 'arc-e2e-stack-'));
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
-  const provider = scriptedProvider(options);
-  const otherProviders = (options.otherProviders ?? []).map(scriptedProvider);
+  const workspace = await realpath(await mkdtemp(join(state, 'workspace-')));
+  const successor = options.succession ? { workspace, ...(options.succession.beforeCreate ? { beforeCreate: options.succession.beforeCreate } : {}) } : undefined;
+  const provider = scriptedProvider({ ...options, succession: successor });
+  const otherProviders = (options.otherProviders ?? []).map(other => scriptedProvider({ ...other, succession: successor }));
   const webDist = options.webDist ?? WORKBENCH_DIST;
-  let relay = await createDevboxServer({ origin, stateDir: join(state, 'relay'), webDist, journals: true });
+  const update = options.controllerUpdate;
+  const controllerReleases = update ? { latest: async () => update.release, version: async () => update.release } : undefined;
+  const relayOptions = { origin, stateDir: join(state, 'relay'), webDist, journals: true, ...(controllerReleases ? { controllerReleases } : {}) };
+  let relay = await createDevboxServer(relayOptions);
   await relay.listen(port, '127.0.0.1');
   let connection = await relay.getConnection();
   let controller: AgentHost | undefined;
   const installationId = options.installationId ?? 'e2e-controller';
 
+  let runningVersion = update?.runningVersion;
+  const updates = { installed: [] as string[], restarts: [] as string[] };
   let hostId = '';
   /** The device credential the Relay issued at the first connection; a Controller that starts again presents it, as an installed one does. */
   let credential: string | undefined;
   const startController = async () => {
     if (controller) throw new Error('The Controller is already running.');
     // The state directory is what gives the Controller its outbox (receipts of the messages it took), so a message sent while it is away waits at the Relay.
-    controller = createAgentHost({ preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
+    const identity = runningVersion ? { version: runningVersion, revision: 'a'.repeat(40), platform: process.platform, arch: process.arch, nodeMajor: Number(process.versions.node.split('.')[0]), remoteUpdate: true } : undefined;
+    controller = createAgentHost({ ...(identity ? { controller: { identity, stateDir: join(state, 'controller'),
+      restart: async (version: string) => { updates.restarts.push(version); }, release: async () => update!.release,
+      install: async (release: ControllerRelease) => { updates.installed.push(release.version); } } } : {}), ...(options.succession ? { succession: { controllerId: installationId, stateDirectory: join(state, 'succession'), enrollment: true as const },
+      executionPolicy: { defaultWorkspace: workspace, allowedWorkspaceRoots: [workspace], lockPermissions: false } } : {}), preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
     hostId = (await controller.ready).hostId;
   };
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
@@ -86,6 +109,10 @@ export async function startStack(options: StackOptions = {}) {
     get hostId() { return hostId; },
     get hostName() { return 'E2E Host'; },
     startController, stopController,
+    /** What the Controller's updater did: the versions it installed and the versions it asked the launcher to restart into. */
+    updates,
+    /** Plays the launcher after an update: the Controller starts again as the release it installed. */
+    async finishUpdate() { await stopController(); runningVersion = update!.release.version; await startController(); },
     /**
      * A second Controller paired with a key the page generated: a Host of its own, with its own scripted provider. `close` stops it.
      * Its device credential is kept by the Controller object, as an installed one keeps its own.
@@ -100,7 +127,7 @@ export async function startStack(options: StackOptions = {}) {
         async close() { await host.close(); await paired.registration.directory.close?.(); },
       };
     },
-    async restartRelay() { await relay.close(); relay = await createDevboxServer({ origin, stateDir: join(state, 'relay'), webDist, journals: true }); await relay.listen(port, '127.0.0.1'); },
+    async restartRelay() { await relay.close(); relay = await createDevboxServer(relayOptions); await relay.listen(port, '127.0.0.1'); },
     async close() { await stopController(); await relay.close(); await Promise.all([provider, ...otherProviders].map(each => each.registration.directory.close?.())); await rm(state, { recursive: true, force: true }); },
   };
 }

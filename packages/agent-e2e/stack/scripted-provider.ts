@@ -11,8 +11,8 @@
  * back). `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
  * so a reload shows the same rows. The provider reads nothing outside this process.
  */
-import { randomUUID } from 'node:crypto';
-import type { AgentProviderAdapter, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
+import { createHash, randomUUID } from 'node:crypto';
+import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentProviderAdapter, type AgentSessionNativeEvidence, type ProviderObservation, type ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
 import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
@@ -56,6 +56,12 @@ export interface ScriptedProviderOptions {
   replyDelayMs?: number;
   /** Answer in two pieces, as a model streams: the page shows the first before the second arrives. */
   stream?: boolean;
+  /**
+   * Makes the provider a successor target: it creates empty sessions, reports readiness, and takes a prepared input (the first message
+   * after a handoff carries the quoted history). `workspace` is the directory the Controller's execution policy allows; `beforeCreate`
+   * runs before a successor is created, so a flow can hold the handoff half done.
+   */
+  succession?: { workspace: string; beforeCreate?(): Promise<void> };
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
@@ -98,8 +104,33 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
         base.push(row(providerId, 'live', key, { role: 'assistant', text: '' }, at, true, 3));
       }, options.replyDelayMs ?? 300);
     };
+    const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+    let epoch = 0, preparations = 0;
+    const evidence = (workspace: string): AgentSessionNativeEvidence => ({
+      availability: () => ({ status: 'configured', version: 2 }),
+      inspectReadiness: async () => ({ cwd: workspace, idle: true, pendingInputs: 0, pendingInteractions: 0, activeChildren: 0 }),
+      captureValidity: () => ({ epoch }) as never,
+      isCurrent: token => (token as unknown as { epoch: number }).epoch === epoch,
+      prepareInput: async parts => {
+        const text = (parts[0] as { text: string }).text;
+        return parseAgentPreparedTextInput(serializeAgentPreparedTextInput({ version: 2, providerId, nativeSessionId, inputId: `${nativeSessionId}-U-${++preparations}`, cwd: workspace,
+          authority: { kind: 'trusted-service', authorityId: 'e2e', namespaceId: 'owned' }, parts: [{ type: 'text', text }],
+          content: { encoding: 'utf-8', bytes: Buffer.byteLength(text), sha256: sha256(text) }, selections: { model: 'scripted/model' } }));
+      },
+      dispatchInput: async witness => {
+        const text = witness.parts[0].text;
+        sent.push(text); write('user', text); epoch += 1;
+        if (options.stream) writeStreamed(answer(text)); else write('assistant', answer(text));
+        return { disposition: 'started' };
+      },
+      inspectInput: async witness => ({ status: 'materialized', execution: { disposition: 'started', nativeExecutionId: `${witness.inputId}-R` }, proof: { version: 2, providerId, nativeSessionId,
+        inputId: witness.inputId, nativeInputId: witness.inputId, cwd: workspace, authority: witness.authority, witnessSha256: sha256(serializeAgentPreparedTextInput(witness)),
+        contentSha256: witness.content.sha256, nativeSelectionsSha256: sha256(JSON.stringify(witness.selections)) } }),
+    });
     const session = Object.assign(base, {
       title: saved.title, sent, write,
+      ...(options.succession ? { nativeEvidence: evidence(options.succession.workspace),
+        runtimeInfo: async () => ({ providerId, sessionId: nativeSessionId, status: 'idle' as const, cwd: options.succession!.workspace, persistence: { providerId, sessionId: nativeSessionId, opaque: '{}' } }) } : {}),
       sendMessage: (async (text: string) => {
         await held;
         sent.push(text); write('user', text);
@@ -113,8 +144,17 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   };
 
   const adapter: AgentProviderAdapter = {
-    descriptor: { providerId, displayName: options.displayName ?? 'Scripted' },
+    descriptor: { providerId, displayName: options.displayName ?? 'Scripted', ...(options.succession ? { sessionExtensions: { instructions: true, tools: true } } : {}) },
     journal: { itemIdentity: 1 as const },
+    ...(options.succession ? { readSessionHistory: async () => ({ entries: [] }), nativeEvidence: {
+      availability: () => ({ status: 'configured' as const, version: 2 as const }),
+      createEmpty: async () => {
+        await options.succession!.beforeCreate?.();
+        const id = `${providerId}-successor-${++created}`;
+        known.set(id, { title: 'Successor', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false });
+        return { status: 'created' as const, handle: { providerId, sessionId: id, opaque: `scripted-${id}` } };
+      },
+    } } : {}),
     async createSession() { throw new Error('The Host supplies directory sessions.'); },
     async resumeSession() { throw new Error('The Host supplies directory sessions.'); },
   };
@@ -124,6 +164,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     workspaces: async () => [],
     create: async () => { const id = `${providerId}-new-${++created}`; known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
     canReleaseSession: () => true,
+    ...(options.succession ? { sessionWorkspace: async () => options.succession!.workspace, supportsSourceReferences: true, supportsBoundedSourceCreate: async () => true,
+      sourceReferences: async () => [], setSourceBindingReader: () => {} } : {}),
     // A session that something else wrote to continues from its own last message; the Controller releases it and reads it again.
     divergedAt: (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ? 1 : undefined,
     checkDivergence: async (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ?? false,

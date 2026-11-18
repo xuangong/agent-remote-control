@@ -16,7 +16,7 @@ import type { HostProviderDiscovery } from './provider-discovery.js';
 import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
-import type { ControllerIdentity, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
 import { createIdleSessions } from './idle-sessions.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
@@ -62,7 +62,9 @@ export type { AgentHostDirectory, AgentHostProviderRegistration, AgentHostReques
 export interface AgentHostOptions extends AgentHostRuntimeOptions {
   providerDiscovery?: HostProviderDiscovery;
   codexDaemon?: { stateDir: string; restart(operationId: string): Promise<void> };
-  controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void> };
+  controller?: { identity: ControllerIdentity; stateDir: string; restart(version: string, clean?: boolean): void | Promise<void>;
+    /** Where the update reads and installs a release; the defaults are GitHub and the Controller's package directory. */
+    release?: (version: string) => Promise<ControllerRelease>; install?: (release: ControllerRelease, clean?: boolean) => Promise<void> };
   vscodeTunnel?: Omit<VscodeTunnelOptions, 'installationId'>;
   preview?: { stateDirectory: string; ttlMs?: number; protectedPorts?: number[]; diagnostic?(event: string): void };
   /** Owner-visible Controller failure signals; see controller-health.ts. */

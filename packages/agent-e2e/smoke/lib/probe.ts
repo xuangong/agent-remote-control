@@ -8,7 +8,8 @@ export function loadChromium(checkout: string): any {
   return createRequire(join(checkout, 'packages/agent-remote-lab/package.json'))('@playwright/test').chromium;
 }
 
-export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean }
+/** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
+export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }
 
 /** One headless page opened on a session through the proxy, with the observer and the Network events that the invariants need. */
 export class PageProbe {
@@ -42,13 +43,38 @@ export class PageProbe {
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: rowsDeadlineMs });
       await this.page.waitForFunction(() => document.querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
       const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
-      paint = { label, ms: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
+      const documentAt: number = await this.page.evaluate(() => performance.timeOrigin + (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).responseEnd);
+      paint = { label, ms: Math.max(0, Math.round(firstRowAt - documentAt)), totalMs: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
     } catch {
       // A page that shows nothing in time is a result, not a harness failure.
       paint = { label, ms: rowsDeadlineMs, fromDeviceStore: false, timedOut: true };
     }
     this.paints.push(paint);
     return paint;
+  }
+
+  /**
+   * Waits until the device store has a conversation on disk. A person who read a conversation and leaves has it kept (the store writes
+   * when the page is hidden); a probe that closes the page at once would drop the write that is still queued.
+   */
+  async waitForKeptRecord(deadlineMs = 10_000): Promise<boolean> {
+    const until = Date.now() + deadlineMs;
+    const kept = () => this.page.evaluate(() => new Promise<boolean>(resolve => {
+      const opening = indexedDB.open('agent-remote-image-drafts');
+      opening.onerror = () => resolve(false);
+      opening.onsuccess = () => {
+        const database = opening.result;
+        if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve(false); return; }
+        const count = database.transaction('sessions').objectStore('sessions').count();
+        count.onsuccess = () => { database.close(); resolve(count.result > 0); };
+        count.onerror = () => { database.close(); resolve(false); };
+      };
+    })).catch(() => false);
+    while (Date.now() < until) {
+      if (await kept()) return true;
+      await this.page.waitForTimeout(100);
+    }
+    return false;
   }
 
   /** Types the text into the composer and submits it. */

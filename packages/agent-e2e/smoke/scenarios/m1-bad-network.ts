@@ -42,7 +42,9 @@ export const badNetwork: Scenario = {
         const condition_ = await withContext(context.browser, proxy.origin, async browserContext => {
           const first = await PageProbe.create(browserContext, recorder.origin);
           const firstOpen = await first.open(viaProxy, `first open, ${name}`, { rowsDeadlineMs: 90_000 });
+          const kept = firstOpen.timedOut || await first.waitForKeptRecord();
           await first.close();
+          if (!kept) context.log(`M1: ${name}: the first open left no record on the device`);
           const probe = await PageProbe.create(browserContext, recorder.origin);
           const revisit = firstOpen.timedOut ? firstOpen : await probe.open(viaProxy, `revisit, ${name}`, { rowsDeadlineMs: 90_000 });
           const ready = !revisit.timedOut && await probe.page.waitForFunction(() => (window as any).__smoke.read().composer === 'enabled', undefined, { timeout: 90_000 }).then(() => true, () => false);

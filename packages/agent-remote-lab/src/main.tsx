@@ -5,10 +5,11 @@ import { WorkspaceShell } from './components/WorkspaceShell.js';
 import { GatewayController } from './GatewayController.js';
 import { previousWorkspacePath } from './workspace-access.js';
 import { startDeviceStore } from './device-store-start.js';
+import { loadChunkWithRecovery } from './chunk-recovery.js';
 const gatewayMode = document.querySelector('meta[name="agent-remote-auth"]')?.getAttribute('content') === 'gateway';
 // The application chunk waits at most a second for the stored conversations, so its first render already reads them.
 const storedConversations = Promise.race([startDeviceStore(gatewayMode), new Promise<void>(resolve => setTimeout(resolve, 1000))]);
-const loadApp = () => Promise.all([import('./App.js'), storedConversations]).then(([module]) => ({ default: module.App }));
+const loadApp = () => loadChunkWithRecovery(() => Promise.all([import('./App.js'), storedConversations]).then(([module]) => ({ default: module.App })));
 const appModule = previousWorkspacePath() ? loadApp() : undefined;
 const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';

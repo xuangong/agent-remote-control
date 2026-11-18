@@ -1,10 +1,11 @@
 // E3 of the target architecture: the page and the Host come back after a socket drop, a Controller restart and a Relay restart; a reload
 // paints from the device store before any frame arrives and then catches up; a journal replacement keeps the reader's place (the S4
-// reading-anchor finding); older history loads when the reader reaches the top (the Codex older-history finding).
+// reading-anchor finding); older history loads when the reader reaches the top (the Codex older-history finding); one failed fetch of the
+// application chunk does not leave the page empty (O27).
 import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
-import { launchBrowser, openPage, openPageIn, rowTexts } from './browser.js';
+import { launchBrowser, openPage, openPageIn, resetWindows, rowTexts } from './browser.js';
 import { numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
 
 let stack: Stack; let browser: Browser;
@@ -118,4 +119,19 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
     expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
     await context.close();
   } finally { await legacy.close(); }
+});
+
+it('E3: the page shows its rows when the first fetch of the application chunk fails (O27)', async () => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await resetWindows(context, stack.origin);
+  const page = await context.newPage();
+  page.setDefaultTimeout(20_000);
+  let refused = 0;
+  await page.route(/\/assets\/App-[^/]*\.js$/, async route => {
+    if (refused < 1) { refused += 1; await route.fulfill({ status: 502, body: 'Bad Gateway' }); } else await route.continue();
+  });
+  await page.goto(stack.sessionUrl('work'), { waitUntil: 'domcontentloaded' });
+  await showsText(page, 'Started');
+  expect(refused).toBe(1);
+  await context.close();
 });

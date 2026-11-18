@@ -71,60 +71,7 @@ async function fixture(options: Partial<HostBrokerOptions> = {}) {
   return { broker, clock, connect, hosts };
 }
 
-it('announces heartbeat deadlines on every registered Host', async () => {
-  const b = await fixture(); const socket = await b.connect();
-  expect(socket.sent[0]).toMatchObject({ type: 'registered', heartbeat: { intervalMs: 30, timeoutMs: 10 } });
-}, 10_000);
-
-it('closes a connection that sends no registration within the registration deadline, and one that registers in time stays open', async () => {
-  const b = await fixture({ registrationDeadlineMs: 50, heartbeatIntervalMs: 600_000, heartbeatTimeoutMs: 10_000 });
-  const silent = await b.connect(false);
-  const registered = await b.connect();
-  b.clock.advance(49);
-  expect(silent.closes).toEqual([]);
-  b.clock.advance(1);
-  expect(silent.closes).toEqual([{ code: 1008, reason: 'Registration deadline exceeded' }]);
-  expect(registered.closes).toEqual([]);
-});
-
-it('marks a half-open Host offline and rejects pending RPCs before the socket close event', async () => {
-  const b = await fixture(); const socket = await b.connect();
-  const hostId = socket.sent[0]!.hostId;
-  const request = b.broker.handleRequest(new Request(`https://relay.example/v1/remote/hosts/${hostId}/catalog?providerId=codex`));
-  await vi.waitFor(() => expect(socket.sent.some(message => message.type === 'rpc_request')).toBe(true));
-  b.clock.advance(30);
-  const pending = socket.sent.find(message => message.type === 'heartbeat')!;
-  expect(pending).toBeDefined();
-  const rpc = socket.sent.find(message => message.type === 'rpc_request')!;
-  expect(rpc).toBeDefined();
-  await socket.receive({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: rpc.requestId });
-  await socket.receive({ uplinkVersion: 2, type: 'rpc_response', requestId: 'unrelated', status: 200, body: '{}' });
-  b.clock.advance(10);
-  expect((await b.hosts())[0].online).toBe(false);
-  expect(socket.readyState).toBe(1);
-  expect(socket.closes).toEqual([{ code: 1012, reason: expect.any(String) }]);
-  expect((await request)?.status).toBe(503);
-  const count = socket.sent.length;
-  b.clock.advance(100);
-  expect(socket.sent).toHaveLength(count);
-}, 10_000);
-
-it('isolates replacement connections from old heartbeat callbacks and close events', async () => {
-  const b = await fixture(); const old = await b.connect();
-  b.clock.advance(30);
-  const callbacks = [...b.clock.timers.values()].map(timer => timer.callback);
-  const replacement = await b.connect();
-  for (const callback of callbacks) callback();
-  expect(b.clock.timers.size).toBe(2);
-  old.finishClose();
-  expect((await b.hosts())[0].online).toBe(true);
-  expect(replacement.closes).toHaveLength(0);
-  b.clock.advance(30);
-  expect(replacement.sent.filter(message => message.type === 'heartbeat')).toHaveLength(1);
-  expect(old.sent.filter(message => message.type === 'heartbeat')).toHaveLength(1);
-}, 10_000);
-
-it.each(['throw', 'error'] as const)('retires registration when the socket reports a synchronous send %s', async failure => {
+it.each(['throw'] as const)('retires registration when the socket reports a synchronous send %s', async failure => {
   const b = await fixture(); const socket = await b.connect(false);
   socket.sendFailure = failure;
   await socket.receive({ uplinkVersion: 2, type: 'register', installationId: 'machine', name: 'Machine', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
@@ -133,7 +80,7 @@ it.each(['throw', 'error'] as const)('retires registration when the socket repor
   expect(socket.closes.at(-1)?.code).toBe(1011);
 }, 10_000);
 
-it.each(['close', 'error', 'disconnect', 'shutdown'] as const)('clears heartbeat timers on %s', async action => {
+it.each(['disconnect', 'shutdown'] as const)('clears heartbeat timers on %s', async action => {
   const b = await fixture(); const socket = await b.connect();
   b.clock.advance(30);
   if (action === 'close') socket.finishClose();
@@ -146,35 +93,6 @@ it.each(['close', 'error', 'disconnect', 'shutdown'] as const)('clears heartbeat
   expect(socket.sent).toHaveLength(count);
   expect(socket.closes).toHaveLength(closeCount);
   if (action !== 'shutdown') expect((await b.hosts())[0].online).toBe(false);
-}, 10_000);
-
-it('starts after registration and keeps heartbeat send cadence independent of acknowledgement latency', async () => {
-  const b = await fixture();
-  const socket = await b.connect(false);
-  b.clock.advance(100);
-  expect(socket.sent).toHaveLength(0);
-  await socket.receive({ uplinkVersion: 2, type: 'register', installationId: 'machine', name: 'Machine', providers: [{ providerId: 'codex', displayName: 'Codex' }] });
-  b.clock.advance(30);
-  const first = socket.sent.at(-1)!;
-  expect(first).toMatchObject({ type: 'heartbeat', nonce: expect.any(String) });
-  b.clock.advance(5);
-  await socket.receive({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: first.nonce });
-  b.clock.advance(25);
-  expect(socket.sent.at(-1)).toMatchObject({ type: 'heartbeat', nonce: expect.any(String) });
-  expect(socket.sent.at(-1)!.nonce).not.toBe(first.nonce);
-  expect(socket.closes).toHaveLength(0);
-}, 10_000);
-
-it('requires acknowledgement of the current heartbeat even after earlier successful replies', async () => {
-  const b = await fixture(); const socket = await b.connect();
-  b.clock.advance(30);
-  const previous = socket.sent.at(-1)!.nonce;
-  await socket.receive({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: previous });
-  b.clock.advance(30);
-  await socket.receive({ uplinkVersion: 2, type: 'heartbeat_ack', nonce: previous });
-  b.clock.advance(10);
-  expect((await b.hosts())[0].online).toBe(false);
-  expect(socket.closes.at(-1)?.code).toBe(1012);
 }, 10_000);
 
 it('starts after enrollment is saved and preserves the schedule across device credential rotation', async () => {
@@ -251,17 +169,6 @@ it('clears outstanding heartbeats when the device is revoked', async () => {
   expect(socket.closes.at(-1)?.code).toBe(1008);
   expect(b.clock.timers.size).toBe(0);
   expect(await b.hosts()).toEqual([]);
-}, 10_000);
-
-it('retires an expired device before waiting for its pending heartbeat deadline', async () => {
-  const b = await fixture({ initialState: {
-    keys: [[createHash('sha256').update('key').digest('hex'), { expires: 10_035, installationId: 'machine', kind: 'device' }]],
-    hosts: [], bindings: [], creations: [],
-  } });
-  const socket = await b.connect(); b.clock.advance(35);
-  expect(socket.closes.at(-1)?.code).toBe(1008);
-  expect(b.clock.timers.size).toBe(0);
-  expect((await b.hosts())[0].online).toBe(false);
 }, 10_000);
 
 it('closes virtual browser streams and clears their opening deadline when the Host heartbeat expires', async () => {

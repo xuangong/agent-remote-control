@@ -8,7 +8,7 @@
  * state, and the Controller reconnects by itself. `close` stops everything and removes the state. Nothing reads the user's home, their
  * Controller or any credential; each stack has its own state directory and invitation.
  */
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -112,7 +112,14 @@ export async function startStack(options: StackOptions = {}) {
     /** What the Controller's updater did: the versions it installed and the versions it asked the launcher to restart into. */
     updates,
     /** Plays the launcher after an update: the Controller starts again as the release it installed. */
-    async finishUpdate() { await stopController(); runningVersion = update!.release.version; await startController(); },
+    async finishUpdate() {
+      await stopController();
+      // The launcher records the result of the restart in the status file the updater keeps.
+      const statusFile = join(state, 'controller', 'controller-updates', 'status.json');
+      const status = JSON.parse(await readFile(statusFile, 'utf8')) as Record<string, unknown>;
+      await writeFile(statusFile, JSON.stringify({ ...status, phase: 'succeeded', updatedAt: Date.now() }));
+      runningVersion = update!.release.version; await startController();
+    },
     /**
      * A second Controller paired with a key the page generated: a Host of its own, with its own scripted provider. `close` stops it.
      * Its device credential is kept by the Controller object, as an installed one keeps its own.

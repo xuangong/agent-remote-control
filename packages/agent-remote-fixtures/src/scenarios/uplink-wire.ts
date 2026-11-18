@@ -1,7 +1,7 @@
 import { createHostBroker } from '@orchardworks/agent-relay-core';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient, type RemoteHostControlRequest, type RemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 
-import { connectToRelay } from '../relay-connection.js';
+import { connectToRelay } from '@orchardworks/agent-session-runtime/testing';
 import { TERMINAL_OWNER } from '../relay-harness.js';
 import { driver, virtualClock } from '../virtual-clock.js';
 import type { Scenario, ScenarioRecorder } from './scenario.js';

@@ -6,6 +6,5 @@ export * from './scenarios/index.js';
 export * from './transcripts.js';
 export * from './recorded-rows.js';
 export * from './uplink-harness.js';
-export { relayLink, relayPlayer, type PlayerConnection, type RelayPlayer, type RelayPlayerOptions } from '@orchardworks/agent-session-runtime/testing';
-export * from './relay-connection.js';
+export { browserStream, connectToRelay, relayConnection, relayLink, relayPlayer, type PlayerConnection, type RelayConnectionOptions, type RelayPlayer, type RelayPlayerOptions } from '@orchardworks/agent-session-runtime/testing';
 export * from './uplink-wire-players.js';

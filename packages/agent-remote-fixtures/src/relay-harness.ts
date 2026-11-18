@@ -48,7 +48,8 @@ export async function until<T>(read: () => T | undefined, label: string): Promis
   throw new Error(`Timed out waiting for ${label}.`);
 }
 
-type Tap = (direction: 'toPeer' | 'toRelay', json: string) => void;
+/** A tap sees each frame as it is sent; returning false drops the frame, as a lost connection does. */
+type Tap = (direction: 'toPeer' | 'toRelay', json: string) => void | boolean;
 
 /** Two connected in-memory sockets: `server` is the Relay's end, `native` the peer's. A tap sees every frame at the moment it is sent. */
 export function socketPair(closers: Array<() => void | Promise<void>>, tap?: Tap) {
@@ -59,7 +60,7 @@ export function socketPair(closers: Array<() => void | Promise<void>>, tap?: Tap
     constructor(direction: 'toPeer' | 'toRelay') { this.direction = direction; }
     send(data: string) {
       if (this.readyState !== 1) throw new Error('Socket is closed');
-      tap?.(this.direction, data);
+      if (tap?.(this.direction, data) === false) return;
       queueMicrotask(() => { if (this.peer.readyState === 1) for (const listener of this.peer.messages) listener(data, false); });
     }
     close(code?: number, reason?: string) {

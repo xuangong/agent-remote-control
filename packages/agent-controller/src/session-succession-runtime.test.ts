@@ -2,10 +2,11 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
-import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { expect, test, vi } from 'vitest';
-import WebSocket, { WebSocketServer } from 'ws';
+import { EventEmitter } from 'node:events';
+import WebSocket from 'ws';
+import { relayConnection } from '@orchardworks/agent-session-runtime/testing';
 import { createHostBroker, type RemoteHostBrokerState } from '@orchardworks/agent-relay-core';
 import { PROTOCOL_VERSION, type ServerMessage, type TpmWork } from '@orchardworks/agent-remote-protocol';
 import { createRemoteHostUplinkClient, createAgentRemoteHttpServer } from '@orchardworks/agent-session-runtime';
@@ -397,50 +398,42 @@ test('real Host TPM first postcommit main input consumes durable context once an
   } finally { await f.close(); }
 });
 
+let relays = 0;
 async function enrollmentTransport(f: Awaited<ReturnType<typeof fixture>>, initial?: RemoteHostBrokerState, options:{installationId?:string;enrollment?:boolean;noAllowance?:boolean;legacyRelay?:boolean;legacyHost?:boolean;ceiling?:number}={}) {
-  const http = createServer((incoming, response) => {
-    void (async () => {
-      const chunks: Buffer[] = []; for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
-      const result = await broker.handleRequest(new Request(origin + incoming.url!, { method: incoming.method, body: Buffer.concat(chunks).toString() }),
-        { principalSubject: () => String(incoming.headers['x-test-subject'] ?? 'owner') });
-      response.writeHead(result?.status ?? 404, result ? Object.fromEntries(result.headers) : {});
-      response.end(result ? await result.text() : '');
-    })().catch(error => { response.writeHead(500); response.end(String(error)); });
-  });
-  const server = new WebSocketServer({ server: http });
-  http.listen(0, '127.0.0.1'); await once(http, 'listening', { signal: AbortSignal.timeout(3000) });
-  const origin = `http://127.0.0.1:${(http.address() as {port:number}).port}`;
+  // The Relay and the Controller meet in memory: the uplink client's `connect` is answered by the Relay's own `prepareUpgrade`.
+  // Each transport is another Relay with its own origin, as a new listener port was.
+  const origin = `http://relay-${++relays}.example`;
   const authority = { version: 1 as const, origin, issuer: 'https://issuer.example', namespace: 'tenant', ownerSubject: 'owner' };
   let saved: RemoteHostBrokerState | undefined; let dropCreationResponse=false;const createRequests=new Set<string>();let failProjection = false, failBinding=false; let beforeControl=async(_input:{action?:string;freeze?:unknown})=>{};
   const makeBroker=(initialState?:RemoteHostBrokerState)=>createHostBroker({ origin, ownerSubject: 'owner', durable: true, successionEnrollment: authority, ...(options.noAllowance ? {} : { successionProjectionAllowance: () => options.ceiling ?? 2 * 1024 * 1024 }), initialState,
     onStateChange: async state => { if (failProjection && state.associations?.freezes.some(item => item.released)) throw new Error('Projection storage unavailable'); if(failBinding&&state.bindings.some(item=>item.sourceRelation))throw new Error('Binding storage unavailable'); saved = structuredClone(state); }, rpcTimeoutMs: 2000 });
   let broker=makeBroker(initial);
-  const request = (path:string, body:unknown, subject='owner') => fetch(origin+path, {method:'POST',body:JSON.stringify(body),headers:{'x-test-subject':subject},signal:AbortSignal.timeout(5000)});
-  const enrollmentRpc = (input: unknown): Promise<{status:number;body:string}> => new Promise((resolve,reject) => {
-    const socket=[...server.clients].find(item=>item.readyState===WebSocket.OPEN), requestId=crypto.randomUUID();
-    if(!socket){reject(new Error('Registered fixture uplink is unavailable.'));return;}
-    const cleanup=()=>{clearTimeout(timer);socket.off('message',receive);};
-    const timer=setTimeout(()=>{cleanup();reject(new Error('Fixture enrollment RPC deadline exceeded.'));},3000);
-    function receive(data:WebSocket.RawData){const message=JSON.parse(data.toString());if(message.type==='rpc_response'&&message.requestId===requestId){cleanup();resolve(message);}}
-    socket.on('message',receive);
-    socket.send(JSON.stringify({uplinkVersion:2,type:'rpc_request',requestId,method:'POST',path:'/remote/succession/enrollment',body:JSON.stringify(input)}));
+  const closers: Array<() => void | Promise<void>> = [];
+  const link = relayConnection(() => broker, closers, {
+    query: endpoint => { if (options.legacyRelay) endpoint.searchParams.delete('successionEnrollment'); },
+    deliver: (direction, json) => {
+      const message = JSON.parse(json);
+      if (direction === 'relay->controller' && message.type === 'rpc_request' && message.path === '/remote/create') createRequests.add(message.requestId);
+      if (direction === 'controller->relay' && dropCreationResponse && message.type === 'rpc_response' && createRequests.has(message.requestId)) { dropCreationResponse = false; return false; }
+      return true;
+    },
   });
-  server.on('connection', async (socket, incoming) => {
-    const endpoint = new URL(origin+incoming.url!); if(options.legacyRelay) endpoint.searchParams.delete('successionEnrollment');
-    const upgrade = await broker.prepareUpgrade(new Request(endpoint, { headers: {authorization:incoming.headers.authorization!} }));
-    if (!upgrade || upgrade instanceof Response) { socket.close(1008); return; }
-    upgrade.accept({get readyState(){return socket.readyState;},get bufferedAmount(){return socket.bufferedAmount;},send:data=>{const message=JSON.parse(data);if(message.type==='rpc_request'&&message.path==='/remote/create')createRequests.add(message.requestId);socket.send(data);},close:(code,reason)=>socket.close(code,reason),
-      onMessage(listener){const handle=(data:WebSocket.RawData,binary:boolean)=>{const message=JSON.parse(data.toString());if(dropCreationResponse&&message.type==='rpc_response'&&createRequests.has(message.requestId)){dropCreationResponse=false;return;}void listener(data.toString(),binary);};socket.on('message',handle);return()=>{socket.off('message',handle);};},
-      onClose(listener){const handle=(code:number)=>listener({code});socket.on('close',handle);return()=>{socket.off('close',handle);};},
-      onError(listener){socket.on('error',listener);return()=>{socket.off('error',listener);};}});
+  const request = async (path:string, body:unknown, subject='owner') => (await broker.handleRequest(new Request(origin+path, {method:'POST',body:JSON.stringify(body)}), { principalSubject: () => subject }))!;
+  const enrollmentRpc = (input: unknown): Promise<{status:number;body:string}> => new Promise((resolve,reject) => {
+    const socket=link.servers.filter(item=>item.readyState===1).at(-1), requestId=crypto.randomUUID();
+    if(!socket){reject(new Error('Registered fixture uplink is unavailable.'));return;}
+    const timer=setTimeout(()=>{cleanup();reject(new Error('Fixture enrollment RPC deadline exceeded.'));},3000);
+    const cleanup=()=>{clearTimeout(timer);stop();};
+    const stop=socket.onMessage(data=>{const message=JSON.parse(data);if(message.type==='rpc_response'&&message.requestId===requestId){cleanup();resolve(message);}});
+    socket.send(JSON.stringify({uplinkVersion:2,type:'rpc_request',requestId,method:'POST',path:'/remote/succession/enrollment',body:JSON.stringify(input)}));
   });
   const connect=async()=>{
     const pairing=await (await request('/v1/remote/pairings',{}))!.json();
     if (options.legacyHost) {
-      const socket = new WebSocket(origin.replace('http:', 'ws:') + '/ws/remote-host?successionEnrollment=1', { headers: { authorization: `Bearer ${pairing.key}` } });
+      const socket = link.connect(new URL(origin.replace('http:', 'ws:') + '/ws/remote-host?successionEnrollment=1'), { authorization: `Bearer ${pairing.key}`, maxPayload: 1 << 20, handshakeTimeout: 3000 }) as unknown as EventEmitter & { send(json: string): void; terminate(): void };
       let resolveReady!: (value: { hostId: string }) => void;
       const ready = new Promise<{hostId:string}>(resolve => { resolveReady = resolve; });
-      socket.on('message', data => { void (async () => {
+      socket.on('message', (data: Buffer) => { void (async () => {
         const message = JSON.parse(data.toString());
         if (message.type === 'credential_issued') socket.send(JSON.stringify({uplinkVersion:2,type:'credential_saved'}));
         if (message.type === 'registered') { expect(message.successionEnrollmentVersion).toBeUndefined(); resolveReady(message); }
@@ -458,13 +451,13 @@ async function enrollmentTransport(f: Awaited<ReturnType<typeof fixture>>, initi
       try { await Promise.race([ready,new Promise<never>((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Legacy registration deadline')),3000);})]); } finally {clearTimeout(deadline);}
       return {ready,close:async()=>{socket.terminate();}};
     }
-    return createRemoteHostUplinkClient({relay:f.host.relay,installationId:options.installationId??'controller',name:'Fixture',providers:f.providerDescriptors,
+    return createRemoteHostUplinkClient({relay:f.host.relay,installationId:options.installationId??'controller',name:'Fixture',providers:f.providerDescriptors,connect:link.connect,
       remoteKey:pairing.key,onCredential:async()=>{},url:origin.replace('http:','ws:')+'/ws/remote-host',resolveSession:f.host.resolveSession,acquireSession:f.host.acquireSession,
       control:f.host.control,...(options.enrollment===false?{}:{successionEnrollment:{control:async(request,context)=>{const result=await f.host.enrollFromRelay(request,context);await beforeControl(JSON.parse(request.body??'{}'));return result;}}})});
   };
   let client=await connect();const {hostId}=await client.ready;
   return {get client(){return client;},get broker(){return broker;},authority,request,enrollmentRpc,hostId,restart:async(beforeConnect?:()=>Promise<void>)=>{await client.close();broker.close();await beforeConnect?.();broker=makeBroker(saved);client=await connect();await client.ready;},failBinding:(value:boolean)=>{failBinding=value;},dropCreationResponse:()=>{dropCreationResponse=true;},beforeControl:(hook:typeof beforeControl)=>{beforeControl=hook;},failProjection:(value:boolean)=>{failProjection=value;},saved:()=>structuredClone(saved!),action:(action:string,input:unknown,subject='owner')=>request(`/v1/remote/hosts/${hostId}/succession/${action}`,input,subject),
-    close:async()=>{await client.close();broker.close();for(const socket of server.clients)socket.terminate();await new Promise<void>(resolve=>server.close(()=>resolve()));await new Promise<void>(resolve=>http.close(()=>resolve()));}};
+    close:async()=>{await client.close();broker.close();for(const close of closers.splice(0).reverse())await close();}};
 }
 
 test('authenticated broker enrollment derives a role, freezes associations and commits over a real uplink',async()=>{

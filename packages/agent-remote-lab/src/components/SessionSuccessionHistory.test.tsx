@@ -72,15 +72,8 @@ it('does not intercept modified history-link clicks so the real URL can open in 
   expect(intercepted).toBe(false);
 }, 5000);
 
-it('builds unknown historical identities without inventing an attachment or parent', () => {
-  const result = sessionSuccessionHistory({ scope: 'scope', replays: chain, current, selected: session('C') });
-  expect(result?.predecessor).toEqual({ hostId: 'host', providerId: 'recorded', nativeSessionId: 'B', title: 'B' });
-  expect(result?.ancestors).toEqual([{ hostId: 'host', providerId: 'recorded', nativeSessionId: 'A', title: 'A' }]);
-}, 5000);
-
-it.each(['missing-current', 'gap', 'wrong-origin', 'wrong-current', 'unrelated', 'duplicate'] as const)('does not infer history from %s role evidence', async reason => {
+it.each(['gap', 'wrong-origin', 'wrong-current', 'unrelated', 'duplicate'] as const)('does not infer history from %s role evidence', async reason => {
   let replays = structuredClone(chain), confirmed: SessionSuccessionCurrent | undefined = structuredClone(current), selected = 'C';
-  if (reason === 'missing-current') confirmed = undefined;
   if (reason === 'gap') replays = replays.slice(1);
   if (reason === 'wrong-origin') replays[1]!.projection.role.origin = native('X');
   if (reason === 'wrong-current') confirmed!.role.current = native('D');

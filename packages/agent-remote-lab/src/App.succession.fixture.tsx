@@ -300,6 +300,9 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
   };
 }
 
+/** A wait that outlasts the restoration retry timer (`RESTORE_RETRY_MS`, 5 s) by the margin a loaded machine needs. */
+export const RESTORE_RETRY_WAIT = 15000;
+
 /** Lets the App render and its requests finish, until the assertion holds. */
 export async function settleApp(assertion: () => void, options?: { timeout?: number }) {
   await waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); assertion(); }, options);

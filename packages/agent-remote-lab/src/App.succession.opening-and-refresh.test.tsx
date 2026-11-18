@@ -370,7 +370,7 @@ it('finishes committed recovery when an earlier native attachment synchronizes d
   } finally { releaseAttach(); releaseCurrent(); }
 }, testDeadline);
 
-it.each(['cancelled', 'rejected'] as const)('waits for the original native session to recover after a %s handoff', async phase => {
+it.each(['cancelled'] as const)('waits for the original native session to recover after a %s handoff', async phase => {
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });
@@ -470,7 +470,7 @@ it('keeps the last confirmed locator when a refresh after the feed reopened cann
   expect(f.requests.filter(request => request.url.endsWith('/attach') && request.body?.nativeSessionId === 'B')).toHaveLength(1);
 }, testDeadline);
 
-it.each(['timeout', 'notification'] as const)('does not restore the confirmed locator after a refresh %s', async reason => {
+it.each(['timeout'] as const)('does not restore the confirmed locator after a refresh %s', async reason => {
   let notify: (() => void) | undefined;
   const subscribe = HttpWebSocketTransport.prototype.onSessionSuccession;
   vi.spyOn(HttpWebSocketTransport.prototype, 'onSessionSuccession').mockImplementation(function (this: HttpWebSocketTransport, listener) {

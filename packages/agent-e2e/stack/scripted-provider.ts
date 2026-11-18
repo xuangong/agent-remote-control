@@ -7,11 +7,13 @@
  * (`hold`) to look at a message while it is pending. Native history is what a terminal and a reopened session read: `write` adds a row the
  * running session sees live, `terminalWrite` adds rows only to the native history, as a terminal does while the Controller's session
  * follows its own last message (the provider then reports the divergence, as the Claude one does, and the Controller reads it again).
- * `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
+ * `terminalTakes` makes a terminal the native owner of a session (the Controller lets the session go and refuses sends until a person takes it
+ * back). `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
  * so a reload shows the same rows. The provider reads nothing outside this process.
  */
 import type { AgentProviderAdapter, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
+import { NativeSessionOwnerError, type NativeOwnerIdentity } from '@orchardworks/agent-remote-controller/testing';
 import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
 
 export const SCRIPTED_PROVIDER = 'scripted';
@@ -65,6 +67,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   const live = new Map<string, ScriptedSessionHandle & ScriptedSession>();
   let created = 0;
   let held: Promise<void> | undefined;
+  const owners = new Map<string, NativeOwnerIdentity>();
+  let handoff: ((nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>) | undefined;
 
   const observation = (id: string, entry: HistoryEntry, at: number, delivery: 'history' | 'live'): ProviderObservation =>
     'observation' in entry ? { ...entry.observation, delivery } : row(providerId, delivery, `${id}:${entry.key ?? `h${at}`}`, entry, at);
@@ -122,7 +126,16 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
     // A session that something else wrote to continues from its own last message; the Controller releases it and reads it again.
     divergedAt: (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ? 1 : undefined,
     checkDivergence: async (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ?? false,
-    async open(nativeSessionId) { return open(nativeSessionId); },
+    setSessionHandoffHandler(handler: (nativeSessionId: string, next: NativeOwnerIdentity) => Promise<void>) { handoff = handler; },
+    async open(nativeSessionId, openOptions) {
+      const owner = owners.get(nativeSessionId);
+      if (owner) {
+        if (openOptions?.takeOver === undefined) throw new NativeSessionOwnerError('native_session_owned', 'A terminal holds this session.', owner);
+        if (openOptions.takeOver !== owner.generation) throw new NativeSessionOwnerError('native_owner_changed', 'The owner changed.', owner);
+        owners.delete(nativeSessionId);
+      }
+      return open(nativeSessionId);
+    },
     async close() { await Promise.all([...live.values()].map(session => session.dispose())); },
   } as AgentHostDirectory;
   const registration: AgentHostProviderRegistration = { adapter, directory };
@@ -136,6 +149,12 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
       const saved = known.get(nativeSessionId);
       if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
       saved.history.push(...rows); saved.updatedAt = new Date().toISOString(); saved.diverged = true;
+    },
+    /** A terminal takes the session: the Controller records the owner and lets the session go. */
+    async terminalTakes(nativeSessionId: string, generation = 'terminal-1') {
+      const owner: NativeOwnerIdentity = { kind: 'native_cli', generation };
+      owners.set(nativeSessionId, owner);
+      await handoff!(nativeSessionId, owner);
     },
     /** A session whose history is a copy of another's, as `claude --fork-session` in a terminal makes one. */
     fork(sourceId: string, nativeSessionId: string, title: string) {

@@ -149,6 +149,18 @@ it('clamps resized windows to the source view and restores preferred height afte
   await key(handle, 'ArrowRight');
   expect(geometry(panel)).toEqual(before);
 });
+it('never shrinks a floating window below its minimum size or grows it past the source view', async () => {
+  bounds.set('main', { width: 1000, height: 800 });
+  const container = await render(<Harness scope="main" />);
+  const panel = container.querySelector('section')!;
+  const handle = container.querySelector('.lab-ask-resize')!;
+  for (let step = 0; step < 6; step++) { await key(handle, 'ArrowLeft', true); await key(handle, 'ArrowUp', true); }
+  expect(geometry(panel)).toMatchObject({ width: 360, height: 320 });
+  for (let step = 0; step < 30; step++) { await key(handle, 'ArrowRight', true); await key(handle, 'ArrowDown', true); }
+  const largest = geometry(panel);
+  expect(largest.left! + largest.width!).toBeLessThanOrEqual(988);
+  expect(largest.top! + largest.height!).toBeLessThanOrEqual(788);
+});
 it('retains the latest failed geometry after unmount and retries only current edits', async () => {
   bounds.set('failed-geometry', { width: 1000, height: 800 });
   const container = await render(<Harness scope="failed-geometry" />);

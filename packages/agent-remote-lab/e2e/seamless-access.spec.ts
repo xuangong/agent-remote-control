@@ -1,7 +1,21 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { openSessionsPage, selectConnectedHost } from './all-sessions';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
+
+/** Whether the device store holds, on disk (IndexedDB), a conversation containing the text; cached startup reads conversations from there. */
+const storedConversationHas = (page: Page, needle: string) => page.evaluate(text => new Promise<boolean>(resolve => {
+  const opening = indexedDB.open('agent-remote-image-drafts');
+  opening.onerror = () => resolve(false);
+  opening.onsuccess = () => {
+    const database = opening.result;
+    if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve(false); return; }
+    const all = database.transaction('sessions').objectStore('sessions').getAll();
+    all.onsuccess = () => { database.close(); resolve(all.result.some(record => JSON.stringify(record).includes(text))); };
+    all.onerror = () => { database.close(); resolve(false); };
+  };
+}), needle);
+const waitForStoredConversation = (page: Page, needle: string) => expect.poll(() => storedConversationHas(page, needle)).toBe(true);
 
 for (const signal of ['visibility', 'pageshow'] as const) {
   test(`authorized ${signal} recovery keeps the live session usable during a delayed access check`, async ({ page }, testInfo) => {
@@ -74,7 +88,7 @@ test('cached startup keeps the editor while business traffic waits for access', 
     await input.fill('Seamless cache marker');
     await page.getByTestId('prompt-submit').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(key => key.endsWith(':workspace')))).toBe(true);
+    await waitForStoredConversation(page, 'Seamless cache marker');
     await input.fill('My unsent draft');
     const timeline = page.getByTestId('timeline');
     await timeline.evaluate(element => {
@@ -155,7 +169,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await input.fill('Private conversation marker');
     await page.getByTestId('prompt-submit').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Private conversation marker');
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).some(key => key.endsWith(':workspace')))).toBe(true);
+    await waitForStoredConversation(page, 'Private conversation marker');
     await input.fill('Private unsent draft');
     await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -190,7 +204,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await expect(dialog).toContainText('does not sign out');
     await page.screenshot({ path: testInfo.outputPath('cache-protection-confirmation.png') });
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-    expect(await page.evaluate(() => Object.keys(localStorage).some(key => key.endsWith(':workspace')))).toBe(true);
+    expect(await storedConversationHas(page, 'Private conversation marker')).toBe(true);
     await toggle.click();
     await dialog.getByRole('button', { name: 'Enable protection' }).click();
     await expect(dialog).not.toBeVisible();

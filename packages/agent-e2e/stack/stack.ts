@@ -39,6 +39,8 @@ export interface StackOptions extends Omit<ScriptedProviderOptions, 'succession'
    * the Controller again as the new version.
    */
   controllerUpdate?: { runningVersion: string; release: ControllerRelease };
+  /** Gives the Controller its Team state, so the page can create a Team whose Leader is one of the scripted sessions. */
+  teams?: boolean;
 }
 
 async function freePort(): Promise<number> {
@@ -76,7 +78,7 @@ export async function startStack(options: StackOptions = {}) {
     if (controller) throw new Error('The Controller is already running.');
     // The state directory is what gives the Controller its outbox (receipts of the messages it took), so a message sent while it is away waits at the Relay.
     const identity = runningVersion ? { version: runningVersion, revision: 'a'.repeat(40), platform: process.platform, arch: process.arch, nodeMajor: Number(process.versions.node.split('.')[0]), remoteUpdate: true } : undefined;
-    controller = createAgentHost({ ...(identity ? { controller: { identity, stateDir: join(state, 'controller'),
+    controller = createAgentHost({ ...(options.teams ? { team: { stateDirectory: join(state, 'teams') } } : {}), ...(identity ? { controller: { identity, stateDir: join(state, 'controller'),
       restart: async (version: string) => { updates.restarts.push(version); }, release: async () => update!.release,
       install: async (release: ControllerRelease) => { updates.installed.push(release.version); } } } : {}), ...(options.succession ? { succession: { controllerId: installationId, stateDirectory: join(state, 'succession'), enrollment: true as const },
       executionPolicy: { defaultWorkspace: workspace, allowedWorkspaceRoots: [workspace], lockPermissions: false } } : {}), preview: { stateDirectory: join(state, 'controller') }, registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });

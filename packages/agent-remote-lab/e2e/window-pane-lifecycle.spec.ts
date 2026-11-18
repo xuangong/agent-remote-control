@@ -91,6 +91,9 @@ async function closeWindows(page: Page) {
 async function closeListedView(page: Page, id: string) {
   const panel = await openWindows(page);
   await panel.locator(`[data-window-view-close="${id}"]`).click();
+  // Removing a bot from its group asks first; a plain view closes at once.
+  const confirm = page.getByRole('dialog').filter({ hasText: 'from this group?' }).getByRole('button', { name: 'Remove', exact: true });
+  if (await confirm.isVisible()) await confirm.click();
   await expect(panel.locator(`[data-window-view-row="${id}"]`)).toHaveCount(0);
 }
 
@@ -202,11 +205,10 @@ test('closing the selected and final primary leaves usable independent docks and
       createWindowView('dock-one', { ...workspace.binding, title: 'Dock one' }),
       createWindowView('dock-two', { ...workspace.binding, title: 'Dock two' }),
     ], 'alpha');
-    if (isMobile) await closeListedView(page, 'alpha');
-    else await page.getByRole('button', { name: 'Close primary group: Alpha', exact: true }).click();
+    await closeListedView(page, 'alpha');
     await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe('beta');
-    if (isMobile) { await closeListedView(page, 'beta'); await closeWindows(page); }
-    else await page.getByRole('button', { name: 'Close primary group: Beta', exact: true }).click();
+    await closeListedView(page, 'beta');
+    await closeWindows(page);
     await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['dock-one', 'dock-two']);
     await expect.poll(async () => {
       const current = await workspace.inspect(); return [current.selectedPrimaryViewId, current.selectedViewId];

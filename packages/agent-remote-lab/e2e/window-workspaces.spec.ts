@@ -165,7 +165,10 @@ test('two pages share Window UI edits and external commands across narrow presen
     await expect(primary.getByTestId('prompt-input')).toBeEnabled();
     await expect(otherPrimary.getByTestId('prompt-input')).toBeEnabled();
     await expect(pane).toBeVisible(); await expect(otherPane).toBeVisible();
-    await otherPane.getByRole('button', { name: 'Close Shared dock session', exact: true }).click();
+    // A bot folds when its own pane closes; the Windows list removes it after asking.
+    await openWindows(page);
+    await menu.locator(`[data-window-view-close="${viewId}"]`).click();
+    await page.getByRole('dialog').filter({ hasText: 'from this group?' }).getByRole('button', { name: 'Remove', exact: true }).click();
     await expect(page.locator('[data-dock-id]')).toHaveCount(0);
     await expect.poll(async () => (await inspect()).views.some(view => view.id === viewId)).toBe(false);
     const nativeCreatesBeforeDelete = creations.filter(url => new URL(url).pathname.endsWith('/create')).length;

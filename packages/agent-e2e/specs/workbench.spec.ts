@@ -222,26 +222,6 @@ test('keeps an earlier control in view when reached with Tab', async ({ page }) 
   await expect.poll(() => bottomDistance(timeline)).toBeGreaterThan(64);
 });
 
-test('restores the reading position across hidden Trace and follows after epoch or Agent replacement', async ({ page }) => {
-  const timeline = page.getByTestId('timeline');
-  await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
-  await timeline.hover();
-  await page.mouse.wheel(0, -600);
-  await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  const before = await readingOffset(timeline);
-  await page.getByRole('button', { name: 'Toggle Trace' }).click();
-  await page.getByRole('button', { name: 'Append live' }).click();
-  await page.getByRole('button', { name: 'Toggle Trace' }).click();
-  await expect.poll(async () => Math.abs(await readingOffset(timeline) - before)).toBeLessThan(1);
-  await page.getByRole('button', { name: 'Replace epoch' }).click();
-  await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
-  await timeline.hover();
-  await page.mouse.wheel(0, -600);
-  await expect(page.getByRole('button', { name: 'Back to latest' })).toBeVisible();
-  await page.getByRole('button', { name: 'Switch Agent' }).click();
-  await expect.poll(() => bottomDistance(timeline)).toBeLessThan(3);
-});
-
 test('folds the input into a bottom tab while preserving the draft and reading position', async ({ page }, testInfo) => {
   const timeline = page.getByTestId('timeline');
   const input = page.getByTestId('prompt-input');

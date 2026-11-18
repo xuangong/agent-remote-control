@@ -29,15 +29,6 @@
     {
       "rule": "root-too-large",
       "from": [
-        "packages/agent-relay-core/src/broker.ts"
-      ],
-      "max": 1,
-      "owner": "M11",
-      "reason": "broker.ts is the whole Relay in one closure; M11 extracts the concerns and leaves relay.ts under 900 lines."
-    },
-    {
-      "rule": "root-too-large",
-      "from": [
         "packages/agent-remote-lab/src/App.tsx"
       ],
       "max": 1,

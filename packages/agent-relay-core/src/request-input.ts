@@ -1,5 +1,5 @@
 import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
-import { BROKER_MAX_BODY_BYTES } from './transport.js';
+import { BROKER_MAX_BODY_BYTES, type BrokerRequestContext } from './transport.js';
 import { BrokerError, type Binding, type Host } from './broker-types.js';
 
 export function required(value: unknown, name: string): string {
@@ -61,3 +61,9 @@ export async function readBody(request: Request): Promise<Record<string, unknown
 export function readOnlyProviders(values: string[]): string[] {
   return [...new Set(values.filter(value => value.trim() && value.length <= 512))].slice(0, 64);
 }
+
+/** The subject a request acts for, as the host environment authenticated it. */
+export const principal = (context: BrokerRequestContext) => context.principalSubject?.();
+
+/** One group of routes: answers a Response for a path it owns and undefined for any other, after the Relay's common checks. */
+export type RouteGroup = (request: Request, context: BrokerRequestContext, url: URL, subject: string | undefined) => Promise<Response | undefined>;

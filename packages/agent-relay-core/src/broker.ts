@@ -1,7 +1,15 @@
 import { TeamBroker, teamMessageBudgetBytes } from './teams.js';
-import { CallForSupportProfileError, emptyCallForSupportState, executeProfileCommand, isCallForSupportProfileCommand, projectEnablement, setEnablement, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
+import { emptyCallForSupportState, validCallForSupportState, type CallForSupportState } from './call-for-support-profiles.js';
 import { TEAM_RECORD_BYTES, teamBytes, teamStateBytes, trimTeamDeliveryReceipts, validSavedTeam, type SavedTeam } from './team-delivery.js';
 import { createBrokerState } from './broker-state.js';
+import { createControllerRoutes } from './controller-routes.js';
+import { createTeamRoutes } from './team-routes.js';
+import { createHostServiceRoutes } from './host-service-routes.js';
+import { createPreviewRoutes } from './preview-routes.js';
+import { createPairingRoutes } from './pairing-routes.js';
+import { createSessionDirectoryRoutes } from './session-directory-routes.js';
+import { createSessionReadRoutes } from './session-read-routes.js';
+import { principal, type RouteGroup } from './request-input.js';
 import { createAccess } from './access.js';
 import { createExpiry } from './credential-expiry.js';
 import { createHostViews } from './host-views.js';
@@ -10,31 +18,19 @@ import { createSessionBindings } from './session-bindings.js';
 import { createSuccession } from './succession-service.js';
 import { createRelations } from './relation-service.js';
 import { createJournalDeletion } from './journal-deletion.js';
-import { JOURNAL_DELETION_LIMIT } from './state.js';
 import { committed, detached } from './drafts.js';
-import { isTeamCreate, isTeamAction, isTeamDelete } from '@orchardworks/agent-remote-protocol';
 import { sessionIdentityMessage, withoutItemKeysFlag } from './session-identity.js';
-import { isCreationSource, type CreationSource } from '@orchardworks/agent-remote-protocol';
-import { isHostStatus, ownerOnlyHostStatus } from '@orchardworks/agent-remote-protocol';
 import { JOURNAL_VERSION } from '@orchardworks/agent-remote-protocol';
 import type { RelationChangeReset, BrokerRelationChange } from './relation-changes.js';
 import { isDeepStrictEqual } from 'node:util';
-import { type HostRecoverySelection, type RevokedHost } from './host-recovery.js';
-import { type BrokerAssociationState } from './succession-associations.js';
-import { isNativeSessionRef, resolveRoleSuccession, nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
+import { resolveRoleSuccession, nativeSessionRefKey, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
 import { isSuccessionAssociationAuthority } from '@orchardworks/agent-remote-protocol';
-import { isTpmAction, isTpmCreate, isTpmList, isTpmWork } from '@orchardworks/agent-remote-protocol';
 import { validSessionRelationUpdate, validSourceRelation, type SourceRelation, type SessionRelation } from '@orchardworks/agent-remote-protocol/model';
-import { isHostProviderChange } from '@orchardworks/agent-remote-protocol';
 import type { NativeSessionOwner } from '@orchardworks/agent-remote-protocol';
-import { isCodexDaemonRestart } from '@orchardworks/agent-remote-protocol';
 import { controllerReleases } from './controller-releases.js';
-import { decodeClientMessage, PROTOCOL_VERSION, controllerUpdateTarget, controllerUpgradeBridgeVersion, type ControllerRelease } from '@orchardworks/agent-remote-protocol';
-import { MAX_PAIRING_HISTORY, pairingStatus, visiblePairing, type SavedPairingKey } from './pairing-keys.js';
+import { decodeClientMessage, PROTOCOL_VERSION, type ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createHash } from 'node:crypto';
 import { systemIds } from './relay-ids.js';
-import { isPairingPurpose } from '@orchardworks/agent-remote-protocol';
-import { sessionAttachFailure } from '@orchardworks/agent-remote-protocol/model';
 import { HostSharing, SharingError } from './host-sharing.js';
 import { createHostPreviews } from './host-previews.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
@@ -43,9 +39,9 @@ import { createHostJournals, type JournalReadRequest } from './host-journals.js'
 import { createHostStreamOpener } from './journal-host-stream.js';
 import { createStreamControl } from './stream-control.js';
 import { createJournalSessions, journalSessionKey } from './journal-sessions.js';
-import { required, requiredHostIdentity, creationFingerprintSettings, optionalSettings, sameBinding, readBody, readOnlyProviders } from './request-input.js';
-import { json, rawJson, rejectUpgrade, HOST_STREAM_LIMIT, USER_STREAM_LIMIT, capacityRefusal } from './http-replies.js';
-import { BrokerError, type Binding, type DeviceCredential, type Host, type HostBrokerOptions, type RemoteHostBrokerState, type RpcResponse, type SharedCreation, type VisibleHostStates } from './broker-types.js';
+import { required, readOnlyProviders } from './request-input.js';
+import { json, rejectUpgrade, HOST_STREAM_LIMIT, USER_STREAM_LIMIT, capacityRefusal } from './http-replies.js';
+import { BrokerError, type Binding, type Host, type HostBrokerOptions, type RemoteHostBrokerState, type VisibleHostStates } from './broker-types.js';
 
 export type { HostBrokerOptions, RemoteHostBrokerState, VisibleHostStates } from './broker-types.js';
 export { USER_STREAM_LIMIT } from './http-replies.js';
@@ -170,7 +166,6 @@ export function createHostBroker(options: HostBrokerOptions) {
       return { value, publish() { brokerState.sharing = draft; } };
     });
   }
-  const principal = (context: BrokerRequestContext) => context.principalSubject?.();
   const permitted = async (context: BrokerRequestContext) => !context.authorize || await context.authorize() === true;
   const keyHash = (key: string) => createHash('sha256').update(key).digest('hex');
   const requireJournal = (hostId: string) => {
@@ -223,534 +218,9 @@ export function createHostBroker(options: HostBrokerOptions) {
       if (access?.status === 'rejected') throw new BrokerError(access.httpStatus, access.code, access.message);
     }
     const subject = principal(context);
-    const succession = /^\/v1\/remote\/hosts\/([^/]+)\/succession\/(describe|prepare|commit|cancel|status|reconcile)$/.exec(url.pathname);
-    if (succession) {
-      requireOwner(subject); requireAccess(succession[1]!, subject);
-      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
-      return json(200, await successionAction(requireHost(succession[1]!), succession[2]!, await readBody(request)));
-    }
-    if (url.pathname === '/v1/remote/controller-release' && request.method === 'GET') {
-      requireOwner(subject);
-      const refresh = url.searchParams.get('refresh') === '1';
-      const release = await (options.controllerReleases ?? controllerReleases).latest({ refresh });
-      if (!release) return json(200, { release });
-      const versions = [...new Set([...brokerState.hosts.values()].flatMap(host => {
-        const version = host.controller?.remoteUpdate && controllerUpgradeBridgeVersion(release, host.controller);
-        return version ? [version] : [];
-      }))];
-      const results = await Promise.allSettled(versions.map(version => readUpgradeBridge(version, refresh)));
-      const bridges = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
-      return json(200, { release, ...(bridges[0] ? { bridgeRelease: bridges[0] } : {}),
-        ...(bridges.length > 1 ? { bridgeReleases: bridges } : {}),
-        ...(results.some(result => result.status === 'rejected') ? { bridgeError: 'An upgrade component for older Controllers is unavailable. Refresh and retry after it is published.' } : {}) });
-    }
-
-    const controllerUpdate = /^\/v1\/remote\/hosts\/([^/]+)\/controller-update$/.exec(url.pathname);
-    if (controllerUpdate) {
-      requireOwner(subject); requireAccess(controllerUpdate[1]!, subject);
-      const host = requireHost(controllerUpdate[1]!);
-      if (!host.controller?.remoteUpdate) return json(409, { error: 'Install the release launcher locally before using remote updates.' });
-      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
-      let body: string | undefined;
-      if (request.method === 'POST') {
-        const input = await readBody(request);
-        const release = await (options.controllerReleases ?? controllerReleases).latest();
-        const bridgeVersion = release && controllerUpgradeBridgeVersion(release, host.controller);
-        const bridge = bridgeVersion ? await readUpgradeBridge(bridgeVersion) : undefined;
-        const target = release && controllerUpdateTarget(release, host.controller, bridge);
-        if (!target || input.version !== target.version
-          || typeof input.operationId !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(input.operationId)) return json(409, { error: 'Refresh the Controller release and Host list before confirming this update.' });
-        body = JSON.stringify({ version: target.version, operationId: input.operationId });
-      }
-      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/controller-update', undefined, body);
-      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    }
-    const providerSettings = /^\/v1\/remote\/hosts\/([^/]+)\/provider-settings$/.exec(url.pathname);
-    if (providerSettings) {
-      requireOwner(subject); requireAccess(providerSettings[1]!, subject);
-      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
-      const host = requireHost(providerSettings[1]!);
-      if (!host.providerManagement) return json(409, { error: 'Update the Controller to manage providers.' });
-      let body: string | undefined;
-      if (request.method === 'POST') {
-        const input = await readBody(request);
-        if (!isHostProviderChange(input)) return json(400, { error: 'Invalid provider preferences.' });
-        body = JSON.stringify(input);
-      }
-      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/provider-settings', undefined, body);
-      requireOwner(principal(context)); requireAccess(providerSettings[1]!, principal(context));
-      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    }
-    if (url.pathname === '/v1/remote/teams' || url.pathname === '/v1/remote/teams/create' || url.pathname === '/v1/remote/teams/action' || url.pathname === '/v1/remote/teams/delete') {
-      requireOwner(subject);
-      const recipientAware = request.headers.get('x-arc-team-recipients') === '1';
-      if (url.pathname === '/v1/remote/teams' && request.method === 'GET') {
-        try { return json(200, { teams: brokerState.teams.filter(team => hostAllowed(team.source.hostId, subject)).map(team => teams.readForClient(team.id, recipientAware)) }); }
-        catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
-      }
-      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
-      const input = await readBody(request); requireOwner(principal(context));
-      try {
-        if (url.pathname.endsWith('/create') && isTeamCreate(input)) {
-          requireAccess(input.source.hostId, principal(context));
-          const result = await teams.create(input);
-          requireOwner(principal(context)); requireAccess(input.source.hostId, principal(context));
-          return json(200, teams.readForClient(result.id, recipientAware));
-        }
-        if (url.pathname.endsWith('/action') && isTeamAction(input)) {
-          const team = brokerState.teams.find(team => team.id === input.teamId);
-          if (!team) return json(404, { error: 'Team not found.' });
-          requireAccess(team.source.hostId, principal(context));
-          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
-          const result = await teams.action(input);
-          requireOwner(principal(context)); requireAccess(team.source.hostId, principal(context));
-          if (input.action === 'add_member') requireAccess(input.hostId, principal(context));
-          return json(200, teams.readForClient(result.id, recipientAware));
-        }
-        if (url.pathname.endsWith('/delete') && isTeamDelete(input)) {
-          const team = brokerState.teams.find(team => team.id === input.teamId);
-          if (!team) return json(404, { error: 'Team not found.' });
-          requireAccess(team.source.hostId, principal(context));
-          await teams.delete(input.teamId);
-          return json(200, { teamId: input.teamId, deleted: true });
-        }
-        return json(400, { error: 'Invalid Team request.' });
-      } catch (error) { return json(409, { error: error instanceof Error ? error.message : 'Team request failed.' }); }
-    }
-    if (url.pathname === '/v1/remote/call-for-support' || url.pathname === '/v1/remote/call-for-support/profiles' || url.pathname === '/v1/remote/call-for-support/enablement') {
-      requireOwner(subject);
-      const resolveVisible = (hostId: string, providerId: string, nativeSessionId: string) => hostAllowed(hostId, subject) ? resolveRole(hostId, providerId, nativeSessionId) : undefined;
-      const view = () => ({ profiles: structuredClone(brokerState.callForSupport?.profiles ?? []), enablement: projectEnablement(brokerState.callForSupport, resolveVisible) });
-      if (url.pathname === '/v1/remote/call-for-support') return request.method === 'GET' ? json(200, view()) : json(405, { error: 'Method is not allowed.' });
-      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
-      const input = await readBody(request); requireOwner(principal(context));
-      try {
-        if (url.pathname.endsWith('/profiles')) {
-          if (!isCallForSupportProfileCommand(input)) return json(400, { error: 'Invalid support profile request.' });
-          const profile = await callForSupportChange(state => executeProfileCommand(state, input, now()));
-          requireOwner(principal(context));
-          return json(200, { ...(profile ? { profile } : {}), ...view() });
-        }
-        const target = input as { hostId?: unknown; providerId?: unknown; nativeSessionId?: unknown; profileIds?: unknown };
-        if (!target || typeof target !== 'object' || Object.keys(target).sort().join() !== 'hostId,nativeSessionId,profileIds,providerId' || typeof target.hostId !== 'string'
-          || typeof target.providerId !== 'string' || typeof target.nativeSessionId !== 'string' || !Array.isArray(target.profileIds) || !target.profileIds.every(id => typeof id === 'string')) {
-          return json(400, { error: 'Invalid Call For Support enablement.' });
-        }
-        requireAccess(target.hostId, principal(context));
-        const worker = { hostId: target.hostId, providerId: target.providerId, nativeSessionId: target.nativeSessionId };
-        await callForSupportChange(state => setEnablement(state, resolveRole, worker, target.profileIds as string[], now()));
-        requireOwner(principal(context));
-        return json(200, view());
-      } catch (error) {
-        if (error instanceof CallForSupportProfileError) return json(error.code === 'not_found' ? 404 : error.code === 'invalid' ? 400 : 409, { code: error.code, error: error.message });
-        throw error;
-      }
-    }
-    const tpm = /^\/v1\/remote\/hosts\/([^/]+)\/tpm(?:\/(create|action|work))?$/.exec(url.pathname);
-    if (tpm) {
-      requireOwner(subject); requireAccess(tpm[1]!, subject);
-      const host = requireHost(tpm[1]!);
-      const generation = host.generation, installationId = host.installationId;
-      const requireTpmLifetime = () => { brokerState.assertHostCurrent(host, generation); requireOwner(principal(context)); requireAccess(host.id, principal(context)); };
-      if (!host.tpmManagement) return request.method === 'GET' && !tpm[2]
-        ? json(200, { supported: false, supportedProviders: [], works: [] })
-        : json(409, { error: 'Update the Controller to use TPM.' });
-      const action = tpm[2];
-      const method = action === 'create' || action === 'action' ? 'POST' : 'GET';
-      if (request.method !== method) return json(405, { error: 'Method is not allowed.' });
-      let body: string | undefined;
-      let expectedId: string | undefined;
-      if (action === 'work') {
-        if (url.searchParams.size !== 1 || !url.searchParams.has('id')) throw new BrokerError(400, 'invalid_request', 'A TPM work ID is required.');
-        expectedId = required(url.searchParams.get('id'), 'id');
-        if (expectedId.length > 128) throw new BrokerError(400, 'invalid_request', 'The TPM work ID is invalid.');
-      } else if (!action && url.searchParams.size) {
-        const cursor = url.searchParams.get('cursor');
-        if (url.searchParams.size !== 1 || !cursor || cursor.length > 128) throw new BrokerError(400, 'invalid_request', 'The TPM catalog cursor is invalid.');
-      } else if (url.searchParams.size) throw new BrokerError(400, 'invalid_request', 'TPM query parameters are invalid.');
-      if (method === 'POST') {
-        const input = await readBody(request);
-        requireTpmLifetime();
-        if (action === 'create' ? !isTpmCreate(input) : !isTpmAction(input)) throw new BrokerError(400, 'invalid_request', 'The TPM request is invalid.');
-        if (action === 'create' && !host.providers.some(provider => provider.providerId === input.providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-        if (action === 'action') expectedId = input.id as string;
-        body = JSON.stringify(input);
-      }
-      const path = `/remote/tpm${action ? '/' + action : ''}${action === 'work' ? '?' + new URLSearchParams({ id: expectedId! }) : !action && url.searchParams.has('cursor') ? '?' + new URLSearchParams({ cursor: url.searchParams.get('cursor')! }) : ''}`;
-      requireTpmLifetime();
-      const result = await rpc(host, method, path, undefined, body);
-      requireTpmLifetime();
-      if (!action && result.status === 404) return json(200, { supported: false, works: [] });
-      if (result.status >= 200 && result.status < 300) {
-        let value: unknown;
-        try { value = JSON.parse(result.body); } catch { throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.'); }
-        if (action ? !isTpmWork(value) || (expectedId !== undefined && value.id !== expectedId) : !isTpmList(value)) throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM response.');
-        const works = isTpmWork(value) ? [value] : isTpmList(value) ? value.works : [];
-        for (const work of works) {
-          const main = work.mainSessionRef;
-          const source = work.mainBinding?.kind === 'fixed' ? work.mainBinding.source : work.mainBinding?.origin;
-          if (main && (main.controllerId !== installationId || main.nativeSessionId !== work.mainNativeSessionId)
-            || source && source.controllerId !== installationId
-            || main && work.mainBinding?.kind === 'fixed' && nativeSessionRefKey(main) !== nativeSessionRefKey(work.mainBinding.source)) {
-            throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid TPM reference.');
-          }
-        }
-      }
-      return rawJson(result);
-    }
-    const hostStatus = /^\/v1\/remote\/hosts\/([^/]+)\/status$/.exec(url.pathname);
-    if (hostStatus) {
-      requireAccess(hostStatus[1]!, subject);
-      if (request.method !== 'GET') return json(405, { error: 'Method is not allowed.' });
-      const target = requireHost(hostStatus[1]!);
-      // A Controller that did not offer this read would treat the request as a protocol error and drop its connection.
-      if (!target.hostStatus) throw new BrokerError(501, 'unsupported_command', 'Update the Controller on this Host to see its status.');
-      const result = await rpc(target, 'GET', '/remote/host-status');
-      requireAccess(hostStatus[1]!, principal(context));
-      let value: unknown;
-      try { value = JSON.parse(result.body); } catch { value = undefined; }
-      if (result.status !== 200 || !isHostStatus(value)) throw new BrokerError(502, 'invalid_host_response', 'The Host returned an invalid status.');
-      return new Response(JSON.stringify(ownerOnlyHostStatus(value, owner(principal(context)))), { status: 200, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    }
-    const codexDaemon = /^\/v1\/remote\/hosts\/([^/]+)\/codex-daemon$/.exec(url.pathname);
-    if (codexDaemon) {
-      requireOwner(subject); requireAccess(codexDaemon[1]!, subject);
-      if (!['GET', 'POST'].includes(request.method)) return json(405, { error: 'Method is not allowed.' });
-      const host = requireHost(codexDaemon[1]!);
-      if (!host.providers.some(provider => provider.providerId === 'codex' && provider.daemonControl)) {
-        throw new BrokerError(400, 'unsupported_configuration', 'This Host does not support remote shared Codex daemon control.');
-      }
-      let body: string | undefined;
-      if (request.method === 'POST') {
-        const input = await readBody(request);
-        if (!isCodexDaemonRestart(input)) throw new BrokerError(400, 'invalid_request', 'Refresh daemon state before confirming restart.');
-        body = JSON.stringify(input);
-      }
-      const result = await rpc(host, request.method as 'GET' | 'POST', '/remote/codex-daemon', undefined, body);
-      requireOwner(principal(context)); requireAccess(codexDaemon[1]!, principal(context));
-      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    }
-    const vscodeTunnel = /^\/v1\/remote\/hosts\/([^/]+)\/vscode-tunnel(?:\/(start|stop))?$/.exec(url.pathname);
-    if (vscodeTunnel) {
-      requireOwner(subject); requireAccess(vscodeTunnel[1]!, subject);
-      const action = vscodeTunnel[2];
-      if ((!action && request.method !== 'GET') || (action && request.method !== 'POST')) return json(405, { error: 'Method is not allowed.' });
-      const body = action ? await readBody(request) : undefined;
-      if (action === 'start' && body?.acceptLicense !== true) return json(400, { error: 'Accept the VS Code Server license terms before starting.' });
-      const result = await rpc(requireHost(vscodeTunnel[1]!), action ? 'POST' : 'GET', `/remote/vscode-tunnel${action ? `/${action}` : ''}`, undefined,
-        action ? JSON.stringify(action === 'start' ? { acceptLicense: true } : {}) : undefined);
-      requireOwner(principal(context)); requireAccess(vscodeTunnel[1]!, principal(context));
-      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-    }
-    const previewSession = /^\/v1\/sessions\/([^/]+)\/previews$/.exec(url.pathname);
-    if (previewSession && request.method === 'POST') {
-      requireOwner(subject);
-      const binding = brokerState.bindings.get(previewSession[1]!);
-      if (!binding || !sessionAllowed(binding, subject)) throw new BrokerError(404, 'session_unavailable', 'Session is unavailable.');
-      const body = await readBody(request);
-      const target = required(body.target, 'target'); const itemId = required(body.itemId, 'itemId');
-      if (body.pathMode !== undefined && body.pathMode !== 'strip' && body.pathMode !== 'preserve') throw new BrokerError(400, 'invalid_path_mode', 'Choose strip or preserve path mode.');
-      const result = await rpc(requireHost(binding.hostId), 'POST', '/remote/previews', undefined,
-        JSON.stringify({ target, source: { sessionId: binding.agentId, itemId }, pathMode: body.pathMode ?? 'strip' }));
-      return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
-    }
-    const previewHost = /^\/v1\/remote\/hosts\/([^/]+)\/previews(?:\/([A-Za-z0-9_-]+)\/(unregister|renew))?$/.exec(url.pathname);
-    if (previewHost) {
-      requireOwner(subject); requireAccess(previewHost[1]!, subject);
-      if (!previewHost[2] && request.method === 'GET') {
-        const snapshot = previews.list(previewHost[1]!);
-        return json(200, { ...snapshot, registrations: snapshot.registrations.filter(value => value.status === 'active') });
-      }
-      if (previewHost[2] && request.method === 'POST') {
-        await readBody(request);
-        if (previewHost[3] === 'renew') {
-          const registration = previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]);
-          if (!registration || registration.status === 'unregistered' || registration.pendingUnregister) return json(409, { error: 'Preview is unavailable or has been unregistered.' });
-          const nameId = previews.nameId(previewHost[1]!, previewHost[2]);
-          if (previews.list(previewHost[1]!).registrations.some(value => value.id !== registration.id && value.status === 'active'
-            && value.expiresAt > now() && !value.pendingUnregister && previews.nameId(previewHost[1]!, value.id) === nameId))
-            return json(409, { error: 'A newer registration uses this tunnel name. Open the current preview.' });
-          const result = await rpc(requireHost(previewHost[1]!), 'POST', '/remote/previews/renew', undefined, JSON.stringify({ id: previewHost[2] }));
-          return new Response(result.body, { status: result.status, headers: { 'content-type': 'application/json' } });
-        }
-        await previews.unregister(previewHost[1]!, previewHost[2]);
-        return json(200, { registration: previews.list(previewHost[1]!).registrations.find(value => value.id === previewHost[2]) });
-      }
-      return json(405, { error: 'Method is not allowed.' });
-    }
-    if (url.pathname === '/v1/remote/hosts' && request.method === 'GET') return json(200, { hosts: visibleHosts(subject) });
-    if (url.pathname === '/v1/remote/pairings') {
-      requireOwner(subject);
-      if (request.method === 'GET') return json(200, { availablePurposes: accountBacked && options.gatewaySetup !== false ? ['host-only', 'gateway-setup'] : ['host-only'],
-        pairings: [...brokerState.pairings].sort((a, b) => b.createdAt - a.createdAt).map(item => visiblePairing(item, now())) });
-      if (request.method !== 'POST') return json(405, { error: 'Method is not allowed.' });
-      const body = await readBody(request);
-      const purpose = body.purpose ?? 'host-only';
-      if (Object.keys(body).some(key => !['purpose', 'recoverHostId'].includes(key)) || !isPairingPurpose(purpose)) throw new BrokerError(400, 'invalid_request', 'Select a supported pairing purpose.');
-      const recoverHostId = body.recoverHostId === undefined ? undefined : required(body.recoverHostId, 'recoverHostId');
-      if (recoverHostId && (recoverHostId.length > 512 || purpose !== 'host-only' || !accountBacked || !options.ownerSubject || !options.successionEnrollment)) throw new BrokerError(400, 'host_recovery_unavailable', 'Recovery requires an authenticated owner and a retained succession identity.');
-      if (options.gatewaySetup === false && purpose !== 'host-only') throw new BrokerError(403, 'unsupported_purpose', 'Gateway setup is unavailable for this authentication provider.');
-      if (!accountBacked && purpose !== 'host-only') throw new BrokerError(400, 'unsupported_purpose', 'Gateway setup requires an account-backed Relay.');
-      const key = `arc_${ids.token()}`;
-      const createdAt = now(); const expires = createdAt + (options.keyLifetimeMs ?? (accountBacked ? 10 * 60 * 1000 : 24 * 60 * 60 * 1000));
-      const item: SavedPairingKey = { id: ids.uuid(), purpose, createdAt, expiresAt: expires };
-      await brokerState.commit(draft => {
-        let recovery: HostRecoverySelection | undefined;
-        if (recoverHostId) {
-          const installationId = brokerState.retainedIdentities().get(recoverHostId);
-          if (!installationId || brokerState.hosts.has(recoverHostId) || [...brokerState.hosts.values()].some(host => host.installationId === installationId)) throw new BrokerError(409, 'host_recovery_unavailable', 'The selected historical Host is unavailable for recovery.');
-          let marker = draft.revokedHosts?.find(host => host.hostId === recoverHostId);
-          if (!marker) {
-            marker = { hostId: recoverHostId, installationId, revocationId: ids.uuid() };
-            (draft.revokedHosts ??= []).push(marker);
-          }
-          recovery = { hostId: marker.hostId, installationId: marker.installationId, revocationId: marker.revocationId };
-          item.recovery = recovery;
-          draft.keys = draft.keys.filter(([, value]) => value.installationId !== installationId || value.recovery?.revocationId === marker.revocationId);
-          if (draft.sharing) for (const grant of draft.sharing.grants) if (grant.hostId === recoverHostId) grant.revoked = true;
-        }
-        draft.keys = draft.keys.filter(([, value]) => value.expires > now());
-        if (draft.keys.length >= 128) throw new BrokerError(429, 'capacity_exceeded', 'Too many active temporary keys.');
-        if ((draft.pairings?.length ?? 0) >= MAX_PAIRING_HISTORY) throw new BrokerError(429, 'pairing_history_full', 'Delete old pairing key records before creating another key.');
-        const credential: DeviceCredential = { expires, purpose, pairingId: item.id, ...(recovery ? { recovery, installationId: recovery.installationId } : {}), ...(accountBacked ? { requiresRotation: true } : {}) };
-        draft.keys.push([keyHash(key), credential]);
-        (draft.pairings ??= []).push(item);
-        return { value: undefined, publish() {
-          for (const hash of brokerState.keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) brokerState.keys.delete(hash);
-          brokerState.pairings = draft.pairings!;
-          brokerState.revokedHosts = draft.revokedHosts;
-          brokerState.sharing = new HostSharing(draft.sharing, () => {});
-          brokerState.keys.set(keyHash(key), credential); options.onPairing?.(key, expires);
-        } };
-      // No key or access removal is published, and no external grant effect occurs, before admission.
-      }, true);
-      return json(201, { ...visiblePairing(item, now()), key, serverUrl: options.publicUrl ?? context.serverUrl ?? new URL(request.url).origin,
-        ...(accountBacked && options.publicUrl ? { command: `export AGENT_HOST_SERVER='${options.publicUrl.replaceAll("'", "'\\''")}'\nexport AGENT_HOST_REMOTE_KEY='${key}'\nagent-remote-controller start` } : {}) });
-    }
-    const pairingAction = /^\/v1\/remote\/pairings\/([^/]+)(\/revoke)?$/.exec(url.pathname);
-    if (pairingAction) {
-      requireOwner(subject);
-      const revoke = pairingAction[2] === '/revoke';
-      if (request.method !== (revoke ? 'POST' : 'DELETE')) return json(405, { error: 'Method is not allowed.' });
-      const body = await readBody(request);
-      if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No pairing management parameters are accepted.');
-      await brokerState.commit(draft => {
-        const item = draft.pairings?.find(item => item.id === pairingAction[1]);
-        if (!item) throw new BrokerError(404, 'pairing_not_found', 'Pairing key record is unavailable.');
-        if (revoke && pairingStatus(item, now()) === 'used') throw new BrokerError(409, 'pairing_used', 'This key has been used. Manage the paired Host to revoke its access.');
-        if (item.usedAt === undefined) draft.keys = draft.keys.filter(([, key]) => key.pairingId !== item.id);
-        if (revoke) item.revokedAt ??= now();
-        else draft.pairings = draft.pairings!.filter(value => value.id !== item.id);
-        return { value: undefined, publish() {
-          brokerState.pairings = draft.pairings ?? [];
-          for (const hash of brokerState.keys.keys()) if (!draft.keys.some(([saved]) => saved === hash)) brokerState.keys.delete(hash);
-          credentialExpiry.enforce();
-        } };
-      });
-      return json(200, { ok: true });
-    }
-    const management = /^\/v1\/remote\/hosts\/([^/]+)\/(rotate|stop)$/.exec(url.pathname);
-    if (management && request.method === 'POST') {
-      requireOwner(subject);
-      const body = await readBody(request);
-      const host = requireHost(management[1]!);
-      if (management[2] === 'rotate') {
-        if (Object.keys(body).length) throw new BrokerError(400, 'invalid_request', 'No parameters are accepted.');
-        if (!accountBacked || !host.issueCredential) throw new BrokerError(409, 'host_upgrade_required', 'Update and reconnect Agent Host before rotating its credential.');
-        await host.issueCredential();
-        return json(200, {ok:true,status:'pending'});
-      }
-      if (Object.keys(body).some(key => key !== 'operationId')) throw new BrokerError(400, 'invalid_request', 'Stop accepts only an operation identity.');
-      const result = await rpc(host, 'POST', '/remote/stop', undefined, JSON.stringify({ operationId: required(body.operationId, 'operationId') }));
-      return rawJson(result);
-    }
-    const reading = /^\/v1\/remote\/hosts\/([^/]+)\/smart-reading$/.exec(url.pathname);
-    if (reading) {
-      requireOwner(subject);
-      const host = brokerState.hosts.get(reading[1]!);
-      if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-      if (request.method === 'GET') return json(200, { providers: host.smartReading ?? [] });
-      if (request.method !== 'PUT') return json(405, { error: 'Method is not allowed.' });
-      if (!journals) throw new BrokerError(409, 'journals_unavailable', 'This Relay does not keep session journals.');
-      const body = await readBody(request);
-      if (Object.keys(body).some(key => key !== 'providerId' && key !== 'enabled') || typeof body.enabled !== 'boolean') {
-        throw new BrokerError(400, 'invalid_request', 'Name a provider and whether smart reading is on for it.');
-      }
-      const providerId = required(body.providerId, 'providerId');
-      const enabled = body.enabled;
-      if (enabled && !host.smartReading?.includes(providerId) && (host.smartReading?.length ?? 0) >= 64) {
-        throw new BrokerError(400, 'invalid_request', 'Smart reading names at most 64 providers per Host.');
-      }
-      const providers = await brokerState.commit(draft => {
-        brokerState.assertHostCurrent(host);
-        const saved = draft.hosts.find(value => value.id === host.id);
-        if (!saved) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-        const next = new Set(saved.smartReading ?? []);
-        if (enabled) next.add(providerId); else next.delete(providerId);
-        if (next.size > 64) throw new BrokerError(400, 'invalid_request', 'Smart reading names at most 64 providers per Host.');
-        const list = [...next].sort();
-        if (list.length > 0) saved.smartReading = list; else delete saved.smartReading;
-        return { value: list, publish() {
-          host.smartReading = list.length > 0 ? list : undefined;
-          if (!enabled) journalSessions?.stopReading(host.id, providerId);
-        } };
-      });
-      return json(200, { providers });
-    }
-    const revoking = /^\/v1\/remote\/hosts\/([^/]+)\/revoke$/.exec(url.pathname);
-    if (accountBacked && revoking && request.method === 'POST') {
-      requireOwner(subject);
-      await readBody(request);
-      const host = brokerState.hosts.get(revoking[1]!);
-      if (!host) throw new BrokerError(404, 'host_not_found', 'The Remote Host is unknown.');
-      let droppedDeletion: string | undefined;
-      await brokerState.commit(draft => {
-        droppedDeletion = undefined;
-        brokerState.assertHostCurrent(host);
-        if (brokerState.retainedIdentities().get(host.id) === host.installationId) {
-          const marker: RevokedHost = { hostId: host.id, installationId: host.installationId, revocationId: ids.uuid(), revokedAt: now() };
-          draft.revokedHosts = [...(draft.revokedHosts ?? []).filter(item => item.hostId !== host.id), marker];
-        }
-        if (draft.sharing) for (const grant of draft.sharing.grants) if (grant.hostId === host.id) grant.revoked = true;
-        for (const item of draft.pairings ?? []) if (item.recovery?.hostId === host.id && item.usedAt === undefined) item.revokedAt ??= now();
-        draft.keys = draft.keys.filter(([, credential]) => credential.installationId !== host.installationId);
-        draft.bindings = draft.bindings.filter(binding => binding.hostId !== host.id);
-        draft.creations = draft.creations.filter(([, value]) => draft.bindings.some(binding => binding.agentId === value.agentId));
-        draft.hosts = draft.hosts.filter(value => value.id !== host.id);
-        if (journals) {
-          const pending = (draft.journalDeletions ?? []).filter(id => id !== host.id);
-          // A revoke always succeeds: when the list is full, the oldest pending deletion is dropped.
-          if (pending.length >= JOURNAL_DELETION_LIMIT) droppedDeletion = pending.shift();
-          draft.journalDeletions = [...pending, host.id];
-        }
-        draft.previews = (draft.previews ?? []).filter(value => value.hostId !== host.id);
-        return { value: undefined, publish() {
-          brokerState.revokedHosts = draft.revokedHosts;
-          brokerState.pairings = draft.pairings ?? [];
-          brokerState.sharing = new HostSharing(draft.sharing, () => {});
-          for (const [key, credential] of brokerState.keys) if (credential.installationId === host.installationId) brokerState.keys.delete(key);
-          sessionBindings.forgetHost(host.id);
-          brokerState.hosts.delete(host.id);
-          previews.forget(host.id);
-          if (journals) {
-            brokerState.journalDeletions = draft.journalDeletions ?? [];
-            deletion.revoked(host.id, droppedDeletion);
-          }
-          if (host.socket) { const socket = host.socket; disconnected(host, socket, 'access_revoked', 1008); socket.close(1008, 'Device revoked'); }
-        } };
-      });
-      return json(200, { ok: true });
-    }
-    const refs = /^\/v1\/remote\/hosts\/([^/]+)\/session\/refs$/.exec(url.pathname);
-    if (refs && (request.method === 'GET' || request.method === 'POST')) {
-      requireAccess(refs[1]!, subject);
-      const host = requireHost(refs[1]!);
-      const input = request.method === 'POST' ? await readBody(request) : { providerId: url.searchParams.get('providerId'), nativeSessionId: url.searchParams.get('nativeSessionId') };
-      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
-      // References name other sessions, so a page may change them only where it may open both sessions.
-      const allowed = (provider: string, session: string) => {
-        const binding = brokerState.nativeBindings.get(JSON.stringify([host.id, provider, session]));
-        return owner(subject) || !!binding && sessionAllowed(binding, subject);
-      };
-      if (!allowed(providerId, nativeSessionId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      // Older Controllers refuse the route and close their uplink, so only Controllers that declare references are asked.
-      if (!host.providers.some(provider => provider.providerId === providerId && provider.sessionReferences)) throw new BrokerError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
-      if (request.method === 'GET') return rawJson(await rpc(host, 'GET', `/remote/session/refs?${new URLSearchParams({ providerId, nativeSessionId })}`));
-      const target = input.target as { providerId?: unknown; nativeSessionId?: unknown } | undefined;
-      if ((input.action !== 'add' && input.action !== 'remove') || typeof target?.providerId !== 'string' || typeof target.nativeSessionId !== 'string'
-        || Object.keys(input).some(key => !['providerId', 'nativeSessionId', 'action', 'target'].includes(key))) throw new BrokerError(400, 'invalid_request', 'Name the reference to add or remove.');
-      if (input.action === 'add' && !allowed(target.providerId, target.nativeSessionId)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      return rawJson(await rpc(host, 'POST', '/remote/session/refs', undefined, JSON.stringify({ providerId, nativeSessionId, action: input.action,
-        target: { providerId: target.providerId, nativeSessionId: target.nativeSessionId } })));
-    }
-    const call = /^\/v1\/remote\/hosts\/([^/]+)\/session\/call$/.exec(url.pathname);
-    if (call && request.method === 'POST') {
-      // Session commands reach every session of a Host, so only its owner sends them.
-      if (!owner(subject)) throw new SharingError(403, 'session_forbidden', 'Session commands are available to the Host owner.');
-      requireAccess(call[1]!, subject);
-      const host = requireHost(call[1]!);
-      if (!host.providers.some(provider => provider.sessionCommands)) throw new BrokerError(400, 'unsupported_configuration', 'Session commands are unavailable. Update the Controller.');
-      const input = await readBody(request);
-      const command = input.request as Record<string, unknown> | undefined;
-      if (!command || typeof command !== 'object' || Array.isArray(command) || Object.keys(input).some(key => key !== 'request')) throw new BrokerError(400, 'invalid_request', 'A session command is required.');
-      // Permission settings need a recent sign-in in the website; the same holds for commands.
-      const settings = command.command === 'set' && command.settings && typeof command.settings === 'object' ? Object.keys(command.settings) : [];      if (settings.some(settingId => context.authorizeMessage?.(JSON.stringify({ type: 'set_session_setting', payload: { settingId } })) === false)) {
-        throw new BrokerError(403, 'reauthentication_required', 'Sign in again in the website before changing permission settings.');
-      }
-      return rawJson(await rpc(host, 'POST', '/remote/session/call', undefined, JSON.stringify({ request: command })));
-    }
-    const rename = /^\/v1\/remote\/hosts\/([^/]+)\/session\/rename$/.exec(url.pathname);
-    if (rename && request.method === 'POST') {
-      requireAccess(rename[1]!, subject);
-      const host = requireHost(rename[1]!);
-      const input = await readBody(request);
-      const providerId = required(input.providerId, 'providerId'), nativeSessionId = required(input.nativeSessionId, 'nativeSessionId');
-      const binding = brokerState.nativeBindings.get(JSON.stringify([host.id, providerId, nativeSessionId]));
-      if (!owner(subject) && (!binding || !sessionAllowed(binding, subject))) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      if (!host.providers.some(provider => provider.providerId === providerId && provider.sessionRename)) throw new BrokerError(400, 'unsupported_configuration', 'Native session renaming is unavailable. Update the Controller.');
-      const title = required(input.title, 'title').trim();
-      if (!title || title.length > 512 || /[\u0000-\u001f\u007f]/.test(title) || Object.keys(input).some(key => !['providerId', 'nativeSessionId', 'title', 'operationId'].includes(key))) throw new BrokerError(400, 'invalid_request', 'Enter a session name of up to 512 characters.');
-      const result = await rpc(host, 'POST', '/remote/session/rename', undefined, JSON.stringify({ providerId, nativeSessionId, title, operationId: required(input.operationId, 'operationId') }));
-      requireAccess(host.id, subject);
-      if (!owner(subject) && (!binding || !sessionAllowed(binding, subject))) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      return rawJson(result);
-    }
-    const listing = /^\/v1\/remote\/hosts\/([^/]+)\/catalog\/listing$/.exec(url.pathname);
-    if (listing) {
-      requireOwner(subject); requireAccess(listing[1]!, subject);
-      const host = requireHost(listing[1]!);
-      if (request.method !== 'GET' && request.method !== 'POST') throw new BrokerError(405, 'method_not_allowed', 'Use GET or POST.');
-      const input = request.method === 'POST' ? await readBody(request) : undefined;
-      const providerId = required(input?.providerId ?? url.searchParams.get('providerId'), 'providerId');
-      if (host.legacyDsh || !host.providers.some(provider => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-      if (input && Object.keys(input).some(key => key !== 'providerId')) throw new BrokerError(400, 'invalid_request', 'Only providerId is accepted.');
-      const result = await rpc(host, request.method, `/remote/catalog/listing${input ? '' : '?' + new URLSearchParams({ providerId })}`, undefined, input ? JSON.stringify({ providerId }) : undefined);
-      requireOwner(principal(context)); requireAccess(host.id, principal(context));
-      return rawJson(result);
-    }
-    const directory = /^\/v1\/remote\/hosts\/([^/]+)\/(catalog(?:\/revision)?|workspaces|workspace-folders(?:\/create)?|models|child\/attach|attach|create)$/.exec(url.pathname);
-    if (directory) {
-      requireAccess(directory[1]!, subject);
-      const action = directory[2]!;
-      if (action.startsWith('workspace-folders')) requireOwner(subject);
-      const host = requireHost(directory[1]!);
-      if (action === 'models' && request.method === 'GET' && host.legacyDsh) return json(200, { models: [] });
-      if (['catalog', 'catalog/revision', 'workspaces', 'workspace-folders', 'models'].includes(action) && request.method === 'GET') {
-        const query = new URLSearchParams(url.search);
-        const providerId = query.get('providerId');
-        if (!host.legacyDsh && (!providerId || !host.providers.some((provider) => provider.providerId === providerId))) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-        if (host.legacyDsh) query.delete('providerId');
-        if (!owner(subject) && action.startsWith('catalog')) {
-          return rawJson(await sharedCatalog(host, action, query, subject!));
-        }
-        const result = await rpc(host, 'GET', `/remote/${action}${query.size ? '?' + query : ''}`);
-        requireAccess(host.id, subject);
-        return rawJson(result);
-      }
-      if (action === 'workspace-folders/create' && request.method === 'POST') {
-        const payload = await readBody(request);
-        const providerId = required(payload.providerId, 'providerId');
-        if (host.legacyDsh || !host.providers.some(provider => provider.providerId === providerId)) throw new BrokerError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-        const result = await rpc(host, 'POST', '/remote/workspace-folders/create', undefined, JSON.stringify({
-          providerId, parentPath: required(payload.parentPath, 'parentPath'), name: required(payload.name, 'name'),
-        }));
-        requireAccess(host.id, subject); requireOwner(subject);
-        return rawJson(result);
-      }
-      if (['attach', 'child/attach', 'create'].includes(action) && request.method === 'POST') {
-        const operation = userMutation(host, action, await readBody(request), subject);
-        const binding = await (action === 'create' ? waitForCreation(operation) : operation);
-        if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-        return json(200, { agentId: binding.agentId, nativeSessionId: binding.nativeSessionId }); }
-    }
-    const session = /^\/v1\/sessions\/([^/]+)\/(snapshot|timeline)$/.exec(url.pathname);
-    const binding = session && brokerState.bindings.get(session[1]!);
-    if (binding && request.method === 'GET') {
-      if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      const host = requireHost(binding.hostId); await recoverBinding(host, binding);
-      const result = await sessionRead(host, binding, url.pathname + url.search);
-      if (!sessionAllowed(binding, subject)) throw new SharingError(403, 'session_forbidden', 'Session access is unavailable.');
-      return rawJson(result);
+    for (const route of routes) {
+      const response = await route(request, context, url, subject);
+      if (response) return response;
     }
     throw new BrokerError(404, 'route_not_found', 'Unknown Remote Host route.');
   }
@@ -927,6 +397,15 @@ export function createHostBroker(options: HostBrokerOptions) {
       catch { client.close(1012, 'Remote Host disconnected'); }
     } };
   }
+  const routes: RouteGroup[] = [
+    createControllerRoutes({ access, brokerState, rpc, successionAction: succession.action, options }),
+    createTeamRoutes({ access, brokerState, now, teams, callForSupportChange, resolveRole }),
+    createHostServiceRoutes({ access, brokerState, rpc }),
+    createPreviewRoutes({ access, brokerState, now, rpc, previews }),
+    createPairingRoutes({ access, brokerState, now, ids, rpc, disconnected, previews, deletion, journals, journalSessions, visibleHosts, credentialExpiry, accountBacked, keyHash, sessionBindings, options }),
+    createSessionDirectoryRoutes({ access, brokerState, rpc, waitForCreation, userMutation, sharedCatalog }),
+    createSessionReadRoutes({ access, brokerState, sessionBindings }),
+  ];
   const handlesRequest = (url: URL) => {
     const session = /^\/v1\/sessions\/([^/]+)\//.exec(url.pathname);
     return url.pathname === '/v1/remote/controller-release' || /^\/v1\/remote\/(hosts|pairings|teams|call-for-support)(\/|$)/.test(url.pathname) || !!(session && brokerState.bindings.has(session[1]!));

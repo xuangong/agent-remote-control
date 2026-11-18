@@ -4,15 +4,19 @@ import { render } from '../test/setup.js';
 import { arrangeFloatingEntries, useTrackingPosition } from './useTrackingPosition.js';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
+let appBarBottom = 0, toolsBottom = 0;
 let viewport: EventTarget & { offsetLeft: number; offsetTop: number; width: number; height: number };
 beforeEach(() => {
   localStorage.clear();
+  appBarBottom = 0; toolsBottom = 0;
   vi.stubGlobal('innerWidth', 400);
   vi.stubGlobal('innerHeight', 800);
   viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 400, height: 800 });
   vi.stubGlobal('visualViewport', viewport);
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.matches('.lab-app-bar')) return rect(0, 0, 400, appBarBottom);
+    if (this.matches('.lab-timeline-tools')) return rect(10, 57, 390, toolsBottom - 57);
     const root = this.closest<HTMLElement>('.lab-tracking-floating');
     return root ? rect(parseFloat(root.style.left || '0'), parseFloat(root.style.top || '0'), 80, 44) : rect(0, 0, 400, 800);
   });
@@ -156,4 +160,60 @@ it('leaves a docked entry unpositioned and out of the floating arrangement', asy
   await view({ height: 700 });
   expect(docked.getAttribute('style')).toBeNull();
   expect(top(container, 'floating')).toBe(300);
+});
+
+function AppBarAndEntry({ name }: { name: string }) {
+  return <><header className="lab-app-bar" /><Entry name={name} /></>;
+}
+function stubAppBar(bottom: number) { appBarBottom = bottom; }
+function stylesheetDefault(top: number) {
+  const style = document.createElement('style');
+  style.textContent = `.lab-tracking-floating { position: fixed; left: 300px; top: ${top}px; }`;
+  document.head.append(style);
+  return () => style.remove();
+}
+
+it('starts a default placement below an app bar of several rows, and below a one-row bar where it was', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    stubAppBar(162);
+    const tall = await render(<AppBarAndEntry name="a" />);
+    expect(top(tall, 'a')).toBe(114 + 162 + 8 - 60);
+  } finally { remove(); }
+  const again = stylesheetDefault(114);
+  try {
+    stubAppBar(48);
+    const one = await render(<AppBarAndEntry name="b" />);
+    expect(top(one, 'b')).toBe(114);
+  } finally { again(); }
+});
+
+it('does not move an entry the owner placed', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    stubAppBar(162); place('a', 300, 114);
+    const container = await render(<AppBarAndEntry name="a" />);
+    expect(top(container, 'a')).toBe(114);
+  } finally { remove(); }
+});
+
+it('moves the default placement below a timeline toolbar that mounts after the entry', async () => {
+  const remove = stylesheetDefault(60);
+  const observed: Array<() => void> = [];
+  vi.stubGlobal('ResizeObserver', class { constructor(private readonly callback: () => void) {} observe(target: Element) { if (target.matches('.lab-timeline-tools')) observed.push(this.callback); } unobserve() {} disconnect() {} });
+  try {
+    const container = await render(<Entry name="a" />);
+    expect(top(container, 'a')).toBe(60);
+    toolsBottom = 107;
+    expect(observed).toHaveLength(0);
+    await act(async () => {
+      const tools = document.createElement('div');
+      tools.className = 'lab-timeline-tools';
+      document.body.append(tools);
+      await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+      for (const callback of observed) callback();
+    });
+    expect(observed.length).toBeGreaterThan(0);
+    expect(top(container, 'a')).toBe(107 + 8);
+  } finally { document.querySelector('.lab-timeline-tools')?.remove(); remove(); }
 });

@@ -56,6 +56,8 @@
   .lab-tpm-window { padding-top: env(safe-area-inset-top, 0px); }
   .lab-tpm-conversation { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .lab-tpm-progress { max-height: 72px; }
+  /* A TPM window fills the screen here; the movable floating controls would cover its toolbar, and the window has its own Works and close buttons. */
+  :root:has(.lab-tpm-viewport:not([hidden])) .lab-tracking-floating:not(:has(.lab-session-popover-panel:not([hidden]))) { visibility: hidden; }
 }
 
 .lab-tpm-title-button { display: flex; align-items: center; gap: 7px; max-width: 100%; min-width: 0; min-height: 36px; padding: 0; border: 0; background: transparent; text-align: left; }

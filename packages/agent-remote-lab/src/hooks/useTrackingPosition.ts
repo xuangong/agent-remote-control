@@ -24,6 +24,8 @@ interface FloatingEntry {
   element: HTMLElement;
   /** Where the owner put the entry, relative to the visible area; only the owner changes it. */
   placement?: Position;
+  /** The stylesheet's default, read once; used while the owner has not placed the entry. */
+  stylesheet?: Position;
   /** The fixed CSS point of an entry being dragged, which the arrangement leaves in place. */
   held(): Position | undefined;
   show(point: Position, view: View): void;
@@ -43,6 +45,55 @@ function stylesheetPlacement(element: HTMLElement): Position | undefined {
   return { x: Number.isFinite(left) ? left : rect.left, y: Number.isFinite(top) ? top : rect.top };
 }
 
+/** The first top, in CSS pixels, of the stylesheet's default column, which sits just under a one-row app bar. */
+const defaultColumnTop = 60;
+/** What a default placement stays clear of: the app bar and the toolbar of a session's timeline, which carry controls at the right edge. */
+const keepClearSelector = '.lab-app-bar, .lab-timeline-tools';
+
+/**
+ * How far a default placement moves down so that it starts below the controls it would otherwise cover. At phone and tablet
+ * widths the app bar has two or three rows, and a default column laid out for one row would cover its Trace tab, View options and
+ * account controls; the timeline toolbar below it holds the session actions. Every entry of the column moves by the same amount, so
+ * the column keeps its order and spacing. An entry the owner placed is not moved.
+ */
+function defaultClearance(horizontal: { left: number; right: number }): number {
+  let bottom = 0;
+  for (const element of document.querySelectorAll(keepClearSelector)) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.right > horizontal.left && rect.left < horizontal.right) bottom = Math.max(bottom, rect.bottom);
+  }
+  return Math.max(0, Math.round(bottom + gap - defaultColumnTop));
+}
+
+/**
+ * Arranges the entries again when a keep-clear element appears, disappears or changes size: a session view mounts its timeline
+ * toolbar after the entries are placed. The watcher runs while at least one entry is registered.
+ */
+let keepClearWatch: { mutations: MutationObserver; sizes: ResizeObserver; frame: number; observed: Set<Element> } | undefined;
+function watchKeepClear() {
+  if (keepClearWatch || typeof MutationObserver === 'undefined' || typeof ResizeObserver === 'undefined') return;
+  const observed = new Set<Element>();
+  const sizes = new ResizeObserver(() => arrangeFloatingEntries());
+  const sync = () => {
+    if (!keepClearWatch) return;
+    keepClearWatch.frame = 0;
+    const present = new Set(document.querySelectorAll(keepClearSelector));
+    for (const element of observed) if (!present.has(element)) { sizes.unobserve(element); observed.delete(element); }
+    for (const element of present) if (!observed.has(element)) { sizes.observe(element); observed.add(element); }
+  };
+  const mutations = new MutationObserver(() => { if (keepClearWatch && !keepClearWatch.frame) keepClearWatch.frame = requestAnimationFrame(sync); });
+  keepClearWatch = { mutations, sizes, frame: 0, observed };
+  mutations.observe(document.body, { childList: true, subtree: true });
+  sync();
+}
+function unwatchKeepClear() {
+  if (!keepClearWatch) return;
+  cancelAnimationFrame(keepClearWatch.frame);
+  keepClearWatch.mutations.disconnect();
+  keepClearWatch.sizes.disconnect();
+  keepClearWatch = undefined;
+}
+
 /**
  * Shows every entry at its placement within the visible area, which the software keyboard shrinks and pans.
  * An entry the visible area moves pushes the entries above it upward instead of covering them, so the
@@ -52,8 +103,13 @@ function stylesheetPlacement(element: HTMLElement): Position | undefined {
 export function arrangeFloatingEntries() {
   const view = viewport();
   const items = [...entries].flatMap(entry => {
-    const placement = entry.placement ??= stylesheetPlacement(entry.element);
-    if (!placement) return [];
+    let placement = entry.placement;
+    if (!placement) {
+      const base = entry.stylesheet ??= stylesheetPlacement(entry.element);
+      if (!base) return [];
+      const { left, right } = entry.element.getBoundingClientRect();
+      placement = { x: base.x, y: base.y + defaultClearance({ left, right }) };
+    }
     const { width, height } = entry.element.getBoundingClientRect(), size = { width, height };
     const held = entry.held();
     const desired = held ?? { x: view.x + placement.x, y: view.y + placement.y };
@@ -144,6 +200,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
     const current: FloatingEntry = { element, placement, held: () => drag.current && position.current, show };
     entry.current = current;
     entries.add(current);
+    watchKeepClear();
     arrangeFloatingEntries();
     const resize = () => {
       const previous = position.current, value = drag.current;
@@ -164,6 +221,7 @@ export function useTrackingPosition(storageKey = 'agent-remote-tracking-position
     return () => {
       if (current.placement) kept.current = { storageKey, placement: current.placement };
       entries.delete(current);
+      if (!entries.size) unwatchKeepClear();
       entry.current = undefined;
       observer?.disconnect();
       window.removeEventListener('resize', resize);

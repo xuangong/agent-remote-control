@@ -895,6 +895,8 @@ textarea {
 .lab-global-view-slot { flex: 0 0 auto; min-width: 0; order: -2; }
 .lab-global-view-slot:empty { display: none; }
 .lab-view-options { position: relative; z-index: 30; }
+/* An open View options or Favorites panel is above the movable floating controls, which would otherwise cover its checkboxes and Close button. */
+:root:has(.lab-view-options-panel, .lab-title-favorites .lab-session-popover-panel:not([hidden])) .lab-tracking-floating:not(:has(.lab-session-popover-panel:not([hidden]))) { z-index: 9; }
 .lab-view-options-trigger { display: flex; align-items: center; justify-content: center; gap: 6px; width: 68px; min-height: 32px; padding: 0 6px; border-color: transparent; border-radius: 6px; color: var(--obs-text-secondary); background: var(--obs-surface); font-size: 12px; }
 .lab-view-options-trigger:active:not(:disabled) { transform: none; }
 .lab-view-options-trigger[aria-expanded="true"] { color: var(--obs-action); background: var(--obs-surface-selected); }

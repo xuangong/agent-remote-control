@@ -73,7 +73,6 @@ for (const width of [320, 390, 844, 1440]) {
 
   for (const view of ['workbench', 'timeline', 'trace', 'inspector', 'command']) {
     test(`contains every rendered content type in ${view} at ${width}px`, async ({ page, isMobile }, testInfo) => {
-      test.skip(isMobile && view === 'workbench', 'The test sets its own viewport; under phone emulation the movable floating controls sit over the header controls at phone width (open item O30).');
       await page.setViewportSize({ width, height: 740 });
       const errors: string[] = [];
       page.on('pageerror', error => errors.push(error.message));
@@ -86,6 +85,8 @@ for (const width of [320, 390, 844, 1440]) {
         // Code and tables own horizontal scrolling; their descendants may be wider.
         if (element.closest('pre, .agent-markdown-table')) return [];
         if (element.closest('.agent-visually-hidden, option')) return [];
+        // Its larger touch target is an invisible ::after box under a coarse pointer, not rendered content.
+        if (element.matches('.lab-composer-toggle') && element.getBoundingClientRect().right <= innerWidth) return [];
         const style = getComputedStyle(element);
         // Hidden measuring boxes (the action toolbar's) render nothing, so they cannot overflow visibly.
         if (style.visibility === 'hidden') return [];

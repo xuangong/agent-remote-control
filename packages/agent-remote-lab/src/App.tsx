@@ -1,3 +1,5 @@
+import { usePanels } from './hooks/usePanels.js';
+import { contextVisible as contextVisibleOf, pageOpen as pageOpenOf, supportingRailOpen as supportingRailOpenOf, windowStageVisible as windowStageVisibleOf, sessionsPageTitle as sessionsPageTitleOf, type MainView, type SessionPanel } from './state/panels.js';
 import { useLiveBudget, LiveConnectionsContext } from './hooks/useLiveBudget.js';
 import { WindowSessionBridgeContext } from './window-session-bridge-context.js';
 import { parseWindowFeature } from './window-feature-views.js';
@@ -402,9 +404,7 @@ function AppContent({
   const workbenchTabRef = useRef<HTMLButtonElement>(null);
   const traceTabRef = useRef<HTMLButtonElement>(null);
   const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
-  const [contextFromSessions, setContextFromSessions] = useState(true);
   const [trackedOnly, setTrackedOnly] = useState(false);
-  const [sessionPanel, setSessionPanel] = useState<'list' | 'favorites' | 'new' | 'settings' | 'hosts'>('list');
   const viewTriggerRef = useRef<HTMLButtonElement>(null);
   const [headerViewTarget, setHeaderViewTarget] = useState<HTMLDivElement | null>(null);
   const [sidebarViewTarget, setSidebarViewTarget] = useState<HTMLDivElement | null>(null);
@@ -605,42 +605,35 @@ function AppContent({
   useFeedbackToast('Session connection', !windowMode || nativeTakeover ? undefined : sessionNotice?.message, sessionNotice?.tone === 'alert' ? 'error' : 'info');
   useFeedbackToast('Provider catalog', windowMode ? catalogError : undefined);
   useDeploymentUpdate(userScoped);
-  const [activeView, setActiveView] = useState<'workbench' | 'trace'>('workbench');
   const [traceNavigation, setTraceNavigation] = useState<{ scope: string; key: string; requestId: number; view: 'workbench' | 'trace' }>();
   const traceRequestCounter = useRef(0);
   const [scanOpen, setScanOpen] = useState(false);
   const opensSession = !!(initialState || cachedState || requested.target?.nativeSessionId || requested.target?.agentId);
-  const [contextOpen, setContextOpen] = useState(() => compactLayoutRef.current && !opensSession);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const pageFocusReturn = useRef(false);
+  const [panels, dispatchPanels] = usePanels({ compact: compactLayoutRef.current, opensSession }, effect => {
+    if (effect.type === 'page-focus-return') pageFocusReturn.current = true;
+    else void favorites.refresh();
+  });
+  const { activeView, contextOpen, inspectorOpen, headerHidden, desktopContextVisible, compact: compactLayout, botRosterCollapsed, sessionPanel, contextFromSessions } = panels;
+  const showView = useCallback((view: MainView) => dispatchPanels({ type: 'view.show', view }), [dispatchPanels]);
+  const closeInspector = useCallback(() => dispatchPanels({ type: 'inspector.close' }), [dispatchPanels]);
   const sidebar = useSidebarWidth(inspectorOpen);
-  const [headerHidden, setHeaderHidden] = useState(true);
-  const [desktopContextVisible, setDesktopContextVisible] = useState(() => !opensSession);
-  const [compactLayout, setCompactLayout] = useState(compactLayoutRef.current);
-  // Desktop: the sidebar's All sessions, Favorites, New session and Settings entries open their panel as a page in place of the Window.
-  const [sessionsPage, setSessionsPage] = useState(false);
   // The Team, TPM, Track and Ask entries render once and move between the sidebar's Shortcuts and their floating places,
   // so hiding or showing the sidebar never remounts them (Team would lose an open panel or a pending creation).
   const shortcutHost = useMovableHost(), askHost = useMovableHost();
   const shortcutSidebarSlot = useRef<HTMLDivElement>(null), shortcutFloatingSlot = useRef<HTMLDivElement>(null);
   const askSidebarSlot = useRef<HTMLDivElement>(null), askFloatingSlot = useRef<HTMLDivElement>(null);
-  const pageOpen = windowMode && !compactLayout && sessionsPage;
+  const pageOpen = pageOpenOf(panels, windowMode);
   // Leaving the page hides it under the focus; focus then returns to the Window (see the layout effect below).
-  const pageFocusReturn = useRef(false);
   const sessionsPageTitleRef = useRef<HTMLHeadingElement>(null);
-  const closePage = useCallback(() => {
-    if (document.activeElement?.closest('#lab-sessions-page')) pageFocusReturn.current = true;
-    setSessionsPage(false);
-  }, []);
+  const closePage = useCallback(() => dispatchPanels({ type: 'page.close', focusInPage: !!document.activeElement?.closest('#lab-sessions-page') }), [dispatchPanels]);
   // Every path that returns to the Window (opening, creating or resuming a session) closes the compact drawer and the desktop page; the desktop sidebar stays.
-  const closeContext = useCallback(() => { setContextOpen(false); closePage(); }, [closePage]);
-  // Compact layouts have no page; the page does not reappear when the window widens again.
-  useEffect(() => { if (compactLayout) setSessionsPage(false); }, [compactLayout]);
-  const [botRosterCollapsed, setBotRosterCollapsed] = useState(false);
+  const closeContext = useCallback(() => dispatchPanels({ type: 'context.close', focusInPage: !!document.activeElement?.closest('#lab-sessions-page') }), [dispatchPanels]);
   const sidebarShown = useRef(desktopContextVisible);
   // ⌘\ toggles the desktop sidebar of the current mode; compact layouts have no sidebar to collapse.
   const toggleSidebar = compactLayout ? undefined : windowMode
-    ? () => setDesktopContextVisible(value => !value)
-    : () => setBotRosterCollapsed(value => !value);
+    ? () => dispatchPanels({ type: 'desktopSidebar.toggle' })
+    : () => dispatchPanels({ type: 'botRoster.toggle' });
   // ⌘K opens the command palette, which serves both modes.
   const [searchOpen, setSearchOpen] = useState(false);
   const openSearch = useCallback(() => setSearchOpen(true), []);
@@ -893,9 +886,9 @@ function AppContent({
     setDetachedSideRoot(undefined);
     succession.leave(); setState(undefined); setSessionState(remoteSessionState(undefined, 'connecting'));
     const generation = ++navigationGeneration.current;
-    setActiveView('workbench');
+    showView('workbench');
     closeContext();
-    if (compactLayoutRef.current) { setInspectorOpen(false); queueMicrotask(() => workbenchPanelRef.current?.focus()); }
+    if (compactLayoutRef.current) { closeInspector(); queueMicrotask(() => workbenchPanelRef.current?.focus()); }
     setSessionNotice(undefined); setUncertainMutation(false); setAttachingAgentId(agentId);
     void transport.fetchSnapshot(agentId).then(async snapshot => {
       if (!accessReadyRef.current || mountedTransport.current !== transport || navigationGeneration.current !== generation) return;
@@ -934,9 +927,7 @@ function AppContent({
     const media = window.matchMedia('(max-width: 1180px)');
     const update = (event: MediaQueryListEvent) => {
       compactLayoutRef.current = event.matches;
-      setCompactLayout(event.matches);
-      setContextOpen(false);
-      setInspectorOpen(false);
+      dispatchPanels({ type: 'compact.changed', compact: event.matches });
     };
     if (typeof media.addEventListener === 'function') {
       media.addEventListener('change', update);
@@ -978,7 +969,7 @@ function AppContent({
       const destination = directoryDestination();
       if (destination && windowWorkspace.readWindow()?.views.find(view => view.id === destination.viewId)?.placement !== 'primary') {
         await bindDirectorySession(item, destination);
-        setActiveView('workbench'); closeContext();
+        showView('workbench'); closeContext();
         return;
       }
       rememberTrackedView();
@@ -1000,8 +991,8 @@ function AppContent({
       };
       letterRequest.current?.abort(); trackedViews.select();
       setDetachedSideRoot(undefined); setNativeTakeover(undefined);
-      setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined); closeContext();
-      if (compactLayoutRef.current) setInspectorOpen(false);
+      showView('workbench'); setFailure(undefined); setSessionNotice(undefined); closeContext();
+      if (compactLayoutRef.current) closeInspector();
       const opened = await bindDirectorySession(primary, destination, { primarySlot: view?.primarySlot ?? slot.id,
         read: view ? () => selectedDestination() && windowWorkspace.readWindow()?.selectedViewId === windowWorkspace.readWindow()?.selectedPrimaryViewId ? trackedViews.get(entryId) : undefined : undefined });
       if (opened && selectedDestination()) trackedViews.select(entryId);
@@ -1033,7 +1024,7 @@ function AppContent({
       if (visible && !replicaFor(visible.agentId).getState().sessionControl?.nativeOwner) {
         setSideFocus(viewKey(visible));
         if (!expandedKeys.has(viewKey(visible))) setSideAnchor(viewKey(visible));
-        setActiveView('workbench'); closeContext(); setInspectorOpen(false); return true;
+        showView('workbench'); closeContext(); closeInspector(); return true;
       }
     }
     // Returning to a native parent remains inside the tracked family. Other
@@ -1044,9 +1035,9 @@ function AppContent({
     pendingViewRestore.current = primarySlot && restoreView ? { scope: baseUrl, transport, slotId: primarySlot, read: restoreView } : undefined;
     setDetachedSideRoot(undefined);
     if (!takeOver && !onRestoring) setNativeTakeover(undefined);
-    setActiveView('workbench'); setFailure(undefined); setSessionNotice(undefined);
+    showView('workbench'); setFailure(undefined); setSessionNotice(undefined);
     closeContext();
-    if (compactLayoutRef.current) setInspectorOpen(false);
+    if (compactLayoutRef.current) closeInspector();
     // A bot keeps its conversation: a session that would take a bot's place in a group with bot details opens beside it, as
     // the directory does, rather than asking the group for an edit it refuses ("A bot keeps its conversation…").
     const shownWindow = sharedWindow && !takeOver && !onRestoring ? windowWorkspace.readWindow() ?? sharedWindow : undefined;
@@ -1185,7 +1176,7 @@ function AppContent({
         const response = await directory.create(reservation.providerId, reservation.operationId, reservation.options);
         const session = { agentId: response.agentId, nativeSessionId: response.nativeSessionId ?? response.agentId, providerId: reservation.providerId, title: 'New session', hostId: selectedHost.id };
         rememberTrackedView(); trackedViews.select();
-        closeContext(); setActiveView('workbench');
+        closeContext(); showView('workbench');
         rememberSession(session); await bindDirectorySession(session, reservation.destination);
         creationReservation.current = undefined;
         setCreationLocked(false);
@@ -1196,7 +1187,7 @@ function AppContent({
         attach(response.payload.agentId);
       }
       setProviderName(providerConnectionName(selectedHost.id, providerId));
-      setSessionPanel('list');
+      dispatchPanels({ type: 'sessionPanel.set', panel: 'list' });
     } catch (error) {
       if (error instanceof DirectoryError && error.code === 'native_file_limit') {
         const notice = sessionConnectionFailure(error, false);
@@ -1226,7 +1217,7 @@ function AppContent({
     const generation = navigationGeneration.current;
     try {
       if (directory) {
-        closeContext(); setActiveView('workbench');
+        closeContext(); showView('workbench');
         const hostId = session?.hostId ?? 'local';
         const target = hostId === selectedHost.id ? directory : new SessionDirectoryClient(baseUrl, undefined, hostId);
         const response = await target.attach(persistence.providerId, persistence.sessionId);
@@ -1256,38 +1247,20 @@ function AppContent({
     }
     if (!next) return;
     event.preventDefault();
-    setActiveView(next);
-    if (next === 'trace') setSessionsPage(false);
+    showView(next);
+    if (next === 'trace') closePage();
     (next === 'workbench' ? workbenchTabRef : traceTabRef).current?.focus();
   }
 
-  function openContext(fromSessions = false): void {
-    setContextFromSessions(fromSessions);
-    setSessionPanel('list');
-    setDesktopContextVisible(true);
-    setInspectorOpen(false);
-    setContextOpen(true);
-  }
+  function openContext(fromSessions = false): void { dispatchPanels({ type: 'context.open', fromSessions }); }
+  function openInspector(): void { dispatchPanels({ type: 'inspector.open' }); }
 
-  function openInspector(): void {
-    setContextOpen(false);
-    setInspectorOpen(true);
-  }
-
-  const contextVisible = compactLayout ? contextOpen : desktopContextVisible;
-  function toggleContext(): void {
-    if (compactLayout) { if (contextOpen) setContextOpen(false); else openContext(); }
-    else setDesktopContextVisible((value) => !value);
-  }
-  function setAllPanelsVisible(visible: boolean): void {
-    setHeaderHidden(!visible);
-    setDesktopContextVisible(visible);
-    setContextOpen(false);
-    setInspectorOpen(visible && !compactLayout);
-  }
-  const supportingRailOpen = compactLayout && (contextOpen || inspectorOpen);
+  const contextVisible = contextVisibleOf(panels);
+  function toggleContext(): void { dispatchPanels({ type: 'context.toggle' }); }
+  function setAllPanelsVisible(visible: boolean): void { dispatchPanels({ type: 'all.setVisible', visible }); }
+  const supportingRailOpen = supportingRailOpenOf(panels);
   // The Window's views are on screen: not covered by the Trace view, the desktop sessions page or a compact drawer.
-  const windowStageVisible = windowMode && activeView === 'workbench' && !pageOpen && !supportingRailOpen;
+  const windowStageVisible = windowStageVisibleOf(panels, windowMode);
   // Compact layouts keep only the floating Windows list.
   const [windowOverviewOpen, setWindowOverviewOpen] = useState(false);
   // Whether All Windows can show, whatever the mode; the palette offers it from Bot mode too.
@@ -1362,23 +1335,12 @@ function AppContent({
   function chooseWindowSession(id: string) {
     sessionWindows.focus(id); showWindowSessionChooser();
   }
-  function showWindowSessionChooser() {
-    setActiveView('workbench'); setSessionPanel('list');
-    if (compactLayout) setContextOpen(true); else setSessionsPage(true);
-  }
+  function showWindowSessionChooser() { dispatchPanels({ type: 'chooser.show' }); }
   /** Desktop: shows a sidebar panel as a page in place of the Window. */
-  function openPage(panel: typeof sessionPanel) {
-    setSessionPanel(panel); setActiveView('workbench'); setSessionsPage(true);
-    if (panel === 'favorites') void favorites.refresh();
-  }
-  const sessionsPageTitle = sessionPanel === 'list' ? 'All sessions' : sessionPanel === 'favorites' ? 'Favorites' : sessionPanel === 'new' ? 'New session' : sessionPanel === 'hosts' ? 'Hosts' : 'Settings';
+  function openPage(panel: SessionPanel) { dispatchPanels({ type: 'page.open', panel }); }
+  const sessionsPageTitle = sessionsPageTitleOf(sessionPanel);
   /** Shows a sidebar panel: a page on desktop, the drawer (instead of the inspector) on compact layouts. */
-  function showPanel(panel: typeof sessionPanel) {
-    if (!compactLayout) { openPage(panel); return; }
-    setActiveView('workbench'); setSessionPanel(panel);
-    setInspectorOpen(false); setContextOpen(true);
-    if (panel === 'favorites') void favorites.refresh();
-  }
+  function showPanel(panel: SessionPanel) { dispatchPanels({ type: 'panel.show', panel }); }
   /** Shows the new-session form. */
   function openNewSessionPanel() { showPanel('new'); }
   function createWindowFromMenu() {
@@ -1442,10 +1404,10 @@ function AppContent({
         if (!local) return openSession(item);
         sessionWindows.bind(local, { ...item, hostId: item.hostId ?? selectedHost.id });
         void succession.refresh();
-        setActiveView('workbench'); closeContext(); return true;
+        showView('workbench'); closeContext(); return true;
       }
       const opened = bindDirectorySession({ ...item, hostId: item.hostId ?? selectedHost.id }, destination);
-      setActiveView('workbench'); closeContext(); return await opened;
+      showView('workbench'); closeContext(); return await opened;
     } catch (error) { setSessionNotice(sessionConnectionFailure(error, false)); return false; }
   }
   function directoryDestination() {
@@ -1927,7 +1889,7 @@ function AppContent({
       if (row) navigation.select({ kind: 'bot', groupId: row.groupId, viewId: row.viewId });
       return;
     }
-    setActiveView('workbench'); closeContext(); setInspectorOpen(false);
+    showView('workbench'); closeContext(); closeInspector();
     const target = openWindows.find(session => sessionKey(session) === sessionKey(item));
     if (target) { revealSession(target); return; }
     const source = openWindows.find(session => {
@@ -2249,7 +2211,7 @@ function AppContent({
     if (activeAgentId) setLetterReveals(values => { const next = { ...values }; delete next[activeAgentId]; return next; });
     setTraceNavigation({ scope: traceScope, key, view, requestId: ++traceRequestCounter.current });
     if (view === 'workbench' && stackRoot) revealSession(stackRoot);
-    setActiveView(view);
+    showView(view);
   }
 
   function viewNavigation(rawSource: OpenedSession, sourceState?: AgentReplicaState, actions?: SessionViewNavigationActions) {
@@ -2276,8 +2238,8 @@ function AppContent({
       return;
     }
     const current = windowWorkspace.readWindow();
-    setActiveView('workbench'); closeContext();
-    if (compactLayout) setInspectorOpen(false);
+    showView('workbench'); closeContext();
+    if (compactLayout) closeInspector();
     if (current) {
       const operation = attributionWindowOperation(current, target, attribution.value, crypto.randomUUID());
       if (operation.type === 'view.select') {
@@ -2526,7 +2488,7 @@ function AppContent({
           selectSide(origin, sessionKey(origin) === sessionKey(sender) ? recipient : sender);
         }
       }
-      setSideFocus(viewKey(viewSession(recipient))); setActiveView('workbench');
+      setSideFocus(viewKey(viewSession(recipient))); showView('workbench');
       setLetterReveals(values => ({ ...values, [recipient.agentId]: { ...target, align: 'start', requestId: ++traceRequestCounter.current } }));
       // Mounted panes acquire their own leases before this temporary navigation lease is released.
       await new Promise(resolve => setTimeout(resolve, 0));
@@ -2982,7 +2944,7 @@ function AppContent({
       onInspectEntry: botPresentation ? undefined : (key: string) => {
         if (view) windowWorkspace.authority?.operate({ type: 'view.select', viewId: view.id });
         setTraceNavigation({ scope: JSON.stringify([context.state?.agent?.id, context.state?.timeline.epoch]), key, view: 'trace', requestId: ++traceRequestCounter.current });
-        setActiveView('trace');
+        showView('trace');
       },
       revealEntry: botPresentation ? undefined : letterReveals[source.agentId] ?? (traceRequest?.view === 'workbench' && context.state?.agent?.id === state?.agent?.id ? traceRequest : undefined),
       onNavigateAttribution: botPresentation ? async (attribution: SessionAttribution) => {
@@ -3188,7 +3150,7 @@ function AppContent({
       {userScoped && sessionPanel === 'favorites' ? <section className="lab-session-directory lab-favorites-section" aria-label={compactLayout ? 'Favorites' : undefined}>{compactLayout ? <div className="lab-directory-heading"><h2><FavoritesHeading loading={favorites.loading} /></h2></div> : null}<FavoritesList favorites={favorites} tracking={tracking} trackedOnly={trackedOnly} onFilterChange={setTrackedOnly} activeKey={focusedSessionKey} busy={transitioning && !sidebarWindow} onOpen={item => void openDirectorySession(item)} /></section> : null}
       {directory && userScoped && sessionPanel === 'hosts' ? <HostOverview hosts={remoteHosts} service={hostClient} visible={windowMode && (compactLayout ? contextOpen : pageOpen)}
         compact={compactLayout} actionsTarget={compactLayout ? undefined : pageActionsTarget}
-        onOpenHost={id => { const host = remoteHosts.find(item => item.id === id); if (host) selectHost(host); if (compactLayout) setSessionPanel('settings'); else openPage('settings'); }} /> : null}
+        onOpenHost={id => { const host = remoteHosts.find(item => item.id === id); if (host) selectHost(host); if (compactLayout) dispatchPanels({ type: 'sessionPanel.set', panel: 'settings' }); else openPage('settings'); }} /> : null}
       {directory && sessionPanel !== 'favorites' && sessionPanel !== 'hosts' ? <HostPairing compact={sessionPanel === 'list'} managementVisible={sessionPanel === 'settings'} service={hostClient} selectedHostId={selectedHost.id} selectionLocked={creationLocked || transitioning && !sidebarWindow} hosts={selectableHosts} hostError={hostError ?? requestedHostUnavailable} onRetryHosts={retryHosts} onSelect={selectHost} /> : null}
       {sessionPanel === 'settings' ? selectedRemoteHost?.id === previewHost?.id ? <HostVscodeTunnel key={selectedRemoteHost?.id} />
         : <VscodeTunnelScope service={vscodeTunnelClient} host={selectedRemoteHost} polling={windowMode && (compactLayout ? contextOpen : pageOpen)}>
@@ -3199,7 +3161,7 @@ function AppContent({
       {directory || providerChoices.length > 1 ? <label className="lab-browse-provider">Browse provider<select aria-label="Browse provider" value={selectedProviderChoice?.selectionId ?? ''} disabled={creationLocked || transitioning && !sidebarWindow || providerChoices.length === 0} onChange={(event) => selectProvider(event.target.value)}>{providerChoices.length === 0 ? <option value="">No providers available</option> : null}{providerChoices.map((provider) => <option key={provider.selectionId} value={provider.selectionId}>{provider.displayName}</option>)}</select></label> : null}
       {directory ? <SessionDirectory quickOpen={<button type="button" className="lab-session-scan-trigger" aria-label="Scan session QR code" onClick={() => setScanOpen(true)}>Scan</button>} favorites={favorites} searchable directory={directory} providerId={providerId} activeAgentId={focusedMenuSession?.agentId} opened={openedSessions} known={sessionEntries} sideStore={forkStore} askStore={ask.store} hostId={selectedHost.id} onOpenRelated={(item) => void openDirectorySession(item)} busy={!sidebarWindow && (transitioning || remoteHosts.find((host) => host.id === selectedHost.id)?.online === false)} revision={directoryRevision} onOpen={(item) => void openDirectorySession(item)} onSelect={(item) => void openDirectorySession(item)} onClose={(agentId) => setOpenedSessions((current) => current.filter((item) => item.agentId !== agentId))} /> : null}
       </div>
-      {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={windowMode && (compactLayout ? contextOpen : pageOpen)} onOpen={() => { if (compactLayout) { setContextOpen(false); setInspectorOpen(false); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
+      {sessionPanel === 'list' ? <HostPreviewGroups client={previewClient} hosts={remoteHosts} activeHostId={previewHost?.access !== 'shared' ? previewHost?.id : undefined} polling={windowMode && (compactLayout ? contextOpen : pageOpen)} onOpen={() => { if (compactLayout) { dispatchPanels({ type: 'context.close', focusInPage: false }); closeInspector(); } }} onOpenSource={(sessionId, itemId, hostId) => void openPreviewSource(sessionId, itemId, hostId)} /> : null}
       <div hidden={sessionPanel !== 'new'}>
       <ProviderSessionControls
         providers={providerChoices}
@@ -3320,8 +3282,8 @@ function AppContent({
       : windowToolbarShown ? windowToolbarViewTarget : minimizedViewTarget ?? sessionViewTarget}
       triggerRef={viewTriggerRef} headerVisible={!headerHidden} sidebarVisible={contextVisible}
       inspectorVisible={inspectorOpen} compact={compactLayout} inert={!windowMode || supportingRailOpen}
-      onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => setHeaderHidden((value) => !value)} onToggleSidebar={toggleContext}
-      onToggleInspector={() => inspectorOpen ? setInspectorOpen(false) : openInspector()} />
+      onSetAllVisible={setAllPanelsVisible} onToggleHeader={() => dispatchPanels({ type: 'header.toggle' })} onToggleSidebar={toggleContext}
+      onToggleInspector={() => dispatchPanels({ type: 'inspector.toggle' })} />
     <header className="lab-app-bar" hidden={headerHidden || windowWorkspace.unavailable}>
       <div className="lab-brand">
         <div ref={setHeaderViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
@@ -3358,7 +3320,7 @@ function AppContent({
           aria-selected={activeView === 'workbench'}
           aria-controls="lab-workbench"
           tabIndex={activeView === 'workbench' ? 0 : -1}
-          onClick={() => setActiveView('workbench')}
+          onClick={() => showView('workbench')}
           onKeyDown={handleViewKeyDown}
         >Workbench</button>
         <button
@@ -3369,7 +3331,7 @@ function AppContent({
           aria-selected={activeView === 'trace'}
           aria-controls="lab-trace"
           tabIndex={activeView === 'trace' ? 0 : -1}
-          onClick={() => { setActiveView('trace'); closePage(); }}
+          onClick={() => { showView('trace'); closePage(); }}
           onKeyDown={handleViewKeyDown}
         >Trace</button>
       </nav>
@@ -3382,7 +3344,7 @@ function AppContent({
       collapsible
       open={contextVisible}
       triggerRef={compactLayout && contextFromSessions ? sessionsTriggerRef : viewTriggerRef}
-      onClose={() => setContextOpen(false)}
+      onClose={() => dispatchPanels({ type: 'context.close', focusInPage: false })}
     >
       {!compactLayout ? <SidebarHeader mode={navigation.mode} onModeChange={navigation.setMode} onSearch={openSearch} actions={<Menu label="New" icon="plus" items={[
         { label: 'New session', onSelect: openNewSessionPanel },
@@ -3393,10 +3355,10 @@ function AppContent({
         <div ref={setSidebarViewTarget} data-pane-selection-ignore className="lab-global-view-slot" />
       </div> : null}
       {compactLayout ? <nav className="lab-session-panel-actions" aria-label="Sidebar sections">
-        <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => setSessionPanel('list')}>Sessions</button>
-        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { setSessionPanel('favorites'); void favorites.refresh(); }}>Favorites</button> : null}
-        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'hosts'} onClick={() => setSessionPanel('hosts')}>Hosts</button> : null}
-        <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => setSessionPanel('settings')}>Settings</button>
+        <button type="button" aria-pressed={sessionPanel === 'list'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'list' })}>Sessions</button>
+        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'favorites'} onClick={() => { dispatchPanels({ type: 'sessionPanel.set', panel: 'favorites' }); void favorites.refresh(); }}>Favorites</button> : null}
+        {userScoped ? <button type="button" aria-pressed={sessionPanel === 'hosts'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'hosts' })}>Hosts</button> : null}
+        <button type="button" aria-pressed={sessionPanel === 'settings'} onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'settings' })}>Settings</button>
       </nav> : null}
       {compactLayout ? sessionPanelContent : <>
         <div className="lab-sidebar-scroll">
@@ -3414,7 +3376,7 @@ function AppContent({
         </div>
         <SidebarFooter hosts={selectableHosts} loaded={hostsLoaded} onHosts={() => openPage(userScoped ? 'hosts' : 'list')} hostsCurrent={pageOpen && sessionPanel === 'hosts'} onSettings={() => openPage('settings')} settingsCurrent={pageOpen && sessionPanel === 'settings'} />
       </>}
-      {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => setSessionPanel('new')}><span aria-hidden="true">＋</span> New session</button></footer> : null}
+      {compactLayout && sessionPanel !== 'new' ? <footer className="lab-session-panel-footer"><button type="button" onClick={() => dispatchPanels({ type: 'sessionPanel.set', panel: 'new' })}><span aria-hidden="true">＋</span> New session</button></footer> : null}
     </SupportingRail>
     {/* After both slots, so a slot rendered in this commit is attached before the entries' layout effects run. */}
     <MovableHostSlot host={shortcutHost} slot={sidebarShortcuts ? shortcutSidebarSlot : shortcutFloatingSlot} />
@@ -3613,7 +3575,7 @@ function AppContent({
       </section>
     </PreviewWorkspace>
     {successionDialog && (activeView !== 'workbench' || !primaryExpanded) ? <button type="button" onClick={() => {
-      setActiveView('workbench'); if (stackRoot) revealSession(stackRoot);
+      showView('workbench'); if (stackRoot) revealSession(stackRoot);
       setSuccessionDialog(current => current ? { ...current, visible: true } : current);
     }}>Recover Handoff</button> : null}
     {renamingSession?.scope === baseUrl ? <RenameSessionDialog favorites={favorites} session={renamingSession.session}
@@ -3626,7 +3588,7 @@ function AppContent({
       compact={compactLayout}
       open={windowMode && inspectorOpen}
       triggerRef={viewTriggerRef}
-      onClose={() => setInspectorOpen(false)}
+      onClose={() => closeInspector()}
     >
       <div className="lab-rail-heading">
         <p className="lab-eyebrow">Replica Inspector</p>
@@ -3648,7 +3610,7 @@ function AppContent({
         <Button variant="destructive" disabled={windowActions.busy || windowWorkspace.provisional} onClick={() => { setDeleteConfirmOpen(false); void windowActions.deleteCurrent(); }}>Delete Window</Button>
       </div>
     </Sheet> : null}
-  </main></ToastActivity.Provider>{botHandoff ? successionProgress : null}{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => setBotRosterCollapsed(value => !value)} onSearch={openSearch}
+  </main></ToastActivity.Provider>{botHandoff ? successionProgress : null}{retainedHandoff ? <div hidden {...{ inert: '' }}><SessionConversationMount mode="bot" active={false} descriptor={retainedHandoff} /></div> : null}<BotWorkspace visible={!windowMode} compact={compactLayout} scope={baseUrl} workspace={windowWorkspace} navigation={navigation} selected={selectedBot} roster={botRoster} projectRoster={projectSharedRoster} directory={otherSessions} describeConversation={describeBotConversation} rosterCollapsed={botRosterCollapsed} onToggleRoster={() => dispatchPanels({ type: 'botRoster.toggle' })} onSearch={openSearch}
       hostName={hostId => remoteHosts.find(host => host.id === hostId)?.name ?? hostId} botInfo={describeBot}
       onNewBot={directory ? openNewBot : undefined} />
     {removingBot && windowMode && sharedWindow?.id === removingBot.windowId && sharedWindow.views.some(view => view.id === removingBot.viewId) ? (() => {

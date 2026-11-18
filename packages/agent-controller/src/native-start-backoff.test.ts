@@ -21,7 +21,7 @@ it('doubles the wait after each native start failure up to a minute and clears i
   for (let attempt = 0; attempt < 6; attempt++) {
     backoff.settle(target, failure('session_attach_failed'));
     const started = now;
-    while (backoff.blocked(target)) now += 1_000;
+    while (backoff.blocked(target) && now - started < 120_000) now += 1_000;
     waits.push(now - started);
   }
   expect(waits).toEqual([5_000, 10_000, 20_000, 40_000, 60_000, 60_000]);

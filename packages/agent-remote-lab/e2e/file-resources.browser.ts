@@ -66,10 +66,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       import React, { useSyncExternalStore, useState } from 'react';
       import { createRoot } from 'react-dom/client';
       import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
-      import { MarkdownContent } from '../../agent-client-web/src/react/MarkdownContent.tsx';
-      import { PreviewWorkspace } from '../../agent-client-web/src/react/PreviewWorkspace.tsx';
-      import { PreviewProvider } from '../../agent-client-web/src/react/PreviewContext.tsx';
-      import { FilePreviewScope } from '../../agent-client-web/src/react/FilePreviewScope.tsx';
+      import { MarkdownContent, PreviewWorkspace, PreviewProvider, FilePreviewScope } from '@orchardworks/agent-client-web/react';
       import { HttpPreviewClient } from '@orchardworks/agent-client';
       const replica = new AgentReplica();
       const client = new RemoteSessionClient(${JSON.stringify(fixture.agentId)}, new HttpWebSocketTransport(${JSON.stringify(fixture.url + fixture.alice.basePath)}), replica);

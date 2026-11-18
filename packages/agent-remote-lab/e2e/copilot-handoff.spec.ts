@@ -5,8 +5,8 @@ import {createGatewayRelay} from '@orchardworks/agent-relay-node/gateway-relay';
 import {createGatewayStaticPages} from '@orchardworks/agent-relay-node/gateway-static';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
-import {createAgentHost} from '../../agent-controller/src/host.js';
-import {createCopilotSessionDirectory} from '../../agent-controller/src/copilot-directory.js';
+import {createAgentHost} from '@orchardworks/agent-remote-controller';
+import {createCopilotSessionDirectory} from '@orchardworks/agent-remote-controller';
 import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';
 
 for (const cold of [false, true]) test(`takes a running native CLI session back through the ${cold ? 'cold' : 'open'} product Chatbox`,async({page,browser},info)=>{

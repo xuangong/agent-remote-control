@@ -20,9 +20,7 @@ beforeAll(async () => {
     import React, { useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
-    import { AgentComposer } from '../../agent-client-web/src/react/AgentComposer.tsx';
-    import { useTimelineScroll } from '../../agent-client-web/src/react/useTimelineScroll.ts';
+    import { AgentTimeline, AgentComposer, useTimelineScroll } from '@orchardworks/agent-client-web/react';
     import { remoteSessionState } from '@orchardworks/agent-client';
     import { AgentReplica } from '@orchardworks/agent-client';
 

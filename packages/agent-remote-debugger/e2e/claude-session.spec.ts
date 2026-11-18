@@ -1,7 +1,7 @@
 import {join} from 'node:path';
 import {expect,test,type WebSocketRoute} from '@playwright/test';
-import {ClaudeAgentProvider} from '../../agent-provider-claude/dist/provider.js';
-import {nativeFixture,nativeReply} from '../../agent-provider-claude/src/test-utils/native-fixture.js';
+import {ClaudeAgentProvider} from '@orchardworks/agent-provider-claude';
+import {nativeFixture,nativeReply} from '@orchardworks/agent-provider-claude/testing';
 import {createDebuggerServer} from '../dist/server.js';
 
 test('Claude live view preserves pending approval on reconnect and renders the actual file diff once',async({page,context},info)=>{

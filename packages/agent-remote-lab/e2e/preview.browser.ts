@@ -54,7 +54,7 @@ for (const engine of [chromium, webkit]) it(`preserves local Markdown images acr
     import React, { useMemo, useState, useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
-    import { MarkdownContent } from '../../agent-client-web/src/react/MarkdownContent.tsx';
+    import { MarkdownContent } from '@orchardworks/agent-client-web/react';
     const replica = new AgentReplica();
     const client = new RemoteSessionClient(${JSON.stringify(f.agentId)}, new HttpWebSocketTransport(${JSON.stringify(f.url + f.alice.basePath)}), replica);
     const resolveResource = (locator,source) => client.resolveResource(locator,source);
@@ -126,9 +126,7 @@ for (const engine of [chromium, webkit]) it(`keeps authenticated preview navigat
   } });
   const source = `
     import React, {useRef,useState} from 'react';import {createRoot} from 'react-dom/client';
-    import {PreviewProvider,usePreviewController,PreviewDock} from '../../agent-client-web/src/react/PreviewContext.tsx';
-    import {PreviewActions} from '../../agent-client-web/src/react/PreviewActions.tsx';
-    import {PreviewWorkspace} from '../../agent-client-web/src/react/PreviewWorkspace.tsx';
+    import {PreviewProvider,usePreviewController,PreviewDock,PreviewActions,PreviewWorkspace} from '@orchardworks/agent-client-web/react';
     import {HttpPreviewClient} from '@orchardworks/agent-client';
     import {trackFocusModality} from './focus-modality.ts';
     import {ViewOptions} from './components/ViewOptions.tsx';

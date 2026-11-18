@@ -67,7 +67,7 @@
       "from": [
         "packages/agent-remote-debugger/**"
       ],
-      "max": 8,
+      "max": 6,
       "owner": "M12",
       "reason": "Debugger tests start the Workbench server and the built CLI by path; they move to the agent-e2e stack in M12."
     },
@@ -76,7 +76,7 @@
       "from": [
         "packages/agent-remote-debugger/**"
       ],
-      "max": 9,
+      "max": 8,
       "owner": "M12",
       "reason": "Debugger tests start the Workbench server and the built CLI by path; they move to the agent-e2e stack in M12."
     },
@@ -85,7 +85,7 @@
       "from": [
         "packages/agent-remote-lab/**"
       ],
-      "max": 42,
+      "max": 20,
       "owner": "M12",
       "reason": "Workbench tests and e2e fixtures start the Relay, the Controller and the web package by path; they move to agent-e2e and to client component tests in M12 and M14."
     },

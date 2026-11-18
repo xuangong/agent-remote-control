@@ -16,7 +16,7 @@ import {
 } from '@orchardworks/agent-session-runtime';
 import { AgentReplica } from '@orchardworks/agent-client';
 
-import { createAgentRemoteRelay as createSourceAgentRemoteRelay } from '../../agent-session-runtime/src/relay.js';
+import { createAgentRemoteRelay as createSourceAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 
 function chunk(recordId: string, value: Record<string, unknown>): DshNativeObservation {
   return {

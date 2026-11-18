@@ -6,8 +6,8 @@ import WebSocket from 'ws';
 import {expect,it,vi} from 'vitest';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
 import {createAgentRemoteHttpServer} from '@orchardworks/agent-session-runtime';
-import {createAgentHostRuntime} from '../../agent-controller/src/host.js';
-import {createCopilotSessionDirectory} from '../../agent-controller/src/copilot-directory.js';
+import {createAgentHostRuntime} from '@orchardworks/agent-remote-controller';
+import {createCopilotSessionDirectory} from '@orchardworks/agent-remote-controller';
 import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';
 
 it('broadcasts native handoff over real browser sockets and reconnects both views to the resumed session',async()=>{

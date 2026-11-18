@@ -470,7 +470,6 @@ describe('incremental timeline identity', () => {
   });
 });
 
-
 it('converges live and Relay history compaction lifecycles without joining independent cycles', () => {
   const store = new TimelineStore('epoch-one');
   let live = applyHistoryPage(createReplicaState(), page('tail', [])).state;
@@ -501,7 +500,6 @@ it('converges live and Relay history compaction lifecycles without joining indep
   append({ type: 'compaction', status: 'completed' });
   expect(live.timeline.entries.slice(-3).map(entry => [entry.seqStart, entry.seqEnd])).toEqual([[8, 8], [9, 10], [11, 11]]);
 });
-
 
 it('maintains waiting state through native restore and returns to the latest authoritative work state', () => {
   const request: AgentInteractionRequest = { kind: 'question', requestId: 'approval', questions: [{ id: 'q', title: 'Continue?', options: [{ value: 'yes', label: 'Yes' }] }] };

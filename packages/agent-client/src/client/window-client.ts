@@ -58,7 +58,7 @@ export class WindowWorkspaceClient {
     const appearances = value.bots !== undefined || value.presentation !== undefined;
     if (!decoded || decoded.id !== id || value.manager !== undefined && (!isWindowSessionBinding(value.manager?.session) || !Number.isSafeInteger(value.manager?.generation) || value.manager.generation < 0)
       || appearances && !isWindowGroup({ window: decoded, ...(value.bots === undefined ? {} : { bots: value.bots }), ...(value.presentation === undefined ? {} : { presentation: value.presentation }) })) throw new Error('Invalid Window snapshot.');
-    value.window = window;
+    value.window = decoded;
   }
   private receipt({ value, status }: WindowResponse, operationId: string): WindowOperationResult {
     if (!isWindowOperationResult(value?.result) || value.result.operationId !== operationId) throw new WindowRequestError('Invalid Window receipt.', status, 'invalid_window_receipt');

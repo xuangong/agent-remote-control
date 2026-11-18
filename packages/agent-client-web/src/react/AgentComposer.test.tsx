@@ -192,3 +192,21 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
   });
   expect(send.mock.calls[1]?.[0]).toEqual([{ type: 'image', attachmentId: 'replacement', label: 'image #1' }]);
 });
+
+it('takes a draft over a state restored from the device but never sends it, and sends once the state is confirmed', async () => {
+  const base = createReplicaState();
+  const agent = { id: 'a', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle' as const, activeTurn: null,
+    capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false }, pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' as const } };
+  const restored: AgentReplicaState = { ...base, agent, timeline: { ...base.timeline, initialized: true, restoredFromDevice: true } };
+  const confirmed: AgentReplicaState = { ...restored, timeline: { ...restored.timeline, restoredFromDevice: undefined } };
+  const send = vi.fn();
+  const live = remoteSessionState(undefined, 'ready');
+  const container = await render(<AgentComposer state={restored} sessionState={live} draft="Typed early" onSendMessage={send} />);
+  expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Typed early', disabled: false });
+  const submit = () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
+  expect(submit().disabled).toBe(true);
+  await act(async () => submit().click());
+  expect(send).not.toHaveBeenCalled();
+  await rerender(container, <AgentComposer state={confirmed} sessionState={live} draft="Typed early" onSendMessage={send} />);
+  expect(submit().disabled).toBe(false);
+});

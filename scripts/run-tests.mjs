@@ -97,7 +97,12 @@ const commands = {
   'unit-package': ['--filter', unitPackage?.name ?? '', 'run', unitPackage?.script ?? 'test', ...process.argv.slice(4)],
   // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
-  e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
+  // The specs that start a Relay and a recorded Host (agent-e2e/specs); the main flows are `e2e-flows`.
+  e2e: ['--filter', '@orchardworks/agent-e2e', 'exec', 'playwright', 'test', '--config=playwright.config.ts', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
+  // The component tier: fixture pages of the Workbench on builder states, with no Relay.
+  components: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=playwright.components.config.ts', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
+  // Specs that still import Workbench or Controller sources by path and wait for public entries (O19); they stay in the Workbench.
+  'e2e-lab': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-relay-node', 'run', 'test:conformance'],
   'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],
 };

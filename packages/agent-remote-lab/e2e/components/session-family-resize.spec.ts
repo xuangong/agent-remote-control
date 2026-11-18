@@ -1,4 +1,4 @@
-import { clickSessionAction } from './session-actions';
+import { clickSessionAction } from '../session-actions';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const names = ['Primary', 'Primary child', 'Primary leaf', 'Dock', 'Dock child', 'Dock leaf'];

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { activateComposerAction } from './composer-actions';
+import { activateComposerAction } from '../composer-actions';
 
 test('narrow composed views keep actions on one row and expose overflow without losing the draft', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });

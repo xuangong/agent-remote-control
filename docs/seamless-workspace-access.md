@@ -31,7 +31,7 @@ The server continues to authorize every API and WebSocket request. A local displ
 
 ## Validation
 
-`e2e/seamless.playwright.config.ts` runs real local Gateway, Relay, Host-uplink and session-channel transports with a fixture authority. It covers desktop Chromium and iPhone WebKit, cached startup with a delayed access check, editor identity and draft preservation, foreground suspension, business request ordering, and automatic Gateway return. It does not use a real Google account or restart a native daemon.
+`packages/agent-remote-lab/e2e/seamless.playwright.config.ts` runs real local Gateway, Relay, Host-uplink and session-channel transports with a fixture authority. It covers desktop Chromium and iPhone WebKit, cached startup with a delayed access check, editor identity and draft preservation, foreground suspension, business request ordering, and automatic Gateway return. It does not use a real Google account or restart a native daemon.
 
 ## Optional device cache protection
 

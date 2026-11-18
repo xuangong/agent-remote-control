@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
-import { activateComposerAction, revealComposerAction } from './composer-actions';
+import { activateComposerAction, revealComposerAction } from '../composer-actions';
 
 test('composer height stays stable from opening through ready and reconnect with a retained draft', async ({ page, isMobile }, testInfo) => {
   await page.setViewportSize({ width: isMobile ? 390 : 1440, height: 844 });

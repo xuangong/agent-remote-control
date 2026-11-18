@@ -220,6 +220,9 @@ importers:
 
   packages/agent-e2e:
     devDependencies:
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
       '@orchardworks/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
@@ -229,6 +232,9 @@ importers:
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk
+      '@orchardworks/agent-relay-core':
+        specifier: workspace:*
+        version: link:../agent-relay-core
       '@orchardworks/agent-relay-node':
         specifier: workspace:*
         version: link:../agent-relay-node
@@ -241,6 +247,9 @@ importers:
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.62.0

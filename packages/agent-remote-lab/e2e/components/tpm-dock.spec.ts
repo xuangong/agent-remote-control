@@ -1,4 +1,4 @@
-import { clickSessionAction } from './session-actions';
+import { clickSessionAction } from '../session-actions';
 import { expect, test } from '@playwright/test';
 
 test('TPM groups remain usable while multiple workspaces are open', async ({ page, isMobile }, testInfo) => {

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { showSessions } from './session-navigation';
-import { openSessionsPage } from './all-sessions';
+import { showSessions } from '../session-navigation';
+import { openSessionsPage } from '../all-sessions';
 
 const base = { hostId: 'host', providerId: 'recorded', title: 'Same session title', starredAt: 1, available: true, online: true, hostName: 'Work Mac' };
 async function setup(page: Page, title = base.title) {

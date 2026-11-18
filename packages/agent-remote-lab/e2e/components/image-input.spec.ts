@@ -94,7 +94,7 @@ test('opens the image across the viewport with readable status and keyboard dism
 });
 
 test('zooms an uploaded image blob and resets it without changing the draft', async ({ page }) => {
-  const imageBytes = await readFile(new URL('./fixtures/markdown-wide.png', import.meta.url));
+  const imageBytes = await readFile(new URL('../fixtures/markdown-wide.png', import.meta.url));
   const editor = page.getByTestId('prompt-input');
   await page.getByRole('button', { name: 'Add images' }).click();
   await page.locator('input[type=file][multiple]').setInputFiles({ name: 'diagram.png', mimeType: 'image/png', buffer: imageBytes });

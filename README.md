@@ -856,7 +856,9 @@ Keys are valid for new connections for 24 hours and bind to one installation. Es
 pnpm verify          # compatibility check, build, typecheck and unit tests
 pnpm test:local      # native CLI suites that need this machine's signed-in agents
 pnpm test:conformance
-pnpm test:e2e
+pnpm test:e2e:flows   # the main flows: real browser, Relay and Controller with a scripted provider
+pnpm test:components  # the Workbench's fixture pages in a real browser, no Relay
+pnpm test:e2e         # older Playwright specs that start a Relay
 pnpm lint:docs
 ```
 

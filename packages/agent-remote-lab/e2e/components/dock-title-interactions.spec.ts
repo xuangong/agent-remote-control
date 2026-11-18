@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { clickSessionAction } from './session-actions';
+import { clickSessionAction } from '../session-actions';
 
 test.setTimeout(40_000);
 const fixture = '/e2e/fixtures/session-family-resize.html?title-drag&content';

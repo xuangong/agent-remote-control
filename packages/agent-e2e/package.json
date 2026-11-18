@@ -14,16 +14,20 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --testTimeout=2000 --hookTimeout=5000",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:specs": "playwright test --config=playwright.config.ts"
   },
   "devDependencies": {
+    "@orchardworks/agent-client": "workspace:*",
     "@orchardworks/agent-provider-claude": "workspace:*",
     "@orchardworks/agent-provider-codex": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-relay-core": "workspace:*",
     "@orchardworks/agent-relay-node": "workspace:*",
     "@orchardworks/agent-remote-controller": "workspace:*",
     "@orchardworks/agent-remote-fixtures": "workspace:*",
     "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-session-runtime": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",

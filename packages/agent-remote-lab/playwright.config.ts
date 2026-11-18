@@ -26,6 +26,8 @@ const viteCommand = `${scenarioEndpoint ? `VITE_AGENT_REMOTE_FIXTURE_ENDPOINT=${
 
 export default defineConfig({
   testDir: './e2e',
+  // The fixture-page specs of the component tier run from playwright.components.config.ts; the specs that start a Relay run from agent-e2e.
+  testIgnore: ['**/components/**'],
   ...(mode === 'interactions' ? { testMatch: 'interaction-capabilities.spec.ts' } : {}),
   globalSetup: './e2e/dev-server-warmup.ts',
   fullyParallel: false,
@@ -38,11 +40,10 @@ export default defineConfig({
   projects: [
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
-    { name: 'webkit-conversation', testMatch: ['simple-conversation.spec.ts', 'tracked-team.spec.ts', 'floating-controls-layout.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'mobile-keyboard-controls.spec.ts', 'layout-diagnostics.spec.ts', 'standalone-layout.spec.ts', 'floating-controls-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'webkit-ask-desktop', testMatch: ['dock-title-interactions.spec.ts', 'window-pane-lifecycle.spec.ts', 'session-family-resize.spec.ts', 'session-attributions.spec.ts', 'composer-initial-draft.spec.ts', 'session-view-binding.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'tpm-dock.spec.ts', 'session-title-rename.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'ask-resize.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts', 'bot-mode.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-ask-mobile', testMatch: ['dock-title-interactions.spec.ts', 'window-pane-lifecycle.spec.ts', 'session-family-resize.spec.ts', 'session-attributions.spec.ts', 'composer-initial-draft.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'tpm-dock.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'session-view-ownership.spec.ts', 'bot-mode.spec.ts'], use: { ...devices['iPhone 13'] } },
+    { name: 'webkit-conversation', testMatch: ['floating-controls-layout.spec.ts'], use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit-mobile-viewport', testMatch: ['floating-controls-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
+    { name: 'webkit-ask-desktop', testMatch: ['window-pane-lifecycle.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'bot-mode.spec.ts'], use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit-ask-mobile', testMatch: ['window-pane-lifecycle.spec.ts', 'ask-persistence.spec.ts', 'session-composition-persistence.spec.ts', 'bot-mode.spec.ts'], use: { ...devices['iPhone 13'] } },
   ],
   webServer: [
     {

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { toggleViewPanel } from './view-options';
-import { openSessionsPage } from './all-sessions';
+import { toggleViewPanel } from '../view-options';
+import { openSessionsPage } from '../all-sessions';
 
 // The long session lists live on the All sessions page, which takes the Window's place in the main area.
 test('long sessions page content never scrolls the desktop workspace away from the viewport', async ({ page, isMobile }, info) => {

@@ -124,3 +124,13 @@ export async function waitForKeptConversation(page: Page, text: string, timeout 
     await page.waitForTimeout(100);
   }
 }
+
+/** Turns the sidebar rail on when a session page hides it, and returns it. */
+export async function showSidebar(page: Page) {
+  await page.locator('.lab-shell').waitFor();
+  const rail = page.locator('#lab-context');
+  if (!await rail.waitFor({ state: 'visible', timeout: 1500 }).then(() => true, () => false)) { await toggleViewPanel(page, 'Sidebar'); await rail.waitFor({ state: 'visible' }); }
+  return rail;
+}
+
+export const composerOf = (page: Page) => page.getByRole('textbox', { name: 'Message', exact: true });

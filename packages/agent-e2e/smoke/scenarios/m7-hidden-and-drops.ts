@@ -1,6 +1,6 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
 import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
-import { PageProbe, withContext } from '../lib/probe.js';
+import { PRIMARY, PageProbe, withContext } from '../lib/probe.js';
 import { mergeInvariantResults, type ScheduleStep } from '../report.js';
 import type { Scenario } from '../scenario.js';
 import { TranscriptRecorder } from '../transcript.js';
@@ -39,7 +39,7 @@ export const hiddenAndDrops: Scenario = {
           }
           if (scrolledTo === 0) throw new Error(`The timeline did not scroll: ${JSON.stringify(await probe.page.evaluate(() => (window as any).__smoke.scrollerSize()))}`);
           await probe.page.waitForTimeout(500);
-          await probe.page.locator('[data-testid="prompt-input"]').click();
+          await probe.page.locator(`${PRIMARY} [data-testid="prompt-input"]`).click();
           await probe.page.keyboard.type(`draft kept ${seconds}`);
           const before = await probe.page.evaluate(() => ({ composer: (window as any).__smoke.composer(), anchor: (window as any).__smoke.anchor() }));
           recorder.mark('page-hidden'); await probe.setHidden(true);
@@ -59,7 +59,7 @@ export const hiddenAndDrops: Scenario = {
           const wire = recorder.transcript().filter(entry => entry.n > first);
           conditions.push({ label: `offline ${seconds} s`, results: [catchUpCostsOneTailRequest(wire), noStaleLabel(wire, page), draftAndPositionKept(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
           (measurements.drops as unknown[]).push({ seconds, scrolledTo, caughtUp, socketsOpenedAfterReturn: wire.filter(entry => 'marker' in entry && entry.marker === 'socket-open').length });
-          await probe.page.locator('[data-testid="prompt-input"]').click();
+          await probe.page.locator(`${PRIMARY} [data-testid="prompt-input"]`).click();
           await probe.page.keyboard.press('Meta+a').catch(() => {});
           await probe.page.keyboard.press('Backspace');
         }

@@ -8,6 +8,9 @@ export function loadChromium(checkout: string): any {
   return createRequire(join(checkout, 'packages/agent-remote-lab/package.json'))('@playwright/test').chromium;
 }
 
+/** A Window can hold other views beside the one a run opened; a run drives its own, the primary conversation. */
+export const PRIMARY = '.lab-primary-conversation';
+
 /** `ms` is the time from the arrival of the page's document to its first row: the part the product controls. `totalMs` adds the document's own trip, which no code can shorten. */
 export interface Paint { label: string; ms: number; fromDeviceStore: boolean; timedOut?: boolean; totalMs?: number }
 
@@ -41,7 +44,7 @@ export class PageProbe {
     let paint: Paint;
     try {
       await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: rowsDeadlineMs });
-      await this.page.waitForFunction(() => document.querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
+      await this.page.waitForFunction(() => (document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-timeline-entry').length > 0, undefined, { timeout: Math.max(1000, rowsDeadlineMs - (Date.now() - started)) });
       const firstRowAt: number = await this.page.evaluate(() => (window as any).__smoke.firstRowAt());
       const documentAt: number = await this.page.evaluate(() => performance.timeOrigin + (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).responseEnd);
       paint = { label, ms: Math.max(0, Math.round(firstRowAt - documentAt)), totalMs: firstRowAt - started, fromDeviceStore: this.timelinePageAt === undefined || firstRowAt < this.timelinePageAt };
@@ -79,18 +82,18 @@ export class PageProbe {
 
   /** Types the text into the composer and submits it. */
   async send(text: string): Promise<void> {
-    const composer = this.page.locator('[data-testid="prompt-input"]');
+    const composer = this.page.locator(`${PRIMARY} [data-testid="prompt-input"]`);
     await composer.click();
     await this.page.keyboard.type(text);
-    await this.page.locator('[data-testid="prompt-submit"]').click();
+    await this.page.locator(`${PRIMARY} [data-testid="prompt-submit"]`).click();
   }
 
-  assistantCount(): Promise<number> { return this.page.evaluate(() => document.querySelectorAll('.agent-message-assistant').length); }
+  assistantCount(): Promise<number> { return this.page.evaluate(() => (document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-message-assistant').length); }
 
   /** Waits until the page shows more assistant messages than `before`, containing `needle`. */
   async waitForReplyContaining(needle: string, deadlineMs: number): Promise<boolean> {
     try {
-      await this.page.waitForFunction((word: string) => [...document.querySelectorAll('.agent-message-assistant')].some(node => (node.textContent ?? '').includes(word)), needle, { timeout: deadlineMs });
+      await this.page.waitForFunction((word: string) => [...(document.querySelector('.lab-primary-conversation') ?? document).querySelectorAll('.agent-message-assistant')].some(node => (node.textContent ?? '').includes(word)), needle, { timeout: deadlineMs });
       return true;
     } catch { return false; }
   }

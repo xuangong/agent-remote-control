@@ -4,17 +4,19 @@ import type { PageRow, PageSample } from '../invariants/types.js';
 
 export const observerSource = `(() => {
   const log = [];
+  // A Window can hold other views beside the one the run opened (a second composer, other rows); the run reads its own, the primary conversation.
+  const root = () => document.querySelector('.lab-primary-conversation') ?? document;
   const unique = list => [...new Set(list)];
-  const texts = selector => unique([...document.querySelectorAll(selector)].map(node => node.textContent.trim()).filter(Boolean));
+  const texts = selector => unique([...root().querySelectorAll(selector)].map(node => node.textContent.trim()).filter(Boolean));
   const read = () => {
-    const editor = document.querySelector('[data-testid="prompt-input"]');
+    const editor = root().querySelector('[data-testid="prompt-input"]');
     return {
       labels: texts('.lab-conversation-status'),
       loading: texts('.lab-empty-state h3'),
       composer: !editor ? 'absent' : editor.getAttribute('aria-disabled') === 'true' || editor.getAttribute('contenteditable') === 'false' ? 'disabled' : 'enabled',
-      messages: document.querySelectorAll('.agent-message').length,
-      entries: document.querySelectorAll('.agent-timeline-entry').length,
-      delivery: unique([...document.querySelectorAll('[data-delivery-state]')].map(node => node.getAttribute('data-delivery-state'))),
+      messages: root().querySelectorAll('.agent-message').length,
+      entries: root().querySelectorAll('.agent-timeline-entry').length,
+      delivery: unique([...root().querySelectorAll('[data-delivery-state]')].map(node => node.getAttribute('data-delivery-state'))),
     };
   };
   let last = '', lastRun = 0, scheduled = false, firstRowAt = null;
@@ -36,19 +38,19 @@ export const observerSource = `(() => {
   if (document.documentElement) start(); else document.addEventListener('readystatechange', start, { once: true });
   setInterval(request, 100);
   const scroller = () => {
-    for (let at = document.querySelector('.agent-timeline-entry')?.parentElement; at; at = at.parentElement) if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at;
+    for (let at = root().querySelector('.agent-timeline-entry')?.parentElement; at; at = at.parentElement) if (at.scrollHeight > at.clientHeight && /auto|scroll/.test(getComputedStyle(at).overflowY)) return at;
     return document.scrollingElement;
   };
   window.__smoke = {
     log, read, firstRowAt: () => firstRowAt,
-    rows: () => [...document.querySelectorAll('.agent-timeline-entry')].map(node => ({
+    rows: () => [...root().querySelectorAll('.agent-timeline-entry')].map(node => ({
       key: node.getAttribute('data-entry-key') || '',
       kind: node.querySelector('.agent-message-user') ? 'user_message' : node.querySelector('.agent-message-assistant') ? 'assistant_message' : node.querySelector('.agent-tool-chevron') ? 'tool_call' : 'other',
       text: (node.innerText || '').trim(),
     })),
-    mark: () => { window.__smokeMarks = [...document.querySelectorAll('.agent-timeline-entry')]; return window.__smokeMarks.length; },
+    mark: () => { window.__smokeMarks = [...root().querySelectorAll('.agent-timeline-entry')]; return window.__smokeMarks.length; },
     survivors: () => ({ total: window.__smokeMarks?.length ?? 0, alive: (window.__smokeMarks ?? []).filter(node => node.isConnected).length }),
-    scrollerSize: () => { const target = scroller(); return { scrollHeight: target.scrollHeight, clientHeight: target.clientHeight, scrollTop: target.scrollTop, rows: document.querySelectorAll('.agent-timeline-entry').length, className: target.className }; },
+    scrollerSize: () => { const target = scroller(); return { scrollHeight: target.scrollHeight, clientHeight: target.clientHeight, scrollTop: target.scrollTop, rows: root().querySelectorAll('.agent-timeline-entry').length, className: target.className }; },
     scrollToMiddle: () => {
       const target = scroller();
       target.dispatchEvent(new WheelEvent('wheel', { deltaY: -1, bubbles: true }));
@@ -60,11 +62,11 @@ export const observerSource = `(() => {
     },
     anchor: () => {
       const target = scroller(), top = target === document.scrollingElement ? 0 : target.getBoundingClientRect().top;
-      const row = [...document.querySelectorAll('.agent-timeline-entry')].find(node => node.getBoundingClientRect().bottom > top + 1);
+      const row = [...root().querySelectorAll('.agent-timeline-entry')].find(node => node.getBoundingClientRect().bottom > top + 1);
       return row ? { key: row.getAttribute('data-entry-key'), offset: Math.round((row.getBoundingClientRect().top - top) * 10) / 10 } : null;
     },
     composer: () => {
-      const editor = document.querySelector('[data-testid="prompt-input"]');
+      const editor = root().querySelector('[data-testid="prompt-input"]');
       return editor ? { text: editor.textContent ?? '', focused: editor.contains(document.activeElement) || document.activeElement === editor } : null;
     },
     setHidden: hidden => {

@@ -168,34 +168,6 @@ async function createWorkspace(page: Page, context: BrowserContext) {
   }
 }
 
-test('closing an unselected primary removes its attached family and preserves the selected pane and independent dock', async ({ page, context }) => {
-  const workspace = await createWorkspace(page, context);
-  try {
-    const child = await workspace.createNative('Alpha child');
-    const leaf = await workspace.createNative('Alpha leaf');
-    await workspace.apply([
-      createWindowView('alpha', { ...workspace.binding, title: 'Alpha' }, 'primary'),
-      { ...createWindowView('alpha-child', { ...child, parentNativeSessionId: workspace.binding.nativeSessionId }, 'attached'), attachedTo: 'alpha' },
-      { ...createWindowView('alpha-leaf', { ...leaf, parentNativeSessionId: child.nativeSessionId }, 'attached'), attachedTo: 'alpha-child' },
-      createWindowView('beta', { ...workspace.binding, title: 'Beta' }, 'primary'),
-      createWindowView('independent', { ...workspace.binding, title: 'Independent' }),
-    ], 'beta');
-    const panel = await openWindows(page);
-    await expect(panel.locator('[data-window-view-id="beta"]')).toHaveAttribute('aria-current', 'true');
-    await closeListedView(page, 'alpha');
-    await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['beta', 'independent']);
-    await expect.poll(async () => {
-      const current = await workspace.inspect(); return [current.selectedPrimaryViewId, current.selectedViewId];
-    }).toEqual(['beta', 'beta']);
-    await expect(panel.locator('[data-window-view-id="beta"]')).toHaveAttribute('aria-current', 'true');
-    await expect(panel.locator('[data-window-view-row="independent"]')).toBeVisible();
-    await closeWindows(page);
-    await expect(page.locator('[data-primary-group-id="alpha"]')).toHaveCount(0);
-    await expect(page.locator('[data-primary-group-id="beta"]').getByTestId('prompt-input')).toBeEnabled();
-    expect(workspace.errors).toEqual([]);
-  } finally { await workspace.close(); }
-});
-
 test('closing the selected and final primary leaves usable independent docks and reachable global controls', async ({ page, context, isMobile }) => {
   const workspace = await createWorkspace(page, context);
   try {
@@ -316,32 +288,6 @@ test('the last pane closes to a persistent empty Window that can bind an existin
   } catch (error) {
     await test.info().attach('empty-window-state', { body: JSON.stringify({ window: await workspace.inspect(), refreshRequests, errors: workspace.errors }, null, 2), contentType: 'application/json' });
     throw error;
-  } finally { await workspace.close(); }
-});
-
-test('closing an attached pane or a linked leader removes only its dependent views', async ({ page, context }) => {
-  const workspace = await createWorkspace(page, context);
-  try {
-    const child = await workspace.createNative('Child');
-    const leaf = await workspace.createNative('Leaf');
-    await workspace.apply([
-      createWindowView('root', { ...workspace.binding, title: 'Root' }, 'primary'),
-      { ...createWindowView('child', { ...child, parentNativeSessionId: workspace.binding.nativeSessionId }, 'attached'), attachedTo: 'root' },
-      { ...createWindowView('leaf', { ...leaf, parentNativeSessionId: child.nativeSessionId }, 'attached'), attachedTo: 'child' },
-      createWindowView('leader', { ...workspace.binding, title: 'Linked leader' }),
-      { ...createWindowView('member', { ...workspace.binding, title: 'Linked member' }), closeWith: 'leader' },
-      { ...createWindowView('member-child', { ...child, parentNativeSessionId: workspace.binding.nativeSessionId }, 'attached'), attachedTo: 'member' },
-      createWindowView('independent', { ...workspace.binding, title: 'Independent' }),
-    ], 'root', 'leaf');
-    await closeListedView(page, 'child');
-    await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['root', 'leader', 'member', 'member-child', 'independent']);
-    await expect.poll(async () => (await workspace.inspect()).selectedViewId).toBe('root');
-    await closeListedView(page, 'leader');
-    await expect.poll(async () => (await workspace.inspect()).views.map(view => view.id)).toEqual(['root', 'independent']);
-    await closeWindows(page);
-    await expect(page.locator('[data-primary-group-id="root"]').getByTestId('prompt-input')).toBeEnabled();
-    expect((await workspace.inspect()).views[0]!.binding?.nativeSessionId).toBe(workspace.binding.nativeSessionId);
-    expect(workspace.errors).toEqual([]);
   } finally { await workspace.close(); }
 });
 

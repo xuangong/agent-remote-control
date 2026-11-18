@@ -29,6 +29,9 @@ const state: AgentReplicaState = {
   },
 };
 
+/** The messages the composers handed to their actions, in order, for the tests to read. */
+function recordSent(text: string): void { ((window as unknown as { sentMessages?: string[] }).sentMessages ??= []).push(text); }
+
 function Fixture() {
   const query = new URLSearchParams(window.location.search);
   const [width, setWidth] = useState(440);
@@ -37,6 +40,7 @@ function Fixture() {
   const [takeoverRequest, setTakeoverRequest] = useState<{ reject(error: Error): void }>();
   const [draftOnly, setDraftOnly] = useState(query.has('draftOnly'));
   const idle = query.has('idle');
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   return <main className="lab-shell" style={{ display: 'block', position: 'static', height: 'auto', overflow: 'visible' }}>
     <nav aria-label="Fixture size">
       <label>Width<input aria-label="View width" type="number" value={width} onChange={event => setWidth(Number(event.target.value))} /></label>
@@ -58,8 +62,8 @@ function Fixture() {
           nativeTakeover={query.has('nativeOwner') ? <SessionControlNotice connected={connection === 'ready'}
             control={{ access: 'read_only', available: false, nativeOwner: { kind: 'native_cli', generation: 'fixture-owner' } }}
             onTakeControl={() => new Promise<void>((_resolve, reject) => setTakeoverRequest({ reject }))} /> : undefined}
-          conversationPath={<strong>Session fixture</strong>} sessionManager={<div><button type="button">Manage</button></div>} messageDraft={query.has('emptyDraft') ? '' : 'A draft kept while the view resizes'}
-          actions={{ sendMessage: async () => {}, sendMessageContent: async () => {}, cancel: async () => {}, listCommands: async () => [{ id: 'review', name: 'review', description: 'Review a change while keeping the conversation visible.', kind: 'skill' }] }} />
+          conversationPath={<strong>Session fixture</strong>} sessionManager={<div><button type="button">Manage</button></div>} messageDraft={drafts[placement] ?? (query.has('emptyDraft') ? '' : 'A draft kept while the view resizes')} onMessageDraftChange={text => setDrafts(current => ({ ...current, [placement]: text }))}
+          actions={{ sendMessage: async text => { recordSent(text); }, sendMessageContent: async content => { recordSent(typeof content === 'string' ? content : JSON.stringify(content)); }, cancel: async () => {}, listCommands: async () => [{ id: 'review', name: 'review', description: 'Review a change while keeping the conversation visible.', kind: 'skill' }] }} />
       </section>)}
     </div>
   </main>;

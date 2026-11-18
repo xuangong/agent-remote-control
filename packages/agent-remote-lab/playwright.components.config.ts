@@ -23,7 +23,7 @@ export default defineConfig({
     { name: 'chromium-desktop', use: { ...devices['Desktop Chrome'] } },
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
     { name: 'webkit-conversation', testMatch: ['simple-conversation.spec.ts', 'tracked-team.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-mobile-viewport', testMatch: ['layout-diagnostics.spec.ts', 'standalone-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
+    { name: 'webkit-mobile-viewport', testMatch: ['layout-diagnostics.spec.ts', 'standalone-layout.spec.ts', 'mobile-viewport-reflow.spec.ts', 'image-atom-touch.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-ask-desktop', testMatch: ['dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'session-title-rename.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts'], use: { ...devices['Desktop Safari'] } },
     { name: 'webkit-ask-mobile', testMatch: ['dock-title-interactions.spec.ts', 'session-family-resize.spec.ts', 'tpm-dock.spec.ts', 'ask-timeline-layout.spec.ts', 'session-view-responsive.spec.ts', 'composer-overflow.spec.ts'], use: { ...devices['iPhone 13'] } },
     { name: 'webkit-desktop', testMatch: ['image-input.spec.ts', 'image-viewer.spec.ts', 'markdown-reading.spec.ts'], use: { ...devices['Desktop Safari'] } },

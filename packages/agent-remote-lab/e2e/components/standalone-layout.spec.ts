@@ -103,3 +103,17 @@ test('keeps composer controls inside the standalone viewport before native recov
   await page.getByRole('button', { name: 'Open sessions', exact: true }).click();
   await page.getByRole('dialog', { name: 'Context', exact: true }).locator('.lab-rail-close').click();
 });
+
+test('serves a standalone manifest and touch icons', async ({ page, request }) => {
+  await page.goto('/');
+  const manifest = await request.get('/app/manifest.webmanifest');
+  expect(manifest.ok()).toBe(true);
+  const value = await manifest.json();
+  expect(value.display).toBe('standalone');
+  expect(value.start_url).toBe('/');
+  for (const icon of value.icons) {
+    const response = await request.get(icon.src);
+    expect(response.headers()['content-type']).toContain('image/png');
+    expect(response.ok()).toBe(true);
+  }
+});

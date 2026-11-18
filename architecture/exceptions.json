@@ -76,7 +76,7 @@
       "from": [
         "packages/agent-remote-lab/**"
       ],
-      "max": 20,
+      "max": 19,
       "owner": "M12",
       "reason": "Workbench tests and e2e fixtures start the Relay, the Controller and the web package by path; they move to agent-e2e and to client component tests in M12 and M14."
     },

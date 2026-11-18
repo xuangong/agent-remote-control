@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openSessionsPage } from './all-sessions';
+import { openSessionsPage } from '../all-sessions';
 
 for (const purpose of ['host-only', 'gateway-setup'] as const) {
   test(`creates and revokes a ${purpose} invitation without retaining its secret`, async ({ page }, testInfo) => {

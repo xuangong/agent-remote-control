@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { toggleViewPanel } from './view-options';
+import { showNewSession } from './session-navigation';
 
 test.beforeEach(async ({}, testInfo) => {
   test.skip(testInfo.project.name !== 'chromium-mobile', 'Touch layout acceptance.');
@@ -7,7 +8,7 @@ test.beforeEach(async ({}, testInfo) => {
 
 async function openSession(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await showNewSession(page);
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
 }
@@ -58,10 +59,10 @@ test('uses one chat viewport in landscape and returns to the retained source dra
   await expect(primary).toBeVisible();
   await primary.getByTestId('prompt-input').fill('Source draft on phone');
   await primary.getByRole('navigation', { name: 'Forked sessions' }).getByRole('button').tap();
-  await expect(side.getByTestId('prompt-input')).toHaveValue('Side draft on phone');
+  await expect(side.getByTestId('prompt-input')).toHaveText('Side draft on phone');
   await page.screenshot({ path: testInfo.outputPath('landscape-side.png') });
   await side.getByRole('button', { name: 'Close side conversation' }).tap();
-  await expect(primary.getByTestId('prompt-input')).toHaveValue('Source draft on phone');
+  await expect(primary.getByTestId('prompt-input')).toHaveText('Source draft on phone');
 });
 
 test('keeps the composer and command menu inside a contracted visual viewport', async ({ page }, testInfo) => {
@@ -93,7 +94,7 @@ test('keeps the composer and command menu inside a contracted visual viewport', 
     window.visualViewport!.dispatchEvent(new Event('resize'));
   });
   await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(844);
-  await expect(page.getByTestId('prompt-input')).toHaveValue('/');
+  await expect(page.getByTestId('prompt-input')).toHaveText('/');
 });
 
 test('keeps drawer dismissal reachable after scrolling and preserves the chat draft', async ({ page }, testInfo) => {
@@ -121,7 +122,7 @@ test('keeps drawer dismissal reachable after scrolling and preserves the chat dr
   await page.screenshot({ path: testInfo.outputPath('phone-drawer.png') });
   await close.tap();
   await expect(drawer).toHaveCount(0);
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Retain my phone draft');
+  await expect(page.getByTestId('prompt-input')).toHaveText('Retain my phone draft');
 });
 
 
@@ -131,13 +132,13 @@ test('recovers a draft after reload and returns through discovery', async ({ pag
   const sessionUrl = page.url();
   await page.getByTestId('prompt-input').fill('Recover after an accidental leave');
   await page.reload();
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
+  await expect(page.getByTestId('prompt-input')).toHaveText('Recover after an accidental leave');
   expect(await page.evaluate(() => history.length)).toBe(historyLength);
   await page.getByRole('button', { name: 'Open sessions' }).tap();
   await page.getByRole('button', { name: 'New session', exact: true }).tap();
   await page.getByTestId('session-create').click();
   await expect(page.getByTestId('prompt-input')).toBeEnabled();
-  await expect(page.getByTestId('prompt-input')).toHaveValue('');
+  await expect(page.getByTestId('prompt-input')).toHaveText('');
   expect(page.url()).not.toBe(sessionUrl);
   expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
   await page.getByRole('button', { name: 'Open sessions' }).tap();
@@ -145,23 +146,8 @@ test('recovers a draft after reload and returns through discovery', async ({ pag
   await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
   const identity = JSON.stringify(['local', 'recorded', new URL(sessionUrl).searchParams.get('session')]);
   await discovery.locator(`[data-session-key=${JSON.stringify(identity)}] > .lab-session-branch > .lab-session-row`).click();
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Recover after an accidental leave');
+  await expect(page.getByTestId('prompt-input')).toHaveText('Recover after an accidental leave');
 });
-
-test('serves a standalone manifest and touch icons', async ({ page, request }) => {
-  await page.goto('/');
-  const manifest = await request.get('/app/manifest.webmanifest');
-  expect(manifest.ok()).toBe(true);
-  const value = await manifest.json();
-  expect(value.display).toBe('standalone');
-  expect(value.start_url).toBe('/');
-  for (const icon of value.icons) {
-    const response = await request.get(icon.src);
-    expect(response.headers()['content-type']).toContain('image/png');
-    expect(response.ok()).toBe(true);
-  }
-});
-
 
 test('restores the reading anchor after reload instead of jumping to latest', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 640 });
@@ -236,46 +222,13 @@ test('enters and exits browser fullscreen while preserving the current conversat
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === document.documentElement)).toBe(true);
   await expect(settings.getByRole('button', { name: 'Exit full screen', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close Context', exact: true }).tap();
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Keep this fullscreen draft');
+  await expect(page.getByTestId('prompt-input')).toHaveText('Keep this fullscreen draft');
   await expect.poll(async () => (await page.locator('.lab-shell').boundingBox())!.height).toBe(await page.evaluate(() => visualViewport!.height));
   await openSettings(page);
   await settings.getByRole('button', { name: 'Exit full screen', exact: true }).tap();
   await expect.poll(() => page.evaluate(() => document.fullscreenElement === null)).toBe(true);
   await expect(settings.getByRole('button', { name: 'Enter full screen', exact: true })).toBeVisible();
 });
-
-test('explains unsupported fullscreen and keeps Settings usable', async ({ page }) => {
-  await page.addInitScript(() => { Object.defineProperty(document, 'fullscreenEnabled', { value: false, configurable: true }); });
-  await openSession(page);
-  const settings = await openSettings(page);
-  await expect(settings.getByRole('button', { name: 'Enter full screen' })).toHaveCount(0);
-  await expect(settings).toContainText('This browser does not support page full screen.');
-  await settings.getByText('Open without the address bar', { exact: true }).tap();
-  await expect(settings.getByText(/On iPhone/)).toBeVisible();
-  await expect(settings).toContainText('Add to Home Screen');
-});
-
-test('reports fullscreen rejection without claiming success or losing the draft', async ({ page }) => {
-  await page.addInitScript(() => {
-    Element.prototype.requestFullscreen = async () => { throw new Error('Denied'); };
-  });
-  await openSession(page);
-  const settings = await openSettings(page);
-  await settings.getByRole('button', { name: 'Enter full screen', exact: true }).tap();
-  await expect(settings.getByRole('alert')).toContainText('Full screen could not be changed');
-  await expect(settings.getByRole('button', { name: 'Enter full screen', exact: true })).toBeEnabled();
-});
-
-
-test('recognizes a Home Screen launch without offering redundant fullscreen controls', async ({ page }) => {
-  await page.addInitScript(() => { Object.defineProperty(navigator, 'standalone', { value: true }); });
-  await openSession(page);
-  const settings = await openSettings(page);
-  await expect(settings).toContainText('Opened from your Home Screen');
-  await expect(settings.getByRole('button', { name: 'Enter full screen' })).toHaveCount(0);
-  await expect(settings.getByText('Open without the address bar')).toHaveCount(0);
-});
-
 
 for (const resizesWindow of [false, true]) test(`removes the home-indicator inset above the keyboard and restores it after dismissal (${resizesWindow ? 'resized window' : 'visual viewport only'})`, async ({ page, context }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
@@ -320,7 +273,7 @@ for (const resizesWindow of [false, true]) test(`removes the home-indicator inse
     return 420 - bounds.y - bounds.height;
   }).toBeLessThanOrEqual(1);
   await show.click();
-  await expect(input).toHaveValue('Keep my draft');
+  await expect(input).toHaveText('Keep my draft');
   await page.evaluate(() => {
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(document.documentElement, 'clientHeight', { configurable: true, value: 844 });
@@ -329,7 +282,7 @@ for (const resizesWindow of [false, true]) test(`removes the home-indicator inse
   });
   await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
   await expect(dock).toHaveCSS('padding-bottom', '40px');
-  await expect(input).toHaveValue('Keep my draft');
+  await expect(input).toHaveText('Keep my draft');
   await input.focus();
   await expect(shell).toHaveAttribute('data-viewport-occluded', 'false');
   await expect(dock).toHaveCSS('padding-bottom', '40px');

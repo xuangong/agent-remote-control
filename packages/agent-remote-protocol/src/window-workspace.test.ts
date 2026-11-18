@@ -228,6 +228,34 @@ it('migrates a v1 Window deterministically without changing its identities or re
   expect(decodeWorkspaceWindow({ ...legacy, selectedPrimaryViewId: 'dock' })).toBeUndefined();
 });
 
+function familyWindow(selection: { primary: string; view: string }): WorkspaceWindow {
+  return { schemaVersion: 3, id: 'w1', title: 'Project', revision: 0, selectedPrimaryViewId: selection.primary, selectedViewId: selection.view, views: [
+    createWindowView('alpha', binding, 'primary'),
+    { ...createWindowView('alpha-child', binding, 'attached'), attachedTo: 'alpha' },
+    { ...createWindowView('alpha-leaf', binding, 'attached'), attachedTo: 'alpha-child' },
+    createWindowView('beta', binding, 'primary'),
+    createWindowView('leader'),
+    { ...createWindowView('member'), closeWith: 'leader' },
+    { ...createWindowView('member-child', binding, 'attached'), attachedTo: 'member' },
+    createWindowView('independent'),
+  ] };
+}
+it('closing an unselected primary removes its whole attached chain and keeps the selected primary and independent docks', () => {
+  const closed = applyWindowOperation(familyWindow({ primary: 'beta', view: 'beta' }), { type: 'view.close', viewId: 'alpha' });
+  expect(closed.views.map(view => view.id)).toEqual(['beta', 'leader', 'member', 'member-child', 'independent']);
+  expect([closed.selectedPrimaryViewId, closed.selectedViewId]).toEqual(['beta', 'beta']);
+});
+it('closing an attached pane removes its attached chain, and closing a linked leader removes its members and their attached views', () => {
+  const afterChild = applyWindowOperation(familyWindow({ primary: 'alpha', view: 'alpha-leaf' }), { type: 'view.close', viewId: 'alpha-child' });
+  expect(afterChild.views.map(view => view.id)).toEqual(['alpha', 'beta', 'leader', 'member', 'member-child', 'independent']);
+  expect(afterChild.selectedViewId).toBe('alpha');
+  const withSibling = familyWindow({ primary: 'alpha', view: 'alpha-leaf' });
+  withSibling.views.splice(1, 0, { ...createWindowView('alpha-sibling', binding, 'attached'), attachedTo: 'alpha' });
+  const afterSiblingCase = applyWindowOperation(withSibling, { type: 'view.close', viewId: 'alpha-child' });
+  expect(afterSiblingCase.selectedViewId).toBe('alpha');
+  const afterLeader = applyWindowOperation(afterChild, { type: 'view.close', viewId: 'leader' });
+  expect(afterLeader.views.map(view => view.id)).toEqual(['alpha', 'beta', 'independent']);
+});
 it('closes the last pane without replacing the Window or creating a new pane', () => {
   const original = workspace();
   original.views = [original.views[0]!];

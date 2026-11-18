@@ -413,6 +413,14 @@ describe('App', () => {
     expect(summary.getAttribute('aria-label')).not.toContain('Ready');
   });
 
+  it('names the ready connection state in text and in the accessible label', async () => {
+    const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
+    const summary = container.querySelector('[data-testid="connection-summary"]') as HTMLElement;
+
+    expect(summary.textContent).toContain('Ready');
+    expect(summary.getAttribute('aria-label')).toMatch(/\. Agent agent-1\. Ready$/);
+  });
+
   it('hides Lab scenario controls when fixture callbacks are unavailable', async () => {
     const container = await render(<App initialState={replicaState} initialSessionStatus="ready" actions={{}} />);
 

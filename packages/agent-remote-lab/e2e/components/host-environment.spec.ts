@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { showNewSession } from './session-navigation';
+import { showNewSession } from '../session-navigation';
 
 test('filters execution environments without confusing same-name Hosts or overflowing mobile layout', async ({ page }, testInfo) => {
   const baseEnvironment = { detectedAt: Date.now(), os: { platform: 'linux', name: 'Ubuntu 24.04 LTS', arch: 'arm64', release: '6.8.0' },
@@ -22,13 +22,13 @@ test('filters execution environments without confusing same-name Hosts or overfl
   const search = context.getByRole('searchbox', { name: 'Find an execution environment' });
   await search.fill('linux chromium');
   const selector = context.getByLabel('Connected Host');
-  await expect(selector.locator('option:enabled')).toHaveCount(1); // The current selection stays listed but disabled; one match is enabled.
+  await expect(selector.locator('option:enabled').filter({ hasNotText: 'Select a Host' })).toHaveCount(1); // Only Hosts that match the search stay enabled; the placeholder is not a Host.
   await selector.selectOption('linux');
   await expect(context.getByTestId('provider-select')).toHaveValue(JSON.stringify(['linux', 'codex']));
   await expect(context.getByLabel('Host environment')).toContainText('Ubuntu 24.04 LTS');
   await search.fill('mac zsh vscode');
   await expect(selector).toHaveValue('linux');
-  await expect(selector.locator('option:enabled')).toHaveCount(1);
+  await expect(selector.locator('option:enabled').filter({ hasNotText: 'Select a Host' })).toHaveCount(1);
   await selector.selectOption('mac');
   await expect(context.getByTestId('provider-select')).toHaveValue(JSON.stringify(['mac', 'codex']));
   await expect(context.getByLabel('Host environment')).toContainText('VS Code');

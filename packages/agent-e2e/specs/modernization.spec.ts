@@ -8,17 +8,6 @@ interface Rgb { red: number; green: number; blue: number }
 
 const focusableSelector = 'button:not(:disabled):not([tabindex^="-"]), a[href]:not([tabindex^="-"]), input:not(:disabled):not([tabindex^="-"]), select:not(:disabled):not([tabindex^="-"]), textarea:not(:disabled):not([tabindex^="-"]), [tabindex]:not([tabindex^="-"])';
 
-test('names the active connection state without relying on its marker', async ({ page }) => {
-  const browserErrors = collectBrowserErrors(page);
-  await openRecordedSession(page);
-
-  const summary = page.getByTestId('connection-summary');
-  await expect(summary).toBeVisible();
-  await expect(summary).toContainText('Ready');
-  await expect(summary).toHaveAccessibleName(`Recorded semantic Provider. Agent ${new URL(page.url()).searchParams.get('agent')}. Ready`);
-  expectBrowserErrors(browserErrors);
-});
-
 test('opens session settings above the composer without moving the conversation', async ({ page }) => {
   await openRecordedSession(page);
   const timeline = page.getByTestId('timeline');

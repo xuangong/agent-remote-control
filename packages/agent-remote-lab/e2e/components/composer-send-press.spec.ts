@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 
 test('holds Send to insert a newline at the selection and releases without sending', async ({ page }, testInfo) => {
-  await page.goto('/');
-  await page.getByRole('button', { name: 'New session', exact: true }).click();
-  await page.getByTestId('session-create').click();
-  const input = page.getByTestId('prompt-input');
-  const send = page.getByTestId('prompt-submit');
+  await page.goto('/e2e/fixtures/session-view-responsive.html');
+  const view = page.locator('[data-placement="primary"]');
+  const sent = () => page.evaluate(() => (window as unknown as { sentMessages?: string[] }).sentMessages ?? []);
+  const input = view.getByTestId('prompt-input');
+  const send = view.getByTestId('prompt-submit');
   // Line breaks are significant here, so compare rendered text instead of whitespace-normalized text.
   const expectDraft = (draft: string) => expect.poll(() => input.evaluate((element: HTMLElement) => element.innerText)).toBe(draft);
   await expect(input).toBeEnabled();
@@ -36,7 +36,7 @@ test('holds Send to insert a newline at the selection and releases without sendi
   await expect(input).toBeFocused();
   await input.press('X');
   await expectDraft('First\nX second');
-  await expect(page.locator('.agent-message-user').filter({ hasText: 'First' })).toHaveCount(0);
+  expect(await sent()).toEqual([]);
 
   // A canceled or dragged gesture must neither send nor mutate the draft.
   const next = await point();
@@ -49,10 +49,9 @@ test('holds Send to insert a newline at the selection and releases without sendi
   }
   await page.waitForTimeout(550);
   await expectDraft('First\nX second');
-  await expect(page.locator('.agent-message-user').filter({ hasText: 'First' })).toHaveCount(0);
+  expect(await sent()).toEqual([]);
   if (touch) { await touch.detach(); await send.tap(); }
   else await send.click();
   await expect(input).toHaveText('');
-  await expect(page.locator('.agent-message-user').filter({ hasText: 'First' })).toHaveCount(1);
-  await expect(page.locator('.agent-message-user').filter({ hasText: 'First' })).toContainText('First\nX second');
+  await expect.poll(sent).toEqual(['First\nX second']);
 });

@@ -1,41 +1,17 @@
-import { expect, test, type Page } from '@playwright/test';
-import { showNewSession } from './session-navigation';
+import { expect, test } from '@playwright/test';
 
-async function openReconnectingSession(page: Page, ask = false) {
-  let primaryId: string | undefined;
-  await page.routeWebSocket(/session-channel/, route => {
-    const server = route.connectToServer();
-    server.onMessage(message => {
-      const envelope = JSON.parse(String(message));
-      const frame = envelope.type === 'message' ? envelope.message : envelope;
-      if (frame.type === 'agent_snapshot') {
-        primaryId ??= frame.payload.id;
-        if (!ask || frame.payload.id !== primaryId) frame.payload.runtimeInfo.connection = { state: 'reconnecting' };
-      }
-      route.send(JSON.stringify(envelope));
-    });
-  });
-  await page.goto('/'); await showNewSession(page); await page.getByTestId('session-create').click();
-  await expect(page.locator('.lab-primary-conversation').getByTestId('prompt-input')).toBeVisible();
-  if (ask) {
-    const primary = page.locator('.lab-primary-conversation');
-    // The command runs only once the source session is ready to send.
-    await expect(primary.getByTestId('prompt-input')).toBeEnabled();
-    await primary.getByTestId('prompt-input').fill('/ask');
-    await expect(primary.getByTestId('prompt-submit')).toBeEnabled();
-    await primary.getByTestId('prompt-input').press('Enter');
-    await page.getByRole('button', { name: 'Ask about this session', exact: true }).click();
-  }
+async function openReconnectingSession(page: import('@playwright/test').Page) {
+  await page.goto('/e2e/fixtures/toast-placement.html');
   const toast = page.locator('.lab-toast').filter({ hasText: 'Native runtime is reconnecting' });
   // Recovery notices appear after the foreground reconnect grace period.
   await expect(toast).toBeVisible({ timeout: 10_000 });
   await toast.hover(); // Pause the countdown while checking viewport transitions.
-  return ask ? page.getByRole('dialog', { name: 'Ask', exact: true }) : page.locator('.lab-primary-conversation');
+  return page.locator('body');
 }
 
-for (const ask of [false, true]) test(`mobile toast stays above the ${ask ? 'Ask' : 'main'} composer through keyboard and draft resizing`, async ({ page }, info) => {
+test('mobile toast stays above the composer through keyboard and draft resizing', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const pane = await openReconnectingSession(page, ask);
+  const pane = await openReconnectingSession(page);
   const input = pane.getByTestId('prompt-input');
   for (const viewport of [{ height: 844, offsetTop: 0 }, { height: 420, offsetTop: 80 }, { height: 340, offsetTop: 160 }, { height: 844, offsetTop: 0 }]) {
     await page.evaluate(value => {

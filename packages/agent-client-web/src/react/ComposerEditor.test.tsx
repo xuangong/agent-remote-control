@@ -64,6 +64,42 @@ it('does not submit composition input and handles mobile line-break intent', asy
   expect(change).toHaveBeenCalledWith([{ type: 'text', text: '\n' }]);
 });
 
+it('reads the paragraph input that follows a Shift+Enter as a line break, not as Enter', async () => {
+  // iPhone WebKit reports Shift+Enter as keydown with shift, then beforeinput insertParagraph without it.
+  const change = vi.fn(); const key = vi.fn();
+  const container = await render(<ComposerEditor id="editor" parts={[]} images={{}} disabled={false} onChange={change} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={key} />);
+  const editor = container.querySelector('[role="textbox"]')!;
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+  key.mockClear();
+  await act(async () => editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true })));
+  expect(change).toHaveBeenCalledWith([{ type: 'text', text: '\n' }]);
+  expect(key).not.toHaveBeenCalled();
+  // The next paragraph input, with no Shift+Enter before it, is still Enter.
+  await act(async () => editor.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true })));
+  await act(async () => editor.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertParagraph', bubbles: true, cancelable: true })));
+  expect(key).toHaveBeenCalledTimes(1);
+  expect(key.mock.calls[0]![0]).toMatchObject({ key: 'Enter' });
+});
+
+it('does not send the Enter that ProseMirror replays on iOS after a Shift+Enter', async () => {
+  vi.useFakeTimers();
+  try {
+    const key = vi.fn();
+    const container = await render(<ComposerEditor id="editor" parts={[]} images={{}} disabled={false} onChange={() => {}} onFiles={() => []} onImport={value => [...value]} onRetry={() => {}} onKeyDown={key} />);
+    const editor = container.querySelector('[role="textbox"]')!;
+    await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+    key.mockClear();
+    // The replay is an untrusted event without Shift. Dispatching one is the same: jsdom marks it untrusted too.
+    vi.advanceTimersByTime(200);
+    await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(key).not.toHaveBeenCalled();
+    // Much later the same event is an Enter again.
+    vi.advanceTimersByTime(1000);
+    await act(async () => editor.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(key).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
 it('pastes at the current selection after a file picker was cancelled', async () => {
   const ref = createRef<ComposerEditorHandle>();
   let parts: DraftPart[] = [{ type: 'text', text: 'Hello' }];

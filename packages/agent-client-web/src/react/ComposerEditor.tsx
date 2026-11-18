@@ -45,6 +45,10 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
   const bookmark = useRef<SelectionBookmark>();
   const previewSelection = useRef<SelectionBookmark>();
   const pendingPastes = useRef(new Map<object, SelectionBookmark>());
+  /** Shift+Enter is down: the paragraph input that follows is its line break, whatever name the browser gives it (iOS reports Enter that way). */
+  const shiftEnterDown = useRef(false);
+  /** When Shift+Enter last went down; ProseMirror replays an iOS Enter without Shift about 200 ms later, which is not an Enter. */
+  const shiftEnterAt = useRef(0);
   const [selected, setSelected] = useState<string>();
   const [previewOpen, setPreviewOpen] = useState(false);
   const replaceInput = useRef<HTMLInputElement>(null);
@@ -96,6 +100,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       },
       handleKeyDown(_view, event) {
         if (event.isComposing || editor.composing || event.keyCode === 229) return false;
+        if (event.key === 'Enter' && !event.shiftKey && !event.isTrusted && Date.now() - shiftEnterAt.current < 400) return true;
         if (event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && editor.state.selection instanceof NodeSelection && editor.state.selection.node.type.name === 'image') {
           previewSelection.current = editor.state.selection.getBookmark();
           event.preventDefault(); setPreviewOpen(true); return true;
@@ -136,10 +141,18 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
       handleDOMEvents: {
         beforeinput(_view, event) {
           if (latest.current.disabled || editor.composing || event.isComposing) return false;
-          if (event.inputType === 'insertLineBreak') { event.preventDefault(); editor.dispatch(editor.state.tr.insertText('\n')); return true; }
+          if (event.inputType === 'insertLineBreak' || event.inputType === 'insertParagraph' && shiftEnterDown.current) { event.preventDefault(); editor.dispatch(editor.state.tr.insertText('\n')); return true; }
           if (event.inputType === 'insertParagraph') { event.preventDefault(); latest.current.onKeyDown(new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })); return true; }
           return false;
         },
+        // ProseMirror takes Enter on iOS before handleKeyDown and later replays it without Shift, so Shift is read from the DOM event.
+        keydown(_view, event) {
+          if (event.key !== 'Enter') return false;
+          shiftEnterDown.current = event.shiftKey;
+          if (event.shiftKey) shiftEnterAt.current = Date.now();
+          return false;
+        },
+        keyup(_view, event) { if (event.key === 'Enter') shiftEnterDown.current = false; return false; },
         copy(_view, event) { return copy(event, false); },
         cut(_view, event) { return copy(event, true); },
         drop(_view, event) { if (event.dataTransfer?.files.length) { event.preventDefault(); return true; } return false; },

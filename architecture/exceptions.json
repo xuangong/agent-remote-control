@@ -33,7 +33,7 @@
       ],
       "max": 1,
       "owner": "M13",
-      "reason": "App.tsx is 3,649 lines of hook wiring and render. M13 moved the rules out into src/state (nine modules, each with a written contract and a unit table); the state hooks and JSX still sit in AppContent. Open item O16 splits them."
+      "reason": "App.tsx is 3,649 lines of hook wiring and render. M13 moved the rules out into src/state (nine modules, each with a written contract and a unit table); the state hooks and JSX still sit in AppContent. Open item O15 splits them."
     },
     {
       "rule": "cross-package-relative",

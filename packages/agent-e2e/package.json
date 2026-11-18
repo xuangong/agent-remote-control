@@ -5,13 +5,24 @@
   "type": "module",
   "description": "Test support for the real stack: fault injection (the latency proxy, process faults, quota and many-session profiles) and the smoke harness that runs real Claude Code and Codex sessions on a `pnpm local` instance under those faults.",
   "exports": {
-    "./faults/latency-proxy.mjs": "./faults/latency-proxy.mjs"
+    "./faults/latency-proxy.mjs": "./faults/latency-proxy.mjs",
+    "./stack": {
+      "import": "./stack/index.ts",
+      "types": "./stack/index.ts"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --testTimeout=2000 --hookTimeout=5000"
+    "test": "vitest run --testTimeout=2000 --hookTimeout=5000",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "devDependencies": {
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-relay-node": "workspace:*",
+    "@orchardworks/agent-remote-controller": "workspace:*",
+    "@orchardworks/agent-remote-fixtures": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.5",

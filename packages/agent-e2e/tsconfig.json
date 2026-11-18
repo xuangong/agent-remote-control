@@ -3,13 +3,24 @@
     "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
     "noEmit": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "allowJs": false,
     "skipLibCheck": true
   },
-  "include": ["faults", "smoke"]
+  "include": [
+    "faults",
+    "smoke",
+    "stack",
+    "flows"
+  ]
 }

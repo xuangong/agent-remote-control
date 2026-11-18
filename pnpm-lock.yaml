@@ -220,6 +220,24 @@ importers:
 
   packages/agent-e2e:
     devDependencies:
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@orchardworks/agent-relay-node':
+        specifier: workspace:*
+        version: link:../agent-relay-node
+      '@orchardworks/agent-remote-controller':
+        specifier: workspace:*
+        version: link:../agent-controller
+      '@orchardworks/agent-remote-fixtures':
+        specifier: workspace:*
+        version: link:../agent-remote-fixtures
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      '@playwright/test':
+        specifier: ^1.50.0
+        version: 1.62.0
       '@types/node':
         specifier: ^24.3.0
         version: 24.13.3

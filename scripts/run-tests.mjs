@@ -99,6 +99,7 @@ const commands = {
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
   conformance: ['--filter', '@orchardworks/agent-relay-node', 'run', 'test:conformance'],
+  'e2e-flows': ['--filter', '@orchardworks/agent-e2e', 'run', 'test:e2e'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
 await verifyNativeTestVersions(mode);
@@ -114,7 +115,7 @@ function stop(signal) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-const outerDeadlineMs = mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
+const outerDeadlineMs = mode === 'e2e-flows' ? 240_000 : mode === 'live-cache-browser' ? 150_000 : mode === 'devbox' ? 30_000 : mode === 'devbox-server' ? 80_000 : mode === 'opencode-server-native' ? 90_000 : successionEvidence || opencodeSuccessionEvidence ? 120_000 : 540_000;
 const deadline = setTimeout(() => {
   process.stderr.write(`${mode} suite exceeded its ${outerDeadlineMs / 1000} second deadline.\n`);
   stop('SIGKILL');

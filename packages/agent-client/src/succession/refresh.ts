@@ -13,6 +13,10 @@
  *   the page navigates by fixed locators and discovers again once.
  * - Any other failure is reported, and the page waits for a fresh answer; a view that was already invalid stays discovered.
  * - Another authority (a different account or access state) discards the evidence the previous one confirmed.
+ * - A composition that a local edit overtook while it was being applied (`retired`, `local_edit`, `owner_edit`) did not fail: the
+ *   document it applied is no longer the current one. The page discovers again, so the newer document is applied; after
+ *   `maxSupersededRetries` consecutive overtaken applications it stops and leaves the explicit Retry. An applied composition
+ *   starts the count over.
  */
 export interface RefreshState {
   /** Authoritative evidence has been read, or restored as stale. */
@@ -23,8 +27,14 @@ export interface RefreshState {
   staleAttempts: number;
   /** The Relay has no succession routes. */
   unsupported: boolean;
+  /** Applications overtaken by an edit in a row, since the last applied one. */
+  supersededAttempts: number;
 }
-export const initialRefreshState: RefreshState = { discovered: false, evidenceStale: false, staleAttempts: 0, unsupported: false };
+export const initialRefreshState: RefreshState = { discovered: false, evidenceStale: false, staleAttempts: 0, unsupported: false, supersededAttempts: 0 };
+
+/** Results of an application that a local edit overtook, as opposed to one that failed. */
+export const supersededCodes: readonly string[] = ['retired', 'local_edit', 'owner_edit'];
+export const maxSupersededRetries = 5;
 
 /** Delays before refreshing locators restored from an unreachable Relay. */
 export const staleRetryDelays: readonly number[] = [1000, 2000, 5000, 10000, 30000];
@@ -66,6 +76,8 @@ export type RefreshEvent =
     replayRead: boolean; hasConfirmedEvidence: boolean; hasDesired: boolean; hasRoles: boolean;
     /** The selected view no longer matches its session; that stays discovered and keeps its own error. */
     invalidView: boolean }
+  | { type: 'composition_applied' }
+  | { type: 'composition_pending'; code: string }
   | { type: 'stale_retry_due'; evidenceStale: boolean }
   | { type: 'authority_changed' };
 
@@ -85,6 +97,11 @@ export function reduceRefresh(state: RefreshState, event: RefreshEvent, delays: 
       return { state: { ...state, discovered: true, evidenceStale: false, staleAttempts: 0 }, effects: [{ type: 'cancel_stale_retry' }] };
     case 'authority_changed':
       return { state: { ...state, discovered: false, evidenceStale: false, staleAttempts: 0 }, effects: [{ type: 'cancel_stale_retry' }] };
+    case 'composition_applied':
+      return { state: { ...state, supersededAttempts: 0 }, effects: [] };
+    case 'composition_pending':
+      if (!supersededCodes.includes(event.code) || state.supersededAttempts >= maxSupersededRetries) return { state, effects: [] };
+      return { state: { ...state, supersededAttempts: state.supersededAttempts + 1 }, effects: [{ type: 'rediscover' }] };
     case 'stale_retry_due':
       return { state, effects: event.evidenceStale ? [{ type: 'rediscover' }] : [] };
     case 'discovery_failed': {

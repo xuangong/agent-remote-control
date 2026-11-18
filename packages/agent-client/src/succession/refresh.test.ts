@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFailure, initialRefreshState, reduceRefresh, staleRetryDelays, type RefreshEvent, type RefreshState } from './refresh.js';
+import { classifyFailure, initialRefreshState, maxSupersededRetries, supersededCodes, reduceRefresh, staleRetryDelays, type RefreshEvent, type RefreshState } from './refresh.js';
 
 const failed = (over: Partial<Extract<RefreshEvent, { type: 'discovery_failed' }>> = {}): RefreshEvent => ({
   type: 'discovery_failed', failure: { kind: 'unreachable', message: 'offline' }, notified: false, replayRead: false,
@@ -29,7 +29,7 @@ describe('reduceRefresh', () => {
   it('confirms evidence on success, resets the backoff and cancels a waiting retry', () => {
     const stale = { ...initialRefreshState, evidenceStale: true, staleAttempts: 3 };
     const result = reduceRefresh(stale, { type: 'discovery_succeeded' });
-    expect(result.state).toEqual({ discovered: true, evidenceStale: false, staleAttempts: 0, unsupported: false });
+    expect(result.state).toEqual({ discovered: true, evidenceStale: false, staleAttempts: 0, unsupported: false, supersededAttempts: 0 });
     expect(result.effects).toEqual([{ type: 'cancel_stale_retry' }]);
   });
   it('restores the confirmed evidence as stale when the Relay is unreachable after a success, and retries with growing delays', () => {
@@ -94,11 +94,30 @@ describe('reduceRefresh', () => {
   it('discards what another authority confirmed', () => {
     const state = run([{ type: 'discovery_succeeded' }, failed(), failed()]);
     const result = reduceRefresh(state, { type: 'authority_changed' });
-    expect(result.state).toEqual({ discovered: false, evidenceStale: false, staleAttempts: 0, unsupported: false });
+    expect(result.state).toEqual({ discovered: false, evidenceStale: false, staleAttempts: 0, unsupported: false, supersededAttempts: 0 });
     expect(result.effects).toEqual([{ type: 'cancel_stale_retry' }]);
   });
   it('starts the backoff over after a success', () => {
     const state = run([failed(), failed(), { type: 'discovery_succeeded' }, failed()]);
     expect(state.staleAttempts).toBe(1);
+  });
+
+  describe('a composition that an edit overtook', () => {
+    const pending = (code: string): RefreshEvent => ({ type: 'composition_pending', code });
+    it.each(supersededCodes)('discovers again after %s', code => {
+      expect(effectsOf(pending(code))).toEqual([{ type: 'rediscover' }]);
+      expect(run([pending(code)]).supersededAttempts).toBe(1);
+    });
+    it.each(['authorization', 'replay_gap', 'older_revision', 'track_write', 'invalid_view'])('leaves %s to the explicit Retry', code => {
+      expect(effectsOf(pending(code))).toEqual([]);
+      expect(run([pending(code)]).supersededAttempts).toBe(0);
+    });
+    it('stops after the bound and starts over when a composition is applied', () => {
+      const bounded = run(Array.from({ length: maxSupersededRetries }, () => pending('retired')));
+      expect(bounded.supersededAttempts).toBe(maxSupersededRetries);
+      expect(effectsOf(pending('retired'), bounded)).toEqual([]);
+      expect(run([{ type: 'composition_applied' }], bounded).supersededAttempts).toBe(0);
+      expect(effectsOf(pending('retired'), run([{ type: 'composition_applied' }], bounded))).toEqual([{ type: 'rediscover' }]);
+    });
   });
 });

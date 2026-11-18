@@ -84,7 +84,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
       // The locators the last completed discovery confirmed, kept while a later refresh cannot read the replay.
       confirmedEvidence: undefined as Map<string, { replays: SessionSuccessionReplay[]; current: SessionSuccessionCurrent }> | undefined,
       // Restored evidence keeps views attached, but input waits for a discovery that reaches the Relay.
-      evidenceStale: false, staleRetry: undefined as ReturnType<typeof setTimeout> | undefined, staleAttempts: 0,
+      evidenceStale: false, staleRetry: undefined as ReturnType<typeof setTimeout> | undefined, staleAttempts: 0, supersededAttempts: 0,
       historyTitles: new Map<string, string>(),
       refreshObservers: new Set<() => void>(),
       favoritesHints: new Map<string, { revision: number; operationId: string; status: string }>(),
@@ -114,7 +114,7 @@ export function useSessionSuccession(options: SuccessionOptions) {
   };
   /** Feeds an event to the refresh model; its state fields live on the runtime under the same names. */
   function refreshWith(event: RefreshEvent): RefreshEffect[] {
-    const { state, effects } = reduceRefresh({ discovered: runtime.discovered, evidenceStale: runtime.evidenceStale, staleAttempts: runtime.staleAttempts, unsupported: runtime.unsupported }, event, latest.current.staleRetryDelays);
+    const { state, effects } = reduceRefresh({ discovered: runtime.discovered, evidenceStale: runtime.evidenceStale, staleAttempts: runtime.staleAttempts, unsupported: runtime.unsupported, supersededAttempts: runtime.supersededAttempts }, event, latest.current.staleRetryDelays);
     Object.assign(runtime, state);
     return effects;
   }
@@ -614,7 +614,10 @@ export function useSessionSuccession(options: SuccessionOptions) {
       runtime.confirmedEvidence = new Map(runtime.historyEvidence);
       applyRefreshEffects(refreshWith({ type: 'discovery_succeeded' }));
       if (!runtime.desired) runtime.active = false;
-      if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
+      const overtaken = runtime.desired && runtime.result?.status === 'pending' ? refreshWith({ type: 'composition_pending', code: runtime.result.code }) : [];
+      if (runtime.desired && runtime.result?.status === 'applied') refreshWith({ type: 'composition_applied' });
+      if (overtaken.length) applyRefreshEffects(overtaken, () => queueMicrotask(() => { if (current()) void discover(); }));
+      else if (runtime.desired && runtime.result?.status !== 'applied') runtime.error = runtime.discoveryError = `Session composition needs synchronization (${runtime.result?.code ?? 'pending'}).`;
       else {
         if (runtime.error === runtime.discoveryError) runtime.error = undefined;
         runtime.discoveryError = undefined;

@@ -12,7 +12,8 @@
  *   view, a session that would take its place, or any other session than the bot's own that is not a history view
  *   of it, opens beside it: an existing bot view of that session is selected, otherwise a new view opens where the
  *   target stands (in the dock or floating when that is where it is, else as a primary group). Anywhere else the
- *   session binds in place.
+ *   session binds in place. A bot whose session the Host reported missing is still a bot of the group and is not rebound: the
+ *   plan takes no fact about a missing session (the baseline tag behaves the same).
  */
 export function focusesVisibleSession(open: {
   readonly targetPrimaryViewId?: string; readonly placement?: string; readonly primarySlot?: string; readonly sessionIntent?: string;

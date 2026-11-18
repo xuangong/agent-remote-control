@@ -45,6 +45,13 @@ describe('binding a session over a view', () => {
   it('opens beside a bot for another session, as a primary group when the bot is primary', () => {
     expect(bindPlan(botOver)).toEqual({ kind: 'open-beside', placement: 'primary' });
   });
+  it('keeps a bot whose session the Host reported missing: another session still opens beside it, as at the baseline', () => {
+    // The plan takes no fact about a missing session. The view shows as empty, but it is still a bot of the group, so it keeps its
+    // place and the directory's session takes a new primary group next to it; the same rule 6 answer as for a bot with a live session.
+    const facts = { ...botOver, targetIsBot: true, hasGroup: true, botAppearance: true };
+    expect(bindPlan(facts)).toEqual({ kind: 'open-beside', placement: 'primary' });
+    expect(bindPlan({ ...facts, targetPlacement: 'dock' })).toEqual({ kind: 'open-beside', placement: 'dock', afterId: 'bot' });
+  });
   it('opens beside in the dock after the bot, or floating, where the bot stands', () => {
     expect(bindPlan({ ...botOver, targetPlacement: 'dock' })).toEqual({ kind: 'open-beside', placement: 'dock', afterId: 'bot' });
     expect(bindPlan({ ...botOver, targetPlacement: 'float' })).toEqual({ kind: 'open-beside', placement: 'float' });

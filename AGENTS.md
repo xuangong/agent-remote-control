@@ -18,7 +18,7 @@ Write code, comments, and documentation in English. Respond to the user in Chine
 
 ## Test layers
 
-Test what a change touches. Unit and integration tests use mock data; only e2e and local/native tests use a real stack.
+Test what a change touches. Unit and integration tests use mock data; only e2e and local/native tests use a real stack. How to write them: `.agents/skills/write-tests/SKILL.md`.
 
 | Layer | Uses | Runs |
 |---|---|---|

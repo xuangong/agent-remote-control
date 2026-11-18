@@ -46,6 +46,9 @@ import { BrokerError, type Binding, type Host, type HostBrokerOptions, type Remo
 export type { HostBrokerOptions, RemoteHostBrokerState, VisibleHostStates } from './broker-types.js';
 export { USER_STREAM_LIMIT } from './http-replies.js';
 
+/** The Relay's HTTP and socket handlers behind one object; a host adds its own listener around it. */
+export type HostBroker = ReturnType<typeof createHostBroker>;
+
 export function createHostBroker(options: HostBrokerOptions) {
   const accountBacked = options.accountBacked ?? options.durable ?? false;
   const origin = new URL(options.origin).origin;

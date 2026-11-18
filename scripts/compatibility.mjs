@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const path = resolve(root, 'packages/agent-remote-lab/compatibility.json');
+const path = resolve(root, 'packages/agent-relay-node/compatibility.json');
 const manifest = JSON.parse(readFileSync(path, 'utf8'));
 const fixedScope = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'scripts'];
 const skippedEntries = ['node_modules', 'dist', '.tmp', 'coverage', 'test-results', 'playwright-report', '.wrangler', 'compatibility.json'];

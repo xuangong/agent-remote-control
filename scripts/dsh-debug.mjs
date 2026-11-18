@@ -163,7 +163,7 @@ async function main() {
       const runtime = join(options.stateDir, 'runtime');
       console.log(`Installing DSH ${DSH_VERSION} locally. A different version will not be substituted.`);
       try {
-        if (!await exists(join(runtime, 'package.json'))) await run(pnpm, ['--filter', '@orchardworks/agent-remote-lab', 'prepare:dsh-release', runtime]);
+        if (!await exists(join(runtime, 'package.json'))) await run(pnpm, ['--filter', '@orchardworks/agent-relay-node', 'prepare:dsh-release', runtime]);
         await run('npm', ['install', '--prefix', runtime, '--no-audit', '--no-fund']);
       } catch (error) {
         throw new Error(`The pinned DSH release could not be installed. Use --dsh /path/to/dsh or --dsh-repo /path/to/deepseek-harness (${DSH_VERSION}).\n${error.message}`);

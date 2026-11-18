@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentCapabilities, AgentProviderAdapter, AgentSession, AgentStreamEvent, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { createProtocolValidationServer } from '../src/server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 
 /** A real Relay transport with a deterministic native session that remains working. */
 class WorkingSession implements AgentSession {

@@ -6,7 +6,7 @@ import { DshProjector } from '@orchardworks/agent-provider-dsh';
 import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from './server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 
 it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-wait-any'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {
   const providerId = scenario.startsWith('codex') ? 'codex' : scenario;

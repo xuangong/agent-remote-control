@@ -3,14 +3,14 @@ import { spawn } from 'node:child_process';
 import { copyFile, cp, mkdir, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
-const build = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab...', 'run', 'build'], { cwd: root, stdio: 'inherit' });
+const build = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab...', '--filter', '@orchardworks/agent-relay-node...', 'run', 'build'], { cwd: root, stdio: 'inherit' });
 const code = await new Promise((resolve, reject) => { build.once('error', reject); build.once('exit', resolve); });
 if (code !== 0) process.exit(code ?? 1);
-const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));
+const require = createRequire(join(root, 'packages/agent-relay-node/package.json'));
 const { build: bundle } = require('esbuild');
 const output = join(root, 'dist/relay');
 await mkdir(output, { recursive: true });
-await bundle({ entryPoints: [join(root, 'packages/agent-remote-lab/src/server/gateway.ts')], outfile: join(output, 'gateway.mjs'),
+await bundle({ entryPoints: [join(root, 'packages/agent-relay-node/src/gateway.ts')], outfile: join(output, 'gateway.mjs'),
   bundle: true, platform: 'node', format: 'esm', target: 'node22', sourcemap: true,
   external: ['bufferutil', 'utf-8-validate'],
   banner: { js: 'import { createRequire as relayCreateRequire } from "node:module"; const require = relayCreateRequire(import.meta.url);' },

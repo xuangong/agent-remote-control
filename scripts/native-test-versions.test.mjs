@@ -20,7 +20,7 @@ async function fixture(t) {
   }
   const bin = join(directory, 'bin'); await mkdir(bin);
   for (const provider of ['claude', 'codex', 'opencode']) await mkdir(join(directory, 'packages', `agent-provider-${provider}`), { recursive: true });
-  const lab = join(directory, 'packages/agent-remote-lab'); await mkdir(lab, { recursive: true });
+  const lab = join(directory, 'packages/agent-relay-node'); await mkdir(lab, { recursive: true });
   await writeFile(join(lab, 'compatibility.json'), JSON.stringify({ providers: [{ providerId: 'codex', native: { name: 'codex-cli', version: '0.162.0' } }] }));
   async function executable(name, body) {
     const path = join(directory, name); await mkdir(dirname(path), { recursive: true });
@@ -91,7 +91,7 @@ for (const version of ['0.161.0', '0.162.1']) test(`local native tests reject Co
 
 test('local native preflight reads an overridden compatibility manifest relative to the Lab package', options, async t => {
   const f = await fixture(t), manifest = 'alternate-compatibility.json';
-  await writeFile(join(f.directory, 'packages/agent-remote-lab', manifest), JSON.stringify({ providers: [{ providerId: 'codex', native: { name: 'fixture-codex', version: '0.163.0' } }] }));
+  await writeFile(join(f.directory, 'packages/agent-relay-node', manifest), JSON.stringify({ providers: [{ providerId: 'codex', native: { name: 'fixture-codex', version: '0.163.0' } }] }));
   const newer = await f.executable('newer-codex', "console.log('fixture-codex 0.163.0');");
   const rejected = await run(f, 'local', { BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST: manifest });
   assert.notEqual(rejected.code, 0); assert.match(rejected.output, /required baseline=0\.163\.0/); assert.doesNotMatch(rejected.output, /TEST_RUNNER_STARTED/);

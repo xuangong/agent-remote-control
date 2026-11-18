@@ -14,7 +14,7 @@ const gateway = process.env.AGENT_REMOTE_GATEWAY_CHECKOUT;
 if (!gateway && process.env.AGENT_REMOTE_TEST_DOCKER !== '1') throw new Error('Set AGENT_REMOTE_GATEWAY_CHECKOUT to the gateway worktree.');
 const fetch = (input, init = {}) => globalThis.fetch(input, { ...init, signal: init.signal ?? AbortSignal.timeout(10_000) });
 const nextEvent = (emitter, name) => once(emitter, name, { signal: AbortSignal.timeout(10_000) });
-const require = createRequire(join(root, 'packages/agent-remote-lab/package.json'));
+const require = createRequire(join(root, 'packages/agent-relay-node/package.json'));
 const { chromium } = require('@playwright/test');
 const { WebSocket } = require('ws');
 const temporary = await mkdtemp(join(tmpdir(), 'agent-remote-gateway-'));

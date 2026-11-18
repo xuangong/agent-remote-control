@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { AgentReplica, HttpWebSocketTransport, type RemoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from './conversation-connections.js';
-import { createRecordedValidationServer } from './server/recorded.js';
+import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
 
 async function fixture(sessionChannels: boolean) {
   const server = createRecordedValidationServer();

@@ -3,7 +3,7 @@ import { get } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, expect, it } from 'vitest';
 import { createDebuggerServer } from './server.js';
-import { createRecordedLabProvider } from '../../agent-remote-lab/src/server/recorded.js';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { createDebuggerRuntime, type DebuggerRuntime } from './runtime.js';
 
 beforeAll(() => {

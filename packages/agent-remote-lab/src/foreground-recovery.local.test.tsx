@@ -10,7 +10,7 @@ import { GatewayController } from './GatewayController.js';
 import { ConversationConnections, ConversationConnectionScope } from './conversation-connections.js';
 import { useConversationSession } from './hooks/useConversationSession.js';
 import { workspaceFetch, workspaceSocket } from './workspace-access.js';
-import { createProtocolValidationServer } from './server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 import { render, unmount } from './test/setup.js';
 
 const cleanups: Array<() => Promise<void> | void> = [];

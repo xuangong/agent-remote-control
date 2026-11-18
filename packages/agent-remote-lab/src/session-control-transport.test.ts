@@ -3,7 +3,7 @@ import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import type { AgentProviderAdapter, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from './server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 
 it.each([
   {sessionControl: 'shared', sessionChannels: false}, {sessionControl: 'shared', sessionChannels: true},

@@ -3,8 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient, type RemoteActivityState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { GatewayController } from './GatewayController.js';
-import { createProtocolValidationServer } from './server.js';
-import { createRecordedLabProvider } from './server/recorded.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { render, unmount } from './test/setup.js';
 import { workspaceFetch, workspaceSocket } from './workspace-access.js';
 

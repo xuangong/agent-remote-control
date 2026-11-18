@@ -12,8 +12,8 @@ import { sessionKey } from './session-tree.js';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession } from './directory-client.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
-import { createProtocolValidationServer } from './server.js';
-import { createRecordedLabProvider } from './server/recorded.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { replicaState } from './test/fixtures.js';
 import { render, unmount, setPromptText, promptText } from './test/setup.js';
 

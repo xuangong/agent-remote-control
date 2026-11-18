@@ -484,6 +484,73 @@ importers:
         specifier: ^8.21.0
         version: 8.21.1
 
+  packages/agent-relay-node:
+    dependencies:
+      '@deepseek-ai/dsh-agent':
+        specifier: 0.1.2-rc.1
+        version: 0.1.2-rc.1(6f833cf90b9dd3f0d529840b1aebfb48)
+      '@orchardworks/agent-provider-codex':
+        specifier: workspace:*
+        version: link:../agent-provider-codex
+      '@orchardworks/agent-provider-dsh':
+        specifier: workspace:*
+        version: link:../agent-provider-dsh
+      '@orchardworks/agent-provider-sdk':
+        specifier: workspace:*
+        version: link:../agent-provider-sdk
+      '@orchardworks/agent-relay-core':
+        specifier: workspace:*
+        version: link:../agent-relay-core
+      '@orchardworks/agent-remote-journal':
+        specifier: workspace:*
+        version: link:../agent-remote-journal
+      '@orchardworks/agent-remote-journal-sqlite':
+        specifier: workspace:*
+        version: link:../agent-remote-journal-sqlite
+      '@orchardworks/agent-remote-protocol':
+        specifier: workspace:*
+        version: link:../agent-remote-protocol
+      '@orchardworks/agent-remote-tunnel':
+        specifier: workspace:*
+        version: link:../agent-remote-tunnel
+      '@orchardworks/agent-session-runtime':
+        specifier: workspace:*
+        version: link:../agent-session-runtime
+      '@orchardworks/dsh':
+        specifier: workspace:*
+        version: link:../agent-remote-dsh
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.1
+    devDependencies:
+      '@orchardworks/agent-client':
+        specifier: workspace:*
+        version: link:../agent-client
+      '@orchardworks/agent-remote-controller':
+        specifier: workspace:*
+        version: link:../agent-controller
+      '@orchardworks/agent-remote-debugger':
+        specifier: workspace:*
+        version: link:../agent-remote-debugger
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.3
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.1
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@6.4.3(@types/node@24.13.3)(tsx@4.23.1)(yaml@2.9.0))
+
   packages/agent-remote-debugger:
     dependencies:
       '@anthropic-ai/claude-agent-sdk':
@@ -529,6 +596,9 @@ importers:
       '@orchardworks/agent-provider-opencode':
         specifier: workspace:*
         version: link:../agent-provider-opencode
+      '@orchardworks/agent-relay-node':
+        specifier: workspace:*
+        version: link:../agent-relay-node
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-controller
@@ -674,9 +744,6 @@ importers:
 
   packages/agent-remote-lab:
     dependencies:
-      '@deepseek-ai/dsh-agent':
-        specifier: 0.1.2-rc.1
-        version: 0.1.2-rc.1(6f833cf90b9dd3f0d529840b1aebfb48)
       '@orchardworks/agent-client':
         specifier: workspace:*
         version: link:../agent-client
@@ -698,15 +765,9 @@ importers:
       '@orchardworks/agent-remote-journal':
         specifier: workspace:*
         version: link:../agent-remote-journal
-      '@orchardworks/agent-remote-journal-sqlite':
-        specifier: workspace:*
-        version: link:../agent-remote-journal-sqlite
       '@orchardworks/agent-remote-protocol':
         specifier: workspace:*
         version: link:../agent-remote-protocol
-      '@orchardworks/agent-remote-tunnel':
-        specifier: workspace:*
-        version: link:../agent-remote-tunnel
       '@orchardworks/agent-session-runtime':
         specifier: workspace:*
         version: link:../agent-session-runtime
@@ -732,6 +793,9 @@ importers:
       '@orchardworks/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
+      '@orchardworks/agent-relay-node':
+        specifier: workspace:*
+        version: link:../agent-relay-node
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-controller

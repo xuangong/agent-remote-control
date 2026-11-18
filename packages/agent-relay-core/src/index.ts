@@ -1,4 +1,4 @@
-export { createHostBroker, type HostBrokerOptions, type RemoteHostBrokerState } from './broker.js';
+export { createHostBroker, type HostBroker, type HostBrokerOptions, type RemoteHostBrokerState } from './broker.js';
 export { JournalRequestError } from './journal-uplink.js';
 export { createHostJournals, type HostJournals, type HostJournalsOptions, type JournalFilled, type JournalLiveEvent, type JournalOpenOptions, type JournalOpened, type JournalOpenRefusal, type JournalPublished, type JournalRefusal, type JournalStatus } from './host-journals.js';
 export { createPartitionJournals, JOURNAL_PARTITION_CACHE, JOURNAL_PARTITION_LIMITS, serveJournalPartition, estimateCloneBytes, type JournalPartitionApi, type JournalPartitionRead } from './journal-partition.js';

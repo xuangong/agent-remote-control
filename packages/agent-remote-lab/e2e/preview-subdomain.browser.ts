@@ -12,7 +12,7 @@ import react from '@vitejs/plugin-react';
 import { build } from 'esbuild';
 import { expect, it, vi } from 'vitest';
 import { controllerContentSecurityPolicy } from '@orchardworks/agent-relay-core';
-import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
+import { onPreviewCleanup, previewFixture } from '@orchardworks/agent-relay-node/testing/preview-tunnel-fixture';
 
 it('opens a root-mounted React Vite app with isolated login, manifest, API, navigation and HMR', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-root-vite-')));

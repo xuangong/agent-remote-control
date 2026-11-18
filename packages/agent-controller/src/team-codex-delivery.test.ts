@@ -9,7 +9,7 @@ import { CodexAppServerProvider } from '@orchardworks/agent-provider-codex';
 import type { AgentSessionConfig, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { Team, TeamMessage } from '@orchardworks/agent-remote-protocol';
 import { createFakeChildProcess } from '@orchardworks/agent-provider-codex/testing';
-import { createRemoteHostBroker } from '../../agent-remote-lab/src/server/remote-host-broker.js';
+import { createRemoteHostBroker } from '../../agent-relay-node/src/remote-host-broker.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 
 interface NativeRequest { id: number; method: string; params: Record<string, unknown> }

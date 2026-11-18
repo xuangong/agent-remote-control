@@ -34,7 +34,7 @@ export async function gatewayRelayTestRuntime({ root, gateway, temporary, env, r
   }
   const startRelay = async () => {
     if (runtime === 'node') {
-      relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/server/gateway.ts'], join(root, 'packages/agent-remote-lab'), {
+      relay = launch(process.execPath, ['--import', 'tsx/esm', 'src/gateway.ts'], join(root, 'packages/agent-relay-node'), {
         ...env, AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_READY_FILE: relayReady, AGENT_REMOTE_STATE_DIR: join(temporary, 'state'),
       });
       await ready(relayReady, relay);

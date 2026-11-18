@@ -11,7 +11,7 @@ import { WorkspaceReady } from '../workspace-access.js';
 import { LiveConnectionsContext, liveConnections } from '../hooks/useLiveBudget.js';
 import { LiveBudget } from '../live-budget.js';
 import { useWindowSessionRetention } from '../hooks/useWindowSessionRetention.js';
-import { createRecordedValidationServer } from '../server/recorded.js';
+import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
 import { render, unmount, setPromptText, promptText } from '../test/setup.js';
 import { SessionConversation } from './SessionConversation.js';
 

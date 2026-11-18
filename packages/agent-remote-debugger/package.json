@@ -36,20 +36,22 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "@types/ws": "^8.18.1",
-    "typescript": "^5.7.0",
-    "vitest": "4.1.11",
-    "@orchardworks/agent-remote-lab": "workspace:*",
-    "esbuild": "^0.28.1",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
-    "@playwright/test": "^1.50.0",
     "@orchardworks/agent-provider-claude": "workspace:*",
     "@orchardworks/agent-provider-copilot": "workspace:*",
     "@orchardworks/agent-provider-opencode": "workspace:*",
-    "@orchardworks/agent-remote-controller": "workspace:*"
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-relay-node": "workspace:*",
+    "@orchardworks/agent-remote-controller": "workspace:*",
+    "@orchardworks/agent-remote-lab": "workspace:*",
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^24.3.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
   }
 }

@@ -2,7 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
-import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
+import { onPreviewCleanup, previewFixture } from '@orchardworks/agent-relay-node/testing/preview-tunnel-fixture';
 
 for (const engine of [chromium, webkit]) it(`restores sessions and failed input across mobile page lifecycles in ${engine.name()}`, async () => {
   let script = '', css = '';

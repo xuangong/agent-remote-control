@@ -2,9 +2,9 @@ import { createServer } from 'node:http';
 import { createHmac, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
-import { createGatewayRelay } from '../src/server/gateway-relay.js';
-import { createGatewayStaticPages } from '../src/server/gateway-static.js';
-import { createRecordedLabProvider } from '../src/server/recorded.js';
+import { createGatewayRelay } from '@orchardworks/agent-relay-node/gateway-relay';
+import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { createSessionStatePublisher, liveSessionState } from '../../agent-controller/src/session-state-publisher.js';
 import type { SessionActivityState } from '@orchardworks/agent-remote-protocol';
 

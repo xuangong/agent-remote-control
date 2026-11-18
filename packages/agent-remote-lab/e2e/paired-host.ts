@@ -1,6 +1,6 @@
 import type { APIRequestContext, TestInfo } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
-import { createRecordedLabProvider } from '../src/server/recorded.js';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 
 export interface PairedHost {
   hostId: string;

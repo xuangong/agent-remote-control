@@ -62,7 +62,7 @@ const unitPackage = mode === 'unit-package' ? workspacePackage(process.argv[3]) 
 const commands = {
   'live-cache-browser': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--config=e2e/session-live-cache.playwright.config.ts'],
   devbox: ['exec', 'node', '--test', '--test-timeout=18000', 'scripts/devbox/start.test.mjs', 'scripts/devbox/codex-profile.test.mjs', 'scripts/lib/build-provenance.test.mjs', 'scripts/controller/entrypoint.test.mjs'],
-  'devbox-server': ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'vitest', 'run', 'src/server/devbox.test.ts', 'src/server/devbox-preview.test.ts', 'src/server/gateway-relay.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
+  'devbox-server': ['--filter', '@orchardworks/agent-relay-node', 'exec', 'vitest', 'run', 'src/devbox.test.ts', 'src/devbox-preview.test.ts', 'src/gateway-relay.test.ts', '--testTimeout=15000', '--hookTimeout=15000'],
   'local-env': ['exec', 'node', '--test', '--test-timeout=240000', '--test-concurrency=1', 'scripts/local/instance.test.mjs', 'scripts/local/environment.test.mjs', 'scripts/local/session.test.mjs', 'scripts/local/runner.test.mjs', 'scripts/local/command.test.mjs'],
   'opencode-server-native': ['exec', 'node', '--test', '--test-timeout=60000', '--test-concurrency=1', 'scripts/opencode-managed-server-native.test.mjs'],
   'opencode-server': ['--filter', '@orchardworks/agent-remote-controller', 'exec', 'vitest', 'run', 'src/opencode-server.test.ts', 'src/opencode-server-supervisor.test.ts', 'src/provider-discovery.test.ts', 'src/registrations.test.ts', 'src/opencode-command.test.ts', 'src/opencode-executable.test.ts', 'src/connection-config.test.ts', 'src/host.test.ts', 'src/cli-bootstrap.test.ts', '--testTimeout=15000', '--hookTimeout=15000', '--maxWorkers=1'],
@@ -98,7 +98,7 @@ const commands = {
   // Native CLI tests depend on this machine's installed and signed-in agents, so the unit suite excludes them.
   local: ['-r', '--workspace-concurrency=1', 'exec', 'vitest', 'run', '--passWithNoTests', '--testTimeout=60000', '--hookTimeout=30000', '--maxWorkers=1', 'local.test'],
   e2e: ['--filter', '@orchardworks/agent-remote-lab', 'exec', 'playwright', 'test', '--timeout=30000', '--global-timeout=480000', ...process.argv.slice(3)],
-  conformance: ['--filter', '@orchardworks/agent-remote-lab', 'run', 'test:conformance'],
+  conformance: ['--filter', '@orchardworks/agent-relay-node', 'run', 'test:conformance'],
 };
 if (!(mode in commands)) throw new Error(`Unknown test suite: ${mode}`);
 await verifyNativeTestVersions(mode);

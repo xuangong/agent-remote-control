@@ -4,7 +4,7 @@ import WebSocket from 'ws';
 import { createWindowView, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from '../conversation-connections.js';
-import { createRecordedValidationServer } from '../server/recorded.js';
+import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
 import { render, unmount } from '../test/setup.js';
 import { useWindowSessionRetention } from './useWindowSessionRetention.js';
 import { LIVE_RECENT } from '../live-budget.js';

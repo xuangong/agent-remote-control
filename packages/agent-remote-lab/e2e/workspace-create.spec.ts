@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentSession } from '@orchardworks/agent-provider-sdk';
 import { createAgentHost, type AgentHostDirectory } from '@orchardworks/agent-remote-controller';
-import { createRecordedLabProvider } from '../src/server/recorded.js';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { showNewSession } from './session-navigation';
 
 test('creates a real Host workspace from Browse and starts an Agent inside it', async ({ page, request }, info) => {

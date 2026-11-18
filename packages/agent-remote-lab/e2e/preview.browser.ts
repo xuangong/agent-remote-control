@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { chromium, webkit } from '@playwright/test';
 import { createServer } from 'vite';
 import { expect, it } from 'vitest';
-import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
+import { onPreviewCleanup, previewFixture } from '@orchardworks/agent-relay-node/testing/preview-tunnel-fixture';
 
 it('loads a prefixed Vite page through the authenticated tunnel and receives a real hot update', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'arc-preview-vite-')));

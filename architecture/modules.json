@@ -705,7 +705,7 @@
       "name": "relay-node",
       "layer": 4,
       "paths": [
-        "packages/agent-remote-lab/src/server/**"
+        "packages/agent-relay-node/**"
       ],
       "seams": [
         "S3"

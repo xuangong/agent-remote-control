@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { expect, it } from 'vitest';
 import type { AgentSession, AgentRuntimeInfo, AgentCapabilities, AgentSessionExtensions, AgentMessageOptions, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { createRemoteHostBroker } from '../../agent-remote-lab/src/server/remote-host-broker.js';
+import { createRemoteHostBroker } from '../../agent-relay-node/src/remote-host-broker.js';
 import { createAgentHost, type AgentHostDirectory } from './host.js';
 import { PortableTeamResourceStore } from '@orchardworks/agent-relay-core';
 import { createHash } from 'node:crypto';

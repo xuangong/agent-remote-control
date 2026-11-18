@@ -52,7 +52,7 @@ type ReplicaJson = {
 };
 
 const children = new Map<ChildProcessWithoutNullStreams, Promise<ChildClose>>();
-let createRecordedValidationServer: typeof import('../../agent-remote-lab/src/server/recorded.js')['createRecordedValidationServer'];
+let createRecordedValidationServer: typeof import('@orchardworks/agent-relay-node/recorded')['createRecordedValidationServer'];
 let AgentReplica: typeof import('@orchardworks/agent-client')['AgentReplica'];
 let HttpWebSocketTransport: typeof import('@orchardworks/agent-client')['HttpWebSocketTransport'];
 let RemoteSessionClient: typeof import('@orchardworks/agent-client')['RemoteSessionClient'];
@@ -80,7 +80,7 @@ beforeAll(async () => {
   expect(local.status, local.stderr).toBe(0);
   const adapters = spawnSync(process.execPath, ['scripts/build-adapters.mjs'], { cwd: debuggerDirectory, encoding: 'utf8', timeout: childTimeoutMs });
   expect(adapters.status, adapters.stderr).toBe(0);
-  ({ createRecordedValidationServer } = await import('../../agent-remote-lab/src/server/recorded.js'));
+  ({ createRecordedValidationServer } = await import('@orchardworks/agent-relay-node/recorded'));
   ({ AgentReplica, HttpWebSocketTransport, RemoteSessionClient } = await import('@orchardworks/agent-client'));
   server = createRecordedValidationServer();
   relayUrl = (await server.http.listen(0, '127.0.0.1')).url;

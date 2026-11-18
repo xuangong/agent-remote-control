@@ -6,9 +6,9 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { createHostedRelay, emptyRelayState, gatewayCookieName, validateRelayState, stageRelayState, type HostedRelayState } from '@orchardworks/agent-relay-core';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { PROTOCOL_VERSION, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
-import { createRecordedLabProvider } from '../src/server/recorded.js';
-import { createGatewayStaticPages } from '../src/server/gateway-static.js';
-import { relaySocket, webRequest, writeResponse } from '../src/server/remote-host-broker.js';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
+import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
+import { relaySocket, webRequest, writeResponse } from '@orchardworks/agent-relay-node/remote-host-broker';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const native = (nativeSessionId: string) => ({ controllerId: 'browser-installation', providerId: 'recorded', nativeSessionId });

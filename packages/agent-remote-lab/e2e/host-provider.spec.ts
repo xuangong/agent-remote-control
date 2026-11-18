@@ -1,7 +1,7 @@
 import { showNewSession, showSessions } from './session-navigation';
 import { expect, test } from '@playwright/test';
 import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
-import { createRecordedLabProvider } from '../src/server/recorded.js';
+import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 
 for (const selected of [{ id: 'codex', name: 'Codex CLI' }, { id: 'claude', name: 'Claude Code' }, { id: 'copilot', name: 'Copilot' }]) {
 test(`selects ${selected.name} on a paired Host and creates through its real uplink`, async ({ page, request }, testInfo) => {

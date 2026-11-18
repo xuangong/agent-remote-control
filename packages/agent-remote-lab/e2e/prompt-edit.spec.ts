@@ -5,7 +5,7 @@ import { createServer as createPortProbe } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { createServer as createViteServer } from 'vite';
 import { expect, test } from '@playwright/test';
-import { createProtocolValidationServer } from '../src/server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 import { SessionDirectoryClient } from '../src/directory-client.js';
 import { createBrowserPrefixAdapter } from '../../agent-remote-debugger/e2e/fixtures/browser-prefix-adapter.mjs';
 

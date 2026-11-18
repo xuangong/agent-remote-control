@@ -5,7 +5,7 @@ import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
 import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type AgentStreamMessage } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from './server.js';
+import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 
 it.each([
   { type: 'agentMessage', deltas: ['e', 'e'], final: 'ee' },

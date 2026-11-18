@@ -26,8 +26,8 @@ function shutdown(code = 0) {
     } catch (error) { if (error.code !== 'ESRCH') throw error; }
   }
 }
-function start(args) {
-  const child = spawn('pnpm', ['--filter', '@orchardworks/agent-remote-lab', 'exec', ...args], {
+function start(packageName, args) {
+  const child = spawn('pnpm', ['--filter', packageName, 'exec', ...args], {
     stdio: 'inherit', detached: process.platform !== 'win32',
     env: { ...process.env, AGENT_REMOTE_WORKSPACE: process.env.AGENT_REMOTE_WORKSPACE ?? process.cwd(), AGENT_REMOTE_PORT: String(relayPort), AGENT_REMOTE_ORIGIN: `http://${host}:${webPort}`, VITE_AGENT_REMOTE_RELAY_TARGET: `http://${host}:${relayPort}`, ...(['local', 'codex', 'recorded'].includes(mode) ? { VITE_AGENT_REMOTE_FIXTURE_ENDPOINT: '/v1/lab/recorded' } : {}) },
   });
@@ -37,7 +37,7 @@ function start(args) {
 }
 process.once('SIGINT', () => shutdown());
 process.once('SIGTERM', () => shutdown());
-if (mode !== 'web') start(['tsx', `src/server/${mode === 'codex-fixture' ? 'codex' : mode}.ts`]);
-start(['vite', '--host', host, '--port', String(webPort), '--strictPort']);
+if (mode !== 'web') start('@orchardworks/agent-relay-node', ['tsx', `src/${mode === 'codex-fixture' ? 'codex' : mode}.ts`]);
+start('@orchardworks/agent-remote-lab', ['vite', '--host', host, '--port', String(webPort), '--strictPort']);
 console.log(`Agent Remote Control: http://${host}:${webPort}`);
 if (mode === 'local') console.log('Native Codex runs in an independent managed Agent Host: generate a pairing key in the workbench, then run pnpm agent-remote-controller start. Use foreground only for attached debugging; it has no daemon pairing control.');

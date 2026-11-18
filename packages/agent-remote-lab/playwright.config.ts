@@ -13,9 +13,9 @@ const mode = process.env.AGENT_REMOTE_TEST_INTERACTIONS === '1' ? 'interactions'
   : process.env.BORGEE_CODEX_TEST_EXECUTABLE !== undefined ? 'codex' : 'recorded';
 const runtimeEnvironment = `AGENT_REMOTE_PORT=${relayPort} AGENT_REMOTE_ORIGIN=http://127.0.0.1:${webPort}`;
 const relayCommand = mode === 'dsh'
-  ? `${runtimeEnvironment} BORGEE_LIVE_DSH_RELAY_PORT=${relayPort} BORGEE_LIVE_DSH_WEB_PORT=${webPort} BORGEE_LIVE_DSH_PLAN_MODE=1 scripts/run-live-dsh.sh`
-  : mode === 'codex' ? `${runtimeEnvironment} pnpm exec tsx scripts/codex-host-fixture.ts`
-  : `${runtimeEnvironment} pnpm exec tsx src/server/${mode}.ts`;
+  ? `${runtimeEnvironment} BORGEE_LIVE_DSH_RELAY_PORT=${relayPort} BORGEE_LIVE_DSH_WEB_PORT=${webPort} BORGEE_LIVE_DSH_PLAN_MODE=1 pnpm --filter @orchardworks/agent-relay-node exec bash scripts/run-live-dsh.sh`
+  : mode === 'codex' ? `${runtimeEnvironment} pnpm --filter @orchardworks/agent-relay-node exec tsx scripts/codex-host-fixture.ts`
+  : `${runtimeEnvironment} pnpm --filter @orchardworks/agent-relay-node exec tsx src/${mode}.ts`;
 // Fixture Relays default their succession, image and resource state to the home directory, where it would
 // accumulate across runs. Live Codex and DSH modes keep the real home for their own credentials and profiles.
 const fixtureHome = mode === 'recorded' || mode === 'interactions' ? process.env.TEST_WORKER_INDEX === undefined

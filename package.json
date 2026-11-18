@@ -40,7 +40,7 @@
     "test:opencode:native": "node scripts/run-tests.mjs opencode-native",
     "test:opencode:succession-evidence": "node scripts/run-tests.mjs opencode-succession-evidence",
     "test:copilot": "node scripts/run-tests.mjs copilot",
-    "start:gateway-relay": "pnpm --filter @orchardworks/agent-remote-lab exec tsx src/server/gateway.ts",
+    "start:gateway-relay": "pnpm --filter @orchardworks/agent-relay-node exec tsx src/gateway.ts",
     "test:gateway-relay": "node scripts/test-gateway-relay.mjs",
     "test:preview-browser": "node scripts/run-tests.mjs preview-browser",
     "test:cloudflare": "node scripts/run-tests.mjs cloudflare",

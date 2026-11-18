@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { chromium, webkit, type BrowserContext, type Page } from '@playwright/test';
 import { expect, it } from 'vitest';
-import { createGatewayRelay } from '../src/server/gateway-relay.js';
+import { createGatewayRelay } from '@orchardworks/agent-relay-node/gateway-relay';
 
 for (const engine of [chromium, webkit]) it(`shares browser identity across tabs and repeat sign-ins in ${engine.name()}`, async () => {
   const secret = 'browser-inventory-local-test-secret-0123456789';

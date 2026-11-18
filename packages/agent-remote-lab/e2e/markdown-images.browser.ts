@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
-import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
+import { onPreviewCleanup, previewFixture } from '@orchardworks/agent-relay-node/testing/preview-tunnel-fixture';
 
 for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
   it(`preserves Markdown image space through delayed bytes and decode failure in ${engine.name()} at ${width}px`, async () => {

@@ -76,7 +76,7 @@ export async function verifyNativeTestVersions(mode, env = process.env) {
   if (['local', 'claude', 'claude-succession-evidence'].includes(mode))
     add('claude', 'AGENT_CLAUDE_TEST_EXECUTABLE', 'claude', mode === 'claude-succession-evidence' ? 'exact' : 'minimum');
   if (mode === 'local') {
-    const cwd = join(root, 'packages/agent-remote-lab');
+    const cwd = join(root, 'packages/agent-relay-node');
     const manifestPath = resolve(cwd, env.BORGEE_AGENT_REMOTE_COMPATIBILITY_MANIFEST ?? 'compatibility.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     const native = manifest.providers?.find(provider => provider.providerId === 'codex')?.native;

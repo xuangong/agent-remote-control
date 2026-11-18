@@ -12,8 +12,8 @@ import { createRemoteHostUplinkClient, type RemoteHostUplinkClient } from '@orch
 import { WindowWorkspaceClient } from '@orchardworks/agent-client';
 import { createAgentHostRuntime, type AgentHostProviderRegistration } from '../../agent-controller/src/host.js';
 import { encodeSqlSnapshot, quoteSqlRecord, SQL_SNAPSHOT_FORMAT, SQL_RECORD_FORMAT, SQL_CHUNK_BYTES } from '../../agent-relay-cloudflare/src/storage-codec.js';
-import { createGatewayStaticPages } from '../src/server/gateway-static.js';
-import { relaySocket, webRequest, writeResponse } from '../src/server/remote-host-broker.js';
+import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
+import { relaySocket, webRequest, writeResponse } from '@orchardworks/agent-relay-node/remote-host-broker';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 

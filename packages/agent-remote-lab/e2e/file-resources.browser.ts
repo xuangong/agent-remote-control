@@ -6,7 +6,7 @@ import { chromium, webkit } from '@playwright/test';
 import { build } from 'esbuild';
 import { expect, it } from 'vitest';
 import { controllerContentSecurityPolicy, FILE_FRAME_PATH, fileFrameDocument, fileFrameHeaders } from '@orchardworks/agent-relay-core';
-import { onPreviewCleanup, previewFixture } from '../src/server/preview-tunnel-fixture.js';
+import { onPreviewCleanup, previewFixture } from '@orchardworks/agent-relay-node/testing/preview-tunnel-fixture';
 
 for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
   it(`reads local files and images in a read-only sidebar in ${engine.name()} at ${width}px`, async () => {

@@ -1,0 +1,48 @@
+{
+  "name": "@orchardworks/agent-relay-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Node host of the Relay: the gateway, the local authorizer, the Devbox, static serving and the SQLite binding, for `pnpm local`, self-hosted deployments and the standalone Workbench.",
+  "exports": {
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./compatibility.json": "./compatibility.json"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:dsh-plugin": "node --import tsx/esm scripts/build-dsh-plugin.ts",
+    "prepare:dsh-release": "node --import tsx/esm scripts/prepare-dsh-release.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run --testTimeout=10000 --maxWorkers=50% --exclude '**/*.local.test.ts'",
+    "test:conformance": "node scripts/run-relay-conformance.mjs",
+    "benchmark:journals": "node scripts/journal-benchmark.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent": "0.1.2-rc.1",
+    "@orchardworks/agent-provider-codex": "workspace:*",
+    "@orchardworks/agent-provider-dsh": "workspace:*",
+    "@orchardworks/agent-provider-sdk": "workspace:*",
+    "@orchardworks/agent-relay-core": "workspace:*",
+    "@orchardworks/agent-remote-journal": "workspace:*",
+    "@orchardworks/agent-remote-journal-sqlite": "workspace:*",
+    "@orchardworks/agent-remote-protocol": "workspace:*",
+    "@orchardworks/agent-remote-tunnel": "workspace:*",
+    "@orchardworks/agent-session-runtime": "workspace:*",
+    "@orchardworks/dsh": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@orchardworks/agent-client": "workspace:*",
+    "@orchardworks/agent-remote-controller": "workspace:*",
+    "@orchardworks/agent-remote-debugger": "workspace:*",
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.7.0",
+    "vitest": "4.1.11"
+  }
+}

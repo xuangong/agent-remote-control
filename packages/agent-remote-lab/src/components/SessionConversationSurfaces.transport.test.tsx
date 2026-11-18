@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 import WebSocket from 'ws';
 import { HttpWebSocketTransport, remoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
-import { createRecordedValidationServer } from '../server/recorded.js';
+import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
 import { SessionViewOperationsContext } from '../session-view-operations.js';
 import { DraftStore } from '../draft-store.js';
 import { render, unmount, setPromptText, promptText } from '../test/setup.js';

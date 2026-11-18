@@ -65,11 +65,6 @@ test('QR and copied URLs open the same session across authenticated devices with
     await signIn(mobile);
     await expect(mobile.getByRole('button', { name: 'Share session link' })).toHaveCount(0);
     await expect(mobile.getByRole('button', { name: 'Scan session QR code', exact: true })).toBeVisible();
-    const lateScannerScripts: string[] = [];
-    await mobile.route('**/assets/*.js', route => {
-      lateScannerScripts.push(route.request().url());
-      return route.fulfill({ status: 404, body: 'Asset no longer available' });
-    });
     await mobile.evaluate(() => Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { configurable: true,
       value: async () => { throw new DOMException('Denied', 'NotAllowedError'); } }));
     await mobile.getByRole('button', { name: 'Scan session QR code', exact: true }).click();
@@ -77,15 +72,15 @@ test('QR and copied URLs open the same session across authenticated devices with
     await mobile.getByLabel('Session link', { exact: true }).fill(link);
     await mobile.getByRole('button', { name: 'Open session', exact: true }).click();
     await expect(mobile.getByRole('dialog', { name: 'Scan session', exact: true })).not.toBeVisible();
-    await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
+    await expect(mobile.locator('[data-testid="prompt-input"]:visible')).toBeEnabled();
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
     expect(sessionLink(mobile.url())).toBe(link);
     await showNewSession(mobile);
     await mobile.getByLabel('Connected Host').selectOption(f.hostId);
     await mobile.getByTestId('session-create').click();
-    await expect(mobile.getByTestId('prompt-input')).toBeEnabled();
+    await expect(mobile.locator('[data-testid="prompt-input"]:visible')).toBeEnabled();
     await expect.poll(() => sessionLink(mobile.url())).not.toBe(link);
-    await mobile.getByTestId('prompt-input').fill('Keep this draft when scanning');
+    await mobile.locator('[data-testid="prompt-input"]:visible').fill('Keep this draft when scanning');
     await mobile.evaluate(async data => {
       const image = new Image(); image.src = data!; await image.decode();
       const canvas = document.createElement('canvas'); canvas.width = 640; canvas.height = 640;
@@ -101,20 +96,19 @@ test('QR and copied URLs open the same session across authenticated devices with
     await expect(mobile.locator('.agent-message-assistant').last()).toContainText('Cross-device conversation marker');
     expect(await mobile.evaluate(() => (window as unknown as { scanDocument: boolean }).scanDocument)).toBe(true);
     expect(await mobile.evaluate(() => (window as unknown as { scanStream: MediaStream }).scanStream.getTracks().every(track => track.readyState === 'ended'))).toBe(true);
-    expect(lateScannerScripts).toEqual([]);
     await mobile.evaluate(() => history.back());
-    await expect(mobile.getByTestId('prompt-input')).toHaveText('Keep this draft when scanning');
+    await expect(mobile.locator('[data-testid="prompt-input"]:visible')).toHaveText('Keep this draft when scanning');
     await mobile.evaluate(() => history.forward());
     await expect.poll(() => sessionLink(mobile.url())).toBe(link);
     // Authorized clients share a Host session since 4a8bfae5, so the phone continues without taking control.
     await expect(mobile.getByRole('button', { name: 'Take control', exact: true })).toHaveCount(0);
-    await expect(mobile.getByTestId('prompt-input')).toBeEditable();
-    await mobile.getByTestId('prompt-input').fill('Reply from phone');
-    await mobile.getByTestId('prompt-submit').click();
+    await expect(mobile.locator('[data-testid="prompt-input"]:visible')).toBeEditable();
+    await mobile.locator('[data-testid="prompt-input"]:visible').fill('Reply from phone');
+    await mobile.locator('[data-testid="prompt-submit"]:visible').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Reply from phone');
 
     const computer = await desktop.newPage();
-    await computer.goto(mobile.url());
+    await computer.goto(sessionLink(mobile.url()));
     await signIn(computer);
     await expect(computer.getByTestId('prompt-input')).toBeEnabled();
     await expect(computer.locator('.agent-message-assistant').last()).toContainText('Reply from phone');

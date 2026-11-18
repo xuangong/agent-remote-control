@@ -121,7 +121,8 @@ test('creating another session after unlinking leaves the independent side', asy
   await expect(page.locator('.lab-primary-conversation')).toHaveAttribute('data-selected', 'true');
   await showNewSession(page);
   await page.getByTestId('session-create').click();
-  const primary = page.locator('.lab-primary-conversation');
+  // The new session opens as its own, selected primary group.
+  const primary = page.locator('.lab-primary-conversation[data-selected="true"]');
   await expect(primary.getByTestId('prompt-input')).toBeVisible();
   await primary.getByTestId('prompt-input').fill('A new independent topic');
   await primary.getByTestId('prompt-input').press('Enter');

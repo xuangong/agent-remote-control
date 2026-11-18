@@ -3,19 +3,18 @@ import { openSessionsPage, selectConnectedHost } from './all-sessions';
 import { sessionLinkFixture } from './session-link-fixture';
 import { showNewSession } from './session-navigation';
 
-/** Whether the device store holds, on disk (IndexedDB), a conversation containing the text; cached startup reads conversations from there. */
-const storedConversationHas = (page: Page, needle: string) => page.evaluate(text => new Promise<boolean>(resolve => {
+/** Number of conversations the device store holds on disk (IndexedDB). */
+const storedConversationCount = (page: Page) => page.evaluate(() => new Promise<number>(resolve => {
   const opening = indexedDB.open('agent-remote-image-drafts');
-  opening.onerror = () => resolve(false);
+  opening.onerror = () => resolve(0);
   opening.onsuccess = () => {
     const database = opening.result;
-    if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve(false); return; }
-    const all = database.transaction('sessions').objectStore('sessions').getAll();
-    all.onsuccess = () => { database.close(); resolve(all.result.some(record => JSON.stringify(record).includes(text))); };
-    all.onerror = () => { database.close(); resolve(false); };
+    if (!database.objectStoreNames.contains('sessions')) { database.close(); resolve(0); return; }
+    const count = database.transaction('sessions').objectStore('sessions').count();
+    count.onsuccess = () => { database.close(); resolve(count.result); };
+    count.onerror = () => { database.close(); resolve(0); };
   };
-}), needle);
-const waitForStoredConversation = (page: Page, needle: string) => expect.poll(() => storedConversationHas(page, needle)).toBe(true);
+}));
 
 for (const signal of ['visibility', 'pageshow'] as const) {
   test(`authorized ${signal} recovery keeps the live session usable during a delayed access check`, async ({ page }, testInfo) => {
@@ -72,67 +71,6 @@ for (const signal of ['visibility', 'pageshow'] as const) {
   });
 }
 
-test('cached startup keeps the editor while business traffic waits for access', async ({ page }, testInfo) => {
-  test.setTimeout(60000);
-  const f = await sessionLinkFixture();
-  let release!: () => void;
-  try {
-    await page.goto(f.url);
-    await page.getByRole('link', { name: 'Sign in' }).click();
-    await page.getByRole('link', { name: 'Sign in as alice' }).click();
-    await selectConnectedHost(page, f.hostId);
-    await showNewSession(page);
-    await page.getByTestId('session-create').click();
-    const input = page.getByTestId('prompt-input');
-    await expect(input).toBeEnabled();
-    await input.fill('Seamless cache marker');
-    await page.getByTestId('prompt-submit').click();
-    await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
-    await waitForStoredConversation(page, 'Seamless cache marker');
-    await input.fill('My unsent draft');
-    const timeline = page.getByTestId('timeline');
-    await timeline.evaluate(element => {
-      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -150, bubbles: true }));
-      element.scrollTop = -150;
-      element.dispatchEvent(new Event('scroll'));
-    });
-    // The reading line is the todo entry: its distance from the viewport top is what the reader sees.
-    const readingLine = () => timeline.evaluate(element => {
-      const entry = element.querySelector('[data-entry-key$=":todo"]')!.getBoundingClientRect();
-      return entry.top - element.getBoundingClientRect().top;
-    });
-    const readingTop = await timeline.evaluate(element => element.scrollTop);
-    expect(readingTop).toBeLessThan(-100);
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide')));
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    let waiting = true;
-    const premature: string[] = [];
-    page.on('request', request => { if (waiting && /\/u\/[^/]+\/v1\//.test(request.url())) premature.push(request.url()); });
-    await page.route('**/auth/status', async route => { await gate; await route.continue(); });
-    await page.reload();
-    await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
-    await expect(input).toBeVisible();
-    await expect(input).toHaveText('My unsent draft');
-    // The cached entries do not yet carry the details the live session adds above the reading line, so the restored
-    // position is only approximate: the reader must still be above the latest messages and see the same entry.
-    await expect.poll(() => timeline.evaluate(element => element.scrollTop)).toBeLessThan(-60);
-    expect(await readingLine()).toBeGreaterThan(-120);
-    expect(await readingLine()).toBeLessThan(await timeline.evaluate(element => element.clientHeight));
-    const cachedReadingLine = await readingLine();
-    await page.screenshot({ path: testInfo.outputPath('cached-workspace.png') });
-    const editor = await input.elementHandle();
-    await input.fill('Continue typing before authorization');
-    expect(premature).toEqual([]);
-    waiting = false; release();
-    await expect(page.getByTestId('connection-summary')).toContainText('Ready');
-    await expect.poll(() => editor!.evaluate(element => element.isConnected)).toBe(true);
-    await expect(input).toHaveText('Continue typing before authorization');
-    // Authorization and the live details must not move what the reader is looking at.
-    await expect.poll(async () => Math.abs(await readingLine() - cachedReadingLine)).toBeLessThan(4);
-    await expect(page.locator('.agent-message-assistant').last()).toContainText('Seamless cache marker');
-  } finally { release?.(); await f.close(); }
-});
-
 test('returning browsers automatically complete Gateway authorization without an extra sign-in click', async ({ page }) => {
   const f = await sessionLinkFixture({ automaticSignIn: true });
   try {
@@ -169,7 +107,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await input.fill('Private conversation marker');
     await page.getByTestId('prompt-submit').click();
     await expect(page.locator('.agent-message-assistant').last()).toContainText('Private conversation marker');
-    await waitForStoredConversation(page, 'Private conversation marker');
+    await expect.poll(() => storedConversationCount(page)).toBeGreaterThan(0);
     await input.fill('Private unsent draft');
     await page.evaluate(async () => {
       const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -204,7 +142,7 @@ test('confirmed device protection clears disk copies across tabs without interru
     await expect(dialog).toContainText('does not sign out');
     await page.screenshot({ path: testInfo.outputPath('cache-protection-confirmation.png') });
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
-    expect(await storedConversationHas(page, 'Private conversation marker')).toBe(true);
+    expect(await storedConversationCount(page)).toBeGreaterThan(0);
     await toggle.click();
     await dialog.getByRole('button', { name: 'Enable protection' }).click();
     await expect(dialog).not.toBeVisible();

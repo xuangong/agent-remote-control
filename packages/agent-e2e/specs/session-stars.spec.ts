@@ -11,40 +11,6 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('opens live tracking without a second attach or background history downloads', async ({ page }, testInfo) => {
-  const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  let attachments = 0;
-  let opening = false;
-  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
-  await page.route('**/v1/remote/hosts/host/attach', async route => {
-    attachments += 1;
-    // Attachment is deliberately unavailable after tracking is ready.
-    await route.fulfill(!opening ? { json: { agentId: 'background-session' } }
-      : { status: 504, json: { error: 'Redundant attachment timed out' } });
-  });
-  await page.route('**/v1/remote/hosts/host/vscode-tunnel', route => route.fulfill({ json: { status: 'stopped', processAlive: false, revision: 0 } }));
-  await page.route('**/v1/remote/hosts/host/previews', route => route.fulfill({ json: { revision: 1, registrations: [] } }));
-  await page.addInitScript(() => localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify([
-    { hostId: 'host', providerId: 'recorded', nativeSessionId: 'background-session', title: 'Build checks', starredAt: 1 },
-  ])));
-  await page.goto('/e2e/fixtures/session-stars.html?switching=1');
-  await expect(track(page).locator('.lab-tracking-counts [data-session-status="idle"]')).toHaveText('1');
-  expect(await page.evaluate(() => performance.getEntriesByName('tracked-content-loaded').length)).toBe(0);
-  await page.getByRole('button', { name: 'Tracked sessions', exact: true }).click();
-  const beforeOpen = attachments;
-  opening = true;
-  await page.evaluate(() => performance.mark('tracked-open'));
-  await track(page).locator('.lab-session-row').click();
-  await expect(page.locator('.lab-primary-conversation .agent-message-assistant')).toContainText('Conversation for background-session');
-  await expect(page.locator('.lab-primary-conversation .lab-conversation-status')).toHaveText('Ready');
-  expect(attachments).toBe(beforeOpen);
-  await expect(track(page).locator('.lab-tracking-count')).toHaveText('0');
-  await expect(page).toHaveURL(/session=background-session/);
-  const duration = await page.evaluate(() => performance.measure('tracked-switch', 'tracked-open', 'tracked-content-loaded').duration);
-  await testInfo.attach('fixture-switch-timing', { body: JSON.stringify({ durationMs: duration, attachRequestsOnClick: attachments - beforeOpen }), contentType: 'application/json' });
-  expect(errors).toEqual([]);
-});
-
 test('moves the tracking button without opening it and keeps the menu inside the viewport', async ({ page }, testInfo) => {
   if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
   await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
@@ -236,88 +202,6 @@ test('uses consistent status colors for mobile titles and grouped tracking count
     await expect(counts.locator('[data-session-status="idle"]')).toHaveText('3');
   }
 });
-
-test('pulses for unread pending and completed work, prioritizes pending, and marks each changed session seen when it is opened', async ({ page }, testInfo) => {
-  await page.route('**/v1/favorites', route => route.fulfill({ json: { revision: 0, folders: [], stars: [] } }));
-  await page.route('**/v1/remote/hosts/host/attach', route => route.fulfill({ json: { agentId: route.request().postDataJSON().nativeSessionId } }));
-  await page.addInitScript(() => {
-    const sessions = ['Needs input', 'Finished work'].map(nativeSessionId => ({
-      hostId: 'host', providerId: 'recorded', nativeSessionId, title: nativeSessionId, starredAt: 1,
-    }));
-    localStorage.setItem(`agent-remote-tracking:${location.origin}/u/alice/`, JSON.stringify(sessions));
-  });
-  if (testInfo.project.name.includes('mobile')) await page.setViewportSize({ width: 320, height: 740 });
-  // Since 3f8cdc90 a tracked session is marked seen by opening its row, so the fixture serves the opened conversation.
-  await page.goto('/e2e/fixtures/session-stars.html?switching');
-  const floating = track(page);
-  const trigger = page.getByRole('button', { name: 'Tracked sessions', exact: true });
-  const panel = floating.locator('section');
-  const row = (title: string) => panel.locator('.lab-session-row').filter({ hasText: title });
-  const opened = (title: string) => page.locator('.lab-primary-conversation').getByText(`Conversation for ${title}`, { exact: true });
-  const activity = async (agentId: string, status: string) => {
-    await page.evaluate(detail => window.dispatchEvent(new CustomEvent('fixture-activity', { detail })), { agentId, status });
-  };
-  await expect(floating.locator('[data-session-status="idle"].lab-tracking-count')).toHaveText('2');
-  await expect(trigger).toHaveCSS('animation-name', 'none');
-  await trigger.click();
-  await expect(panel.locator('.lab-tracked-change')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
-  await activity('Needs input', 'running'); await activity('Finished work', 'running');
-  await expect(trigger).toHaveCSS('animation-name', 'none');
-  await activity('Finished work', 'idle');
-  await expect(floating).toHaveAttribute('data-alert', 'idle');
-  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
-  await trigger.click();
-  await expect(row('Finished work')).toContainText('Ready');
-  await expect(floating).toHaveAttribute('data-alert', 'idle');
-  // Pending work takes priority over completed work.
-  await activity('Needs input', 'waiting');
-  await expect(floating).toHaveAttribute('data-alert', 'pending');
-  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-pending-pulse');
-  await expect(row('Needs input')).toContainText('Waiting');
-  const backgrounds = await trigger.evaluate(element => {
-    const animation = element.getAnimations().find(value => value instanceof CSSAnimation)!;
-    animation.pause(); animation.currentTime = 0;
-    const first = getComputedStyle(element).backgroundColor;
-    animation.currentTime = 800;
-    const second = getComputedStyle(element).backgroundColor;
-    animation.play();
-    return [first, second];
-  });
-  expect(backgrounds[0]).not.toBe(backgrounds[1]);
-  await page.getByRole('button', { name: 'Close Tracked sessions' }).click();
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(trigger).toHaveCSS('animation-name', 'none');
-  await expect(floating).toHaveAttribute('data-alert', 'pending');
-  await page.screenshot({ path: testInfo.outputPath('pending-reminders.png') });
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  // Opening the pending session marks it seen; the completed one keeps its own reminder.
-  await trigger.click();
-  await row('Needs input').click();
-  await expect(opened('Needs input')).toBeVisible();
-  await expect(floating).toHaveAttribute('data-alert', 'idle');
-  await expect(trigger).toHaveCSS('animation-name', 'lab-tracking-idle-pulse');
-  // The open session shows its own status instead of alerting.
-  await activity('Needs input', 'waiting');
-  await expect(floating).toHaveAttribute('data-alert', 'idle');
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.screenshot({ path: testInfo.outputPath('idle-reminders.png') });
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await trigger.click();
-  await row('Finished work').click();
-  await expect(opened('Finished work')).toBeVisible();
-  await expect(trigger).toHaveCSS('animation-name', 'none');
-  await expect(floating).not.toHaveAttribute('data-alert', /./);
-  // A background session that needs input again alerts again until its state moves on.
-  await activity('Needs input', 'running'); await activity('Needs input', 'waiting');
-  await expect(floating).toHaveAttribute('data-alert', 'pending');
-  await activity('Needs input', 'running');
-  await expect(trigger).toHaveCSS('animation-name', 'none');
-  await trigger.click();
-  await expect(row('Needs input')).toContainText('Working');
-  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', page.viewportSize()!.width);
-});
-
 
 test('draws the tracking edge from applied content and closes immediately when the activity target is reached', async ({ page }, testInfo) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));

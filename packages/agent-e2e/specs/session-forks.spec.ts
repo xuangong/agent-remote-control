@@ -29,9 +29,10 @@ function sideWith(page: Page, text: string): Locator {
   return page.locator('.lab-side-conversation').filter({ has: page.locator('.agent-message-user').filter({ hasText: text }) });
 }
 
-/** Closes a pane's session view from the sidebar's "In this Window" list; the agent session keeps running. */
-async function closeView(page: Page, pane: Locator) {
-  await page.locator(`#lab-context [data-window-view-close='${await pane.getAttribute('data-view-id')}']`).click();
+/** Closing a Side folds its pane, which stays in the Window and returns from its source's Side list; the agent session keeps running. */
+async function foldSide(pane: Locator) {
+  await pane.getByRole('button', { name: 'Close subagent', exact: true }).click();
+  await expect(pane).toBeHidden();
 }
 
 /** Each pane's width separator is named after its title. */
@@ -215,9 +216,8 @@ hosted('fork keeps the source chat, side sends independently, and references sur
   expect(new Set(ids).size).toBe(ids.length);
   await side.getByTestId('prompt-input').fill('Retained side draft');
   await page.screenshot({ path: testInfo.outputPath('fork-side.png'), fullPage: true });
-  // Closing the fork's view keeps the fork; its source's Side list opens it again.
-  await page.locator(`#lab-context [data-window-view-close='${await side.getAttribute('data-view-id')}']`).click();
-  await expect(side).toHaveCount(0);
+  // Closing the fork's pane folds it and keeps the fork; its source's Side list opens it again.
+  await foldSide(side);
   await entry.click();
   await expect(side).toBeVisible();
   await expect(side.locator('.agent-message-user').last()).toContainText('Use that context in this branch.');
@@ -287,7 +287,9 @@ hosted('rejects a delayed fork input after the main conversation changes', async
   const sessions = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
   await sessions.getByRole('button', { name: 'Refresh', exact: true }).click();
   await sessions.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
-  await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
+  // Opening the fork from the directory adds it as its own primary group beside the source.
+  const fork = page.getByRole('region', { name: /^Primary group: Fork of New/ });
+  await expect(fork.locator('.lab-fork-reference summary')).toBeVisible();
   await page.evaluate(() => {
     const key = Object.keys(localStorage).find((key) => key.includes(':record:'))!;
     void navigator.locks.request(key, () => new Promise<void>((resolve) => {
@@ -296,24 +298,24 @@ hosted('rejects a delayed fork input after the main conversation changes', async
     }));
   });
   await expect.poll(() => page.evaluate(() => (window as unknown as { forkLocked?: boolean }).forkLocked)).toBe(true);
-  await primary.getByTestId('prompt-input').fill('This must stay in the fork.');
-  await primary.getByTestId('prompt-input').press('Enter');
-  await primary.locator('.lab-fork-reference summary').click();
-  await primary.getByRole('button', { name: 'Open source session' }).click();
-  await expect(primary.locator('.lab-fork-reference')).toHaveCount(0);
+  await fork.getByTestId('prompt-input').fill('This must stay in the fork.');
+  await fork.getByTestId('prompt-input').press('Enter');
+  await fork.locator('.lab-fork-reference summary').click();
+  await fork.getByRole('button', { name: 'Open source session' }).click();
+  await expect(fork.locator('.lab-fork-reference')).toHaveCount(0);
   await page.evaluate(() => (window as unknown as { releaseFork: () => void }).releaseFork());
   // The input is rejected locally: it never reaches the source, and the fork records it as not sent.
   const delivery = () => page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find((key) => key.includes(':record:'))!)!).delivery);
   await expect.poll(delivery).toBe('pending');
-  await expect(primary.getByTestId('timeline')).not.toContainText('This must stay in the fork.');
+  await expect(page.locator('.agent-message-user').filter({ hasText: 'This must stay in the fork.' })).toHaveCount(0);
   // The fork is not stuck: opening it again, its next input is delivered.
   const discovery = (await showAllSessions(page)).getByRole('region', { name: 'Discover sessions' });
   await discovery.getByRole('button', { name: 'Refresh', exact: true }).click();
   await discovery.getByRole('button').filter({ has: page.getByText('Fork of New session', { exact: true }) }).click();
-  await expect(primary.locator('.lab-fork-reference summary')).toBeVisible();
-  await primary.getByTestId('prompt-input').fill('Delivered after the rejection.');
-  await primary.getByTestId('prompt-input').press('Enter');
-  await expect(primary.locator('.agent-message-assistant').last()).toContainText('Delivered after the rejection.');
+  await expect(fork.locator('.lab-fork-reference summary')).toBeVisible();
+  await fork.getByTestId('prompt-input').fill('Delivered after the rejection.');
+  await fork.getByTestId('prompt-input').press('Enter');
+  await expect(fork.locator('.agent-message-assistant').last()).toContainText('Delivered after the rejection.');
   await expect.poll(delivery).toBe('sent');
 });
 
@@ -353,15 +355,13 @@ test('keeps a tree of side panes with independent drafts and reopens a closed on
   await c.getByRole('button', { name: 'Side 1 · Branch E', exact: true }).click();
   await expect(e).toHaveAttribute('data-selected', 'true');
   await expect(e.getByTestId('prompt-input')).toHaveText('Draft on E');
-  // Closing E's view keeps its source C; C's Side list reopens E's session in a new view. Drafts belong to views
-  // (docs/superpowers/specs/2026-10-15-window-workspaces-design.md), so the new view starts with an empty draft.
-  await closeView(page, e);
-  await expect(e).toHaveCount(0);
+  // Closing E's pane folds it and keeps its source C; C's Side list restores it with its draft.
+  await foldSide(e);
   await expect(c).toBeVisible();
   await c.getByRole('button', { name: 'Side 1 · Branch E', exact: true }).click();
   await expect(e.locator('.agent-message-assistant').last()).toContainText('Branch E');
   await expect(e).toHaveAttribute('data-selected', 'true');
-  await expect(e.getByTestId('prompt-input')).toHaveText('');
+  await expect(e.getByTestId('prompt-input')).toHaveText('Draft on E');
   await expect(d.getByTestId('prompt-input')).toHaveText('Draft on D');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: `../../.tmp/evidence/side-tree-${testInfo.project.name}.png`, fullPage: true });

@@ -66,3 +66,21 @@ it('E6: a draft stays in the composer when the person changes mode', async () =>
   expect(texts).toContain('A draft that is not sent');
   await close();
 });
+
+it('E6: a bot put to sleep gives up its rows in Window mode, and opening it wakes it', async () => {
+  const { page, close } = await groupOfTwo();
+  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await page.getByRole('button', { name: /^Beta/ }).first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Sleep' }).click();
+  await showsText(page, 'is asleep. Opening it wakes it.');
+  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await showsText(page, 'alpha answer');
+  await page.waitForFunction(() => !document.body.innerText.includes('beta answer'));
+  await page.getByRole('button', { name: 'Bot mode' }).first().click();
+  await page.getByRole('button', { name: /^Beta/ }).first().click();
+  await showsText(page, 'beta answer');
+  await page.getByRole('button', { name: 'Window mode' }).first().click();
+  await showsText(page, 'alpha answer');
+  await showsText(page, 'beta answer');
+  await close();
+});

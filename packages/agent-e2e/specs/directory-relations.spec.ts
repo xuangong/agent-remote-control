@@ -40,9 +40,10 @@ test('Discover sessions reopens linked Ask and Side native sessions from their s
   const sourceKey = JSON.stringify(['local', 'recorded', source.nativeSessionId]);
   for (const [identity, kind, message, messageCount] of [[askIdentity, 'Ask', 'Saved directory Ask', askMessages], [sideIdentity, 'Side', 'Saved directory Side', sideMessages]] as const) {
     await page.goto(sourceUrl);
-    await expect(input).toBeEnabled();
-    // Opening a session binds the selected view, which is still the Side; select the main view so the linked session replaces it.
-    await input.click();
+    // Each opened linked session is a primary group of its own beside the source.
+    const sourceInput = page.getByRole('region', { name: 'New session', exact: true }).getByTestId('prompt-input');
+    await expect(sourceInput).toBeEnabled();
+    await sourceInput.click();
     const directory = await showDirectory(page);
     const sourceRow = directory.locator(`[data-session-key='${sourceKey}']`);
     await sourceRow.locator(':scope > .lab-session-branch > .lab-session-toggle').click();
@@ -53,8 +54,10 @@ test('Discover sessions reopens linked Ask and Side native sessions from their s
     await expect(row).toHaveCount(1);
     await row.click();
     await expect(page).toHaveURL(url => url.searchParams.get('session') === identity.nativeSessionId);
-    await expect(primary.locator('.agent-message-assistant').last()).toContainText(message);
-    await expect(primary.locator('.agent-message-user')).toHaveCount(messageCount);
+    // The opened session is the selected primary group; other groups of the Window stay beside it.
+    const opened = page.locator('.lab-primary-conversation[data-selected="true"]');
+    await expect(opened.locator('.agent-message-assistant').last()).toContainText(message);
+    await expect(opened.locator('.agent-message-user')).toHaveCount(messageCount);
     expect(creations).toHaveLength(3);
   }
 });

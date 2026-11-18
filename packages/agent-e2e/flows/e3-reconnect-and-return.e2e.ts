@@ -15,6 +15,7 @@ beforeAll(async () => {
     sessions: {
       work: { title: 'Work', history: [{ role: 'user', text: 'Start' }, { role: 'assistant', text: 'Started' }] },
       long: { title: 'Long', history: numberedHistory(40) },
+      rewritten: { title: 'Rewritten', history: numberedHistory(60, ' ' + 'padding '.repeat(40)) },
       replaced: { title: 'Replaced', history: numberedHistory(60, ' ' + 'padding '.repeat(40)) },
       older: { title: 'Older', history: numberedHistory(300, ' ' + 'padding '.repeat(60)) },
     },
@@ -133,5 +134,26 @@ it('E3: the page shows its rows when the first fetch of the application chunk fa
   await page.goto(stack.sessionUrl('work'), { waitUntil: 'domcontentloaded' });
   await showsText(page, 'Started');
   expect(refused).toBe(1);
+  await context.close();
+});
+
+it('E3: the reader keeps their line when a Controller restart replaces the journal with a history that changed above them', async () => {
+  const { context, page } = await openPage(browser, stack.sessionUrl('rewritten'));
+  await page.waitForFunction(() => document.body.innerText.includes('Row 60 '));
+  await timelineScroll(page).hover();
+  await expect.poll(async () => { await page.mouse.wheel(0, -250); const offset = await rowOffset(page, 'Row 30 padding'); return offset !== undefined && offset > 100 && offset < 500; }, { timeout: 20_000, interval: 100 }).toBe(true);
+  await page.waitForTimeout(300);
+  const before = (await rowOffset(page, 'Row 30 padding'))!;
+  // The native history now holds a different row 10 and one more row at the end; the rows between keep their keys.
+  const changed = numberedHistory(61, ' ' + 'padding '.repeat(40)).map(row => row.key === 'r10' ? { ...row, text: 'Row 10 rewritten while the reader was away' } : row);
+  stack.provider.replaceHistory('rewritten', changed);
+  await stack.stopController();
+  await stack.startController();
+  await send(page, 'after the replacement');
+  await showsText(page, 'Echo: after the replacement');
+  expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
+  // The replacement did arrive: reading up to row 10 shows the rewritten text.
+  await timelineScroll(page).hover();
+  await expect.poll(async () => { await page.mouse.wheel(0, -1500); return (await rowOffset(page, 'Row 10 rewritten while the reader was away')) !== undefined; }, { timeout: 20_000, interval: 150 }).toBe(true);
   await context.close();
 });

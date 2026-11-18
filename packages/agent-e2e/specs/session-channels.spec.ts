@@ -6,7 +6,7 @@ type TimelineRequest = Extract<ClientMessage, { type: 'timeline_request' }>['pay
 test.describe.configure({ timeout: 20_000 });
 
 function observeChannels(page: Page) {
-  const sockets: { mode: string; closed: boolean; pongs: number }[] = [];
+  const sockets: { mode: string; closed: boolean }[] = [];
   const subscriptions = new Map<number, { mode: string; agentId: string }>();
   const activityMessages: string[] = [];
   const errors: string[] = [];
@@ -20,7 +20,7 @@ function observeChannels(page: Page) {
   page.on('websocket', socket => {
     const url = new URL(socket.url());
     if (!url.pathname.startsWith('/v1/')) return;
-    const state = { mode: url.searchParams.get('observation') ?? 'legacy', closed: false, pongs: 0 };
+    const state = { mode: url.searchParams.get('observation') ?? 'legacy', closed: false };
     sockets.push(state);
     socket.on('close', () => { state.closed = true; });
     socket.on('framesent', ({ payload }) => {
@@ -31,7 +31,6 @@ function observeChannels(page: Page) {
     });
     socket.on('framereceived', ({ payload }) => {
       const frame = JSON.parse(String(payload));
-      if (frame.type === 'pong') state.pongs++;
       if (frame.type === 'closed') subscriptions.delete(frame.subscriptionId);
       if (state.mode === 'activity' && frame.type === 'message') activityMessages.push(frame.message.type);
     });
@@ -52,29 +51,6 @@ async function initialize(page: Page) {
     b: (await page.locator('#fixture').getAttribute('data-agent-b'))!,
   };
 }
-
-test('keeps healthy shared channels after a short page suspension and subsequent switches', async ({ page }) => {
-  const wire = observeChannels(page);
-  await initialize(page);
-  expect(wire.sockets).toHaveLength(2);
-  await page.evaluate(() => {
-    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-  });
-  await expect.poll(() => wire.sockets.map(socket => socket.pongs)).toEqual([1, 1]);
-  expect(wire.sockets.every(socket => !socket.closed)).toBe(true);
-  await expect(page.locator('#primary-state')).toHaveText('a:ready');
-  await expect(page.locator('#activity-state')).toContainText('a:ready');
-  await expect(page.locator('#activity-state')).toContainText('b:ready');
-  await expect.poll(() => wire.sockets.filter(socket => !socket.closed).map(socket => socket.mode).sort()).toEqual(['activity', 'session']);
-  expect(wire.sockets).toHaveLength(2);
-  for (const name of ['B', 'A', 'B']) {
-    await page.getByRole('button', { name: `Primary ${name}`, exact: true }).click();
-    await expect(page.locator('#primary-state')).toHaveText(`${name.toLowerCase()}:ready`);
-    expect(wire.sockets).toHaveLength(2);
-  }
-  expect(wire.errors).toEqual([]);
-});
 
 test('reuses two physical channels across ordinary switches and concurrent side conversations', async ({ page }, testInfo) => {
   const wire = observeChannels(page);

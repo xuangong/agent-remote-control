@@ -42,8 +42,8 @@ export default defineConfig({
     { name: 'chromium-mobile', use: { ...devices['Pixel 7'] } },
     { name: 'webkit-mobile-sidebar', testMatch: ['mobile-sidebar.spec.ts', 'provider-layout.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
     { name: 'webkit-mobile-viewport', testMatch: ['mobile-viewport.spec.ts', 'mobile-keyboard-controls.spec.ts'], use: { ...devices['iPhone 13'], browserName: 'webkit' } },
-    { name: 'webkit-ask-desktop', testMatch: ['session-attributions.spec.ts', 'composer-initial-draft.spec.ts', 'session-view-binding.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },
-    { name: 'webkit-ask-mobile', testMatch: ['session-attributions.spec.ts', 'composer-initial-draft.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['iPhone 13'] } },
+    { name: 'webkit-ask-desktop', testMatch: ['composer-initial-draft.spec.ts', 'session-view-binding.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['Desktop Safari'] } },
+    { name: 'webkit-ask-mobile', testMatch: ['composer-initial-draft.spec.ts', 'team.spec.ts', 'workspace-layout.spec.ts', 'ask-dock.spec.ts', 'ask-composer.spec.ts', 'session-view-ownership.spec.ts'], use: { ...devices['iPhone 13'] } },
   ],
   webServer: [
     {

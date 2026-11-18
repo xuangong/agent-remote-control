@@ -56,6 +56,8 @@ export interface WebSocketLike {
 export interface HttpWebSocketTransportDependencies {
   readonly sessionChannels?: boolean;
   readonly sessionSuccessions?: boolean;
+  /** The first wait before the activity channel reopens after a loss (default 1 s). */
+  readonly stateRetryMs?: number;
   readonly fetch?: typeof fetch;
   readonly WebSocket?: new (url: string) => WebSocketLike;
   readonly webSocketFactory?: (url: string) => WebSocketLike;
@@ -221,6 +223,7 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
     if (dependencies.sessionChannels) {
       this.sessionChannels = new SessionChannelPool({
         sessionSuccessions: dependencies.sessionSuccessions,
+        stateRetryMs: dependencies.stateRetryMs,
         onSuccession: succession => this.receiveSuccession(succession),
         onSuccessionSupport: supported => { if (dependencies.sessionSuccessions && !this.successionDisposed) this.successionSupport = supported ? 'supported' : 'unsupported'; },
         onTitle: session => {

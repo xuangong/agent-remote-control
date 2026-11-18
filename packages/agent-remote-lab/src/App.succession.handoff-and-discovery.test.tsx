@@ -23,7 +23,7 @@ import { readLastSession } from './conversation-recovery.js';
 import * as starsHooks from './hooks/useSessionStars.js';
 import * as attentionHooks from './hooks/useSessionAttention.js';
 import type { FavoritesSnapshot } from './session-stars-client.js';
-import { act, cleanups, committed, failureFixture, handoffCommandFixture, native, RESTORE_RETRY_WAIT, saveSessionComposition, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
+import { act, cleanups, committed, failureFixture, handoffCommandFixture, native, saveSessionComposition, setGlobalAskVisible, settleApp, testDeadline, visibleQuery, waitFor } from './App.succession.fixture.js';
 
 it('does not silently replace an unavailable requested Handoff provider', async () => {
   const f = await handoffCommandFixture();
@@ -551,12 +551,12 @@ it('restores a selected Side path and focus while the primary changes from A to 
 
 
 it('retains an authorized desired B after its replay endpoint becomes unavailable', async () => {
-  const f = await failureFixture();
+  const f = await failureFixture(false, undefined, false, '', { stateRetryMs: 20 });
   await settleApp(() => { expect(f.view.textContent).toContain('Fixture successor unavailable.'); });
   f.failReplay('route_not_found');
+  f.dropSockets();
   await act(async () => window.dispatchEvent(new Event('online')));
-  // The next attempt comes from the restoration retry timer, a real 5 s wait; the default 5 s deadline would race it.
-  await settleApp(() => { expect(f.view.textContent).toContain('Fixture succession route unavailable.'); }, { timeout: RESTORE_RETRY_WAIT });
+  await settleApp(() => { expect(f.view.textContent).toContain('Fixture succession route unavailable.'); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   expect(new URL(window.location.href).searchParams.get('session')).toBe('B');
   expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe('A local draft');

@@ -16,6 +16,8 @@ type Mode = 'session' | 'activity';
 type Negotiation = Extract<ClientMessage, { type: 'negotiate' }>;
 interface Dependencies {
   sessionSuccessions?: boolean;
+  /** The first wait before the activity channel reopens after a loss; it doubles up to 30 s. */
+  stateRetryMs?: number;
   onSuccession?(succession: import('@orchardworks/agent-remote-protocol').SessionSuccessionReplay): void;
   onSuccessionSupport?(supported: boolean): void;
   onTitle?(session: import('@orchardworks/agent-remote-protocol').SessionTitleUpdate): void;
@@ -89,10 +91,11 @@ export class SessionChannelPool {
   private readonly intents = new Set<Subscription>();
   private stateWatchers = 0;
   private stateRetry?: ReturnType<typeof setTimeout>;
-  private stateRetryDelay = 1_000;
+  private stateRetryDelay: number;
   private feedOpened = false;
 
   constructor(private readonly dependencies: Dependencies) {
+    this.stateRetryDelay = dependencies.stateRetryMs ?? 1_000;
     this.unwatch = watchPageResume(() => {
       this.pageHidden = false;
       this.pageHiddenSince = undefined;
@@ -312,7 +315,7 @@ export class SessionChannelPool {
         channel.readyTimer = undefined;
         this.startHeartbeat(channel);
         if (mode === 'activity') {
-          this.stateRetryDelay = 1_000;
+          this.stateRetryDelay = this.dependencies.stateRetryMs ?? 1_000;
           if (this.feedOpened) notifyFeedReopened();
           this.feedOpened = true;
         }

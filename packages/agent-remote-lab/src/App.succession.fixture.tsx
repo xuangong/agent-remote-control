@@ -73,7 +73,7 @@ export function committed(from = 'A', to = 'B', revision = 2, roleId = 'primary'
       receipt: { ...request, to: native(to, providerId), phase: 'committed', committedRevision: revision, startedAt: 'now', updatedAt: 'now',
         prepared: { ...request, to: native(to, providerId), workspace, associationRevision: 1, participants: [], capture: { epoch: 'epoch', seq: 1, capturedAt: 'now' } } } } };
 }
-export async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { otherWindows?: WorkspaceWindow[]; hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
+export async function failureFixture(advanceDuringRecovery = false, nativeIdentity?: string | null, strict = false, flags = '', setup?: { stateRetryMs?: number; otherWindows?: WorkspaceWindow[]; hostService?: ComponentProps<typeof App>['hostService']; beforeWindowMutation?(mutation: WindowMutation): Promise<void>; windowDocument?: WorkspaceWindow; persistPrompt?: boolean; successionCommit?(): SuccessionActionResult; successionPrepare?(body: Record<string, unknown>): Promise<SuccessionActionResult>; teams?(): Team[]; chain?: SessionSuccessionReplay[]; replayFailure?: string; selected?: string; providerId?: string; userScoped?: boolean; favorites?: FavoritesSnapshot; liveActivity?: boolean; holdRelationsInitially?: boolean; holdReplayInitially?: boolean; holdTimelineInitially?: boolean; holdSnapshotInitially?: boolean; holdAccessInitially?: boolean; nativeConnection?: 'connected' | 'restoring'; preserveNativeState?: boolean; children?: AgentChildSession[]; timeline?: ProjectedTimelineEntry[]; nativeStatus?: 'idle' | 'running'; successionDescription?: SuccessionDescription; successionStatus?(): SuccessionActionResult; attachmentFailure?(body: Record<string, unknown>): { status: number; payload: unknown } | undefined; seed?(scope: string, source: OpenedSession): void | Promise<void> }) {
   configureImageDraftPersistence(() => setup?.persistPrompt === true);
   const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
   const hostedWindows = new Map<string, WorkspaceWindow>();
@@ -258,7 +258,7 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const scope = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
-  const transport = new HttpWebSocketTransport(scope, { WebSocket, sessionChannels: true, sessionSuccessions: true }) as LabTransport;
+  const transport = new HttpWebSocketTransport(scope, { WebSocket, sessionChannels: true, sessionSuccessions: true, stateRetryMs: setup?.stateRetryMs }) as LabTransport;
   cleanups.push(async () => { (transport as HttpWebSocketTransport).dispose(); for (const socket of sockets.clients) socket.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
   const source = { hostId: 'host', providerId, nativeSessionId: 'A', agentId: 'agent-A', title: 'Retained primary' };
   localStorage.setItem(`agent-remote-opened:${scope}`, JSON.stringify([source]));
@@ -296,12 +296,11 @@ export async function failureFixture(advanceDuringRecovery = false, nativeIdenti
     holdCurrent() { let release!: () => void; currentGate = new Promise(resolve => { release = resolve; }); return () => { currentGate = undefined; release(); }; },
     holdControl() { let release!: () => void; controlGate = new Promise(resolve => { release = resolve; }); return () => { controlGate = undefined; release(); }; },
     pauseReplay() { replayGate ??= new Promise(resolve => { releaseReplay = resolve; }); return () => { releaseReplay?.(); replayGate = undefined; }; },
+    /** The Relay's side of a lost connection: the page's session channels close at once and it reconnects. */
+    dropSockets() { for (const socket of sockets.clients) socket.terminate(); },
     notify(replay: SessionSuccessionReplay) { for (const socket of sockets.clients) socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'session_succession_committed', succession: replay })); },
   };
 }
-
-/** A wait that outlasts the restoration retry timer (`RESTORE_RETRY_MS`, 5 s) by the margin a loaded machine needs. */
-export const RESTORE_RETRY_WAIT = 15000;
 
 /** Lets the App render and its requests finish, until the assertion holds. */
 export async function settleApp(assertion: () => void, options?: { timeout?: number }) {

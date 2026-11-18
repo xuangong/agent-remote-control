@@ -18,7 +18,7 @@ import { RecoveryScope, type ReadingPositions } from './conversation-recovery.js
 import * as attentionHooks from './hooks/useSessionAttention.js';
 import * as managerComponents from './components/ChatSessionManager.js';
 import * as windowWorkspaceHooks from './hooks/useWindowWorkspace.js';
-import { act, cleanups, committed, failureFixture, native, RESTORE_RETRY_WAIT, saveSessionComposition, settleApp, visibleQuery, waitFor } from './App.succession.fixture.js';
+import { act, cleanups, committed, failureFixture, native, saveSessionComposition, settleApp, visibleQuery, waitFor } from './App.succession.fixture.js';
 
 it('rejects a retired source after awaiting Ask relations before creating any native target', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -231,12 +231,12 @@ it('permanently retires primary image lifetimes across page resume and same-nati
 });
 
 it('reconciles metadata on page resume without retrying an HTTP attachment failure', async () => {
-  const f = await failureFixture();
+  const f = await failureFixture(false, undefined, false, '', { stateRetryMs: 20 });
   await settleApp(() => { expect(f.view.textContent).toContain('Retry session'); });
   const reads = f.requests.filter(item => item.url.includes('/session-successions')).length;
+  f.dropSockets();
   await act(async () => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
-  // The next read comes from the restoration retry timer, a real 5 s wait; the default 5 s deadline would race it.
-  await settleApp(() => { expect(f.requests.filter(item => item.url.includes('/session-successions')).length).toBeGreaterThan(reads); }, { timeout: RESTORE_RETRY_WAIT });
+  await settleApp(() => { expect(f.requests.filter(item => item.url.includes('/session-successions')).length).toBeGreaterThan(reads); });
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
   expect(f.view.textContent).toContain('Retry session');
 });

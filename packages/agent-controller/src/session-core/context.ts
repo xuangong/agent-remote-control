@@ -1,6 +1,6 @@
-import type { AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
+import type { AgentEmptyCreationResult, AgentPersistenceHandle, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { NativeSessionRef } from '@orchardworks/agent-remote-protocol';
-import type { AgentRemoteRelay, OperationCache, RemoteHostCatalog, SessionBindings } from '@orchardworks/agent-session-runtime';
+import type { AgentRemoteRelay, OperationCache, RemoteHostCatalog, RemoteHostSessionLease, SessionBindings, SessionWireAgent } from '@orchardworks/agent-session-runtime';
 
 import type { createHostStatusReader } from '../host-status.js';
 import type { createIdleSessions } from '../idle-sessions.js';
@@ -10,12 +10,20 @@ import type { SessionSuccessionEnrollment } from '../session-succession-enrollme
 import type { SessionSuccessionService } from '../session-succession-service.js';
 import type { SessionSuccessionStore } from '../session-succession-store.js';
 import type { SessionSuccessionCoordinator } from '../session-succession.js';
+import type { WorkerSupport } from '../call-for-support-worker.js';
+import type { SessionRoles } from '../session-role-succession.js';
 import type { TeamRuntime } from '../team.js';
 import type { TpmCoordinator } from '../tpm.js';
 import type { SessionRefContext } from '../session-refs.js';
 import type { SessionCaller, SessionCallResult } from '../session-routes.js';
 import type { Admission } from './admission.js';
 import type { AgentHostProviderRegistration, AgentHostRuntimeOptions, SessionBinding } from './types.js';
+
+/** What a native attachment was opened from: the provider's session, and the identity of the creation result or prefix handle it was opened with. */
+export interface NativeAttachment { session: AgentSession; nativeCreation?: string; nativePrefix?: string }
+
+/** The adapter-owned succession evidence of a Controller configured with a state directory. */
+export type NativeSuccession = Extract<NonNullable<AgentHostRuntimeOptions['succession']>, { stateDirectory: string }>['native'];
 
 /** The succession state this Controller keeps: its identity, the store of role records, the evidence contexts and the coordinator. */
 export interface SuccessionHandle {
@@ -51,12 +59,23 @@ export interface SessionCoreContext {
   readonly team: TeamRuntime | undefined;
   readonly enrollment: SessionSuccessionEnrollment | undefined;
   readonly sessionRefs: SessionRefContext | undefined;
+  readonly roles: SessionRoles;
+  readonly workerSupport: WorkerSupport | undefined;
+  readonly workerToolsApplied: Map<string, boolean>;
+  readonly nativeAttachments: WeakMap<SessionWireAgent, NativeAttachment>;
+  readonly successionConfig: AgentHostRuntimeOptions['succession'];
+  readonly nativeSuccession: NativeSuccession;
   registration(providerId: string): AgentHostProviderRegistration;
   liveAgent(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
   nativeRef(binding: Pick<SessionBinding, 'providerId' | 'nativeSessionId'>): NativeSessionRef;
   mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[];
   directoryOperation<T>(scope: string, operationId: string, kind: string, targets: readonly NativeSessionRef[], parameters: unknown,
     dispatch: () => Promise<T>, validate?: () => Promise<void>): Promise<T>;
+  nativeFamily(providerId: string, nativeSessionId: string): SessionBinding[];
+  originalCreation(target: NativeSessionRef): AgentEmptyCreationResult | undefined;
+  originalNativePrefix(target: NativeSessionRef): { handle: AgentPersistenceHandle; source: NativeSessionRef } | undefined;
+  assertHandoffState(target: NativeSessionRef, captured?: { epoch: string; seq: number }, allowMissing?: boolean): void;
+  acquireSession(agentId: string): Promise<RemoteHostSessionLease | undefined>;
   tracked<T>(operation: Promise<T>): Promise<T>;
   project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted?: boolean,
     takeoverScope?: string, qualifiedResult?: boolean): Promise<SessionBinding>;
@@ -65,3 +84,4 @@ export interface SessionCoreContext {
   workerExtensions(providerId: string, holder: NativeSessionRef | undefined, actual: () => NativeSessionRef | undefined): AgentSessionExtensions | undefined;
   markShared(payload: Record<string, unknown> | undefined, providerId: string, nativeSessionId: string): Promise<void>;
 }
+

@@ -220,6 +220,12 @@ importers:
 
   packages/agent-e2e:
     devDependencies:
+      '@orchardworks/agent-provider-claude':
+        specifier: workspace:*
+        version: link:../agent-provider-claude
+      '@orchardworks/agent-provider-codex':
+        specifier: workspace:*
+        version: link:../agent-provider-codex
       '@orchardworks/agent-provider-sdk':
         specifier: workspace:*
         version: link:../agent-provider-sdk

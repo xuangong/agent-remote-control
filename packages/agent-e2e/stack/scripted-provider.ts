@@ -1,10 +1,14 @@
 /**
  * A scripted provider for the e2e stack: sessions whose history and replies a flow decides.
  *
- * Contract. `scriptedProvider()` returns the Controller registration and a handle per session. A session starts with its `history`
- * (completed rows, then the history boundary). A message sent to it is echoed as a user row and answered by `answer(text)` as an
- * assistant row, after the optional `replyDelayMs`; a flow can also `write` live rows as a terminal would write them. Item keys are
- * stable per session, so a reload shows the same rows. The provider reads nothing outside this process.
+ * Contract. `scriptedProvider()` returns the Controller registration and a handle per session. A session starts with its native
+ * `history`: plain rows, or the observations of a recording (`recordedHistory`). A message sent to it is echoed as a user row and
+ * answered by `answer(text)` as an assistant row, immediately, after `replyDelayMs`, or streamed in pieces; a flow can hold the echo
+ * (`hold`) to look at a message while it is pending. Native history is what a terminal and a reopened session read: `write` adds a row the
+ * running session sees live, `terminalWrite` adds rows only to the native history, as a terminal does while the Controller's session
+ * follows its own last message (the provider then reports the divergence, as the Claude one does, and the Controller reads it again).
+ * `fork` adds a session whose history is a copy of another's, as a terminal fork does. Item keys are stable per session and position,
+ * so a reload shows the same rows. The provider reads nothing outside this process.
  */
 import type { AgentProviderAdapter, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import type { AgentHostDirectory, AgentHostProviderRegistration } from '@orchardworks/agent-remote-controller';
@@ -13,14 +17,21 @@ import { ScriptedSession } from '@orchardworks/agent-remote-fixtures';
 export const SCRIPTED_PROVIDER = 'scripted';
 
 export interface ScriptedRow { role: 'user' | 'assistant'; text: string }
+/** One entry of a native history: a plain row, or an observation a real CLI produced (see `recordedHistory`). */
+export type HistoryEntry = ScriptedRow | { observation: ProviderObservation };
 
-/** A timeline observation of one completed or live item of a scripted session. */
-export function row(delivery: 'history' | 'live', key: string, row: ScriptedRow, sequence: number): ProviderObservation {
+/** The history of a recording: the observations of the session read again, in the order the provider gave them. */
+export function recordedHistory(recording: { reread: ProviderObservation[] }): HistoryEntry[] {
+  return recording.reread.map(observation => ({ observation: { ...observation, delivery: 'history' as const } }));
+}
+
+/** A timeline observation of one completed item of a scripted session. `completes` false gives a piece of a streamed item. */
+export function row(providerId: string, delivery: 'history' | 'live', key: string, entry: ScriptedRow, sequence: number, completes = true, piece = 0): ProviderObservation {
   return {
-    type: 'observation', sourceKey: `${delivery}:${key}`, occurredAt: 1_725_000_000_000 + sequence, delivery,
-    event: { type: 'timeline', provider: SCRIPTED_PROVIDER, turnId: `turn-${Math.ceil(sequence / 2)}`,
-      item: { type: row.role === 'user' ? 'user_message' : 'assistant_message', text: row.text, messageId: key } },
-    itemIdentity: { key, completes: true },
+    type: 'observation', sourceKey: `${delivery}:${key}:${piece}`, occurredAt: 1_725_000_000_000 + sequence, delivery,
+    event: { type: 'timeline', provider: providerId, turnId: `turn-${Math.ceil(sequence / 2)}`,
+      item: { type: entry.role === 'user' ? 'user_message' : 'assistant_message', text: entry.text, messageId: key } },
+    itemIdentity: completes ? { key, completes: true } : { key },
   };
 }
 
@@ -28,39 +39,67 @@ export interface ScriptedSessionHandle {
   readonly nativeSessionId: string;
   readonly title: string;
   readonly sent: string[];
-  /** A row the way a terminal writing to the same session would add it. */
+  /** A row the way the running session adds it: the page sees it live and the native history keeps it. */
   write(role: ScriptedRow['role'], text: string): void;
 }
 
 export interface ScriptedProviderOptions {
   /** Sessions that exist when the Controller starts, with their history. */
-  sessions?: Record<string, { title: string; history: ScriptedRow[] }>;
+  sessions?: Record<string, { title: string; history: HistoryEntry[] }>;
+  providerId?: string;
+  displayName?: string;
   answer?(text: string): string;
   replyDelayMs?: number;
+  /** Answer in two pieces, as a model streams: the page shows the first before the second arrives. */
+  stream?: boolean;
 }
 
 export function scriptedProvider(options: ScriptedProviderOptions = {}) {
+  const providerId = options.providerId ?? SCRIPTED_PROVIDER;
   const answer = options.answer ?? (text => `Echo: ${text}`);
-  const known = new Map<string, { title: string; history: ScriptedRow[]; createdAt: string }>();
-  for (const [id, session] of Object.entries(options.sessions ?? {})) known.set(id, { ...session, createdAt: '2026-11-18T00:00:00.000Z' });
+  interface Native { title: string; history: HistoryEntry[]; createdAt: string; updatedAt: string; diverged: boolean }
+  const known = new Map<string, Native>();
+  const startedAt = Date.parse('2026-11-18T00:00:00.000Z');
+  for (const [id, session] of Object.entries(options.sessions ?? {})) known.set(id, { ...session, history: [...session.history], createdAt: new Date(startedAt).toISOString(), updatedAt: new Date(startedAt).toISOString(), diverged: false });
   const live = new Map<string, ScriptedSessionHandle & ScriptedSession>();
   let created = 0;
+  let held: Promise<void> | undefined;
+
+  const observation = (id: string, entry: HistoryEntry, at: number, delivery: 'history' | 'live'): ProviderObservation =>
+    'observation' in entry ? { ...entry.observation, delivery } : row(providerId, delivery, `${id}:h${at}`, entry, at);
 
   const open = (nativeSessionId: string): ScriptedSession => {
     const saved = known.get(nativeSessionId);
     if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
-    let sequence = 0;
-    const items: ProviderStreamItem[] = [...saved.history.map(entry => row('history', `${nativeSessionId}:h${++sequence}`, entry, sequence)), { type: 'history_boundary' }];
-    const base = new ScriptedSession(SCRIPTED_PROVIDER, nativeSessionId, items);
+    saved.diverged = false;
+    const items: ProviderStreamItem[] = [...saved.history.map((entry, at) => observation(nativeSessionId, entry, at + 1, 'history')), { type: 'history_boundary' }];
+    const base = new ScriptedSession(providerId, nativeSessionId, items);
     const sent: string[] = [];
-    const write = (role: ScriptedRow['role'], text: string) => { saved.history.push({ role, text }); base.push(row('live', `${nativeSessionId}:h${++sequence}`, { role, text }, sequence)); };
+    const write = (role: ScriptedRow['role'], text: string) => {
+      saved.history.push({ role, text });
+      saved.updatedAt = new Date().toISOString();
+      base.push(row(providerId, 'live', `${nativeSessionId}:h${saved.history.length}`, { role, text }, saved.history.length));
+    };
+    /** The answer as a model streams it: two pieces under one item key, then the completed item. */
+    const writeStreamed = (text: string) => {
+      const at = saved.history.length + 1;
+      const half = Math.ceil(text.length / 2);
+      const key = `${nativeSessionId}:h${at}`;
+      base.push(row(providerId, 'live', key, { role: 'assistant', text: text.slice(0, half) }, at, false, 1));
+      setTimeout(() => {
+        base.push(row(providerId, 'live', key, { role: 'assistant', text: text.slice(half) }, at, false, 2));
+        saved.history.push({ role: 'assistant', text }); saved.updatedAt = new Date().toISOString();
+        base.push(row(providerId, 'live', key, { role: 'assistant', text: '' }, at, true, 3));
+      }, options.replyDelayMs ?? 300);
+    };
     const session = Object.assign(base, {
       title: saved.title, sent, write,
-      // The runtime hands the text over; a scripted provider echoes it and answers.
       sendMessage: (async (text: string) => {
+        await held;
         sent.push(text); write('user', text);
-        const reply = () => write('assistant', answer(text));
-        if (options.replyDelayMs) setTimeout(reply, options.replyDelayMs); else reply();
+        if (options.stream) writeStreamed(answer(text));
+        else if (options.replyDelayMs) setTimeout(() => write('assistant', answer(text)), options.replyDelayMs);
+        else write('assistant', answer(text));
       }) as unknown as ScriptedSession['sendMessage'],
     });
     live.set(nativeSessionId, session);
@@ -68,20 +107,52 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}) {
   };
 
   const adapter: AgentProviderAdapter = {
-    descriptor: { providerId: SCRIPTED_PROVIDER, displayName: 'Scripted' },
+    descriptor: { providerId, displayName: options.displayName ?? 'Scripted' },
     journal: { itemIdentity: 1 as const },
     async createSession() { throw new Error('The Host supplies directory sessions.'); },
     async resumeSession() { throw new Error('The Host supplies directory sessions.'); },
   };
   const directory: AgentHostDirectory = {
-    providerId: SCRIPTED_PROVIDER,
-    list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId: SCRIPTED_PROVIDER, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.createdAt, state: 'idle' as const })),
+    providerId,
+    list: async () => [...known].map(([nativeSessionId, saved]) => ({ nativeSessionId, providerId, title: saved.title, createdAt: saved.createdAt, updatedAt: saved.updatedAt, state: 'idle' as const })),
     workspaces: async () => [],
-    create: async () => { const id = `scripted-new-${++created}`; known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString() }); return id; },
+    create: async () => { const id = `${providerId}-new-${++created}`; known.set(id, { title: 'New session', history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false }); return id; },
     canReleaseSession: () => true,
+    // A session that something else wrote to continues from its own last message; the Controller releases it and reads it again.
+    divergedAt: (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ? 1 : undefined,
+    checkDivergence: async (nativeSessionId: string) => known.get(nativeSessionId)?.diverged ?? false,
     async open(nativeSessionId) { return open(nativeSessionId); },
     async close() { await Promise.all([...live.values()].map(session => session.dispose())); },
   } as AgentHostDirectory;
   const registration: AgentHostProviderRegistration = { adapter, directory };
-  return { registration, session: (nativeSessionId: string) => live.get(nativeSessionId), known: () => [...known.keys()] };
+  return {
+    registration, providerId,
+    /** The running session of this provider, once something has opened it. */
+    session: (nativeSessionId: string) => live.get(nativeSessionId),
+    known: () => [...known.keys()],
+    /** Rows a terminal appends to the native history while the Controller's session does not see them; the provider reports the divergence. */
+    terminalWrite(nativeSessionId: string, ...rows: ScriptedRow[]) {
+      const saved = known.get(nativeSessionId);
+      if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
+      saved.history.push(...rows); saved.updatedAt = new Date().toISOString(); saved.diverged = true;
+    },
+    /** A session whose history is a copy of another's, as `claude --fork-session` in a terminal makes one. */
+    fork(sourceId: string, nativeSessionId: string, title: string) {
+      const source = known.get(sourceId);
+      if (!source) throw new Error(`No scripted session ${sourceId}.`);
+      known.set(nativeSessionId, { title, history: [...source.history], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), diverged: false });
+    },
+    /** What the native history holds now; the next reopen reads this. */
+    replaceHistory(nativeSessionId: string, history: HistoryEntry[]) {
+      const saved = known.get(nativeSessionId);
+      if (!saved) throw new Error(`No scripted session ${nativeSessionId}.`);
+      saved.history = [...history]; saved.updatedAt = new Date().toISOString();
+    },
+    /** Holds every send before the provider echoes it; the returned function lets them through. */
+    hold(): () => void {
+      let release!: () => void;
+      held = new Promise<void>(resolve => { release = resolve; });
+      return () => { release(); held = undefined; };
+    },
+  };
 }

@@ -23,6 +23,8 @@ export interface StackOptions extends ScriptedProviderOptions {
   /** Where the built Workbench is; the default is the checkout's. */
   webDist?: string;
   installationId?: string;
+  /** More providers of the same Controller, for a flow that hands a session from one provider to another. */
+  otherProviders?: ScriptedProviderOptions[];
 }
 
 async function freePort(): Promise<number> {
@@ -38,6 +40,7 @@ export async function startStack(options: StackOptions = {}) {
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
   const provider = scriptedProvider(options);
+  const otherProviders = (options.otherProviders ?? []).map(scriptedProvider);
   const webDist = options.webDist ?? WORKBENCH_DIST;
   let relay = await createDevboxServer({ origin, stateDir: join(state, 'relay'), webDist, journals: true });
   await relay.listen(port, '127.0.0.1');
@@ -50,20 +53,35 @@ export async function startStack(options: StackOptions = {}) {
   let credential: string | undefined;
   const startController = async () => {
     if (controller) throw new Error('The Controller is already running.');
-    controller = createAgentHost({ registrations: [provider.registration], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
+    controller = createAgentHost({ registrations: [provider.registration, ...otherProviders.map(other => other.registration)], installationId, name: 'E2E Host', uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: credential ?? connection.remoteKey, onCredential: async issued => { credential = issued; } } });
     hostId = (await controller.ready).hostId;
   };
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
   await startController();
 
   return {
-    origin, provider, state,
+    origin, provider, otherProviders, state,
     /** The address of a scripted session's page; the Controller must be registered. */
-    sessionUrl: (nativeSessionId: string) => origin + controllerPath({ hostId, providerId: 'scripted', nativeSessionId }),
+    sessionUrl: (nativeSessionId: string, providerId: string = provider.providerId) => origin + controllerPath({ hostId, providerId, nativeSessionId }),
+    get hostId() { return hostId; },
     get hostName() { return 'E2E Host'; },
     startController, stopController,
+    /**
+     * A second Controller paired with a key the page generated: a Host of its own, with its own scripted provider. `close` stops it.
+     * Its device credential is kept by the Controller object, as an installed one keeps its own.
+     */
+    async pairController(pairing: { key: string; name: string; installationId: string } & ScriptedProviderOptions) {
+      const paired = scriptedProvider(pairing);
+      const host = createAgentHost({ registrations: [paired.registration], installationId: pairing.installationId, name: pairing.name, uplink: { url: `ws://127.0.0.1:${port}/ws/remote-host`, remoteKey: pairing.key, onCredential: async () => {} } });
+      const { hostId: pairedHostId } = await host.ready;
+      return {
+        provider: paired, hostId: pairedHostId,
+        sessionUrl: (nativeSessionId: string) => origin + controllerPath({ hostId: pairedHostId, providerId: paired.providerId, nativeSessionId }),
+        async close() { await host.close(); await paired.registration.directory.close?.(); },
+      };
+    },
     async restartRelay() { await relay.close(); relay = await createDevboxServer({ origin, stateDir: join(state, 'relay'), webDist, journals: true }); await relay.listen(port, '127.0.0.1'); },
-    async close() { await stopController(); await relay.close(); await provider.registration.directory.close?.(); await rm(state, { recursive: true, force: true }); },
+    async close() { await stopController(); await relay.close(); await Promise.all([provider, ...otherProviders].map(each => each.registration.directory.close?.())); await rm(state, { recursive: true, force: true }); },
   };
 }
 export type Stack = Awaited<ReturnType<typeof startStack>>;

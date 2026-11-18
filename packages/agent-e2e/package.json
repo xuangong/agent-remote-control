@@ -17,6 +17,8 @@
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "devDependencies": {
+    "@orchardworks/agent-provider-claude": "workspace:*",
+    "@orchardworks/agent-provider-codex": "workspace:*",
     "@orchardworks/agent-provider-sdk": "workspace:*",
     "@orchardworks/agent-relay-node": "workspace:*",
     "@orchardworks/agent-remote-controller": "workspace:*",

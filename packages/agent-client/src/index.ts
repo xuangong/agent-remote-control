@@ -5,6 +5,7 @@ export * from './client/session-states.js';
 export * from './client/session-reads.js';
 export * from './client/session-drafts.js';
 export * from './client/session-outbox.js';
+export * from './succession/index.js';
 export * from './replica/window-absorption.js';
 export * from './replica/reducer.js';
 export * as sendState from './replica/send-state.js';

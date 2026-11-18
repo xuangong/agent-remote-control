@@ -413,6 +413,22 @@
       "invariants": []
     },
     {
+      "name": "client-succession",
+      "layer": 1,
+      "paths": [
+        "packages/agent-client/src/succession/**"
+      ],
+      "seams": [
+        "S3"
+      ],
+      "flows": [
+        "E5"
+      ],
+      "invariants": [
+        "succession-follows-confirmed-role"
+      ]
+    },
+    {
       "name": "client",
       "layer": 2,
       "paths": [

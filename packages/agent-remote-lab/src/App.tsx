@@ -1,4 +1,12 @@
 import { availableProvidersOf, chosenProviderId, creationUnavailableReason as creationUnavailableReasonOf, requestedHostUnavailableReason, hostProviders, providerAfterHostChange, providerChoices, providerConnectionName as providerConnectionNameOf, restoreHostSelection } from './state/creation-choice.js';
+import { awakeDetails, closeOperation, foldsOnClose as foldsOnCloseOf, isAsleep, paneFolding, restorePlan } from './state/pane-folding.js';
+import { quoteTargets as quoteTargetsOf } from './state/quote-targets.js';
+import { paneDraftOwners, storeFor } from './state/draft-ownership.js';
+import { fixtureStaleness, viewStaleness, type CapturedBot, type GroupBindingLookup } from './state/source-currency.js';
+import { drainModeSteps } from './state/mode-steps.js';
+import { paletteActions } from './state/palette-actions.js';
+import { noQuote, reduceQuote, selectedKeys } from './state/quote-selection.js';
+import { useSyncReducer } from './hooks/useSyncReducer.js';
 import { usePanels } from './hooks/usePanels.js';
 import { contextVisible as contextVisibleOf, pageOpen as pageOpenOf, supportingRailOpen as supportingRailOpenOf, windowStageVisible as windowStageVisibleOf, sessionsPageTitle as sessionsPageTitleOf, type MainView, type SessionPanel } from './state/panels.js';
 import { useLiveBudget, LiveConnectionsContext } from './hooks/useLiveBudget.js';
@@ -362,8 +370,8 @@ function AppContent({
   const forkBusy = useRef(false);
   const [forkInputStatus, setForkInputStatus] = useState<{ agentId: string; pending: boolean; error?: string }>();
   // Messages being selected in one session view to quote into another; creationId keeps a retried new session single.
-  const [quoteSelection, setQuoteSelection] = useState<{ viewId: string; epoch: string | null; keys: ReadonlySet<string>; creationId?: string; busy?: boolean; error?: string }>();
-  const [quoteNotice, setQuoteNotice] = useState<{ viewId: string; message: string; open?(): Promise<void> }>();
+  const [quote, dispatchQuote] = useSyncReducer(reduceQuote, noQuote);
+  const { selection: quoteSelection, notice: quoteNotice } = quote;
   const [referencePicker, setReferencePicker] = useState<string>();
   const [sessionOptions, setSessionOptions] = useState<CreateSessionOptions>({});
   const [directoryRevision, setDirectoryRevision] = useState(0);
@@ -579,9 +587,7 @@ function AppContent({
     return draftOwnerBinding(owner);
   }
   function draftOwnerBinding(owner: StoreOwner) {
-    let store = draftStores.get(owner.scope);
-    if (!store) { store = new DraftStore(owner.scope); draftStores.set(owner.scope, store); }
-    return { store, key: owner.key };
+    return { store: storeFor(draftStores, owner.scope, scope => new DraftStore(scope)), key: owner.key };
   }
   // While the window has not yet said which conversation it shows, the rows this device stored of the requested one stay on screen instead of an empty shell.
   const heldWhileResolving = succession.active && !succession.state && !succession.selected && !!cachedState;
@@ -1349,21 +1355,14 @@ function AppContent({
   function windowPaneFolding(viewId: string): { fold?: FoldedBot; asleep?: boolean; onWake?(): void; onFold?(): void; onRestore?(): void; onRemove?(): void; onCloseView?(viewId: string): void } {
     if (!sharedWindow) return {};
     const view = sharedWindow.views.find(item => item.id === viewId);
-    const folded = !compactLayout && !!view && isBotView(view) && !missingSessions.has(sessionKey(view.binding)) && (view.collapsed || asleepBot(view));
-    // A compact layout does not fold: a sleeping bot there shows its Asleep bar over its released conversation.
-    const asleep = compactLayout && !!view && isBotView(view) && !missingSessions.has(sessionKey(view.binding)) && asleepBot(view);
+    const folding = paneFolding(view, windowWorkspace.readGroup(sharedWindow.id), { compact: compactLayout, sessionMissing: !!view?.binding && missingSessions.has(sessionKey(view.binding)) });
     return { onCloseView: closeView, ...(foldsOnClose(view) ? { onFold: () => closeView(viewId) } : {}),
-      ...(asleep ? { asleep: true, onWake: () => restoreView(viewId) } : {}),
-      ...(folded ? { fold: foldedBot(view), onRestore: () => restoreView(viewId), onRemove: () => setRemovingBot({ windowId: sharedWindow.id, viewId }) } : {}) };
+      ...(folding.kind === 'asleep' ? { asleep: true, onWake: () => restoreView(viewId) } : {}),
+      ...(folding.kind === 'folded' ? { fold: foldedBot(view as WindowView & { binding: WindowSessionBinding }), onRestore: () => restoreView(viewId), onRemove: () => setRemovingBot({ windowId: sharedWindow.id, viewId }) } : {}) };
   }
   function windowDraftBinding(entry: (typeof sessionWindows.entries)[number]) {
-    const slot = succession.document.slots.find(slot => slot.id === entry.slotId);
-    if (slot && entry.managed) {
-      const origin = slot.origin.target;
-      const key = sessionKey({ hostId: origin.hostId, ...origin.native });
-      return { draftBinding: { store: messageDrafts, key: `session:${key}` }, imageDraftBinding: { scope: baseUrl, key: JSON.stringify([baseUrl, key]) } };
-    }
-    return slot ? { draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image } : {};
+    const owners = paneDraftOwners(succession.document.slots.find(slot => slot.id === entry.slotId), !!entry.managed, baseUrl);
+    return owners ? { draftBinding: draftOwnerBinding(owners.text), imageDraftBinding: owners.image } : {};
   }
   async function openDirectorySession(item: Parameters<typeof openSession>[0]): Promise<boolean> {
     try {
@@ -1732,19 +1731,18 @@ function AppContent({
     return (connection?.agentId === source.agentId ? connection.replica : replicas.get(source.agentId))?.getState();
   }
   function sourceStale(source: OpenedSession): SourceStaleness | undefined {
+    const viewId = (source as { viewId?: string }).viewId, sourceKey = sessionKey(source);
+    let lookup: GroupBindingLookup = { kind: 'none' };
     try {
-      const mapped = currentGroupBinding((source as { viewId?: string }).viewId);
-      const captured = (source as { bot?: { groupId: string; viewId: string } }).bot;
-      if (captured && (!mapped || mapped.groupId !== captured.groupId || mapped.viewId !== captured.viewId)) return 'view';
-      if (mapped && sessionKey(mapped.binding) !== sessionKey(source)) return 'view';
-    } catch { return 'view'; }
+      const mapped = currentGroupBinding(viewId);
+      if (mapped) lookup = { kind: 'bound', groupId: mapped.groupId, viewId: mapped.viewId, sessionKey: sessionKey(mapped.binding) };
+    } catch { lookup = { kind: 'unresolvable' }; }
+    const stale = viewStaleness({ captured: (source as { bot?: CapturedBot }).bot, lookup, sourceKey });
+    if (stale) return stale;
     if (initialState && !succession.active) {
-      const id = (source as { viewId?: string }).viewId;
-      const agent = initialState.agent, slot = succession.document.slots.find(slot => slot.id === id);
-      if (!slot || sessionKey(compositionSelection(slot)) !== sessionKey(source)) return 'view';
-      if (!agent) return 'connecting';
-      if (agent.id !== source.agentId) return 'agent';
-      return agent.providerId === source.providerId && agent.runtimeInfo.sessionId === source.nativeSessionId ? undefined : 'native';
+      const slot = succession.document.slots.find(slot => slot.id === viewId), agent = initialState.agent;
+      return fixtureStaleness({ slotSelectionKey: slot && sessionKey(compositionSelection(slot)), sourceKey, source,
+        agent: agent && { id: agent.id, providerId: agent.providerId, nativeSessionId: agent.runtimeInfo.sessionId } });
     }
     return succession.sourceStale(source);
   }
@@ -1984,11 +1982,9 @@ function AppContent({
   const windowConfirmed = !!initialState || windowWorkspace.unavailable || windowWorkspace.hasActiveWindow && !windowWorkspace.provisional;
   useEffect(() => {
     if (!modeSteps.current.length) return;
-    modeSteps.current = modeSteps.current.filter(step => {
-      if (step.mode !== navigation.mode) return false;
-      if (step.confirmed && step.mode === 'window' && !windowConfirmed) return true;
-      step.run(); return false;
-    });
+    const { run, waiting } = drainModeSteps(modeSteps.current, { mode: navigation.mode, windowMode: 'window', windowConfirmed });
+    modeSteps.current = [...waiting];
+    for (const step of run) step.run();
   }, [navigation.mode, queuedModeSteps, windowConfirmed]);
   async function openWindowFromSearch(id: string) {
     try { await windowWorkspace.open(id); closePage(); }
@@ -2025,26 +2021,14 @@ function AppContent({
   [searchOpen, sessionEntries, favorites.stars, searchCatalog, remoteHosts, providers]);
   /** The palette's items, built from what the page already knows, and only while it is open. */
   function commandItems(): CommandItem[] {
-    const apple = applePlatform(), toWindow = () => switchMode('window');
-    /** Runs a step in Window mode, switching to it first; see inMode. */
-    const inWindow = (step: () => void, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); };
-    const sidebarShown = windowMode ? desktopContextVisible : !botRosterCollapsed;
-    const action = (id: string, title: string, run: () => void, keys?: { shown: string; aria: string }): CommandItem =>
-      ({ id: `action:${id}`, kind: 'action', title, run, ...(keys ? { shortcut: keys.shown, keyShortcuts: keys.aria } : {}) });
-    const actions: CommandItem[] = [
-      ...(!windowMode && directory ? [action('new-bot', 'New bot', openNewBot)] : []),
-      action('new-session', 'New session', () => { toWindow(); openNewSessionPanel(); }),
-      action('new-window', 'New Window', inWindow(() => searchRuns.current.createWindowFromMenu())),
-      ...(sharedWindow && !windowWorkspace.unavailable ? [action('new-session-view', 'New session view', inWindow(() => { closePage(); searchRuns.current.addSessionView(); }, true))] : []),
-      action('all-sessions', 'All sessions', () => { toWindow(); showPanel('list'); }),
-      ...(userScoped ? [action('favorites', 'Favorites', () => { toWindow(); showPanel('favorites'); })] : []),
-      action('settings', 'Settings', () => { toWindow(); showPanel('settings'); }),
-      ...(toggleSidebar ? [action('toggle-sidebar', sidebarShown ? 'Hide sidebar' : 'Show sidebar', toggleSidebar,
-        apple ? { shown: '⌘\\', aria: 'Meta+\\' } : { shown: 'Ctrl+\\', aria: 'Control+\\' })] : []),
-      windowMode ? action('bot-mode', 'Switch to Bot mode', () => switchMode('bot'), apple ? { shown: '⌥⌘2', aria: 'Alt+Meta+2' } : { shown: 'Ctrl+Alt+2', aria: 'Control+Alt+2' })
-        : action('window-mode', 'Switch to Window mode', toWindow, apple ? { shown: '⌥⌘1', aria: 'Alt+Meta+1' } : { shown: 'Ctrl+Alt+1', aria: 'Control+Alt+1' }),
-      ...(windowOverviewSupported ? [action('all-windows', 'All Windows', () => { toWindow(); setWindowOverviewOpen(true); })] : []),
-    ];
+    const toWindow = () => switchMode('window');
+    const actions = paletteActions({ windowMode, hasDirectory: !!directory, userScoped, windowEditable: !!sharedWindow && !windowWorkspace.unavailable,
+      sidebarShown: windowMode ? desktopContextVisible : !botRosterCollapsed, canToggleSidebar: !!toggleSidebar, windowOverviewSupported, apple: applePlatform() }, {
+      toWindow, switchMode, newBot: openNewBot, newSessionPanel: openNewSessionPanel, showPanel, toggleSidebar: () => toggleSidebar?.(),
+      inWindow: (step, confirmed = false) => () => { toWindow(); inMode('window', step, confirmed); },
+      createWindow: () => searchRuns.current.createWindowFromMenu(),
+      addSessionView: () => { closePage(); searchRuns.current.addSessionView(); },
+      openWindowOverview: () => setWindowOverviewOpen(true) });
     // Each session is one item: a bot in Bot mode, a session (opened in Window mode) otherwise.
     const bots = windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map((row): CommandItem => ({ id: `bot:${row.groupId}/${row.viewId}`, kind: 'bot',
       title: botDisplayName(row.binding), subtitle: section.title, ...(row.details.label ? { keywords: [row.details.label] } : {}),
@@ -2727,16 +2711,7 @@ function AppContent({
   }
   /** Session views of every Window that can receive a quote from `sourceViewId`, located by Window and session. */
   function quoteTargets(sourceViewId: string, source: OpenedSession): QuoteTargetWindow[] {
-    const current = windowWorkspace.readWindow() ?? sharedWindow;
-    const catalog = [...new Map([...(windowWorkspace.windows ?? []), ...(current ? [current] : [])].map(window => [window.id, window])).values()];
-    const placement = { primary: 'Main', dock: 'Docked', float: 'Floating', attached: 'Side' } as const;
-    return catalog.map(window => ({ id: window.id, title: window.title || 'Untitled Window', current: window.id === current?.id,
-      views: window.views.filter(view => {
-        const feature = parseWindowFeature(view.feature);
-        return view.id !== sourceViewId && !!view.binding && view.binding.sessionIntent !== 'history' && !view.binding.parentNativeSessionId
-          && (!feature || feature.kind === 'team') && sessionKey(view.binding) !== sessionKey(source);
-      }).map(view => ({ viewId: view.id, title: view.binding!.title || 'Untitled session', detail: placement[view.placement] })) }))
-      .filter(window => window.current || window.views.length).sort((a, b) => Number(b.current) - Number(a.current));
+    return quoteTargetsOf(windowWorkspace.windows ?? [], windowWorkspace.readWindow() ?? sharedWindow, { viewId: sourceViewId, session: source });
   }
   /** A new session in the source's workspace, with its provider and model, opened as a dock of the current Window. */
   async function createQuoteSession(source: OpenedSession, sourceState: AgentReplicaState, operationId: string): Promise<string> {
@@ -2772,19 +2747,19 @@ function AppContent({
       let destination = target.viewId;
       if (destination === NEW_SESSION_TARGET) {
         const creationId = selection.creationId ?? crypto.randomUUID();
-        setQuoteSelection(current => current?.viewId === viewId ? { ...current, creationId, busy: true, error: undefined } : current);
+        dispatchQuote({ type: 'creating', viewId, creationId });
         destination = await createQuoteSession(source, sourceState, creationId);
       }
       addQuote(baseUrl, destination, excerpt);
-      setQuoteSelection(current => current?.viewId === viewId ? undefined : current);
+      dispatchQuote({ type: 'quoted', viewId });
       const window = quoteTargets(viewId, source).find(item => item.id === target.windowId);
       if (!window || window.current) { revealQuoteTarget(destination); return; }
       const title = window.views.find(item => item.viewId === destination)?.title ?? 'the session';
-      setQuoteNotice({ viewId, message: `Quoted into “${title}” in Window “${window.title}”.`, async open() {
+      dispatchQuote({ type: 'quoted', viewId, notice: { viewId, message: `Quoted into “${title}” in Window “${window.title}”.`, async open() {
         await windowWorkspace.open(target.windowId); revealQuoteTarget(destination);
-      } });
+      } } });
     } catch (error) {
-      setQuoteSelection(current => current?.viewId === viewId ? { ...current, busy: false, error: message(error, 'The messages could not be quoted.') } : current);
+      dispatchQuote({ type: 'failed', viewId, error: message(error, 'The messages could not be quoted.') });
     }
   }
   const openExcerptSource = useCallback((source: { hostId?: string; providerId: string; nativeSessionId: string; title: string }) =>
@@ -2815,16 +2790,7 @@ function AppContent({
   }
   /** Starting a selection in another view replaces the one in progress. */
   function quoteEntrySelection(viewId: string, epoch: string | null): TimelineEntrySelection {
-    const selected = quoteSelection?.viewId === viewId && quoteSelection.epoch === epoch ? quoteSelection.keys : undefined;
-    return { label: 'Quote', selected, select(keys, value) {
-      setQuoteNotice(undefined);
-      setQuoteSelection(current => {
-        const same = current?.viewId === viewId && current.epoch === epoch;
-        const next = new Set(same ? current.keys : []);
-        for (const key of keys) if (value) next.add(key); else next.delete(key);
-        return { ...(same ? current : {}), viewId, epoch, keys: next, error: undefined };
-      });
-    } };
+    return { label: 'Quote', selected: selectedKeys(quote, viewId, epoch), select(keys, value) { dispatchQuote({ type: 'select', viewId, epoch, keys, value }); } };
   }
   const sessionPresentationRef = useRef(sessionViewPresentation);
   sessionPresentationRef.current = sessionViewPresentation;
@@ -2951,10 +2917,10 @@ function AppContent({
       },
       composerStatus: <>{!botHandoff && (gated || successionDialog && viewKey(successionDialog.source) === source.viewId) ? successionProgress : null}
         {quoteView && quoteSelection?.viewId === quoteView && context.state ? <QuoteSelectionBar count={quoteSelection.keys.size} windows={quoteTargets(quoteView, source)}
-          busy={!!quoteSelection.busy} error={quoteSelection.error} onCancel={() => setQuoteSelection(undefined)}
+          busy={!!quoteSelection.busy} error={quoteSelection.error} onCancel={() => dispatchQuote({ type: 'cancel' })}
           onQuote={target => void quoteSelected(quoteView, source, context.state!, target)} /> : null}
-        {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => setQuoteNotice(undefined)}
-          onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; setQuoteNotice(undefined); void open().catch(() => {}); } : undefined} /> : null}</>,
+        {quoteView && quoteNotice?.viewId === quoteView ? <QuoteNotice message={quoteNotice.message} onDismiss={() => dispatchQuote({ type: 'notice.dismiss' })}
+          onOpen={quoteNotice.open ? () => { const open = quoteNotice.open!; dispatchQuote({ type: 'notice.dismiss' }); void open().catch(() => {}); } : undefined} /> : null}</>,
       // Bot mode does not announce a handoff: the conversation continues into the earlier sessions instead of linking to them.
       timelineStart: botPresentation || windowBot ? earlierConversationFor(succession.historyNavigationFor(source)) : undefined,
       // Bot mode shows a bot at work as a chat shows a contact typing, until it finishes, waits for the owner or disconnects.
@@ -3006,23 +2972,22 @@ function AppContent({
   }
   /** Whether the shown Window's view is a bot put to sleep (stored with its group). */
   function asleepBot(view: { id: string }) {
-    return !!sharedWindow && !!windowWorkspace.readGroup(sharedWindow.id)?.bots?.members[view.id]?.asleep;
+    return !!sharedWindow && isAsleep(windowWorkspace.readGroup(sharedWindow.id), view.id);
   }
   /** Wakes a sleeping bot for every device, keeping its other details. */
   function wakeBot(groupId: string, viewId: string) {
-    const { asleep: _asleep, ...details } = windowWorkspace.readGroup(groupId)?.bots?.members[viewId] ?? {};
+    const details = awakeDetails(windowWorkspace.readGroup(groupId)?.bots?.members[viewId]);
     void windowWorkspace.operateGroup(groupId, { type: 'bot.update', viewId, details }).catch(error => setSessionNotice(sessionConnectionFailure(error, false)));
   }
   /** A bot of a group shown in Bot mode folds when its pane closes; removing it from the group is a separate, confirmed step. */
   function foldsOnClose(view: WindowView | undefined): view is WindowView & { binding: WindowSessionBinding } {
-    const group = sharedWindow ? windowWorkspace.readGroup(sharedWindow.id) : undefined;
-    return !!view && !!group && hasBotAppearance(group) && isBotView(view) && !missingSessions.has(sessionKey(view.binding));
+    return foldsOnCloseOf(view, sharedWindow ? windowWorkspace.readGroup(sharedWindow.id) : undefined, !!view?.binding && missingSessions.has(sessionKey(view.binding)));
   }
   /** The × of a pane in the shown Window: a bot folds where it stands, any other view closes. */
   function closeView(viewId: string) {
     const authority = windowWorkspace.authority, current = authority?.readWindow?.() ?? authority?.window;
     if (!authority || !current) return;
-    authority.operate(foldsOnClose(current.views.find(view => view.id === viewId)) ? foldOperation(current, viewId) : { type: 'view.close', viewId });
+    authority.operate(closeOperation(current, viewId, foldsOnClose(current.views.find(view => view.id === viewId))));
   }
   /** Removing a view from the shown Window's list: a bot of a group in Bot mode asks first. */
   function confirmBotRemoval(view: WindowView): boolean {
@@ -3035,8 +3000,9 @@ function AppContent({
     const authority = windowWorkspace.authority, current = authority?.readWindow?.() ?? authority?.window;
     const view = current?.views.find(item => item.id === viewId);
     if (!authority || !current || !view) return;
-    if (asleepBot(view)) wakeBot(current.id, viewId);
-    if (view.collapsed || current.selectedViewId !== viewId) authority.operate(viewSelection(view));
+    const plan = restorePlan(current, view, asleepBot(view));
+    if (plan.wake) wakeBot(current.id, viewId);
+    if (plan.select) authority.operate(plan.select);
   }
   /** What a folded bot's slim card shows: who it is and how it is doing, from the shared channel, while its conversation is released. */
   function foldedBot(view: WindowView & { binding: WindowSessionBinding }): FoldedBot {

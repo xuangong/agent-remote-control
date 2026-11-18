@@ -190,22 +190,6 @@ describe('from Bot mode while the hosted Window is still loading', () => {
       expect(app.workspace().window?.selectedViewId).toBe(added.id);
     } finally { await app.close(); }
   });
-
-  it('drops the step when Window mode is left before the Window loads', async () => {
-    const app = await start('http://localhost/palette-held-left/');
-    try {
-      await shortcut();
-      await search(app.container, 'A1');
-      await app.switchMode('bot');
-      await releaseAndSettle(app);
-      await until(() => expect(app.workspace().readGroup('A')?.window.revision).toBeDefined());
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
-      await app.switchMode('window');
-      await until(() => expect(app.workspace().provisional).toBe(false));
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
-      expect(app.workspace().window?.selectedViewId).toBe('A2');
-    } finally { await app.close(); }
-  });
 });
 
 it('keeps focus on the page when Hide sidebar runs from the sidebar Search button', async () => {

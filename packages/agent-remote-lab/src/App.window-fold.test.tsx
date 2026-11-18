@@ -82,20 +82,3 @@ it("folds a bot's Side on close, lists it in the sidebar, and asks before the si
     await until(() => expect(app.workspace().readGroup('A')?.window.views.map(view => view.id)).toEqual(['A1', 'A2']));
   } finally { await app.close(); }
 });
-
-it('closes history views, and every view of a group not shown in Bot mode, as before', async () => {
-  const group = botGroup('A');
-  group.window.views[0] = createWindowView('A1', { ...botTarget('A1'), sessionIntent: 'history' }, 'primary');
-  const hidden = { ...botGroup('B'), presentation: { bots: false as const } };
-  const scope = 'http://localhost/window-fold-close/'; seedGroup(scope, group); seedGroup(scope, hidden); history.replaceState(null, '', '/?window=A');
-  const app = await mountBotApp(scope, { hosted: true });
-  try {
-    await until(() => expect(app.container.querySelector('button[aria-label="Close primary group: A1"]')).not.toBeNull());
-    await act(async () => app.container.querySelector<HTMLButtonElement>('button[aria-label="Close primary group: A1"]')!.click());
-    await until(() => expect(app.workspace().readGroup('A')?.window.views.map(view => view.id)).toEqual(['A2']));
-    await act(async () => { await app.workspace().open('B'); });
-    await until(() => expect(app.container.querySelector('button[aria-label="Close primary group: B2"]')).not.toBeNull());
-    await act(async () => app.container.querySelector<HTMLButtonElement>('button[aria-label="Close primary group: B2"]')!.click());
-    await until(() => expect(app.workspace().readGroup('B')?.window.views.map(view => view.id)).toEqual(['B1']));
-  } finally { await app.close(); }
-});

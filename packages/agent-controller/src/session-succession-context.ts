@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 import { AgentOperationRejectedError, AGENT_NATIVE_EVIDENCE_LIMITS, parseAgentPreparedTextInput, serializeAgentPreparedTextInput, parseAgentInputMaterialization, serializeAgentInputMaterialization, type AgentPreparedTextInput, type AgentTextInputProof, type AgentInputAcceptance, type AgentPersistenceHandle, serializeAgentEmptyCreationResult } from '@orchardworks/agent-provider-sdk';
-import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { StateFiles } from './state-file.js';
 import { isNativeSessionRef, isSuccessionRequest, nativeSessionRefKey, MAX_NORMALIZED_CONTEXT_BYTES, MAX_NORMALIZED_CONTEXT_ENTRIES, quotedSessionContextPrefix,
   type NativeSessionRef, type TimelineCursor } from '@orchardworks/agent-remote-protocol';
-import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
+import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
 
 export interface SuccessionContextAttachment {
   operationId: string;
@@ -94,7 +93,7 @@ export class SessionSuccessionContextStore {
   }
   private readonly dispatchTails = new Map<string, Promise<unknown>>();
   private restoredAt = 0;
-  constructor(private readonly directory: string, private readonly options: { restartSettleMs?: number; now?: () => number } = {}) { this.ready = this.restore(); }
+  constructor(directory: string, private readonly options: { restartSettleMs?: number; now?: () => number } = {}, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
   /**
    * A marker restored from the previous process covers work whose outcome that process could not confirm, so it
    * fences succession while that work could still reach the native session. Succession separately requires the
@@ -515,10 +514,9 @@ export class SessionSuccessionContextStore {
     this.tail = next; return next;
   }
   private async restore(): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    let text: string;
-    try { text = await readFile(join(this.directory, 'context.json'), 'utf8'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; this.loaded = true; return; }
+    await this.files.open();
+    const text = await this.files.read('context.json');
+    if (text === undefined) { this.loaded = true; return; }
     if (Buffer.byteLength(text) > MAX_STORE_BYTES) throw new Error('Succession context storage byte limit exceeded.');
     const parsed = JSON.parse(text);
     if (parsed.version === 1 && (parsed.preparations !== undefined || parsed.attachments?.some((record: SuccessionContextRecord) => record.version !== 1 || record.deliveries?.some(delivery => delivery.reservedBytes !== undefined)))) throw new Error('Ambiguous legacy context storage.');
@@ -539,7 +537,7 @@ export class SessionSuccessionContextStore {
   }
   private async write(state: ContextState): Promise<void> {
     this.checkCapacity(state);
-    try { await publishSuccessionState(this.directory, 'context.json', state); }
+    try { await this.files.publish('context.json', JSON.stringify(state)); }
     catch (error) { if (error instanceof SuccessionPublicationUnknown) this.writeFailure = error; throw error; }
   }
 }

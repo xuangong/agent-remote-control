@@ -9,6 +9,7 @@ import { SessionSuccessionStore } from './session-succession-store.js';
 import { SessionSuccessionCoordinator } from './session-succession.js';
 import { SessionSourceBindings } from './session-source-binding.js';
 import { syncSuccessionDirectory, withSuccessionFile } from './succession-persistence.js';
+import type { StateFiles } from './state-file.js';
 
 export interface SessionSuccessionPorts {
   /** Certifies zero-turn creation, normalized capture, quiescence and routed source-binding support for both adapters. */
@@ -51,9 +52,9 @@ export class SessionSuccessionService {
   private readonly preparation: LocalSuccessionPreparation;
   private cursorKey?: Buffer;
   private readonly bindingReaders = new Map<string, SessionSourceBindings>();
-  constructor(private readonly directory: string, private readonly controllerId: string, private readonly ports: SessionSuccessionPorts) {
-    this.store = new SessionSuccessionStore(join(directory, 'roles'));
-    this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'));
+  constructor(private readonly directory: string, private readonly controllerId: string, private readonly ports: SessionSuccessionPorts, files: { roles?: StateFiles; contexts?: StateFiles } = {}) {
+    this.store = new SessionSuccessionStore(join(directory, 'roles'), files.roles);
+    this.contexts = new SessionSuccessionContextStore(join(directory, 'contexts'), undefined, files.contexts);
     const preparation = this.preparation = new LocalSuccessionPreparation(controllerId, '', {
       inspect: (source, preparation) => ports.inspect(source, preparation), supports: (source, targetProvider) => ports.supports(source, targetProvider),
       supportsBoundedProjection: (source, targetProvider) => ports.supportsBoundedProjection?.(source, targetProvider) ?? Promise.resolve(false),

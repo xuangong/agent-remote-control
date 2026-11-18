@@ -1,11 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentOperationRejectedError, type AgentMessageOptions, type AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { AgentManagerEvent, SessionWireAgent } from '@orchardworks/agent-session-runtime';
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
+import { memoryStateFiles } from './memory-state-files.js';
 
 class SessionManager {
   readonly listeners = new Set<(event: AgentManagerEvent) => void>();
@@ -39,10 +37,10 @@ class SessionManager {
   cancel = vi.fn(async () => {});
   steer = vi.fn(async () => {});
 }
-const fixtures: Array<{ coordinator: TpmCoordinator; directory: string }> = [];
-afterEach(async () => { for (const f of fixtures.splice(0)) { await f.coordinator.close(); await rm(f.directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } });
+const fixtures: Array<{ coordinator: TpmCoordinator; files: unknown }> = [];
+afterEach(async () => { for (const f of fixtures.splice(0)) await f.coordinator.close(); });
 async function fixture(queueMessage = false, tickMs = 1_000_000) {
-  const directory = await mkdtemp(join(tmpdir(), 'arc-tpm-coordinator-'));
+  const files = memoryStateFiles();
   const sessions = new Map<string, SessionManager>([['main', new SessionManager('main', queueMessage)]]);
   let now = 1_000_000; let available = true; let supported = ['codex']; let createFailure: Error | undefined;
   const creates: AgentSessionExtensions[] = [];
@@ -60,8 +58,8 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
     },
     async execute(_agent, _operation, work) { await work.validate?.(); work.beforeDispatch?.(); return work.dispatch(); },
   };
-  const options = { stateDirectory: directory, now: () => now, tickMs, heartbeatMs: 1000, waitingHeartbeatMs: 5000, minimumReviewMs: 30, coalesceMs: 5 };
-  let coordinator = new TpmCoordinator(options, access); fixtures.push({ coordinator, directory }); await coordinator.ready;
+  const options = { stateDirectory: '/tpm/state', files, now: () => now, tickMs, heartbeatMs: 1000, waitingHeartbeatMs: 5000, minimumReviewMs: 30, coalesceMs: 5 };
+  let coordinator = new TpmCoordinator(options, access); fixtures.push({ coordinator, files }); await coordinator.ready;
   const input = { providerId: 'codex', mainNativeSessionId: 'main', title: 'Deliver isolated work', requirement: 'Agree on scope and deliver evidence.', operationId: 'create-one', delegated: true };
   const create = async (operationId = input.operationId) => {
     const work = await coordinator.create({ ...input, operationId }, 'browser-scope');
@@ -101,10 +99,10 @@ async function fixture(queueMessage = false, tickMs = 1_000_000) {
     }
     return true;
   };
-  return { directory, sessions, access, creates, input, create, call, acknowledge, advanceTodo,
+  return { files, sessions, access, creates, input, create, call, acknowledge, advanceTodo,
     get coordinator() { return coordinator; }, get now() { return now; }, advance(ms: number) { now += ms; },
     setAvailable(value: boolean) { available = value; }, setSupported(value: string[]) { supported = value; }, failCreate(error: Error) { createFailure = error; },
-    async restart() { await coordinator.close(); coordinator = new TpmCoordinator(options, access); fixtures.find(f => f.directory === directory)!.coordinator = coordinator; await coordinator.ready; },
+    async restart() { await coordinator.close(); coordinator = new TpmCoordinator(options, access); fixtures.find(f => f.files === files)!.coordinator = coordinator; await coordinator.ready; },
   };
 }
 async function waitMessages(manager: SessionManager, count: number) { await expect.poll(() => manager.messages.length).toBe(count); }
@@ -1052,10 +1050,9 @@ it.each(['unknown', 'queued', 'void'] as const)('retains the own TPM recipient a
   expect(native.messages).toHaveLength(2); expect(f.sessions.get('B')!.messages).toEqual([]);
   if (outcome === 'unknown') {
     await f.coordinator.close();
-    const { readFile, writeFile } = await import('node:fs/promises');
-    const path = join(f.directory, `${work.id}.json`), saved = JSON.parse(await readFile(path, 'utf8'));
+    const saved = f.files.json(`${work.id}.json`);
     delete saved.work.outbox.find((item: { id: string }) => item.id === intent.id).resolvedTarget;
-    await writeFile(path, JSON.stringify(saved)); await f.restart(); await f.coordinator.tick();
+    f.files.put(`${work.id}.json`, saved); await f.restart(); await f.coordinator.tick();
     expect(f.coordinator.hasUnsettledRecipient(ref(anchor))).toBe(true); expect(f.coordinator.hasUnsettledRecipient(ref('B'))).toBe(true);
     expect(f.coordinator.hasUnsettledRecipient(ref('unrelated'))).toBe(false);
     expect(f.coordinator.store.get(work.id).work.outbox!.find(item => item.id === intent.id)!.resolvedTarget).toBeUndefined();

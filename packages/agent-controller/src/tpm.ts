@@ -11,8 +11,12 @@ import { initialTpmTodo, tpmInstructions, tpmReviewPrompt, tpmPlaceholderTitle }
 import { backgroundInputHash, withBackgroundReviews } from './session-background.js';
 import { changeSessionTodo, confirmSessionTodo, invalidateSessionTodoApproval, currentSessionTodo, sessionTodoComplete, sessionTodoInstructions, sessionTodoTools } from './session-todo.js';
 
+import type { StateFiles } from './state-file.js';
+
 export interface TpmOptions {
   stateDirectory: string;
+  /** The state directory's files; the default is the disk under `stateDirectory`. */
+  files?: StateFiles;
   heartbeatMs?: number;
   waitingHeartbeatMs?: number;
   minimumReviewMs?: number;
@@ -74,7 +78,7 @@ export class TpmCoordinator {
   private readonly now: () => number;
   constructor(private readonly options: TpmOptions, private readonly access: TpmSessionAccess) {
     this.now = options.now ?? Date.now;
-    this.store = new TpmStore(options.stateDirectory);
+    this.store = new TpmStore(options.stateDirectory, options.files);
     this.ready = this.store.ready;
     void this.ready.then(() => {
       if (this.closed) return;

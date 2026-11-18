@@ -2,10 +2,9 @@ import { nativePrefixResumeHandle, type NativePrefixCandidate } from './local-su
 import { AGENT_NATIVE_EVIDENCE_LIMITS, AGENT_NATIVE_EVIDENCE_REASONS, parseAgentEmptyCreationResult, serializeAgentEmptyCreationResult, type AgentEmptyCreationResult, type AgentNativeEvidenceCode, type AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { sourceParticipantId } from './source-participant.js';
 import { isRelationChangeReservation, isRelationChangeReceipt, relationChangeKey, type RelationChangeReservation, type RelationChangeReceipt } from '@orchardworks/agent-remote-protocol';
-import { mkdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { StateFiles } from './state-file.js';
 import { createHash } from 'node:crypto';
-import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, publishSuccessionState, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
+import { assertSuccessionCapacity, isReservation, jsonBytes, largestSuccessionId, largestSuccessionRef, diskStateFiles, reservationBytes, SuccessionCapacityError, SuccessionPublicationUnknown } from './succession-persistence.js';
 import { successionAuthorityKey, successionFreezeKey, isNativeSessionRef, isSuccessionAssociationAuthority, isSuccessionAssociationFreeze, type SuccessionAssociationAuthority, type SuccessionAssociationFreeze, type NativeSessionRef, isPrimaryRole, isPreparedSuccession, isSuccessionParticipant, isSuccessionRecord, isSuccessionRequest, nativeSessionRefKey, nativePrefixSelectionKey,
   type PrimaryRole, type SuccessionParticipant, type SuccessionPhase, type SuccessionRecord, type SuccessionRequest } from '@orchardworks/agent-remote-protocol';
 
@@ -53,7 +52,7 @@ export class SessionSuccessionStore {
   private revision = 0;
   private pendingReaderGeneration = -1;
   private pendingReaders = new Set<string>();
-  constructor(private readonly directory: string) { this.ready = this.restore(); }
+  constructor(directory: string, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
   get generation(): number { this.assertReadable(); return this.revision; }
 
   private assertReadable(): void {
@@ -759,10 +758,9 @@ export class SessionSuccessionStore {
     }
   }
   private async restore(): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    let text: string;
-    try { text = await readFile(join(this.directory, 'state.json'), 'utf8'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; this.loaded = true; return; }
+    await this.files.open();
+    const text = await this.files.read('state.json');
+    if (text === undefined) { this.loaded = true; return; }
     if (Buffer.byteLength(text) > maxBytes) throw new Error('Succession storage size limit exceeded.');
     const parsed = JSON.parse(text);
     const legacyPreparation = [1, 2, 3].includes(parsed.version);
@@ -789,7 +787,7 @@ export class SessionSuccessionStore {
   }
   private async write(state: StoreState): Promise<void> {
     this.checkCapacity(state);
-    try { await publishSuccessionState(this.directory, 'state.json', state); }
+    try { await this.files.publish('state.json', JSON.stringify(state)); }
     catch (error) { if (error instanceof SuccessionPublicationUnknown) this.writeFailure = error; throw error; }
   }
 }

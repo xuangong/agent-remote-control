@@ -3,7 +3,7 @@ import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
 import { SlowTestReporter } from '../../scripts/lib/slow-test-reporter.mjs';
 
 // Tests that start child processes or wait on real timers; they are slow and load-sensitive, so they form their own project.
-const processTests = ['src/cli-*.test.ts', 'src/opencode-server*.test.ts', 'src/codex-daemon-runner.test.ts', 'src/vscode-tunnel*.test.ts'];
+const processTests = ['src/*.process.test.ts', 'src/cli-*.test.ts', 'src/opencode-server*.test.ts', 'src/codex-daemon-runner.test.ts', 'src/vscode-tunnel*.test.ts'];
 // Native tests need this machine's installed agents and run through `pnpm test:local`.
 const excluded = [...configDefaults.exclude, '**/*.local.test.ts', '**/*.local.test.tsx'];
 

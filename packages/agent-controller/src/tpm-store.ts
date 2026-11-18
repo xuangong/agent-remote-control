@@ -1,6 +1,5 @@
-import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { diskStateFiles } from './succession-persistence.js';
+import type { StateFiles } from './state-file.js';
 import { isTpmWork, nativeSessionRefKey, type TpmWork, type TpmIntent } from '@orchardworks/agent-remote-protocol';
 import { initialTpmTodo } from './tpm-role.js';
 import type { BackgroundReviewRecord } from './session-background.js';
@@ -43,7 +42,7 @@ export class TpmStore {
   readonly ready: Promise<void>;
   private records = new Map<string, TpmRecord>();
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(private readonly directory: string) { this.ready = this.restore(); }
+  constructor(directory: string, private readonly files: StateFiles = diskStateFiles(directory)) { this.ready = this.restore(); }
   /** Internal immutable index; updates replace the stored record, never mutate readers. */
   backgroundReviews(id: string): readonly BackgroundReviewRecord[] { return this.records.get(id)?.backgroundReviews ?? []; }
   all(): TpmRecord[] { return structuredClone([...this.records.values()]); }
@@ -89,10 +88,10 @@ export class TpmStore {
     this.tail = next; return next;
   }
   private async restore(): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    for (const name of await readdir(this.directory)) {
+    await this.files.open();
+    for (const name of await this.files.list()) {
       if (!/^[a-zA-Z0-9_-]+\.json$/.test(name)) continue;
-      const record: TpmRecord = JSON.parse(await readFile(join(this.directory, name), 'utf8'));
+      const record: TpmRecord = JSON.parse((await this.files.read(name))!);
       if (record.version !== 1 || !isTpmWork(record.work) || `${record.work.id}.json` !== name
         || typeof record.createKey !== 'string' || typeof record.requirement !== 'string' || !record.actions
         || !['prepared', 'dispatching', 'accepted', 'unknown', 'abandoned'].includes(record.creation)) throw new Error(`Invalid TPM record: ${name}`);
@@ -127,12 +126,6 @@ export class TpmStore {
     // Retain a bounded annotation ledger; older native content remains readable without grouping.
     if ((record.backgroundReviews?.length ?? 0) > 2048) record.backgroundReviews = record.backgroundReviews!.slice(-2048);
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(record.work.id) || !isTpmWork(record.work)) throw new Error('Invalid TPM work record.');
-    const target = join(this.directory, `${record.work.id}.json`);
-    const temporary = `${target}.${randomUUID()}.tmp`;
-    const file = await open(temporary, 'wx', 0o600);
-    try { await file.writeFile(JSON.stringify(record)); await file.sync(); }
-    finally { await file.close(); }
-    try { await rename(temporary, target); }
-    catch (error) { await unlink(temporary).catch(() => undefined); throw error; }
+    await this.files.publish(`${record.work.id}.json`, JSON.stringify(record));
   }
 }

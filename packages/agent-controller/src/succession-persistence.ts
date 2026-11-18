@@ -1,6 +1,7 @@
-import { open, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import type { StateFiles } from './state-file.js';
 
 export const SUCCESSION_STORE_BYTES = 8 * 1024 * 1024;
 export const jsonBytes = (value: unknown): number => Buffer.byteLength(JSON.stringify(value), 'utf8');
@@ -52,12 +53,25 @@ function unsupportedDirectorySync(error: unknown): boolean {
   // This existing Windows exception does not certify crash or power-loss behavior.
   return process.platform === 'win32' && ['EPERM', 'EISDIR', 'EINVAL', 'ENOTSUP'].includes((error as NodeJS.ErrnoException)?.code ?? '');
 }
-export async function publishSuccessionState(directory: string, name: string, state: unknown): Promise<void> {
+/** The state directory on disk: fsync of the file and of its directory, and an atomic rename. */
+export function diskStateFiles(directory: string): StateFiles {
+  return {
+    open: async () => { await mkdir(directory, { recursive: true, mode: 0o700 }); },
+    list: () => readdir(directory),
+    read: async name => {
+      try { return await readFile(join(directory, name), 'utf8'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+    },
+    publish: (name, content) => publishFile(directory, name, content),
+  };
+}
+export const publishSuccessionState = (directory: string, name: string, state: unknown): Promise<void> => publishFile(directory, name, JSON.stringify(state));
+async function publishFile(directory: string, name: string, content: string): Promise<void> {
   const target = join(directory, name), temporary = `${target}.${randomUUID()}.tmp`;
   let renameAttempted = false, failure: SuccessionPublicationRejected | SuccessionPublicationUnknown | undefined;
   try {
     const file = await open(temporary, 'wx', 0o600);
-    await withSuccessionFile(file, async () => { await file.writeFile(JSON.stringify(state)); await file.sync(); });
+    await withSuccessionFile(file, async () => { await file.writeFile(content); await file.sync(); });
     renameAttempted = true; await rename(temporary, target);
     await syncSuccessionDirectory(directory);
   } catch (error) {

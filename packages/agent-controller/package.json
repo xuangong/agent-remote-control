@@ -22,6 +22,10 @@
     "./local-session-succession": {
       "types": "./dist/local-session-succession.d.ts",
       "import": "./dist/local-session-succession.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "types": "./dist/index.d.ts",

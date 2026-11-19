@@ -48,6 +48,8 @@ export interface SessionFacts {
   readonly session: RemoteSessionState;
   /** The session's Host as the Relay last said (SessionStatesView.host); undefined before it said anything. */
   readonly host?: { readonly online: boolean; readonly name?: string };
+  /** The replica, read only for the words of a failure: the runtime failure and the last non-recoverable diagnostic. */
+  readonly replica?: AgentReplicaState;
 }
 
 export type SessionNotice =
@@ -75,7 +77,7 @@ export type ComposerAvailability =
 /** Whether the composer takes input, and whether a send goes now or waits. Only a business reason disables it. */
 export function composerAvailability(facts: SessionFacts): ComposerAvailability;
 
-/** The business label of the activity line: Working, Waiting for response, Starting, Ready, Closed, Agent failed, the native owner's words; undefined before any Snapshot. */
+/** The business label of the activity line: Working, Waiting for response, Starting, Ready, Closed, Agent failed, the native owner's words; undefined before any Snapshot and for a session the Relay refused. */
 export function sessionActivityLabel(facts: SessionFacts, commandPending?: boolean): string | undefined;
 ```
 
@@ -88,7 +90,7 @@ export function sessionActivityLabel(facts: SessionFacts, commandPending?: boole
   - `failed`: status `failed`;
   - `unavailable`: connection `unavailable`;
   - `unsupported`: `capabilities.sendMessage === false`.
-- **R3.** `dispatch: 'now'` exactly when `session.synchronized && !controlChecking && operations.send_message.allowed`. This is today's `dispatchReady`, moved here. In every other enabled case the value is `when_ready`. Before the first Snapshot (no agent) the composer is `enabled` with `when_ready`.
+- **R3.** `dispatch: 'now'` exactly when `session.synchronized && !controlChecking && operations.send_message.allowed`. This is today's `dispatchReady`, moved here. In every other enabled case the value is `when_ready`. Before the first Snapshot (no agent) the composer is `enabled` with `when_ready`. The code reads `operations.send_message.allowed` alone: that availability already refuses an unsynchronized session and any control but `control`, so the other two terms add nothing (a mutation that drops `!controlChecking` fails no test); the R3 test asserts the whole condition.
 - **R4.** Host offline gives the `host_offline` notice and leaves the composer `enabled`. The lab's existing `sendLater` path (the outbox) still decides how the send waits for the Host.
 - **R5.** The notice for a native owner replaces `leaseActivityLabel`. Its words come from one place, `leaseNoticeLabel`, minus its `checking` case.
 
@@ -239,8 +241,8 @@ done
 
 **Interfaces.** Section 4.1.
 
-**Vectors.** These are rows `{ name, facts, notice, composer, label }` built with `remoteSessionState` over `buildReplica`, `buildRestoredReplica` and `buildSnapshot`. Concrete rows:
-1. Each `connection` value with an idle agent, control granted and synchronized only at `ready`: no notice, `enabled`, `now` only at `ready`, label Ready.
+**Vectors.** These are rows `{ name, facts, notice, composer, label }` built with `remoteSessionState` over a replica that applied a Snapshot and a tail page, or restored them from the device (`buildPresentationReplica`; `buildReplica` and `buildRestoredReplica` apply no Snapshot or a fixed one), and `buildSnapshot`. Concrete rows:
+1. Each `connection` value but `unavailable` (row 10, a business fact under R2) with an idle agent, control granted and synchronized only at `ready`: no notice, `enabled`, `now` only at `ready`, label Ready.
 2. No agent yet (`connecting`, no Snapshot): no notice, `enabled`/`when_ready`, label undefined.
 3. Restored from the device, `catching_up`, `checking`: no notice, `enabled`/`when_ready`, label from the stored status (Working for a stored running turn).
 4. Runtime `reconnecting` and `restoring` while `ready`: no notice, `enabled`/`when_ready`, label Ready or Working.
@@ -594,6 +596,18 @@ What the control arm shows:
 - The editor is editable (`contenteditable`) while Opening session shows, but Enter is refused until the session is ready: 4 of 10 opens at 1x and 100 ms. The other opens pressed Enter after `ready`, because the editor became editable late.
 - At 100 ms every accepted send lost the editor's focus within 50 ms of Enter, and the text typed after it went nowhere: 6 of 6 at 1x, 10 of 10 at 4x. At 0 ms none did. Only the refused opens kept focus, because nothing was sent. Task 4's focus test and E9 cover this.
 - The two-send views, for comparison with S5: first send sending 31 / 35, 105 / 110, 38 / 50, 199 / 223; acknowledged 53 / 60, 154 / 155, 159 / 175, 349 / 373 (same condition order).
+
+### Task 1: the rule module
+
+**State accounting.** `session-presentation.ts`: +0 state; +4 functions (`sessionNotice`, `sessionNoticeWords`, `composerAvailability`, `sessionActivityLabel`), +1 optional fact (`SessionFacts.replica`, for failure words only). No view reads it yet, so the three label chains are still three (Tasks 4 and 5 take them to one). Test support: `session-presentation-vectors.ts` (28 rows, the builders `buildPresentationReplica` and `buildSessionFacts`, the T5 copy).
+
+**Deviations, with the reason.**
+- `SessionFacts` gains `replica`: the `failed` and `unavailable` notices carry the runtime failure and the refusal reason, which `RemoteSessionState` does not hold.
+- `sessionActivityLabel` is undefined for connection `unavailable`: a refused session has no activity to report, and its notice says why.
+- A non-recoverable diagnostic while connecting gives the `unavailable` notice (today's "Connection failed") but leaves the composer enabled, as R2 says: diagnostics are not cleared on reconnect, so disabling on them could block a recovered session.
+- R3 reads `send_message.allowed` alone (section 4.1, R3).
+
+**Tests.** `session-presentation.test.ts`: 36 tests, 1,800 combinations in the R1 product (six connections, four leases, three runtimes, five activities, three Hosts, restored or not), about 50 ms of test time. Mutations checked: dropping the Host-offline notice, the agent-unavailable notice, or turning Working into a connection word each fail tests.
 
 ## 11. Decisions (2026-11-20)
 

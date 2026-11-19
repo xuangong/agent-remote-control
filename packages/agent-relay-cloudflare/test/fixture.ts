@@ -139,7 +139,7 @@ async function buildBundles(options: { actualEntry?: true; completeCodec?: true;
   return { script, journalsScript };
 }
 
-export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; controllerBridge?: Record<string, unknown>; controllerBridges?: Record<string, unknown>[]; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
+export async function fixture(options: { actualEntry?: true; completeCodec?: true; authProvider?: 'google' | 'mainsite' | 'gateway'; previewOrigin?: string; previewDomain?: string; controllerRelease?: Record<string, unknown>; workerVersionId?: string; authorityOutageGraceMs?: number; journals?: { tuning?: object; withoutBinding?: true; olderPartition?: true };
   /** Serves the store conformance cases of `testing` entries from the Durable Objects. */ conformance?: true; /** The fixture lives until its file ends instead of one test. */ lifetime?: 'file';
   /** Shortens the registration and heartbeat deadlines of connected Hosts. */ hostLiveness?: { heartbeatIntervalMs?: number; heartbeatTimeoutMs?: number; registrationDeadlineMs?: number } } = {}) {
   const owned = options.lifetime === 'file' ? fileClosers : closers;
@@ -148,10 +148,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   const bundle = await bundleFor(options);
   const script = bundle.script;
   const journalsScript = bundle.journalsScript;
-  let authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
-  let ownerFailures = 0;
-  let renewalDelayMs = 0, activeRenewals = 0, peakRenewals = 0;
-  const authorityOperations: string[] = [];
+  const authenticatedAt = Date.now(); let authorityStatus = 200; let leaseMs = 120_000; let authorityCalls = 0;
   const runtimeErrors: string[] = [];
   const sockets: WebSocket[] = [];
   let mf: Miniflare;
@@ -183,7 +180,7 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
         }
         if (options.controllerRelease && ['api.github.com', 'github.com'].includes(new URL(request.url).hostname)) {
           const path = new URL(request.url).pathname;
-          const candidates = [options.controllerRelease, ...(options.controllerBridge ? [options.controllerBridge] : []), ...(options.controllerBridges ?? [])];
+          const candidates = [options.controllerRelease];
           const entry = (manifest: Record<string, unknown>) => ({ tag_name: `controller-v${manifest.version}`, draft: false, prerelease: false, published_at: '2026-09-22', assets: [{ name: 'controller-release.json' }, { name: manifest.asset }] });
           const requested = /controller-v([^/]+)/.exec(path)?.[1];
           if (!requested) return Response.json(candidates.map(entry));
@@ -192,21 +189,11 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
           return Response.json(path.endsWith('controller-release.json') ? manifest : entry(manifest));
         }
         authorityCalls++;
-        const operation = new URL(request.url).pathname.split('/').at(-1)!;
-        authorityOperations.push(operation);
-        if (operation === 'renew' && renewalDelayMs) {
-          peakRenewals = Math.max(peakRenewals, ++activeRenewals);
-          await new Promise(resolve => setTimeout(resolve, renewalDelayMs));
-          activeRenewals--;
-        }
         const body = await request.text(); const token = request.headers.get('authorization')?.slice(7) ?? '';
         const parts = token.split('.'); const claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString());
         const valid = sign('arc-relay-service+jwt', claims) === token && claims.iss === origin && claims.aud === issuer &&
           claims.bodyHash === createHash('sha256').update(body).digest('base64url');
         if (!valid) return new Response('Invalid proof', { status: 401 });
-        if (new URL(request.url).pathname.endsWith('/user-status') && ownerFailures > 0) {
-          ownerFailures--; return new Response('Temporary authority failure', { status: 503 });
-        }
         if (authorityStatus !== 200) return new Response('Unavailable', { status: authorityStatus });
         const value = JSON.parse(body); const subject = value.subject ?? value.continuation;
         return Response.json({ active: true, subject, authenticatedAt, expiresAt: Date.now() + 3_600_000, validUntil: Date.now() + leaseMs });
@@ -286,11 +273,6 @@ export async function fixture(options: { actualEntry?: true; completeCodec?: tru
   return { requestAt, request, previewRequest, json, beginLogin, login, beginGoogleLogin, finishGoogleLogin, upgrade, upgradeResponse, host, control, directory,
     setGoogleConfig(clientId: string, allowedEmails = googleEmails) { googleClientId = clientId; googleEmails = allowedEmails; },
     setAuthority(status: number, duration = 120_000) { authorityStatus = status; leaseMs = duration; },
-    failOwnerChecks(count: number) { ownerFailures = count; },
-    delayRenewals(ms: number) { renewalDelayMs = ms; peakRenewals = 0; authorityOperations.length = 0; },
-    get peakRenewals() { return peakRenewals; },
-    get authorityOperations() { return [...authorityOperations]; },
-    setAuthenticatedAt(value: number) { authenticatedAt = value; },
     get runtimeErrors() { return runtimeErrors.join(''); },
     get authorityCalls() { return authorityCalls; },
     async inspect(path: string, init?: RequestInit) { const namespace = await mf.getDurableObjectNamespace('RELAY'); return namespace.getByName('primary').fetch(origin + '/_fixture/' + path, { ...init, signal: AbortSignal.timeout(10000) } as any); },

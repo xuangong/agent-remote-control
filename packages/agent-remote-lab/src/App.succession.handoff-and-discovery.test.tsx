@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { createHash, webcrypto } from 'node:crypto';
 import { StrictMode, useContext, type ComponentProps } from 'react';
 import { expect, it, vi } from 'vitest';
@@ -352,7 +353,7 @@ it('confirms only B through the real session channel in StrictMode and keeps its
   await act(async () => { for (const update of f.updates) update('B', 'restoring'); });
   // A restoring runtime says nothing per session (target T5); the view and its editor stay.
   await settleApp(() => { expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).toBe(editor); });
-  expect(f.view.textContent).not.toMatch(/Restoring|Reconnecting|Synchronizing|Opening session/);
+  expect(f.view.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).toBe(editor);
   await act(async () => { for (const update of f.updates) update('B'); });
   expect(f.frames.filter(frame => frame.type === 'subscribe').every(frame => frame.agentId === 'agent-B')).toBe(true);

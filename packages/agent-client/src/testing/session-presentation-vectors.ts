@@ -12,9 +12,9 @@ import { buildEntry, buildSnapshot } from './builders.js';
  * connection, with the notice, composer availability and activity label the rules give it.
  */
 
-/** The T5 words. A copy of agent-e2e's `faults/connection-words.mjs`, which this package may not import; a test keeps them equal. */
-export const T5_WORDS: readonly string[] = ['Opening session', 'Checking access', 'Synchronizing', 'Reconnecting', 'Restoring', 'Awaiting Agent', 'Start with a Provider', 'Loading conversation'];
-export const T5_PATTERN = new RegExp(`\\b(?:${T5_WORDS.join('|')})\\b`, 'i');
+import { SESSION_CONNECTION_PATTERN } from './connection-words.js';
+/** The T5 pattern, for the readers of the vector table. */
+export const T5_PATTERN = SESSION_CONNECTION_PATTERN;
 
 export const CONNECTIONS: readonly RemoteSessionStatus[] = ['idle', 'connecting', 'catching_up', 'ready', 'disconnected', 'unavailable'];
 
@@ -130,8 +130,8 @@ export const SESSION_PRESENTATION_VECTORS: readonly SessionPresentationVector[] 
     notice: { kind: 'unavailable', message: 'Session was deleted' }, composer: disabled('unavailable', 'Session was deleted'), label: undefined },
   { name: 'unavailable, no Snapshot, no reason', facts: buildSessionFacts('unavailable', undefined),
     notice: { kind: 'unavailable', message: 'This session is unavailable.' }, composer: disabled('unavailable', 'This session is unavailable.'), label: undefined },
-  { name: 'connecting, refused before the Snapshot', facts: buildSessionFacts('connecting', { diagnostic: { message: 'Session was deleted', recoverable: false } }),
-    notice: { kind: 'unavailable', message: 'Session was deleted' }, composer: enabled('when_ready'), label: undefined },
+  { name: 'connecting again, a stale refusal in the diagnostics', facts: buildSessionFacts('connecting', { snapshot: idle, diagnostic: { message: 'Protocol version is incompatible.', recoverable: false } }),
+    notice: undefined, composer: enabled('when_ready'), label: 'Ready' },
   // 11. An agent that takes no messages.
   { name: 'ready, sendMessage unsupported', facts: buildSessionFacts('ready', { snapshot: agent('idle', { sendMessage: false }), control: CONTROL.granted }),
     notice: undefined, composer: disabled('unsupported', 'This agent does not take messages.'), label: 'Ready' },

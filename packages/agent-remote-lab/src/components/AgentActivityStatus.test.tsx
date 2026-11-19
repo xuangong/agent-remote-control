@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -74,7 +75,7 @@ describe('composer activity', () => {
     const cancel = vi.fn();
     const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'connecting')} state={active} onCancel={cancel} />);
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
-    expect(container.textContent).not.toMatch(/Opening session|Synchronizing|Checking access|Reconnecting/);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     const interrupt = container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement;
     expect(interrupt.disabled).toBe(true);
     await act(async () => interrupt.click());

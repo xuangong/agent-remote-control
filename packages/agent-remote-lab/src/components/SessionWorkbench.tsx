@@ -311,7 +311,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
         searchPanel={searchOpen && state ? <TimelineSearch key={searchScope} state={state} search={actions.searchTimeline} onClose={closeSearch} onClearSelection={() => setSearchSelection(undefined)}
           onSelect={async (match, signal) => {
             if (actions.loadSearchMatch) await scroll.loadOlder(() => actions.loadSearchMatch!(match, { signal }));
-            else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('Reconnect to load this result.');
+            else if (!state.timeline.entries.some(entry => entry.seqStart === match.seq)) throw new Error('This result loads when the session is ready.');
             signal.throwIfAborted();
             setSearchSelection(previous => ({ scope: searchScope, key: match.key, request: (previous?.request ?? 0) + 1 }));
           }} /> : null}>

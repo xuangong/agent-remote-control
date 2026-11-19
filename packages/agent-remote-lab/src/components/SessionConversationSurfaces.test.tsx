@@ -129,13 +129,14 @@ it.each(['scope', 'transport'] as const)('releases old hosts and ignores delayed
   await act(async () => oldPending(0));
   expect(container.querySelector('input')).toBe(current);
 });
-it('retains the editor visibly while access recovery fences attachment and mutation', async () => {
+it('retains the editor visibly while access recovery fences attachment without blocking the composer', async () => {
   const container = await render(<Harness />), input = container.querySelector<HTMLInputElement>('input')!;
   input.value = 'Retain during access recovery';
   await act(async () => update({ ready: false }));
+  expect(container.querySelector('output')?.dataset.blocked).not.toBe('true');
   expect(container.querySelector('input')).toBe(input);
   expect(input.closest('[hidden]')).toBeNull();
-  expect(container.querySelector('output')?.dataset).toMatchObject({ visible: 'true', blocked: 'true', attach: 'false' });
+  expect(container.querySelector('output')?.dataset).toMatchObject({ visible: 'true', attach: 'false' });
   await act(async () => update({ ready: true }));
   expect(container.querySelector('input')).toBe(input);
   expect(input.value).toBe('Retain during access recovery');

@@ -237,9 +237,10 @@ it('serializes pending sends while accepting more input during an outstanding se
   const view = await setup({ onSendMessage: send });
   await view.type('First'); await view.click();
   await view.update({ connection: 'ready' });
-  expect(view.notice()?.getAttribute('data-state')).toBe('sending');
-  expect(view.container.querySelector<HTMLButtonElement>('[aria-label="Dismiss message after checking delivery"]')!.disabled).toBe(true);
+  // Dispatched, the message is the conversation's outgoing row: the composer's chip leaves, so Sending shows once.
+  expect(view.notice()).toBeNull();
   await view.type('Second'); await view.click();
+  expect(view.notice()?.textContent).toContain('Second');
   expect(send).toHaveBeenCalledTimes(1);
   await act(async () => finish());
   expect(send.mock.calls).toEqual([['First'], ['Second']]);
@@ -259,7 +260,7 @@ it('pauses FIFO behind an unknown outcome until the user checks and dismisses it
   expect(send.mock.calls).toEqual([['Uncertain'], ['Later']]);
 });
 
-it('waits for confirmed control, and keeps a waiting message while a terminal takes the session', async () => {
+it('waits for confirmed control, and holds a waiting message as Not sent when a terminal takes the session, sending it only on Retry', async () => {
   const view = await setup();
   await view.type('After control'); await view.click();
   expect(view.notice()?.textContent).toContain('Sending');
@@ -268,9 +269,28 @@ it('waits for confirmed control, and keeps a waiting message while a terminal ta
   await view.update({ state: { ...state, sessionControl: CONTROL.nativeCli } });
   expect(view.send).not.toHaveBeenCalled();
   expect(view.notice()?.textContent).toContain('After control');
+  expect(view.notice()?.textContent).toContain('Not sent');
+  expect(view.notice()?.textContent).not.toContain('Sending');
   expect(view.container.querySelector('textarea')!.disabled).toBe(true);
   await view.update({ state: { ...state, sessionControl: CONTROL.granted } });
+  await advance(1000);
+  expect(view.send).not.toHaveBeenCalled();
+  await view.click('[aria-label="Retry pending send"]');
   expect(view.send).toHaveBeenCalledExactlyOnceWith('After control');
+});
+
+it.each([
+  ['the session ended', { status: 'closed' as const }],
+  ['the agent failed', { status: 'failed' as const }],
+])('says Not sent, with Retry and Cancel, for a waiting message when %s', async (_name, agent) => {
+  const view = await setup();
+  await view.type('Too late'); await view.click();
+  await view.update({ connection: 'ready', state: { ...state, agent: { ...state.agent!, ...agent } } });
+  expect(view.notice()?.textContent).toContain('Not sent');
+  expect(view.container.querySelector('[aria-label="Retry pending send"]')).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Cancel pending send"]')).not.toBeNull();
+  await advance(1000);
+  expect(view.send).not.toHaveBeenCalled();
 });
 
 it('accepts messages during native recovery even without the outer recovery hint', async () => {
@@ -411,4 +431,15 @@ it('clears a successful plain-text send in the current fixed image-capable sessi
   await pasteImage(view.container, 'Current question'); await view.click();
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Current question');
   expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe('');
+});
+
+it('says Not sent for a waiting message when the view could not open its session', async () => {
+  const view = await setup({ sessionKey: 'view' });
+  await view.type('Typed while opening'); await view.click();
+  expect(view.notice()?.textContent).toContain('Sending');
+  await view.update({ draftOnly: true });
+  expect(view.notice()?.textContent).toContain('Not sent');
+  await view.update({ draftOnly: false, connection: 'ready' });
+  await advance(1000);
+  expect(view.send).not.toHaveBeenCalled();
 });

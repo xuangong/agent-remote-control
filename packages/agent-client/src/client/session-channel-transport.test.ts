@@ -92,4 +92,26 @@ describe('the link of the activity channel', () => {
     expect(later).toEqual(['up', 'down']);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('makes no claim once nobody watches the activity channel, so a stale down clears', () => {
+    const { channels, sockets, links } = pool();
+    const stop = channels.watchStates();
+    sockets[0]!.open(); sockets[0]!.ready(); sockets[0]!.drop();
+    stop();
+    expect(channels.relayLink()).toBe('unknown');
+    expect(links).toEqual(['up', 'down', 'unknown']);
+    channels.dispose();
+  });
+
+  it('reopens a lost channel at once when asked, without waiting for its backoff', () => {
+    const { channels, sockets } = pool();
+    channels.watchStates();
+    sockets[0]!.open(); sockets[0]!.ready(); sockets[0]!.drop();
+    expect(sockets).toHaveLength(1);
+    channels.reopenRelayLink();
+    expect(sockets).toHaveLength(2);
+    channels.reopenRelayLink();
+    expect(sockets).toHaveLength(2);
+    channels.dispose();
+  });
 });

@@ -27,9 +27,9 @@ export function AgentActivityStatus({ state, sessionState: session, host, visibl
   const timed = active && Number.isFinite(startedAt);
   const now = useVisibleClock(timed && visible);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-  return <div className="agent-activity" data-connection-pending={notice || undefined} data-active={notice || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
+  return <div className="agent-activity" data-notice={notice || undefined} data-active={notice || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">
-      <span className={`agent-presence agent-state-${notice ? 'offline' : terminal ? session.activity : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
+      <span className={`agent-presence agent-state-${notice ? 'notice' : terminal ? session.activity : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
       <span className="agent-activity-label" data-testid="agent-activity-label" aria-live="polite" hidden={label === undefined}>{label}</span>
       {timed ? <time className="agent-activity-elapsed" data-testid="turn-elapsed" aria-label="Turn elapsed time" aria-live="off" dateTime={`PT${seconds}S`}>{formatElapsed(seconds)}</time>
         : working ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}

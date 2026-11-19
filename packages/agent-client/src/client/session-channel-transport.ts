@@ -157,7 +157,8 @@ export class SessionChannelPool {
     return () => {
       if (!watching) return;
       watching = false;
-      if (--this.stateWatchers === 0) { clearTimeout(this.stateRetry); this.stateRetry = undefined; }
+      // Nobody watches the activity channel any more: it makes no claim about the link.
+      if (--this.stateWatchers === 0) { clearTimeout(this.stateRetry); this.stateRetry = undefined; this.setLink('unknown'); }
     };
   }
 
@@ -167,6 +168,13 @@ export class SessionChannelPool {
   subscribeRelayLink(listener: (link: ChannelLink) => void): () => void {
     this.linkListeners.add(listener);
     return () => { this.linkListeners.delete(listener); };
+  }
+
+  /** Reopens a lost activity channel now instead of after its backoff, for a person who asked to retry. */
+  reopenRelayLink(): void {
+    if (this.disposed || !this.stateWatchers || this.channels.has('activity')) return;
+    this.stateRetryDelay = this.dependencies.stateRetryMs ?? 1_000;
+    this.ensureStateChannel();
   }
 
   private setLink(link: ChannelLink): void {

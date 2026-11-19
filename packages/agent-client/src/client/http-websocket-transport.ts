@@ -109,6 +109,8 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   /** The device's link to the Relay, as its activity channel sees it; `unknown` without session channels. */
   relayLink(): ChannelLink { return this.sessionChannels?.relayLink() ?? 'unknown'; }
   subscribeRelayLink(listener: (link: ChannelLink) => void): () => void { return this.sessionChannels?.subscribeRelayLink(listener) ?? (() => {}); }
+  /** Reopens a lost link now, for the device banner's Retry. */
+  reopenRelayLink(): void { this.sessionChannels?.reopenRelayLink(); }
   watchSessionStates(listener: (states: SessionStatesView) => void): () => void {
     if (!this.sessionChannels) { listener(this.sessionStates.view()); return () => {}; }
     const unsubscribe = this.sessionStates.subscribe(listener), stopWatching = this.sessionChannels.watchStates();

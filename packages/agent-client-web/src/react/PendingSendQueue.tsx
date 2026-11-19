@@ -6,6 +6,8 @@ export function PendingSendQueue({ items, onCancel, onRetry }: {
 }) {
   const [copied, setCopied] = useState<string>();
   const [copyError, setCopyError] = useState<string>();
+  // A dispatched message is the conversation's own outgoing row from then on: one Sending, never two.
+  items = items.filter(item => item.phase !== 'sending');
   if (!items.length) return null;
   return <div className="agent-pending-queue" role="region" aria-label="Pending messages on this device">
     <div className="agent-pending-messages">

@@ -699,7 +699,7 @@ it('retires an explicitly replaced ordinary window while D attachment is held an
 });
 
 it.each(['send', 'queue'].flatMap(delivery => ['pending D', 'failed D', 'return to A'].map(replacement => ({ delivery, replacement }))))(
-  'retires a held $delivery from the actual window through $replacement', async ({ delivery, replacement }) => {
+  '$delivery: a draft write held across the actual window replacement through $replacement is retired or delivered once', async ({ delivery, replacement }) => {
     const f = await setupEdit('window', { queue: delivery === 'queue' });
     await vi.waitFor(() => expect(observed.bindings.get('A')?.scope?.isCurrent()).toBe(true));
     const writer = await inspectImageDraft(f.imageDraftBinding);
@@ -725,7 +725,10 @@ it.each(['send', 'queue'].flatMap(delivery => ['pending D', 'failed D', 'return 
       const submit = f.view.querySelector<HTMLButtonElement>(delivery === 'queue' ? '[data-testid="queue-submit"]' : '[data-testid="prompt-submit"]')!;
       expect(submit.disabled).toBe(false);
       await act(async () => { submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); submit.click(); });
-      expect(held).toBe(1); expect(f.sent).toHaveLength(0);
+      expect(held).toBe(1);
+      // A plain text send does not wait for the draft write: it goes to the current recipient at once and is not replayed.
+      if (delivery === 'send') { expect(f.sent).toHaveLength(1); expect(f.sent[0]!.payload.agentId).toBe('A'); } else expect(f.sent).toHaveLength(0);
+      const sentBeforeReplacement = f.sent.length;
       await act(async () => f.replaceTarget());
       await vi.waitFor(() => expect(f.requests.some(item => item.path.endsWith('/attach') && item.body.nativeSessionId === 'D')).toBe(true));
       expect(original.isCurrent()).toBe(false);
@@ -740,10 +743,15 @@ it.each(['send', 'queue'].flatMap(delivery => ['pending D', 'failed D', 'return 
       }
       expect(original.isCurrent()).toBe(false);
       await act(async () => { await release(); });
-      expect(f.sent).toHaveLength(0);
+      expect(f.sent).toHaveLength(sentBeforeReplacement);
       expect(f.view.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('false');
-      expect(f.drafts.get('selected-owner')).toBe('Held A draft');
-      expect((await readImageDraft(f.imageDraftBinding.key))?.parts).toEqual([{ type: 'text', text: 'Held A draft' }]);
+      if (delivery === 'send') {
+        expect(f.drafts.get('selected-owner') ?? '').toBe('');
+        expect((await readImageDraft(f.imageDraftBinding.key))?.parts ?? []).toEqual([]);
+      } else {
+        expect(f.drafts.get('selected-owner')).toBe('Held A draft');
+        expect((await readImageDraft(f.imageDraftBinding.key))?.parts).toEqual([{ type: 'text', text: 'Held A draft' }]);
+      }
     } finally {
       if (f.sent.length) await act(async () => f.acknowledge());
       write.mockRestore(); await act(async () => f.connections.clear());

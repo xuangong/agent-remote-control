@@ -254,7 +254,7 @@ it('lets conversation history leave an offline Host for a visited session on ano
   expect(new URLSearchParams(location.search).get('host')).toBe('desk');
   f.disconnect();
   await f.refresh();
-  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Desk Host is offline. Messages will be delivered when it is back.');
+  expect(f.container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toContain('offline');
   const back = f.container.querySelector<HTMLButtonElement>('[aria-label="Back to previous conversation"]')!;
   expect(back.disabled).toBe(false);
   await act(async () => { back.click(); await new Promise(resolve => setTimeout(resolve, 30)); });

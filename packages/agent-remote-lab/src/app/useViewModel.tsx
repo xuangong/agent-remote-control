@@ -110,7 +110,7 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
     return { slotId: slot.id, titleInteraction: undefined, props: {
       storageScope: baseUrl, baseUrl, target, viewId: slot.id, windowViewId: view?.id,
       hostLabel: host?.name ?? target.hostId, compact: compactLayout, active: !windowMode, visible: !windowMode,
-      attachmentEnabled: accessReady && confirmed, mutationBlocked: !accessReady || !confirmed,
+      attachmentEnabled: accessReady && confirmed, mutationBlocked: !confirmed,
       offline: host?.online === false || (refusedOffline !== undefined && host?.id === refusedOffline), familyRoot: false, entries: [target], transport, replicaFor,
       directoryFor: hostId => hostId === selectedHost.id ? directory : undefined,
       draftStore: messageDrafts, draftBinding: draftOwnerBinding(slot.owners.text), imageDraftBinding: slot.owners.image,

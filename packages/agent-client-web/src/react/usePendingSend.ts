@@ -11,6 +11,8 @@ export interface WaitingSend extends PendingSend {
   phase: 'waiting' | 'preparing' | 'sending' | 'error';
   dispatched: boolean;
   reason?: string;
+  /** Held because the session cannot take it (ended, failed, refused, read-only, unopened): only Retry sends it. */
+  held?: boolean;
   abort?: AbortController;
 }
 
@@ -53,9 +55,9 @@ export function usePendingSend(sessionKey: string, visible: boolean) {
       return true;
     })).then(() => {
       if (item.dispatched) remove(item);
-      else item.phase = 'waiting';
+      else item.phase = item.held ? 'error' : 'waiting';
     }).catch(error => {
-      if (!item.dispatched && abort.signal.aborted) item.phase = 'waiting';
+      if (!item.dispatched && abort.signal.aborted) item.phase = item.held ? 'error' : 'waiting';
       else {
         item.phase = 'error';
         item.reason = error instanceof Error ? error.message : 'Message could not be sent.';
@@ -91,7 +93,17 @@ export function usePendingSend(sessionKey: string, visible: boolean) {
     retry(id: string) {
       const item = queues.current.get(sessionKey)?.find(item => item.id === id);
       if (!item || item.phase !== 'error' || item.dispatched) return;
-      item.phase = 'waiting'; item.reason = undefined; notify();
+      item.phase = 'waiting'; item.reason = undefined; item.held = false; notify();
+    },
+    /** Stops every message of this session that has not left, with a reason; each says Not sent until the person retries or cancels it. */
+    hold(reason: string) {
+      let changed = false;
+      for (const item of queues.current.get(sessionKey) ?? []) {
+        if (item.dispatched || item.phase === 'error' || item.phase === 'sending') continue;
+        item.held = true; item.reason = reason; changed = true;
+        if (item.phase === 'preparing') item.abort?.abort(); else item.phase = 'error';
+      }
+      if (changed) notify();
     },
     cancel(id: string) {
       const item = queues.current.get(sessionKey)?.find(item => item.id === id);

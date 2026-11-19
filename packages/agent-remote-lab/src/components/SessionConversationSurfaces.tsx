@@ -170,7 +170,8 @@ const ConversationSurface = memo(function ConversationSurface({ registry, entry,
   }, [entry.host, chosen.mode, shown, enabled, descriptor.onSelectWindowPane]);
   const props: SessionConversationProps = { ...descriptor.props,
     attachmentManaged: attachment.attachmentManaged, attachedSession: attachment.attachedSession, attachmentNotice: attachment.attachmentNotice,
-    visible: shown, mutationBlocked: !enabled || !placed || descriptor.props.mutationBlocked,
+    // Lost access to the Relay is a connection state: sends wait for it (T4), they are not blocked.
+    visible: shown, mutationBlocked: !placed || descriptor.props.mutationBlocked,
     attachmentEnabled: enabled && placed && descriptor.props.attachmentEnabled !== false,
     onPendingInputChange(count) {
       if (registry.reportPending(entry, count)) descriptor.props.onPendingInputChange?.(count);

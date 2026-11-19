@@ -1,23 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 
 const RECOVERY_NOTICE_DELAY_MS = 5000;
 
-/** A disconnect gets one foreground grace period, including retries and catch-up. */
-export function useRecoveryNotice(sessionKey: string, status: RemoteSessionStatus, runtimeRecovering: boolean, visible: boolean): boolean {
-  const episode = useRef<{ sessionKey: string; timelineDisconnected: boolean; startedAt?: number }>({ sessionKey, timelineDisconnected: false });
+/** A lost link gets one foreground grace period before the page says so. */
+export function useRecoveryNotice(sessionKey: string, recovering: boolean, visible: boolean): boolean {
+  const episode = useRef<{ sessionKey: string; startedAt?: number }>({ sessionKey });
   const pageHidden = useRef(false);
   const [elapsedFor, setElapsedFor] = useState<string>();
 
   useEffect(() => {
     if (episode.current.sessionKey !== sessionKey) {
-      episode.current = { sessionKey, timelineDisconnected: false };
+      episode.current = { sessionKey };
       setElapsedFor(undefined);
     }
     const current = episode.current;
-    if (status === 'disconnected') current.timelineDisconnected = true;
-    else if (status === 'ready' || status === 'idle') current.timelineDisconnected = false;
-    const recovering = current.timelineDisconnected || runtimeRecovering;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const update = () => {
       clearTimeout(timer);
@@ -47,7 +43,7 @@ export function useRecoveryNotice(sessionKey: string, status: RemoteSessionStatu
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', show);
     };
-  }, [sessionKey, status, runtimeRecovering, visible]);
+  }, [sessionKey, recovering, visible]);
 
-  return visible && elapsedFor === sessionKey && (runtimeRecovering || (status !== 'ready' && status !== 'idle'));
+  return visible && elapsedFor === sessionKey && recovering;
 }

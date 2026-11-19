@@ -151,31 +151,38 @@ async function setup(kind: ViewKind, options: { images?: boolean; recipient?: Im
   return { ...f, view, drafts, scope, draftKey, imageDraftBinding, replica, connections, switchSession: () => switchSession() };
 }
 
-it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'child', 'ask', 'tpm'] as const)('clears the mounted %s editor and persisted text only after matching ACK', async kind => {
+it.each(['side', 'window', 'team-leader', 'team-member', 'compact-leader', 'compact-member', 'child', 'ask', 'tpm'] as const)('sends %s text once, clears the editor and persisted draft at once, and ignores the ACK for the draft', async kind => {
   const f = await setup(kind);
   await type(f.view, 'Confirmed input');
   expect(promptText(editor(f.view))).toBe('Confirmed input');
   expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
   await submit(f);
   expect(f.sent).toHaveLength(1);
-  expect(promptText(editor(f.view))).toBe('Confirmed input');
+  expect(promptText(editor(f.view))).toBe('');
+  f.drafts.flush();
+  expect(readDrafts(f.scope)[f.draftKey]).toBe('');
   await act(async () => f.acknowledge());
   expect(promptText(editor(f.view))).toBe('');
+  expect(f.sent).toHaveLength(1);
+  expect(f.view.querySelector('[data-testid="pending-send"]')).toBeNull();
   f.drafts.flush();
   expect(readDrafts(f.scope)[f.draftKey]).toBe('');
 });
 
-it.each(['side', 'window'] as const)('retains the %s draft after rejection and echo without ACK', async kind => {
+it.each(['side', 'window'] as const)('keeps the %s message as a Check delivery chip after echo and rejection without ACK, without replaying it', async kind => {
   const f = await setup(kind);
   await type(f.view, 'Unconfirmed input'); await submit(f);
   await act(async () => f.echo());
   expect(f.view.querySelector('.agent-message-user')?.textContent).toContain('Unconfirmed input');
-  expect(promptText(editor(f.view))).toBe('Unconfirmed input');
-  expect(f.view.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(f.view.querySelector('[data-testid="pending-send"]')).toBeNull();
   await act(async () => f.reject());
-  expect(promptText(editor(f.view))).toBe('Unconfirmed input');
+  const chip = f.view.querySelector('[data-testid="pending-send"]');
+  expect(chip?.textContent).toContain('Unconfirmed input');
+  expect(chip?.textContent).toContain('Check delivery');
+  expect(promptText(editor(f.view))).toBe('');
+  expect(f.sent).toHaveLength(1);
   f.drafts.flush();
-  expect(readDrafts(f.scope)[f.draftKey]).toBe('Unconfirmed input');
+  expect(readDrafts(f.scope)[f.draftKey]).toBe('');
 });
 
 it.each(['side', 'window'] as const)('preserves a newer %s edit after an old matching ACK', async kind => {
@@ -199,34 +206,43 @@ it('retains a changed revision even when its text returns to the submitted value
   expect(promptText(editor(f.view))).toBe('Same text');
 });
 
-it('ignores an ACK for another request and preserves the draft across a session switch', async () => {
+it('ignores an ACK for another request and does not resurrect the sent draft across a session switch', async () => {
   const f = await setup('side');
   await type(f.view, 'Old session input'); await submit(f);
   const original = f.sent[0]!;
   await act(async () => f.acknowledge({ ...original, payload: { ...original.payload, requestId: 'another-request' } }));
-  expect(promptText(editor(f.view))).toBe('Old session input');
+  expect(promptText(editor(f.view))).toBe('');
   await act(async () => f.switchSession());
   await act(async () => f.acknowledge(original));
-  expect(promptText(editor(f.view))).toBe('Old session input');
+  expect(promptText(editor(f.view))).toBe('');
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]!.payload.agentId).toBe('side');
   f.drafts.flush();
-  expect(readDrafts(f.scope)[f.draftKey]).toBe('Old session input');
+  expect(readDrafts(f.scope)[f.draftKey]).toBe('');
 });
 
-it('keeps an explicitly retired Ask recipient authoritative over its connected fallback', async () => {
+it('does not send to the connected fallback of an explicitly retired Ask recipient and keeps the message as Not sent', async () => {
   const f = await setup('ask', { recipient: { identity: 'succession-recipient', lifetime: {}, isCurrent: () => false } });
   await type(f.view, 'Retired owner input'); await submit(f, false);
+  await act(async () => {});
   expect(f.view.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('false');
   expect(f.sent).toHaveLength(0);
-  expect(promptText(editor(f.view))).toBe('Retired owner input');
+  const chip = f.view.querySelector('[data-testid="pending-send"]');
+  expect(chip?.textContent).toContain('Retired owner input');
+  expect(chip?.textContent).toContain('Not sent');
+  expect(promptText(editor(f.view))).toBe('');
 });
 
-it('preserves the Ask draft when its explicit recipient retires after dispatch and before ACK', async () => {
+it('sends an Ask message once to its recipient when the recipient retires after dispatch and before ACK', async () => {
   let current = true;
   const f = await setup('ask', { recipient: { identity: 'succession-recipient', lifetime: {}, isCurrent: () => current } });
   await type(f.view, 'Retired owner input'); await submit(f);
   current = false;
   await act(async () => f.acknowledge());
-  expect(promptText(editor(f.view))).toBe('Retired owner input');
+  expect(f.sent).toHaveLength(1);
+  expect(f.sent[0]!.payload.agentId).toBe('ask');
+  expect(promptText(editor(f.view))).toBe('');
+  expect(f.view.querySelector('[data-testid="pending-send"]')).toBeNull();
 });
 
 it.each(['ack', 'reject'] as const)('persists image bytes and clears the image document only for %s', async outcome => {

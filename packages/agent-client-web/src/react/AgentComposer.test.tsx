@@ -4,9 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
 import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
-import { buildSessionFacts, CONTROL, SESSION_PRESENTATION_VECTORS } from '@orchardworks/agent-client/testing';
+import { buildSessionFacts, CONTROL, SESSION_PRESENTATION_VECTORS, SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 
-const T5 = /\b(?:Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation)\b/i;
 
 it.each(['connecting', 'catching_up', 'disconnected'] as const)('says no connection word while a local draft has no native binding (%s)', async connection => {
   const state: AgentReplicaState = { ...createReplicaState(), agent: {
@@ -19,7 +18,7 @@ it.each(['connecting', 'catching_up', 'disconnected'] as const)('says no connect
   for (const cached of [state, undefined]) {
     const container = await render(<AgentComposer state={cached} sessionState={remoteSessionState(undefined, connection)} draftOnly draft="Local draft" onSendMessage={send} onCancel={cancel} />);
     expect(container.querySelector<HTMLElement>('[data-testid="agent-activity-label"]')?.hidden).toBe(true);
-    expect(container.textContent).not.toMatch(T5);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.hidden).toBe(true);
     expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
@@ -35,7 +34,7 @@ it.each([false, true])('does not present Ready for an unbound draft while access
   const session = { ...remoteSessionState(undefined, 'ready'), controlChecking };
   const container = await render(<AgentComposer draftOnly sessionState={session} draft="Local draft" />);
   expect(container.querySelector<HTMLElement>('[data-testid="agent-activity-label"]')?.hidden).toBe(true);
-  expect(container.textContent).not.toMatch(T5);
+  expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
 });
 
@@ -44,7 +43,7 @@ describe('the composer follows composerAvailability, row by row', () => {
     const container = await render(<AgentComposer sessionKey="agent-1" state={row.facts.replica} sessionState={row.facts.session} host={row.facts.host} onSendMessage={vi.fn()} />);
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
     expect(input.disabled || input.readOnly).toBe(row.composer.input === 'disabled');
-    expect(container.textContent).not.toMatch(T5);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   });
 });
 
@@ -80,7 +79,7 @@ it('takes a message typed before the first Snapshot, says Sending at once, keeps
   await act(async () => {});
   expect(send).toHaveBeenCalledExactlyOnceWith('Typed while opening');
   expect(input.value).toBe(' next');
-  expect(container.textContent).not.toMatch(T5);
+  expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
 });
 
 it('allows cached-session drafts while synchronizing but waits for readiness to send or execute commands', async () => {
@@ -255,4 +254,28 @@ it('takes a send over a state restored from the device, says Sending, and sends 
   await rerender(container, <AgentComposer state={confirmed} sessionState={remoteSessionState(confirmed, 'ready')} draft="" onSendMessage={send} />);
   await act(async () => {});
   expect(send).toHaveBeenCalledExactlyOnceWith('Typed early');
+});
+
+it('sends a message at once through the queue, keeps the editor enabled and focused, and keeps what is typed while it is on its way', async () => {
+  let acknowledge!: () => void;
+  const send = vi.fn(() => new Promise<void>(resolve => { acknowledge = resolve; }));
+  const ready = buildSessionFacts('ready', { snapshot: { status: 'idle' }, control: CONTROL.granted });
+  const container = await render(<AgentComposer sessionKey="agent-1" state={ready.replica} sessionState={ready.session} onSendMessage={send} />);
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  input.focus();
+  const type = (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await type('Sent now');
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+  expect(send).toHaveBeenCalledExactlyOnceWith('Sent now');
+  // On its way, the message is the conversation's outgoing row; the composer shows no second Sending.
+  expect(container.querySelector('[data-testid="pending-send"]')).toBeNull();
+  expect(input.disabled).toBe(false);
+  expect(document.activeElement).toBe(input);
+  await type('Typed meanwhile');
+  await act(async () => acknowledge());
+  expect(input.value).toBe('Typed meanwhile');
+  expect(document.activeElement).toBe(input);
 });

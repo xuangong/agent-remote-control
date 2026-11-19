@@ -1,4 +1,5 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { act, useState, type ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -361,7 +362,7 @@ describe('App', () => {
     try {
       const container = await render(<App transport={labTransport()} />);
       expect(container.querySelector('[data-testid="workbench"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
       // A conversation that is still opening says nothing until it has rows, and is not the session-start empty state.
       expect(container.textContent).not.toContain('Opening session remembered-agent');
       expect(container.textContent).not.toContain('Start with a Provider');
@@ -373,7 +374,7 @@ describe('App', () => {
   it.each(['catching_up', 'disconnected'] as const)('presents %s as the business state, never a connection word, without discarding the last replica', async sessionStatus => {
     const container = await render(<App initialState={replicaState} initialSessionStatus={sessionStatus} actions={{}} />);
     expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Ready');
-    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
   });
 
@@ -405,10 +406,11 @@ describe('App', () => {
     const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
     const summary = container.querySelector('[data-testid="connection-summary"]') as HTMLElement;
 
-    // The failure is the session's notice, in its own words.
-    expect(summary.textContent).toContain('Provider observation stream failed.');
+    // The app bar says the activity; the failure's own words are said once, by the conversation.
+    expect(summary.textContent).toContain('Agent failed');
+    expect(summary.textContent).not.toContain('Provider observation stream failed.');
     expect(summary.textContent).not.toContain('Ready');
-    expect(summary.getAttribute('aria-label')).toContain('Provider observation stream failed.');
+    expect(summary.getAttribute('aria-label')).toContain('Agent failed');
     expect(summary.getAttribute('aria-label')).not.toContain('Ready');
   });
 
@@ -623,7 +625,7 @@ describe('App', () => {
 
       expect(container.querySelector('#lab-context')).toBeNull();
       expect(document.activeElement).toBe(container.querySelector('[data-testid="workbench"]'));
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     } finally {
       window.matchMedia = originalMatchMedia;
     }
@@ -687,7 +689,7 @@ describe('App', () => {
     });
 
     expect(transport.resumeAgent).toHaveBeenCalledWith(expect.any(String), previousState.agent.persistence);
-    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.querySelector('[aria-label="Agent timeline"]')).toBeNull();
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
   });
@@ -1047,7 +1049,7 @@ it('shows recovery waiting without a failure alert and clears it after a success
 });
 
 
-it('notifies a failed send without clearing the draft or replaying it after dismissal', async () => {
+it('notifies a failed send, keeps the message as Check delivery and does not replay it after dismissal', async () => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.stubGlobal('IDBKeyRange', IDBKeyRange);
   window.history.replaceState(null, '', '/?agent=agent-1');
@@ -1070,8 +1072,11 @@ it('notifies a failed send without clearing the draft or replaying it after dism
       expect(container.querySelector('.lab-toast')?.textContent).toContain('The message was not accepted.');
     });
     await act(async () => container.querySelector<HTMLButtonElement>('.lab-toast button')!.click());
-    expect(promptText(input)).toBe('Keep this failed message');
+    expect(promptText(input)).toBe('');
     expect(sendMessage).toHaveBeenCalledTimes(1);
+    const chip = container.querySelector('[data-testid="pending-send"]');
+    expect(chip?.textContent).toContain('Keep this failed message');
+    expect(chip?.textContent).toContain('Check delivery');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('The message was not accepted.');
   } finally {
     await unmount(container);
@@ -1102,7 +1107,7 @@ it('shows no stored conversation content before the Relay confirms access, and s
     // The Relay confirms the lease: the stored rows show, with no opening label over them.
     await act(async () => setWorkspaceReady(path, true));
     await vi.waitFor(() => expect(view.textContent).toContain('Cached conversation, immediately visible.'));
-    expect(view.textContent).not.toMatch(/Opening session|Synchronizing/);
+    expect(view.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }
 });
 
@@ -1132,7 +1137,7 @@ it('shows stored conversation content in the first render on a cached lease, wit
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
     watch.disconnect();
     expect(view.textContent).toContain('Cached on a lease, first render.');
-    const bad = frames.filter(text => /Opening session|Awaiting Agent|Start with a Provider|Synchronizing/.test(text));
+    const bad = frames.filter(text => SESSION_CONNECTION_PATTERN.test(text));
     const rowless = frames.filter(text => !text.includes('Cached on a lease, first render.') && /Ready for a session|Conversation/.test(text));
     expect({ bad: bad.length, rowless: rowless.length, frames: frames.length }).toMatchObject({ bad: 0 });
   } finally { fetcher.mockRestore(); setWorkspaceReady(path, true); localStorage.removeItem('agent-remote:workspace-access'); }

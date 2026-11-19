@@ -44,7 +44,7 @@ function InteractionContent({ request, onResponse, questionDraft, onQuestionDraf
   }
 
   if (request.kind === 'form') {
-    return <FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : 'Interaction unavailable. Reconnect to respond.'} />;
+    return <FormCard request={request} onResponse={respond} pending={pending} disabled={readOnly || !onResponse} failure={readOnly || waitingForConnection ? undefined : onResponse ? failure : 'Interaction unavailable. It can be answered when the session is ready.'} />;
   }
 
   if (!onResponse && !readOnly && !waitingForConnection) {

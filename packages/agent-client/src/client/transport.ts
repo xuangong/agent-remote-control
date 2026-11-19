@@ -100,6 +100,7 @@ export interface RemoteAgentTransport {
   /** The device's link to the Relay as the activity channel sees it; `unknown` until a channel was ready. */
   relayLink?(): import('./relay-link.js').ChannelLink;
   subscribeRelayLink?(listener: (link: import('./relay-link.js').ChannelLink) => void): () => void;
+  reopenRelayLink?(): void;
   /** The account's read positions, shared by every device; the listener receives the current view at once and on each change. */
   watchSessionReads?(listener: (reads: import('./session-reads.js').SessionReadsView) => void): () => void;
   /** Records that the owner has seen a session's replies up to readAt; positions never move back. */

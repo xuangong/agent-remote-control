@@ -1,4 +1,5 @@
 import { act, useState, type ComponentProps } from 'react';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -27,13 +28,13 @@ it('raises no toast and shows no connection word through disconnects, retries, c
     await view.update({ sessionStatus });
     await advance(10_000);
     expect(view.toast()).toBeNull();
-    expect(view.container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/i);
+    expect(view.container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   }
   for (const state of ['reconnecting', 'restoring', 'connected'] as const) {
     await view.update({ state: runtime(state) });
     await advance(10_000);
     expect(view.toast()).toBeNull();
-    expect(view.container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/i);
+    expect(view.container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   }
 });
 
@@ -51,7 +52,7 @@ function runtime(state: 'connected' | 'reconnecting' | 'restoring' | 'unavailabl
 
 it.each([
   { state: runtime('unavailable'), message: 'The agent is not available on its Host.' },
-  { state: { ...replicaState, diagnostics: [{ code: 'unauthorized', message: 'Access denied.', recoverable: false }] }, sessionStatus: 'connecting' as const, message: 'Access denied.' },
+  { state: { ...replicaState, diagnostics: [{ code: 'unauthorized', message: 'Access denied.', recoverable: false }] }, sessionStatus: 'unavailable' as const, message: 'Access denied.' },
 ])('says $message once above the timeline, without a toast', async ({ message, ...props }) => {
   const view = await workbench(props);
   expect(view.toast()).toBeNull();

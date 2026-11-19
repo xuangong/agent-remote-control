@@ -1,6 +1,7 @@
 import { act, useContext, useEffect, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChannelLink } from '@orchardworks/agent-client';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { render } from './test/setup.js';
 import { GatewayController } from './GatewayController.js';
 import { rememberWorkspaceAccess, forgetWorkspaceAccess, RelayLinkReport } from './workspace-access.js';
@@ -358,10 +359,11 @@ it('shows stored rows on a cached unexpired lease before the status answers, and
 });
 
 describe('the device link indicator', () => {
-  const T5 = /\b(?:Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation)\b/i;
+  const reopen = vi.fn();
   function LinkReporter({ link }: { link: ChannelLink }) {
-    const report = useContext(RelayLinkReport);
-    useEffect(() => { report(link); }, [link, report]);
+    const relayLink = useContext(RelayLinkReport);
+    useEffect(() => { relayLink.report(link); }, [link, relayLink]);
+    useEffect(() => { relayLink.setReopen(reopen); }, [relayLink]);
     return <p>Private controller</p>;
   }
   async function mount() {
@@ -381,7 +383,10 @@ describe('the device link indicator', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(200); });
     const banner = view.querySelector('.gateway-recovery');
     expect(banner?.textContent).toContain('Offline. Messages will be sent when this device is back online.');
-    expect(banner?.textContent).not.toMatch(T5);
+    expect(banner?.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
+    // Retry asks the transport to reopen the link now.
+    await act(async () => view.querySelector<HTMLButtonElement>('.gateway-recovery button')!.click());
+    expect(reopen).toHaveBeenCalledOnce();
     await setLink('up');
     expect(view.querySelector('.gateway-recovery')).toBeNull();
   });

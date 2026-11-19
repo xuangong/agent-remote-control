@@ -88,7 +88,10 @@ it('restores mobile conversation actions when its Host reconnects while Context 
     await act(async () => {
       submit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       submit.click();
-      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledWith('After the Host reconnects'));
+    });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(sendMessage).toHaveBeenCalledWith('After the Host reconnects');
     });
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(promptText(input)).toBe('');

@@ -45,7 +45,7 @@ test('reviews typed interactions and recovers redacted history through the real 
   const disconnected = await request.post(`${relayUrl}/v1/lab/interactions/disconnect`, { headers: { origin: new URL(page.url()).origin } });
   expect(disconnected.status()).toBe(204);
   await expect(form.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
-  await expect(form).toContainText('Reconnect to respond.');
+  await expect(form).toContainText('It can be answered when the session is ready.');
   await expect(form.getByLabel('Access token', { exact: true })).toHaveValue('  browser-secret  ');
   await expect(form.getByLabel('Region', { exact: true })).toHaveValue('eu');
   await page.screenshot({ path: resolve(screenshotDirectory, 'form-offline.png'), fullPage: true });

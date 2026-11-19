@@ -13,11 +13,11 @@
 .lab-composer-dock .agent-composer :is(textarea, .agent-composer-editor) {
   box-sizing: border-box; min-height: 38px; padding: 6px; line-height: 1.5;
 }
-.lab-composer-dock .agent-activity[data-connection-pending="true"] {
+.lab-composer-dock .agent-activity[data-notice="true"] {
   flex: 0 1 auto; min-width: 0; max-width: calc(100% - 96px);
 }
-.lab-composer-dock .agent-activity[data-connection-pending="true"] .agent-activity-summary { flex-wrap: nowrap; }
-.lab-composer-dock .agent-activity[data-connection-pending="true"] .agent-activity-label {
+.lab-composer-dock .agent-activity[data-notice="true"] .agent-activity-summary { flex-wrap: nowrap; }
+.lab-composer-dock .agent-activity[data-notice="true"] .agent-activity-label {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .lab-composer-dock .agent-composer:not([data-control-readonly]) :is(textarea, .agent-composer-editor) {
@@ -69,9 +69,9 @@
   .lab-composer-dock .agent-activity > button { min-height: 30px; padding-block: 2px; line-height: 1.5; }
   .lab-composer-dock .agent-session-toolbar { --agent-toolbar-target: 44px; }
   .lab-composer-dock .agent-composer-actions > button[data-testid="prompt-submit"] { flex: 0 0 44px; min-width: 44px; margin-left: 0; }
-  .lab-composer-dock .agent-activity[data-active="true"]:not([data-connection-pending="true"]) { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
+  .lab-composer-dock .agent-activity[data-active="true"]:not([data-notice="true"]) { order: -1; flex-basis: 100%; margin: 0; justify-content: space-between; }
   .lab-composer-dock .agent-activity[data-active="true"] + button[data-testid="prompt-submit"] { margin-left: 0; }
-  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]:not([data-connection-pending="true"])) { --lab-session-panel-space: 208px; }
+  .lab-composer-dock .agent-composer:has(.agent-activity[data-active="true"]:not([data-notice="true"])) { --lab-session-panel-space: 208px; }
 }
 
 /* Short views keep menus usable by letting them cover the composer. */

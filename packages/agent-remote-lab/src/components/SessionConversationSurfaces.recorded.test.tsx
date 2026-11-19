@@ -74,7 +74,8 @@ it.each([true, false])('keeps one real stream and in-flight editor through locat
     await act(async () => { await waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 5000 }); });
     await f.update({ mode: 'bot' });
     expect(f.container.querySelector('[data-destination="bot"] [data-testid="prompt-input"]')).toBe(prompt);
-    expect(f.container.querySelector('[data-testid="prompt-submit"]')?.getAttribute('aria-label')).toBe('Sending…');
+    expect(promptText(prompt as HTMLElement)).toBe('');
+    expect(prompt?.getAttribute('aria-disabled')).not.toBe('true');
     await f.update({ claimed: !unclaimed, rebound: true });
     expect(prompt?.isConnected).toBe(true);
     if (unclaimed) expect(prompt?.closest('[inert]')).not.toBeNull();

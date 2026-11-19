@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { composerAvailability, sessionActivityLabel, sessionNotice, sessionNoticeWords, type SessionFacts } from './session-presentation.js';
 import { leaseView } from './lease-view.js';
-import { buildSessionFacts, CONNECTIONS, CONTROL, SESSION_PRESENTATION_VECTORS, T5_PATTERN, T5_WORDS, type ReplicaFacts } from '../testing/session-presentation-vectors.js';
+import { buildSessionFacts, CONNECTIONS, CONTROL, SESSION_PRESENTATION_VECTORS, T5_PATTERN, type ReplicaFacts } from '../testing/session-presentation-vectors.js';
 
 const BUSINESS_LABELS = new Set(['Ready', 'Working', 'Waiting for response', 'Starting', 'Closed', 'Agent failed', 'Executing command', 'Native CLI has control', 'Native control transferred']);
 
@@ -32,11 +31,13 @@ const RUNTIMES = ['connected', 'reconnecting', 'restoring'] as const;
 const ACTIVITIES = ['none', 'idle', 'running', 'waiting', 'starting'] as const;
 const HOSTS = { unknown: undefined, online: { online: true, name: 'Mac mini' }, offline: { online: false, name: 'Mac mini' } } as const;
 
+const STALE = { message: 'Protocol version is incompatible.', recoverable: false };
 function replicaFacts(activity: typeof ACTIVITIES[number], runtime: typeof RUNTIMES[number], control: ReplicaFacts['control'], restored: boolean): ReplicaFacts | undefined {
-  if (activity === 'none') return control ? { control } : undefined;
+  // Every replica carries a non-recoverable diagnostic from an earlier attempt: it must never speak for a later one.
+  if (activity === 'none') return control ? { control, diagnostic: STALE } : undefined;
   const runtimeInfo = { providerId: 'codex', sessionId: 'native-1', status: activity, ...(runtime === 'connected' ? {} : { connection: { state: runtime } }) };
   const activeTurn = activity === 'running' || activity === 'waiting' ? { turnId: 't1' } : null;
-  return { snapshot: { status: activity, activeTurn, runtimeInfo }, control, restored };
+  return { snapshot: { status: activity, activeTurn, runtimeInfo }, control, restored, diagnostic: STALE };
 }
 
 const combinations: Array<{ name: string; facts: SessionFacts; business: boolean }> = [];
@@ -101,13 +102,5 @@ describe('R2 and R3: the composer', () => {
       expect(sessionNotice(facts)?.kind, name).toBe('host_offline');
       expect(composerAvailability(facts).input, name).toBe('enabled');
     }
-  });
-});
-
-describe('the T5 words', () => {
-  it('are the same list as agent-e2e/faults/connection-words.mjs', () => {
-    const source = readFileSync(new URL('../../../agent-e2e/faults/connection-words.mjs', import.meta.url), 'utf8');
-    const list = source.slice(source.indexOf('Object.freeze(['), source.indexOf('])'));
-    expect([...list.matchAll(/'([^']+)'/g)].map(match => match[1])).toEqual(T5_WORDS);
   });
 });

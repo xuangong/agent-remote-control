@@ -189,6 +189,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const queueAllowed = ready && session.operations.queue_message.allowed;
   const latest = useRef({ agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
   latest.current = { agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
+  // A message that waits for a session that cannot take it does not stay Sending, and is never sent unasked later.
+  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !laterMode && agentId !== '' ? 'This session could not be opened.' : undefined;
+  useEffect(() => { if (unsendable) waiting.hold(unsendable); }, [unsendable, agentId, waiting.items.length]);
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
   for (const [abort, owner] of richPreparations.current) {
     if (draftOnly || mutationBlocked || pendingFirstInputContext || imageRecipient?.identity !== owner.identity || imageRecipient?.lifetime !== owner.lifetime || !owner.isCurrent()) abort.abort();
@@ -204,6 +207,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   function deferMessage(): void {
     if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
     if (hasImages && blockFirstInputImages()) return;
+    // A second key press before this render saw the first one finds the draft already taken.
+    if (!hasImages && !currentDraft.text.trim()) return;
     const submitted = currentDraft.text;
     const parts = imageDraft.parts.map(part => ({ ...part }));
     // Own the bytes independently of the editable draft and its upload lifecycle.
@@ -426,7 +431,8 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     }
     if (hasResources && waiting.items.length > 0) return;
     const action = onSendMessage;
-    if (!hasResources && kind === 'send' && (!sendNow || waiting.items.length > 0) && (sendNow || canWait) && !operationBusy && hasContent && capabilities?.sendMessage !== false && (canWait || (hasImages ? onSendMessageContent : action))) { deferMessage(); return; }
+    // A plain send always goes through the queue, now or later: one path, and the editor is never disabled under it (Task 6).
+    if (!hasResources && kind === 'send' && (!sendNow || waiting.items.length > 0 || !hasAttachments) && (sendNow || canWait) && !operationBusy && hasContent && capabilities?.sendMessage !== false && (canWait || (hasImages ? onSendMessageContent : action))) { deferMessage(); return; }
     if ((hasAttachments ? !onSendMessageContent : !action) || currentDraft.pending || currentDraft.settingPending || !ready || !hasContent || !imageSendReady) return;
     if (!(kind === 'queue' ? session.operations.queue_message.allowed : session.operations.send_message.allowed) || (kind === 'queue' && (!canQueue || waiting.items.length > 0))) return;
     const submitted = currentDraft.text;
@@ -614,7 +620,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     </div>)}</div> : null}
     {hasResources && (draftScope || imageDraftBinding?.scope) && !resourceDraft.storageError ? <p role="status" className="agent-composer-note">{imageDraft.storageSaved && !resourceDraft.storageBusy ? 'Resource draft saved on this device.' : 'Saving resource draft…'}</p> : null}
     {hasResources && resourceDraft.storageError ? <p role="status" className="agent-composer-note">{resourceDraft.storageError}</p> : null}
-    {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources remain in your draft. Reconnect before sending.</p> : null}
+    {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources stay in your draft until the session is ready.</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
     {!ownershipReadOnly && !draftOnly && agentId === '' ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? commandRecovery != null ? <div className="agent-composer-note">{commandRecovery}</div>

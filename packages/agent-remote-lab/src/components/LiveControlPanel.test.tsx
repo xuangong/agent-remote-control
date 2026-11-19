@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -7,7 +8,7 @@ import { replicaState } from '../test/fixtures.js';
 import { LiveControlPanel } from './LiveControlPanel.js';
 
 describe('LiveControlPanel', () => {
-  it('sends Enter once, preserves pending text, and clears and focuses after acknowledgement', async () => {
+  it('sends Enter once, clears the editor at once and keeps it focused and enabled while the acknowledgement is pending', async () => {
     const acknowledgement = deferred<void>();
     const sendMessage = vi.fn(() => acknowledgement.promise);
     const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={sendMessage} />);
@@ -17,11 +18,15 @@ describe('LiveControlPanel', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     });
+    await act(async () => {});
     expect(sendMessage).toHaveBeenCalledExactlyOnceWith('A new message');
-    expect(input.value).toBe('  A new message  ');
-    expect(container.querySelector('[data-testid="prompt-submit"]')?.getAttribute('aria-label')).toBe('Sending…');
-    await act(async () => acknowledgement.resolve());
     expect(input.value).toBe('');
+    expect(input.disabled).toBe(false);
+    expect(document.activeElement).toBe(input);
+    await type(input, 'Typed meanwhile');
+    await act(async () => acknowledgement.resolve());
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('Typed meanwhile');
     expect(document.activeElement).toBe(input);
   });
 
@@ -43,19 +48,26 @@ describe('LiveControlPanel', () => {
     expect(sendMessage).toHaveBeenCalledWith('\u4f60\u597d');
   });
 
-  it('retains a rejected message for retry and leaves the draft intact after cancelling a turn', async () => {
+  it('keeps a rejected message in the Check delivery queue chip, never replays it, and leaves the editor and cancel independent', async () => {
     const sendMessage = vi.fn().mockRejectedValueOnce(new Error('Try again.')).mockResolvedValue(undefined);
     const active = { ...replicaState, agent: { ...replicaState.agent!, activeTurn: { turnId: 'turn-1', startedAt: '2026-09-03T00:00:00.000Z' }, capabilities: { ...replicaState.agent!.capabilities, cancel: true } } };
     const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onSendMessage={sendMessage} onCancel={async () => {}} />);
     const input = container.querySelector('textarea')!;
     await type(input, 'Keep my draft');
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
-    expect(input.value).toBe('Keep my draft');
-    expect(container.querySelector('[role="alert"]')?.textContent).toBe('Try again.');
-    await act(async () => (container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).click());
-    expect(input.value).toBe('Keep my draft');
-    await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
+    await act(async () => {});
+    const chip = () => container.querySelector('[data-testid="pending-send"]');
     expect(input.value).toBe('');
+    expect(chip()?.textContent).toContain('Keep my draft');
+    expect(chip()?.textContent).toContain('Check delivery');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Try again.');
+    await act(async () => (container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).click());
+    expect(chip()?.textContent).toContain('Keep my draft');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await act(async () => {});
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    await act(async () => chip()!.querySelector<HTMLButtonElement>('[aria-label="Dismiss message after checking delivery"]')!.click());
+    expect(chip()).toBeNull();
   });
 
   it('isolates drafts and late command completion across Agent changes', async () => {
@@ -127,29 +139,34 @@ describe('LiveControlPanel', () => {
     expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
     await type(input, 'Edited while recovering');
     expect(onDraftChange).toHaveBeenLastCalledWith('Edited while recovering');
-    expect(container.textContent).not.toMatch(/Reconnecting|Restoring|Opening session|Synchronizing|Checking access/i);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
   });
 
-  it('waits for the send acknowledgement before reporting success', async () => {
+  it('dispatches a send once, clears the editor and reports no success message while the acknowledgement is pending', async () => {
     const acknowledgement = deferred<void>();
-    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={() => acknowledgement.promise} />);
+    const sendMessage = vi.fn(() => acknowledgement.promise);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={sendMessage} />);
     const input = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'Wait for Relay acknowledgement.');
     await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
 
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
 
+    await act(async () => {});
+    expect(sendMessage).toHaveBeenCalledExactlyOnceWith('Wait for Relay acknowledgement.');
+    expect(input.value).toBe('');
     expect(container.textContent).not.toContain('Message sent.');
-    expect((container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
       acknowledgement.resolve();
       await acknowledgement.promise;
     });
 
-    expect(container.textContent).toContain('Message sent.');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('');
+    expect(container.querySelector('[data-testid="pending-send"]')).toBeNull();
   });
 
   it('reports rejected shared client confirmations for send and cancel', async () => {
@@ -170,11 +187,14 @@ describe('LiveControlPanel', () => {
     await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
 
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Send was rejected.');
+    await act(async () => {});
+    const alerts = () => Array.from(container.querySelectorAll('[role="alert"]')).map(alert => alert.textContent).join(' | ');
+    expect(alerts()).toContain('Send was rejected.');
+    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Retry after rejection.');
     expect(container.textContent).not.toContain('Message sent.');
 
     await act(async () => (container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).click());
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Cancel was rejected.');
+    expect(alerts()).toContain('Cancel was rejected.');
     expect(container.textContent).not.toContain('Turn cancellation requested.');
   });
 });

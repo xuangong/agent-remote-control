@@ -31,7 +31,7 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   // Every phase of taking over says the same thing to the person who asked for it.
   const label = phase ? 'Taking control…' : leaseNoticeLabel(lease.state);
   const description = !phase && native ? 'Taking over interrupts its running work.'
-    : !phase && !connected ? 'Reconnect to take control.' : undefined;
+    : !phase && !connected ? 'Control can be taken once the session is ready.' : undefined;
   return <div className="lab-session-control" data-read-only="true" data-native={native || undefined} aria-busy={!!phase}>
     <div className="lab-session-control-row">
       <span className="lab-session-control-owner" role="status">

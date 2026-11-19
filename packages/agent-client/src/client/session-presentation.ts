@@ -61,8 +61,8 @@ function leaseNotice(state: LeaseState): SessionNotice | undefined {
 export function sessionNotice(facts: SessionFacts): SessionNotice | undefined {
   const { session, host, replica } = facts;
   const failure = lastFailure(replica);
+  // Only a refusal for good is a notice. Diagnostics outlive reconnects, so an older one never speaks for a later attempt.
   if (session.connection === 'unavailable') return { kind: 'unavailable', message: failure ?? UNAVAILABLE };
-  if (session.connection === 'connecting' && failure) return { kind: 'unavailable', message: failure };
   if (session.activity === 'failed') {
     const agent = replica?.agent;
     return { kind: 'failed', message: agent?.runtimeInfo.failure?.message.trim() || agent?.lastError?.trim() || FAILED };

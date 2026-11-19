@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -259,7 +260,7 @@ it('keeps a stream capacity refusal and a pause out of the conversation, in the 
     const view = await render(<SessionWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
     expect(view.querySelector('[role="alert"]')).toBeNull();
     expect(view.textContent).not.toContain(diagnostic.message);
-    expect(view.textContent).not.toMatch(/Reconnecting|Synchronizing|Opening session/);
+    expect(view.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   }
 });
 
@@ -278,7 +279,6 @@ it('says why a conversation cannot open yet when its Host is offline', async () 
   expect(empty.querySelector('p')?.textContent).toBe('The conversation appears here when it is back. Messages you send now wait for it.');
 });
 
-const T5_WORDS = /Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i;
 
 it('says no connection word in the heading, the notes or a toast while the session catches up, checks control and loses its link', async () => {
   vi.useFakeTimers();
@@ -295,7 +295,7 @@ it('says no connection word in the heading, the notes or a toast while the sessi
       await act(async () => update(status));
       await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
       const said = [...view.querySelectorAll('.lab-conversation-status, .lab-control-note, .lab-toast')].map(node => node.textContent).join(' ');
-      expect(said, status).not.toMatch(T5_WORDS);
+      expect(said, status).not.toMatch(SESSION_CONNECTION_PATTERN);
       expect(view.querySelector('.lab-toast'), status).toBeNull();
     }
   } finally { vi.useRealTimers(); }
@@ -307,7 +307,7 @@ it('shows the composer with an enabled editor before the first Snapshot when the
   expect(dock.hidden).toBe(false);
   expect(view.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
   expect(view.querySelector('.lab-empty-state')).toBeNull();
-  expect(view.textContent).not.toMatch(T5_WORDS);
+  expect(view.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   const none = await render(<SessionWorkbench state={undefined} sessionStatus="idle" actions={{}} />);
   expect(none.querySelector('.lab-empty-state h3')?.textContent).toBe('Start with a Provider');
 });

@@ -1,4 +1,5 @@
 import { applyInteractionRequested, remoteSessionState, RemoteOperationError, SessionHandoff } from '@orchardworks/agent-client';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { ToastProvider } from './Toast.js';
 import { act, useEffect, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
@@ -138,7 +139,7 @@ describe('LabWorkbench', () => {
     const state = { ...replicaState, agent: { ...replicaState.agent!, status: agentStatus } };
     const container = await render(<LabWorkbench state={state} sessionStatus={sessionStatus} actions={{}} />);
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe(expected);
-    expect(container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     if (sessionStatus !== 'ready') {
       expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
       expect(container.querySelector('[data-testid="cancel-submit"]')?.matches(':disabled')).toBe(true);
@@ -204,7 +205,7 @@ describe('LabWorkbench', () => {
     // The heading keeps the business label; only an unavailable agent is said, once, above the timeline.
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Working');
     expect([...container.querySelectorAll('.lab-control-note')].map(note => note.textContent)).toEqual(notice ? [notice] : []);
-    expect(container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.textContent).toContain('Waiting for connection to respond.');
     expect(container.textContent).not.toContain('The host cannot respond');
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
@@ -241,7 +242,7 @@ describe('LabWorkbench', () => {
       const state = { ...replicaState, timeline: { ...replicaState.timeline, ...held } };
       const container = await render(<LabWorkbench state={state} sessionStatus={status} actions={{}} />);
       expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
-      expect(container.textContent).not.toMatch(/Opening session|Synchronizing|Checking access/);
+      expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
     }
   });
 
@@ -249,25 +250,26 @@ describe('LabWorkbench', () => {
     const state = { ...replicaState, timeline: { ...replicaState.timeline, restoredFromDevice: true as const } };
     const container = await render(<LabWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
-    expect(container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   });
 
   it('says nothing while a conversation is still opening and has no rows', async () => {
     const container = await render(<LabWorkbench sessionStatus="connecting" attachingAgentId="remembered-agent" actions={{}} draftOnly />);
     // The heading and the timeline say nothing; the draft composer keeps its own status.
-    expect(container.querySelector('.lab-timeline, .agent-timeline')?.textContent ?? '').not.toMatch(/Opening session|Awaiting Agent|Start with a Provider|Loading conversation/);
+    expect(container.querySelector('.lab-timeline, .agent-timeline')?.textContent ?? '').not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(container.querySelector('.lab-empty-state')).toBeNull();
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('');
   });
 
-  it('alerts with a generic connection failure before readiness and preserves the diagnostic', async () => {
+  it('says a refusal for good once, and nothing for an earlier diagnostic while connecting again', async () => {
     const state = {
       ...replicaState,
       diagnostics: [{ code: 'incompatible_protocol_version', message: 'Protocol version is incompatible.', recoverable: false }],
     };
-    const container = await render(<LabWorkbench state={state} sessionStatus="connecting" actions={{}} />);
-
-    expect(container.querySelector('.lab-control-note[role="alert"]')?.textContent).toBe('Protocol version is incompatible.');
+    const connecting = await render(<LabWorkbench state={state} sessionStatus="connecting" actions={{}} />);
+    expect(connecting.querySelector('.lab-control-note')).toBeNull();
+    const refused = await render(<LabWorkbench state={state} sessionStatus="unavailable" actions={{}} />);
+    expect(refused.querySelector('.lab-control-note[role="alert"]')?.textContent).toBe('Protocol version is incompatible.');
   });
 
   it('says nothing per session while reconnecting after a historical unrecoverable diagnosis', async () => {
@@ -279,7 +281,7 @@ describe('LabWorkbench', () => {
 
     expect(container.querySelector('.lab-control-note')).toBeNull();
     expect(container.querySelector('.lab-conversation-status')?.textContent).toBe('Ready');
-    expect(container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i);
+    expect(container.textContent).not.toMatch(SESSION_CONNECTION_PATTERN);
   });
 
   it.each([

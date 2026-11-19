@@ -62,25 +62,26 @@ async function setup(withImage = false) {
     changeText: (value: string) => changeText(value), reload: async () => { await unmount(view); return render(<Harness />); } };
 }
 
+// A plain-text send goes through the composer's queue (I1 Task 6); retention guards the sends that carry attachments.
 it('retains the submitted document before dispatch and restores it after rejection and completed hydration', async () => {
-  const f = await setup();
-  expect(f.send).not.toHaveBeenCalled();
-  expect(writeImageDraft).toHaveBeenCalledWith(expect.objectContaining({ parts: [{ type: 'text', text: 'rejected draft' }] }), 0);
+  const f = await setup(true);
+  expect(f.richSend).not.toHaveBeenCalled();
+  expect(writeImageDraft).toHaveBeenCalledWith(expect.objectContaining({ parts: expect.arrayContaining([{ type: 'text', text: 'rejected draft' }]) }), 0);
   await act(async () => f.release());
-  expect(f.send).toHaveBeenCalledExactlyOnceWith('rejected draft');
-  expect(f.getDisk().parts).toEqual([{ type: 'text', text: 'rejected draft' }]);
+  expect(f.richSend).toHaveBeenCalledOnce();
+  expect(f.getDisk().parts).toEqual(expect.arrayContaining([{ type: 'text', text: 'rejected draft' }]));
   let hydrate!: (draft: ImageDraft) => void;
   vi.mocked(readImageDraft).mockImplementationOnce(() => new Promise(resolve => { hydrate = resolve; }));
   const reloaded = await f.reload();
   expect(reloaded.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('true');
   await act(async () => hydrate(structuredClone(f.getDisk())));
   expect(reloaded.querySelector('[aria-label="Live provider controls"]')?.getAttribute('aria-busy')).toBe('false');
-  expect(reloaded.querySelector('[data-testid="prompt-input"]')?.textContent).toBe('rejected draft');
-  expect(f.getDisk().parts).toEqual([{ type: 'text', text: 'rejected draft' }]);
+  expect(reloaded.querySelector('[data-testid="prompt-input"]')?.textContent).toContain('rejected draft');
+  expect(f.getDisk().parts).toEqual(expect.arrayContaining([{ type: 'text', text: 'rejected draft' }]));
 });
 
-it.each(['newer edit', 'text ABA', 'recipient retirement', 'replacement recipient', 'document owner', 'native authority', 'storage failure'] as const)('never dispatches a retained send after %s during storage', async boundary => {
-  const f = await setup();
+it.each(['recipient retirement', 'replacement recipient', 'document owner', 'native authority', 'storage failure'] as const)('never dispatches a retained send after %s during storage', async boundary => {
+  const f = await setup(true);
   expect(writeImageDraft).toHaveBeenCalledOnce();
   expect(f.send).not.toHaveBeenCalled();
   await act(async () => {
@@ -96,7 +97,7 @@ it.each(['newer edit', 'text ABA', 'recipient retirement', 'replacement recipien
   expect(f.send).not.toHaveBeenCalled();
   expect(f.richSend).not.toHaveBeenCalled();
   expect(f.view.querySelector('[data-testid="prompt-input"]')?.textContent).toBe(preserved);
-  if (boundary !== 'document owner') expect(preserved).toBe(boundary === 'newer edit' ? 'newer draft' : 'rejected draft');
+  if (boundary !== 'document owner') expect(preserved).toContain(boundary === 'newer edit' ? 'newer draft' : 'rejected draft');
 });
 
 it('does not dispatch an old attachment snapshot after an image-only revision change during retention', async () => {

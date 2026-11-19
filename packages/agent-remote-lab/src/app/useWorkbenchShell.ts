@@ -58,13 +58,14 @@ export function useWorkbenchShell(scope: Pick<AppInputs, 'baseUrl' | 'injectedTr
       });
     };
   }, [transport, injectedTransport]);
-  const reportLink = useContext(RelayLinkReport);
+  const relayLink = useContext(RelayLinkReport);
   useEffect(() => {
     if (!transport.relayLink || !transport.subscribeRelayLink) return;
-    reportLink(transport.relayLink());
-    const stop = transport.subscribeRelayLink(reportLink);
-    return () => { stop(); reportLink('unknown'); };
-  }, [transport, reportLink]);
+    relayLink.report(transport.relayLink());
+    const stop = transport.subscribeRelayLink(relayLink.report);
+    relayLink.setReopen(transport.reopenRelayLink ? () => transport.reopenRelayLink!() : undefined);
+    return () => { stop(); relayLink.report('unknown'); relayLink.setReopen(undefined); };
+  }, [transport, relayLink]);
   return { navigation, windowMode, windowModeRef, pageVisible, accessReady, activated, accessReadyRef, shellRef, readingPositions, transport, mountedTransport };
 }
 

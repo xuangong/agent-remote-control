@@ -8,7 +8,12 @@ const automaticKey = 'agent-remote:automatic-sign-in';
 const logoutKey = 'agent-remote:signed-out';
 export const WorkspaceReady = createContext(true);
 /** Where the page's transport reports the device's link to the Relay; GatewayController provides it and shows the one indicator. */
-export const RelayLinkReport = createContext<(link: ChannelLink) => void>(() => undefined);
+export interface RelayLinkReporter {
+  report(link: ChannelLink): void;
+  /** How the banner's Retry reopens the link now; undefined when the page's transport cannot. */
+  setReopen(reopen: (() => void) | undefined): void;
+}
+export const RelayLinkReport = createContext<RelayLinkReporter>({ report: () => undefined, setReopen: () => undefined });
 
 export function parseAccess(value: unknown): WorkspaceAccess {
   if (!value || typeof value !== 'object' || !('basePath' in value) || !('expiresAt' in value) ||

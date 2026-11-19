@@ -1,7 +1,7 @@
 import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/agent-client';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { signInReturnKey } from '@orchardworks/agent-relay-core/access-page';
 import { WorkspaceShell } from './components/WorkspaceShell.js';
 import { SecurityPanel } from './components/SecurityPanel.js';
@@ -33,10 +33,12 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
   const [attempt, setAttempt] = useState(0);
   const stop = useRef<() => void>(() => undefined);
   const [channelLink, setChannelLink] = useState<ChannelLink>('unknown');
+  const reopenLink = useRef<() => void>();
+  const relayLinkReporter = useMemo(() => ({ report: setChannelLink, setReopen: (reopen: (() => void) | undefined) => { reopenLink.current = reopen; } }), []);
   const browserOnline = useBrowserOnline();
   // The page's one connection indicator: this device's link to the Relay, after the usual grace for a quick socket swap.
   const link = relayLinkView({ accessReady: ready, needsSignIn, channel: channelLink, browserOnline });
-  const notice = useRecoveryNotice('device-link', 'ready', link.state !== 'online', !!access);
+  const notice = useRecoveryNotice('device-link', link.state !== 'online', !!access);
   useEffect(() => {
     let stopped = false;
     let expiry: ReturnType<typeof setTimeout> | undefined;
@@ -201,11 +203,11 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;
-  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={setChannelLink}>
+  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={relayLinkReporter}>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction, ready)}</div>
     {securityOpen ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
     {notice && !securityOpen ? <div className="gateway-recovery" role="status">
-      {link.state === 'sign_in' ? <>Sign in to reconnect. <a href={'/auth/login' + returnPath.slice(1)} onClick={rememberTarget}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></>}
+      {link.state === 'sign_in' ? <>Sign in again to keep sending. <a href={'/auth/login' + returnPath.slice(1)} onClick={rememberTarget}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={() => { setAttempt(value => value + 1); reopenLink.current?.(); }}>Retry</button></>}
     </div> : null}
   </RelayLinkReport.Provider></WorkspaceReady.Provider>;
   if (access === undefined && previousWorkspacePath()) return <WorkspaceShell />;

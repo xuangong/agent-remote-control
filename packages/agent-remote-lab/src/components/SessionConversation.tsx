@@ -209,9 +209,10 @@ export function SessionConversation(props: SessionConversationProps) {
   // only its input waits (it queues) until a discovery confirms the locator again.
   const locatorWaiting = !!retainedResolution && staleLocator && !retainingInput;
   const pending = disconnected || !!resolutionError && !locatorWaiting || !displayedSession;
-  // A view opening its first session takes messages, which wait until it is ready (target T4). A failure, an offline Host and a
-  // view whose target changed under a previous session do not: the composer's draft may belong to that previous session.
-  const opening = pending && !session && !disconnected && !(resolutionError && !locatorWaiting) && !error && !props.offline;
+  // A view opening its first session, or opening it again after its connection was lost, takes messages, which wait until it
+  // is ready (target T4). A failure, an offline Host and a view whose target changed under a previous session do not: the
+  // composer's draft may belong to that previous session.
+  const opening = pending && !session && !(resolutionError && !locatorWaiting) && !error && !props.offline;
   return <FamilyChat {...props} disconnected={disconnected} opening={opening} onPendingInputChange={count => {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
@@ -239,7 +240,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDis
   useEffect(() => { onSessionReady?.(conversation); return () => onSessionReady?.(undefined); }, [onSessionReady, conversation.sendQueuedInput, actions.sendMessage]);
   const open = (destination: SessionEntry | AgentChildSessionView) => {
     if (pending) throw new Error('The session is still opening.');
-    if (offline) throw new Error('The Host is offline. Reconnect it before opening a subagent.');
+    if (offline) throw new Error('The Host is offline. Open the subagent when it is back.');
     return onNavigate(destination, childrenFor, presentedSession);
   };
   const navigationActions: SessionViewNavigationActions = {
@@ -300,7 +301,7 @@ function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDis
     draftSessionKey={key} draftBinding={composerDraft} imageDraftBinding={imageDraftBinding} imageRecipient={pending ? undefined : explicitImageRecipient ?? imageRecipient} questionDrafts={pending ? {} : questions}
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
-    visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={disconnected || mutationBlocked || presentation?.mutationBlocked}
+    visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={mutationBlocked || presentation?.mutationBlocked}
     draftOnly={pending && !opening || identityMismatch || !!presentation?.draftOnly}
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}

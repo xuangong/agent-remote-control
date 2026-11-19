@@ -14,7 +14,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.reverse()) await close(); cleanups.length = 0; });
 /** Lease tests run without outage grace unless they pass one. */
 async function fixture(graceMs = 0) {
-  const clock = manualClock(); cleanups.push(async () => clock.restore());
+  const clock = manualClock(); cleanups.push(async () => { clock.restore(); });
   let disabled = false; let unavailable = false; const authenticatedAt = Date.now();
   const authority = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;

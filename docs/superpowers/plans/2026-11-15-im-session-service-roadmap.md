@@ -139,3 +139,15 @@ After I4: the rest of P2 (operation queue and business states), S6b, P3, P4 and 
 - `/health` returned 200, and tailing the Relay showed no configuration error.
 - For a few minutes after the deploy, `PUT …/smart-reading` answered `journals_unavailable`. The running Durable Object was still on the previous version: Cloudflare propagates Worker and Durable Object code independently, as `docs/current/agent-remote/deployment.md` notes.
 - After that, the owner turned smart reading on for `claude`, `codex` and `copilot` on all 4 Hosts.
+
+## Release 2026-11-20: I1 quiet open and Controller 0.3.1
+
+Shipped from main `8ac70385`.
+- **Relay.** Worker `3d63810e` deployed with `wrangler.journals-enabled.jsonc`. The rollback target is `974938b1`. The partitions Worker is unchanged at `99170f75`. `/health` returns 200.
+- **Controller.** 0.3.1 is the latest GitHub release (`controller-v0.3.1`, sha256 `cf94e142…`). It fixes the Claude parallel-tool reread order. The I1 client changes ship with the Relay's web bundle.
+- **I1 measured against the control.** At 4x CPU and 100 ms:
+  - opens showing a connection word: 10 of 10 → 0;
+  - key to "Sending": 106/181 → 49/55 ms (p50/p95);
+  - focus and text kept: 0 → 10.
+- **Seen on `pnpm local`.** The access page still shows "Checking access" for about 60 ms before the workspace mounts. The I4 brand pass rewords it.
+- **Open phone defect.** On the phone, the floating launchers (activity, TPM, Window, Team) cover the conversation. This is O30 again, with more launchers, and it is fixed next.

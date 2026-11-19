@@ -10,6 +10,8 @@ export interface EnvironmentProbe {
   userShell(): string | undefined; now(): number;
   read(path: string): Promise<string | undefined>;
   available(path: string, executable?: boolean): Promise<HostDetectionStatus>;
+  /** How long one probe may take before its answer is unknown; defaults to 350 ms. */
+  probeTimeoutMs?: number;
 }
 const nativeProbe = (env: NodeJS.ProcessEnv): EnvironmentProbe => ({
   platform: platform(), arch: arch(), release: release(), home: homedir(), env,
@@ -22,9 +24,9 @@ const nativeProbe = (env: NodeJS.ProcessEnv): EnvironmentProbe => ({
 });
 const clean = (value: string) => value.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 160);
 
-async function bounded<T>(work: () => Promise<T>, fallback: T): Promise<T> {
+async function bounded<T>(work: () => Promise<T>, fallback: T, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try { return await Promise.race([Promise.resolve().then(work), new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), 350); })]); }
+  try { return await Promise.race([Promise.resolve().then(work), new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), timeoutMs); })]); }
   catch { return fallback; }
   finally { clearTimeout(timer); }
 }
@@ -35,7 +37,7 @@ export async function detectHostEnvironment(probe: EnvironmentProbe = nativeProb
   const paths = windows ? win32 : posix;
   const env = (key: string) => windows ? Object.entries(probe.env).find(([name]) => name.toLowerCase() === key.toLowerCase())?.[1] : probe.env[key];
   const available = async (path: string, executable = true): Promise<HostDetectionStatus> => {
-    return bounded(() => probe.available(path, executable), 'unknown');
+    return bounded(() => probe.available(path, executable), 'unknown', probe.probeTimeoutMs ?? 350);
   };
   const find = async (commands: string[], locations: string[] = []): Promise<HostDetectionStatus> => {
     const directories = [...(env('PATH') ?? '').split(windows ? ';' : ':').filter(path => paths.isAbsolute(path)).slice(0, 32),
@@ -65,7 +67,7 @@ export async function detectHostEnvironment(probe: EnvironmentProbe = nativeProb
   let osName = ({ darwin: 'macOS', win32: 'Windows', linux: 'Linux' } as Record<string, string>)[probe.platform] ?? probe.platform;
   if (probe.platform === 'linux') {
     try {
-      const data = await bounded(() => probe.read('/etc/os-release'), undefined);
+      const data = await bounded(() => probe.read('/etc/os-release'), undefined, probe.probeTimeoutMs ?? 350);
       const name = data?.match(/^PRETTY_NAME=(?:"([^"\n]*)"|'([^'\n]*)'|([^\n]*))$/m);
       osName = clean(name?.[1] ?? name?.[2] ?? name?.[3] ?? '') || osName;
     } catch {}

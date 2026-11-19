@@ -10,7 +10,7 @@ import { nativeSessionRefKey } from '@orchardworks/agent-remote-protocol';
 import { createOperationCache, type MutationEntry } from '@orchardworks/agent-session-runtime';
 import type { AgentInputAcceptance, AgentPreparedTextInput, AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, {recursive:true,force:true}))); });
+afterEach(async () => { vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, {recursive:true,force:true}))); });
 const ref = (nativeSessionId: string) => ({controllerId:'host',providerId:'fixture',nativeSessionId});
 const operation = (operationId: string) => ({operationId,kind:'send_message' as const,parameters:{text:'hello'},maximumResultBytes:1024});
 async function fixture() {
@@ -251,14 +251,15 @@ test('clears restored markers of sessions nobody reopens once the restart settle
   await f.contexts.markMutation(idle, 'before'); await f.contexts.markMutation(busy, 'before');
   let now = 0;
   const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10, now: () => now }); await restored.ready;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const cache = createOperationCache();
   const unsettled = vi.spyOn(cache, 'hasUnsettledMutation').mockImplementation(key => key === nativeSessionRefKey(busy));
   const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined, cache);
   try {
-    now = 10;
+    now = 10; await vi.advanceTimersByTimeAsync(1_010);
     const markers = async () => (JSON.parse(await readFile(join(f.root, 'context.json'), 'utf8')).coverage as Array<{ target: { nativeSessionId: string } }>)
       .map(marker => marker.target.nativeSessionId).sort();
-    await vi.waitFor(async () => expect(await markers()).toEqual(['busy']), { timeout: 3_000, interval: 50 });
+    await vi.waitFor(async () => expect(await markers()).toEqual(['busy']), { interval: 5 });
     expect(restored.coverageAvailable(idle)).toBe(true);
     expect(restored.coverageAvailable(busy)).toBe(true);
     expect(() => boundary.checkSource(busy)).toThrow(/unsettled/i);
@@ -270,12 +271,13 @@ test('an unreadable store at restart settlement keeps its markers without an unc
   await f.contexts.markMutation(target, 'before');
   let now = 0;
   const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10, now: () => now }); await restored.ready;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined);
   await new Promise(resolve => setImmediate(resolve));
   const settlement = vi.spyOn(restored, 'restartSettlement').mockImplementation(() => { throw new Error('Succession context store is not ready.'); });
   try {
-    now = 10;
-    await vi.waitFor(() => expect(settlement).toHaveBeenCalled(), { timeout: 3_000, interval: 50 });
+    now = 10; await vi.advanceTimersByTimeAsync(1_010);
+    expect(settlement).toHaveBeenCalled();
     expect(JSON.parse(await readFile(join(f.root, 'context.json'), 'utf8')).coverage).toEqual([{ target, operationId: 'before' }]);
   } finally { settlement.mockRestore(); await boundary.close(); }
 });
@@ -284,11 +286,12 @@ test('close cancels a pending restart settlement', async () => {
   const f = await fixture(), target = ref('idle');
   await f.contexts.markMutation(target, 'before');
   const restored = new SessionSuccessionContextStore(f.root, { restartSettleMs: 10 }); await restored.ready;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const boundary = new SessionSuccessionBoundary(restored, () => {}, () => undefined);
-  await Promise.resolve(); await boundary.close();
-  const clearing = vi.spyOn(restored, 'clearMutation');
-  await new Promise(resolve => setTimeout(resolve, 1_100));
-  expect(clearing).not.toHaveBeenCalled();
+  await new Promise(resolve => setImmediate(resolve)); await boundary.close();
+  const settlement = vi.spyOn(restored, 'restartSettlement');
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(settlement).not.toHaveBeenCalled();
 });
 
 async function recoveryFixture() {

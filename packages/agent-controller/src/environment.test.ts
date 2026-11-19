@@ -51,7 +51,7 @@ it('honors configured executable names and finds standard tools outside the serv
 });
 
 it('finishes detection when an environment probe stalls', async () => {
-  const result = await detectHostEnvironment(probe({ read: () => new Promise(() => {}), available: () => new Promise(() => {}) }));
+  const result = await detectHostEnvironment(probe({ probeTimeoutMs: 5, read: () => new Promise(() => {}), available: () => new Promise(() => {}) }));
   expect(result.browsers.every(item => item.status === 'unknown')).toBe(true);
   expect(result.container).toBeNull();
-}, 3000);
+});

@@ -18,32 +18,12 @@
    "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
   },
   {
-   "test": "packages/agent-controller/src/session-succession-capacity.test.ts > optional unknown keeps a complete positive-proof reserve at the eight-MiB boundary",
-   "reason": "Serializes, validates and clones an 8 MiB succession state several times; CPU bound by the ceiling under test, no disk."
-  },
-  {
    "test": "packages/agent-controller/src/tpm-review.test.ts > paginates bounded catalog summaries without losing work identities or exposing large artifacts",
    "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
   },
   {
    "test": "packages/agent-controller/src/controller-update.test.ts > installs a verified package without lifecycle scripts and preserves the active version",
    "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
-   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > close cancels a pending restart settlement",
-   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
-  },
-  {
-   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > clears restored markers of sessions nobody reopens once the restart settles",
-   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
-  },
-  {
-   "test": "packages/agent-controller/src/environment.test.ts > finishes detection when an environment probe stalls",
-   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
-   "test": "packages/agent-controller/src/session-succession-boundary.test.ts > an unreadable store at restart settlement keeps its markers without an uncaught error",
-   "reason": "Waits a real restart-settlement delay; needs the delay as an injected clock."
   },
   {
    "test": "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores tpm tools with exact recipient and release fencing",

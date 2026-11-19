@@ -570,16 +570,15 @@ Follow `.agents/skills/prepare-arc-local/SKILL.md`:
 
 To be filled by Task 9 and Task 10: accounting against section 5, runner tables for both arms, suites, and the `pnpm local` report.
 
-## 11. Open questions
+## 11. Decisions (2026-11-20)
 
-1. **Runtime `unavailable`.** T4 says runtime state never disables the composer. When the adapter reports the native runtime unavailable, sends cannot be dispatched (`sessionOperationAvailability` refuses them). The plan says it once as a notice ("The agent is not available on <Host>") and keeps the composer enabled, with sends waiting. The alternative is to disable it as a business failure. Owner's choice; the vectors take either.
-2. **Settings before ready.** The model and setting controls render from the Snapshot but stay non-interactive until their operation is allowed, with no label. A change made before ready is not queued. Is that acceptable for I1, or should setting changes wait in the queue too (P2 scope)?
-3. **Commands, skills, files and next-turn queueing before ready.**
-   - They need the session's command list or the Host, so I1 accepts them only at `now`. Before that, Enter leaves them in the editor.
-   - Plain text and images wait in the queue.
-   - Should a command typed during open also wait, which would be new behaviour in the waiting queue?
-4. **The sign-in page's words.** `agent-relay-core/src/access-page.ts` says "Checking access…", "Restoring access…" and "Opening session…" before the workspace exists, on a cold first visit. That is account access, not a session, so it is out of I1 and the flows observe only the workspace. If the owner reads T5 as covering it too, the rewording is a separate, small Relay change.
-5. **Capacity and paused sessions.** `session_capacity` and `session_paused` diagnostics today surface through the "reconnecting" note. I1 shows them only in L3, because a paused hidden view resumes on use and an active view retries. Confirm that no business notice is wanted.
-6. **100 ms at 4x CPU.** S5 measured 116 to 125 ms, dominated by the throttled page. Task 6's single text path is the planned fix. If it still misses, the choice is between accepting the measured figure and a deeper rendering change, which belongs with I3's new timeline.
-7. **"Sending" with its age after a minute.** This is in the design's per-operation presentation and is not required by T4's measurement. The plan leaves it to P2's operation presentation.
-8. **Crude-mode sessions.** T5 is stated for smart mode. The plan applies the same rule to every session, with no mode branch: crude sessions also lose the labels and keep the composer enabled. This is simpler and consistent with design decision 4. Flag it if crude sessions should keep their labels.
+The owner asked for autonomous progress on the approved Orchard design. These answers follow its decisions 4 and 5:
+
+1. **Runtime unavailable.** The composer stays enabled. A notice names the problem once ("The agent is not available on <Host>"), and sends wait.
+2. **Settings before ready.** They are non-interactive without a label and are not queued. Queuing them belongs to P2.
+3. **Commands, skills, files and next-turn queueing.** These are accepted only at `now`. Plain text and images wait.
+4. **Sign-in page words.** They are out of I1. The I4 brand pass rewords the access page.
+5. **Capacity and paused sessions.** They show in L3 only.
+6. **100 ms at 4x CPU.** Measure after Task 6. If it still misses, record the figure, and the rendering change moves to I3's timeline.
+7. **"Sending" with its age.** This belongs to P2.
+8. **Crude-mode sessions.** The same rule applies to every session, with no mode branch.

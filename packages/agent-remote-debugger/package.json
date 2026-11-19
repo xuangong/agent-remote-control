@@ -4,7 +4,13 @@
   "version": "0.1.0",
   "private": false,
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "exports": {
+      "./server": {
+        "types": "./dist/server.d.ts",
+        "import": "./dist/server.js"
+      }
+    }
   },
   "type": "module",
   "bin": {

@@ -1984,7 +1984,8 @@ it('pipelines socket history with subscription and waits for both confirmations'
   } finally { client.stop(); }
 });
 
-it('requests control before socket history so slow history cannot block ownership acquisition', async () => {
+// I1 section 3: the control check runs alongside the subscription on the wire; only `ready` waits for the grant.
+it('requests the subscription, control and the tail in one flight, and waits on none of them to send the next', async () => {
   const transport = new FakeTransport();
   const client = new RemoteSessionClient('agent-one', transport, new AgentReplica(), {timelineRecovery: 'websocket', requireSessionControl: true});
   const statuses: string[] = []; client.subscribeStatus(value => statuses.push(value));
@@ -1993,9 +1994,8 @@ it('requests control before socket history so slow history cannot block ownershi
     transport.emit({protocolVersion: '1.8.0', type: 'negotiated', sessionControl: true});
     transport.emit(snapshot());
     transport.emit({protocolVersion: '1.8.0', type: 'session_control', payload: {agentId: 'agent-one', access: 'read_only', available: true, revision: '1'}});
-    const types = transport.sent.map(message => message.type);
-    expect(types).toContain('timeline_request');
-    expect(types.indexOf('session_control_request')).toBeLessThan(types.indexOf('timeline_request'));
+    // No reply yet: all three requests left in this one synchronous flight.
+    expect(transport.sent.map(message => message.type)).toEqual(['negotiate', 'timeline_subscription', 'session_control_request', 'timeline_request']);
     const request = transport.sent.find(message => message.type === 'timeline_request')!;
     if (request.type !== 'timeline_request') throw new Error('Missing history');
     transport.emit(page('tail', [], {requestId: request.payload.requestId}));
@@ -2005,7 +2005,7 @@ it('requests control before socket history so slow history cannot block ownershi
     await transport.settle(); expect(statuses.at(-1)).toBe('catching_up');
     const control = transport.sent.find(message => message.type === 'session_control_request')!;
     if (control.type !== 'session_control_request') throw new Error('Missing control');
-    transport.emit({protocolVersion: '1.8.0', type: 'session_control', payload: {agentId: 'agent-one', requestId: control.payload.requestId, access: 'read_only', available: false, revision: '1'}});
+    transport.emit({protocolVersion: '1.8.0', type: 'session_control', payload: {agentId: 'agent-one', requestId: control.payload.requestId, access: 'control', available: false, revision: '1', token: 'proof'}});
     await transport.settle(); expect(statuses.at(-1)).toBe('ready');
   } finally { client.stop(); }
 });

@@ -310,7 +310,7 @@ pnpm arch:check
 
 **Files.** `packages/agent-client/src/client/remote-session-client.test.ts`.
 
-**Test.** "requests the subscription, control and the tail in one flight, and waits on none of them to send the next":
+**Test.** "requests the subscription, control and the tail in one flight, and waits on none of them to send the next" (the existing "requests control before socket history…" test, renamed and tightened, rather than a second test of the same rule):
 - Using the existing fake transport, emit `negotiated` (`sessionControl: true`), `agent_snapshot` and `session_control`, synchronously and with no replies.
 - Assert that `transport.sent` holds `timeline_subscription`, `session_control_request` and `timeline_request` (tail), in that order, before any reply.
 - Then answer the tail before the grant, and assert that the status stays `catching_up` until the grant, then becomes `ready`.
@@ -617,6 +617,12 @@ What the control arm shows:
 **Tests.** `relay-link.test.ts` 7, `session-channel-transport.test.ts` 4 (fake sockets, fake timers), `GatewayController.test.tsx` +2 (27 in the file). The pool's deadline test advances the 20 s open deadline with fake timers.
 
 **Not yet seen by the page.** The browser specs that read `.gateway-recovery` (`e2e/seamless-access.spec.ts`) only check that it is hidden; Task 7 runs them.
+
+### Task 3: the control check alongside the subscription
+
+**State accounting.** 0 fields, 0 paths: no product change. Section 3's finding holds.
+
+**Test.** The existing test "requests control before socket history so slow history cannot block ownership acquisition" already drove this flight and only checked that control preceded the tail. It is renamed to the plan's name and now asserts the exact order before any reply (`negotiate`, `timeline_subscription`, `session_control_request`, `timeline_request`), answers the tail first, stays `catching_up`, and turns `ready` on a granted `control`. A new test would have asserted the same rule twice. Mutation: deferring `beginSocketRecovery` behind `controlReady` fails it, and only it, of the 109 tests in the file.
 
 ## 11. Decisions (2026-11-20)
 

@@ -68,7 +68,7 @@ const typeAndSend = async (page: Page, text: string) => {
 };
 
 for (const journalServed of [true, false]) {
-  it(`keeps the text in the composer when a ${journalServed ? 'journal-served' : 'crude'} session was taken by a terminal, offers take-over, and sends the same text after it`, async () => {
+  it(`holds the text in the queue as Not sent when a ${journalServed ? 'journal-served' : 'crude'} session was taken by a terminal, offers take-over, and Retry sends the same text once after it`, async () => {
     const view = await sessionPage(journalServed);
     try {
       await typeAndSend(view.page, 'first');
@@ -77,31 +77,42 @@ for (const journalServed of [true, false]) {
       await view.relay.terminalTakes();
       await view.input.fill('draft that must survive');
       await view.input.press('Enter');
-      // The refusal keeps the text and the focus, and the composer turns read-only with the take-over offered.
+      // The refusal delivered nothing: the text waits in the queue chip as Not sent, and the take-over is offered.
       const takeOver = view.page.getByRole('button', { name: 'Interrupt and take control' });
       await browserExpect(takeOver).toBeVisible();
-      await browserExpect(view.input).toHaveValue('draft that must survive');
+      const chip = view.page.getByTestId('pending-send');
+      await browserExpect(chip).toContainText('draft that must survive');
+      await browserExpect(chip.locator('.agent-pending-state')).toHaveText('Not sent');
       expect(sentTexts(view.relay)).toEqual(['first']);
       await takeOver.click();
       await browserExpect(takeOver).toBeHidden();
       await browserExpect(view.input).toBeEditable();
-      await browserExpect(view.input).toHaveValue('draft that must survive');
-      await view.input.press('Enter');
-      await browserExpect(view.input).toHaveValue('');
+      await view.page.getByRole('button', { name: 'Retry pending send' }).click();
       await expect.poll(() => sentTexts(view.relay)).toEqual(['first', 'draft that must survive']);
+      await browserExpect(chip).toHaveCount(0);
       expect(view.errors).toEqual([]);
     } finally { await view.close(); }
   }, 60_000);
 }
 
-it('keeps the text in the composer and says why when the Host is offline', async () => {
+it('holds the text as Not sent and says why when the Host is offline, then Retry sends it once the Host is back', async () => {
   const view = await sessionPage(true);
   try {
     await view.relay.stopController();
     await view.input.fill('while the Host is away');
     await view.input.press('Enter');
     await browserExpect(view.page.getByText(/offline/i).first()).toBeVisible();
-    await browserExpect(view.input).toHaveValue('while the Host is away');
+    const chip = view.page.getByTestId('pending-send');
+    await browserExpect(chip).toContainText('while the Host is away');
+    await browserExpect(chip.locator('.agent-pending-state')).toHaveText('Not sent');
+    expect(sentTexts(view.relay)).toEqual([]);
+    await view.relay.startController();
+    // Retry sends it once the Host is back; the page reconnects on its own.
+    await expect.poll(async () => {
+      await view.page.getByRole('button', { name: 'Retry pending send' }).click({ timeout: 1000 }).catch(() => {});
+      return sentTexts(view.relay);
+    }, { timeout: 20_000 }).toEqual(['while the Host is away']);
+    await browserExpect(chip).toHaveCount(0);
     expect(view.errors).toEqual([]);
   } finally { await view.close(); }
 }, 60_000);

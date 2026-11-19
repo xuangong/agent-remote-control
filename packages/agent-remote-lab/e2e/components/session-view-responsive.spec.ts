@@ -1,5 +1,16 @@
 import { expect, test, type Locator } from '@playwright/test';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { activateComposerAction, revealComposerAction } from '../composer-actions';
+
+const BUSINESS_LABEL = /^(Ready|Working|Waiting for response|Starting|Closed|Agent failed)$/;
+
+/** T5: whatever the connection, the view says no connection word, its label is hidden or a business label, and the editor takes input. */
+async function expectNoConnectionWords(view: Locator) {
+  const status = view.getByTestId('agent-activity-label');
+  await expect(view).not.toContainText(SESSION_CONNECTION_PATTERN);
+  if (await status.isVisible()) await expect(status).toHaveText(BUSINESS_LABEL);
+  await expect(view.getByTestId('prompt-input')).toBeEditable();
+}
 
 test('composer height stays stable from opening through ready and reconnect with a retained draft', async ({ page, isMobile }, testInfo) => {
   await page.setViewportSize({ width: isMobile ? 390 : 1440, height: 844 });
@@ -12,7 +23,7 @@ test('composer height stays stable from opening through ready and reconnect with
       const status = view.getByTestId('agent-activity-label');
       const input = view.getByTestId('prompt-input');
       const draft = () => input.evaluate(element => element instanceof HTMLTextAreaElement ? element.value : element.textContent);
-      await expect(status).toHaveText('Opening session');
+      await expectNoConnectionWords(view);
       await expect(composer).not.toContainText('Open or attach to an Agent first.');
       await expect(input).toHaveCSS('font-size', width <= 760 ? '16px' : '14px');
       const expectedDraft = query.includes('emptyDraft') ? '' : 'A draft kept while the view resizes';
@@ -31,49 +42,38 @@ test('composer height stays stable from opening through ready and reconnect with
         await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
         expect(Math.abs((await composer.boundingBox())!.height - opening.height)).toBeLessThan(1);
         expect(await draft()).toBe(expectedDraft);
-        if (connection !== 'ready') await expect(status).toBeVisible();
+        await expectNoConnectionWords(view);
       }
     }
   }
 });
 
-test('connection status remains visible during recovery and hides when ready in a narrow Session View', async ({ page }, testInfo) => {
+test('no connection word shows in a narrow Session View, and the editor stays editable', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/e2e/fixtures/session-view-responsive.html?idle&toolbar');
   const view = page.locator('[data-placement="primary"]');
-  const status = view.getByTestId('agent-activity-label');
   for (const width of [360, 320]) {
     await page.getByRole('spinbutton', { name: 'View width' }).fill(String(width));
-    for (const [connection, label] of [['connecting', 'Opening session'], ['catching_up', 'Synchronizing'], ['disconnected', 'Reconnecting'], ['ready', 'Ready']] as const) {
+    for (const connection of ['connecting', 'catching_up', 'disconnected', 'ready']) {
       await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
-      await expect(status).toHaveText(label);
-      if (connection === 'ready') await expect(status).toBeHidden();
-      else {
-        await expect(status).toBeVisible();
-        const frame = (await view.boundingBox())!, indicator = (await status.boundingBox())!;
-        expect(indicator.x).toBeGreaterThanOrEqual(frame.x);
-        expect(indicator.x + indicator.width).toBeLessThanOrEqual(frame.x + frame.width);
-      }
+      await expectNoConnectionWords(view);
       await expect(view.getByTestId('cancel-submit')).toBeHidden();
       if (connection === 'connecting' || connection === 'ready') await view.screenshot({ path: testInfo.outputPath(`${width}-${connection}.png`) });
     }
   }
 });
 
-test('cached and empty draft views show recovery without reviving old activity or native controls', async ({ page }) => {
+test('cached and empty draft views say no connection word and keep the editor open without reviving old activity or native controls', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   for (const query of ['draftOnly&toolbar', 'draftOnly&toolbar&noSnapshot']) {
     await page.goto(`/e2e/fixtures/session-view-responsive.html?${query}`);
     await page.getByRole('spinbutton', { name: 'View width' }).fill('360');
     const view = page.locator('[data-placement="primary"]');
-    for (const [connection, label] of [['connecting', 'Opening session'], ['catching_up', 'Synchronizing'], ['disconnected', 'Reconnecting'], ['ready', 'Opening session']] as const) {
+    for (const connection of ['connecting', 'catching_up', 'disconnected', 'ready']) {
       await page.getByRole('combobox', { name: 'Session connection' }).selectOption(connection);
-      await expect(view.getByTestId('agent-activity-label')).toHaveText(label);
-      await expect(view.getByTestId('agent-activity-label')).toBeVisible();
+      await expectNoConnectionWords(view);
       await expect(view.getByTestId('turn-elapsed')).toHaveCount(0);
       await expect(view.getByTestId('cancel-submit')).toBeHidden();
-      await expect(view.getByTestId('prompt-submit')).toBeDisabled();
-      await expect(view.getByTestId('prompt-input')).toBeEditable();
     }
   }
 });

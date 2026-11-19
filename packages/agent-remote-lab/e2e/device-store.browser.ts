@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from '@playwright/test';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { build } from 'esbuild';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 
@@ -21,7 +22,7 @@ beforeAll(async () => {
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
     import '@orchardworks/agent-client-web/browser';
-    import { AgentTimeline } from '@orchardworks/agent-client-web/react';
+    import { AgentComposer, AgentTimeline } from '@orchardworks/agent-client-web/react';
     import { AgentActivityStatus } from '@orchardworks/agent-client-web/testing';
     import { remoteSessionState } from '@orchardworks/agent-client';
     import { AgentReplica } from '@orchardworks/agent-client';
@@ -69,9 +70,10 @@ beforeAll(async () => {
       const state = useSyncExternalStore(listener => replica.subscribe(listener), () => replica.getState());
       useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => connection);
       const session = remoteSessionState(state, connection);
-      return <div style={{ width: '720px' }}><AgentActivityStatus state={state} sessionState={session} /><AgentTimeline state={state} /></div>;
+      return <div style={{ width: '720px' }}><AgentActivityStatus state={state} sessionState={session} /><AgentTimeline state={state} /><AgentComposer state={state} sessionState={session} onSendMessage={async text => { window.sentMessages.push(text); }} /></div>;
     }
     // Every state the page is in: rows and opening words, recorded as the document changes.
+    window.sentMessages = [];
     window.frames = [];
     const record = () => window.frames.push({ rows: document.querySelectorAll('.agent-timeline-entry').length, text: document.body.textContent });
     window.ready.then(() => {
@@ -91,7 +93,7 @@ afterAll(async () => { await browser?.close(); await new Promise<void>(resolve =
 
 interface Row { key: string; seq: number; text: string }
 const rows = (count: number): Row[] => Array.from({ length: count }, (_, index) => ({ key: `k${index}`, seq: index + 1, text: `Reply number ${index}. ${'Readable conversation text. '.repeat(3)}` }));
-const opening = /Opening session|Synchronizing|Checking access/;
+const opening = SESSION_CONNECTION_PATTERN;
 
 /** A browser context that has read the conversation once and is back on a fresh page. */
 async function knownConversation(initialScript?: string) {
@@ -117,7 +119,7 @@ it('shows the stored rows in the first frame after a reload, with no opening wor
     await page.locator('.agent-timeline-entry').first().waitFor();
     const firstFrame = await page.evaluate(() => (window as any).frames[0]);
     expect(firstFrame.rows).toBe(30);
-    expect(firstFrame.text).not.toMatch(/Opening session|Synchronizing|Checking access/);
+    expect(firstFrame.text).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(await page.evaluate(() => (window as any).replica.getState().timeline.restoredFromDevice)).toBe(true);
     // The connection opens and its first page confirms the rows: the same nodes stay, no frame is without rows, no opening word appears.
     await marks(page);
@@ -154,13 +156,22 @@ it('replaces stored rows by key when the Relay holds another epoch, keeping unch
   } finally { await context.close(); }
 });
 
-it('says Reconnecting, never hides it, when the connection breaks while stored rows are held', async () => {
+it('a broken connection keeps the stored rows and says nothing per session', async () => {
   const { context, page } = await knownConversation();
   try {
     await page.reload();
     await page.locator('.agent-timeline-entry').first().waitFor();
     await page.evaluate(() => { (window as any).setConnection('disconnected'); });
-    await expect.poll(() => page.evaluate(() => document.body.textContent)).toContain('Reconnecting');
+    const input = page.getByTestId('prompt-input');
+    await expect.poll(() => input.isEditable()).toBe(true);
+    expect(await page.locator('.agent-timeline-entry').count()).toBe(30);
+    expect(await page.evaluate(() => document.body.textContent)).not.toMatch(SESSION_CONNECTION_PATTERN);
+    await input.click();
+    await page.keyboard.type('Typed while offline');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => page.getByTestId('pending-send').textContent()).toMatch(/Sending/);
+    expect(await page.evaluate(() => (window as any).sentMessages)).toEqual([]);
+    expect(await page.evaluate(() => document.body.textContent)).not.toMatch(SESSION_CONNECTION_PATTERN);
     expect(await page.locator('.agent-timeline-entry').count()).toBe(30);
   } finally { await context.close(); }
 });

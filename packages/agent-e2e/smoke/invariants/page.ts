@@ -1,7 +1,6 @@
 import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
-import { markers, received, sent, payloadOf, agentOf } from './wire.js';
-
-const RECONNECT_LABEL = /reconnect|synchroniz|connecting/i;
+import { sessionConnectionWordsIn } from '../../faults/connection-words.mjs';
+import { markers, sent, received, payloadOf, agentOf } from './wire.js';
 
 /** M3: once the page showed a conversation it never shows an empty frame again without a loading or empty-state placeholder. */
 export function noBlankFrame(page: PageReport): InvariantResult {
@@ -12,35 +11,21 @@ export function noBlankFrame(page: PageReport): InvariantResult {
     if (sample.messages > 0) shown = true;
     else if (shown) {
       checked += 1;
-      if (sample.loading.length === 0 && sample.labels.length === 0) violations.push({ message: 'the conversation went blank with no placeholder and no status label', at: sample.t });
+      if (sample.loading.length === 0) violations.push({ message: 'the conversation went blank with no placeholder or held rows', at: sample.t });
     }
     if (sample.messages > 0) checked += 1;
   }
   return result('no-blank-frame', checked, violations);
 }
 
-/**
- * M3 and M7: a status label such as "Reconnecting" or "Synchronizing" must clear within `graceMs` of the Relay answering on an
- * open connection. A label that stays after the connection is healthy is stale.
- */
-export function noStaleLabel(transcript: Transcript, page: PageReport, graceMs = 5000): InvariantResult {
+/** T5: no sample of the page shows a per-session connection word. A business label such as Ready, Working or Host offline is fine. */
+export function noSessionConnectionLabel(page: PageReport): InvariantResult {
   const violations: Violation[] = [];
-  const ready = received(transcript).filter(frame => ['negotiated', 'timeline_page', 'agent_snapshot', 'agent_stream'].includes(frame.message.type));
-  const closes = markers(transcript, 'socket-close');
-  let checked = 0;
   for (const sample of page.samples) {
-    if (!sample.labels.some(label => RECONNECT_LABEL.test(label))) continue;
-    checked += 1;
-    const anchor = ready.filter(frame => frame.t <= sample.t).at(-1);
-    if (!anchor) continue;
-    const closedSince = closes.some(close => close.connection === anchor.connection && close.t > anchor.t && close.t <= sample.t);
-    // The newest answer must be old enough, and no newer open or close may explain the label.
-    const reopened = markers(transcript, 'socket-open').some(open => open.t > anchor.t && open.t <= sample.t);
-    if (!closedSince && !reopened && sample.t - anchor.t > graceMs) {
-      violations.push({ message: `"${sample.labels.join(', ')}" still shown ${sample.t - anchor.t} ms after the Relay answered`, at: sample.t });
-    }
+    const words = sessionConnectionWordsIn(sample.labels.join('\n'));
+    if (words.length > 0) violations.push({ message: `the page said ${words.map(word => `"${word}"`).join(', ')} at ${sample.t} ms`, at: sample.t, detail: sample.labels });
   }
-  return result('no-stale-label', checked, violations);
+  return result('no-session-connection-label', page.samples.length, violations);
 }
 
 /**

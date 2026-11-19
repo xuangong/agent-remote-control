@@ -1,31 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import { page, sample, tailPage, transcript } from './builders.js';
-import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, noBlankFrame, noStaleLabel } from './page.js';
+import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, noBlankFrame, noSessionConnectionLabel } from './page.js';
 
 describe('no blank frame', () => {
   it('passes when the conversation stays or a placeholder covers the gap', () => {
     const report = page({ samples: [sample(0), sample(100, { messages: 0, entries: 0, loading: ['Loading session'] }), sample(200)] });
     expect(noBlankFrame(report).status).toBe('passed');
   });
-  it('fails when the conversation empties with no placeholder and no label', () => {
-    const report = page({ samples: [sample(0), sample(100, { messages: 0, entries: 0, labels: [] }), sample(200)] });
+  it('fails when the conversation empties with no placeholder or held rows, whatever label shows', () => {
+    const report = page({ samples: [sample(0), sample(100, { messages: 0, entries: 0, labels: ['Ready'] }), sample(200)] });
     expect(noBlankFrame(report).violations[0]?.at).toBe(100);
   });
 });
 
-describe('no stale label', () => {
-  const answered = () => transcript().marker(0, 'socket-open', undefined, 1).receive(1000, 'negotiated');
-  it('passes when the label clears soon after the Relay answers', () => {
-    const report = page({ samples: [sample(1500, { labels: ['Synchronizing'] }), sample(3000)] });
-    expect(noStaleLabel(answered().build(), report, 5000).status).toBe('passed');
+describe('no session connection label', () => {
+  it('passes samples that say Ready or Working', () => {
+    const report = page({ samples: [sample(100, { labels: ['Ready'] }), sample(200, { labels: ['Working'] }), sample(300, { labels: [] })] });
+    expect(noSessionConnectionLabel(report).status).toBe('passed');
   });
-  it('passes when the connection closed after the answer, so reconnecting is true', () => {
-    const wire = answered().marker(2000, 'socket-close', undefined, 1).build();
-    expect(noStaleLabel(wire, page({ samples: [sample(9000, { labels: ['Reconnecting'] })] }), 5000).status).toBe('passed');
+  it('fails at the time a sample says Synchronizing, or any other connection word', () => {
+    const report = page({ samples: [sample(100), sample(1500, { labels: ['Synchronizing'] }), sample(2000, { labels: ['Reconnect'] })] });
+    const found = noSessionConnectionLabel(report);
+    expect(found.status).toBe('failed');
+    expect(found.violations.map(violation => violation.at)).toEqual([1500, 2000]);
+    expect(found.violations[0]?.message).toMatch(/Synchronizing/);
   });
-  it('fails when "Reconnecting" stays long after the Relay answered on an open connection', () => {
-    const report = page({ samples: [sample(9000, { labels: ['Reconnecting'] })] });
-    expect(noStaleLabel(answered().build(), report, 5000).violations[0]?.message).toMatch(/Reconnecting/);
+  it('passes Host offline, which is a business fact', () => {
+    expect(noSessionConnectionLabel(page({ samples: [sample(100, { labels: ['Host offline'] })] })).status).toBe('passed');
+  });
+  it('is not exercised by an empty report', () => {
+    expect(noSessionConnectionLabel(page()).status).toBe('not_exercised');
   });
 });
 

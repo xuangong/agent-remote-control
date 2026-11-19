@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from '@playwright/test';
+import { SESSION_CONNECTION_PATTERN } from '../faults/connection-words.mjs';
 
 test.use({ launchOptions: { ignoreDefaultArgs: ['--hide-scrollbars'] } });
 
@@ -17,14 +18,16 @@ test('keeps the composer fixed and accepting drafts through session recovery', a
   await expect(send).toBeEnabled();
   const ready = await geometry();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: true })));
-  await expect(page.locator('.lab-conversation-status')).toHaveText('Synchronizing');
+  await expect(page.locator('.lab-conversation-status')).not.toHaveText(SESSION_CONNECTION_PATTERN);
+  await expect(page.locator('body')).not.toContainText(SESSION_CONNECTION_PATTERN);
   await expect(send).toBeEnabled();
   await expect(input).toBeEnabled();
   expect(await geometry()).toEqual(ready);
   await input.fill('My draft is ready');
   const syncing = await geometry();
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('fixture-synchronizing', { detail: false })));
-  await expect(page.locator('.lab-conversation-status')).not.toHaveText('Synchronizing');
+  await expect(page.locator('.lab-conversation-status')).not.toHaveText(SESSION_CONNECTION_PATTERN);
+  await expect(page.locator('body')).not.toContainText(SESSION_CONNECTION_PATTERN);
   await expect(send).toBeEnabled();
   await expect(input).toHaveValue('My draft is ready');
   expect(await geometry()).toEqual(syncing);

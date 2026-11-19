@@ -55,12 +55,13 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       }
       await input.fill('Keep editing while the network recovers');
       await browserExpect(page.locator('[data-testid="pending-send"]')).toHaveCount(3);
-      await browserExpect(page.locator('.agent-pending-state')).toHaveCount(0);
+      await browserExpect(page.locator('.agent-pending-state')).toHaveCount(3);
+      await browserExpect(page.locator('.agent-pending-state')).toHaveText(['Sending', 'Sending', 'Sending']);
       const geometry = await page.evaluate(() => {
         const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
         const queue = box('.agent-pending-queue'), composer = box('.agent-composer'), toggle = box('.lab-composer-toggle');
         const messages = document.querySelectorAll('.agent-pending-message');
-        const shortText = messages[1]!.querySelector('.agent-pending-text')!.getBoundingClientRect();
+        const shortText = messages[1]!.querySelector('.agent-pending-state')!.getBoundingClientRect();
         const dismiss = messages[1]!.querySelector('.agent-pending-dismiss span')!.getBoundingClientRect();
         return { overflow: document.documentElement.scrollWidth > innerWidth, above: queue.bottom <= composer.top, beside: queue.right < toggle.left,
           longWidth: messages[0]!.getBoundingClientRect().width, shortWidth: messages[1]!.getBoundingClientRect().width,
@@ -69,7 +70,7 @@ for (const engine of [chromium, webkit]) for (const width of [402, 1280]) {
       });
       expect(geometry).toMatchObject({ overflow: false, above: true, beside: true });
       expect(geometry.longWidth).toBeLessThanOrEqual(240);
-      expect(geometry.shortWidth).toBeLessThan(70);
+      expect(geometry.shortWidth).toBeLessThan(110); // the text and its Sending word, far from the long message's width
       expect(geometry.dismissGap).toBeGreaterThanOrEqual(0);
       expect(geometry.dismissGap).toBeLessThanOrEqual(6);
       expect(geometry.inputGap).toBeGreaterThanOrEqual(0);

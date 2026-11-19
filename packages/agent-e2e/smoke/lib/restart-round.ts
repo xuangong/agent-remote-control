@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { noBlankFrame, noDuplicateItemKey, noStaleLabel, journalSequencesContiguous, messagesSettleOnce, oneReplacementPerRestart, turnRowsCompleteAfterReturn, type InvariantResult, type MarkerName } from '../invariants/index.js';
+import { noBlankFrame, noDuplicateItemKey, noSessionConnectionLabel, journalSequencesContiguous, messagesSettleOnce, oneReplacementPerRestart, turnRowsCompleteAfterReturn, type InvariantResult, type MarkerName } from '../invariants/index.js';
 import type { ScheduleStep } from '../report.js';
 import type { RunContext } from '../scenario.js';
 import { TranscriptRecorder } from '../transcript.js';
@@ -82,7 +82,7 @@ export async function runRestartRound(context: RunContext, plan: RoundPlan, reco
     const wire = recorder.transcript().filter(entry => entry.n > fromNumber);
     const results = [
       oneReplacementPerRestart(wire), journalSequencesContiguous(wire), messagesSettleOnce(wire, { final: false }), noDuplicateItemKey(wire, outcome),
-      noBlankFrame(outcome), noStaleLabel(wire, outcome),
+      noBlankFrame(outcome), noSessionConnectionLabel(outcome),
       turnRowsCompleteAfterReturn(outcome, [{ prompt: firstPrompt.slice(0, 40), requireReply: false }, { prompt: `Reply with the single word ${after}` }]),
     ];
     return { label, results, measurements, schedule };

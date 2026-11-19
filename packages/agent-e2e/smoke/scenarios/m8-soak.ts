@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { journalSequencesContiguous, memoryFlat, noBlankFrame, noDuplicateItemKey, noStaleLabel, rowCountsStable, socketCountsStable, type InvariantResult, type PageReport, type ResourceSample } from '../invariants/index.js';
+import { journalSequencesContiguous, memoryFlat, noBlankFrame, noDuplicateItemKey, noSessionConnectionLabel, rowCountsStable, socketCountsStable, type InvariantResult, type PageReport, type ResourceSample } from '../invariants/index.js';
 import { positiveInteger } from '../lib/arguments.js';
 import { createBotGroup } from '../lib/bot-group.js';
 import { PageProbe, withContext } from '../lib/probe.js';
@@ -89,7 +89,7 @@ export const soak: Scenario = {
         extraRows: { first: resources[0]?.rows, last: resources.at(-1)?.rows, max: Math.max(...resources.map(sample => sample.rows)) }, sockets: { min: Math.min(...resources.map(sample => sample.sockets)), max: Math.max(...resources.map(sample => sample.sockets)) } };
       const delivery: InvariantResult = { invariant: 'streamed-replies-shown', checked: SESSIONS.length, status: outcome.lastReplies >= SESSIONS.length ? 'passed' : 'failed',
         violations: outcome.lastReplies >= SESSIONS.length ? [] : [{ message: `the last streamed reply is shown in ${outcome.lastReplies} of ${SESSIONS.length} panes` }] };
-      const results = [memoryFlat(outcome.page), rowCountsStable(outcome.page), socketCountsStable(outcome.page), noDuplicateItemKey(wire, outcome.page), noBlankFrame(outcome.page), noStaleLabel(wire, outcome.page), journalSequencesContiguous(wire), delivery];
+      const results = [memoryFlat(outcome.page), rowCountsStable(outcome.page), socketCountsStable(outcome.page), noDuplicateItemKey(wire, outcome.page), noBlankFrame(outcome.page), noSessionConnectionLabel(outcome.page), journalSequencesContiguous(wire), delivery];
       return { measurements, invariants: mergeInvariantResults([{ label: `${SESSIONS.length} streaming panes`, results }]), schedule, transcript: recorder };
     } finally { await proxy.close(); await group.close().catch(() => {}); await host.close(); }
   },

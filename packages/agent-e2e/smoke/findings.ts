@@ -10,7 +10,7 @@ const owners: Record<string, { seam: string; module: string }> = {
   'one-replacement-per-restart': { seam: 'S2', module: 'controller (publisher)' },
   'turn-rows-complete-after-return': { seam: 'S2', module: 'controller (session-core)' },
   'no-blank-frame': { seam: 'S6', module: 'client (replica) and the renderer' },
-  'no-stale-label': { seam: 'S6', module: 'client (connection)' },
+  'no-session-connection-label': { seam: 'S6', module: 'client (session-presentation)' },
   'trim-reported': { seam: 'S3', module: 'relay-core (journal-service, window-decision)' },
   'live-only-items-survive': { seam: 'S2', module: 'journal' },
   'no-refused-row-hole': { seam: 'S2', module: 'journal' },

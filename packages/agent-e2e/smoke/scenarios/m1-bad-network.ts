@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { firstPaintFromDeviceStore, journalSequencesContiguous, messagesSettleOnce, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
+import { firstPaintFromDeviceStore, journalSequencesContiguous, messagesSettleOnce, noDuplicateItemKey, noSessionConnectionLabel, type InvariantResult } from '../invariants/index.js';
 import { PageProbe, withContext } from '../lib/probe.js';
 import type { Provider } from '../lib/sessions.js';
 import { mergeInvariantResults, type ScheduleStep } from '../report.js';
@@ -70,7 +70,7 @@ export const badNetwork: Scenario = {
           messagesSettleOnce(forCondition, { final: condition_.replied }),
           noDuplicateItemKey(forCondition, condition_.page),
           journalSequencesContiguous(forCondition),
-          noStaleLabel(forCondition, condition_.page),
+          noSessionConnectionLabel(condition_.page),
         ];
         results.push({ label: name, results: verdicts });
         context.log(`M1: ${name}: first rows on revisit ${condition_.revisit.ms} ms, replied ${condition_.replied}`);

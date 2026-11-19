@@ -32,8 +32,9 @@ test('waits through compaction delays before acknowledgement and echo without sh
   await page.clock.fastForward(60_000);
   await expect(row).toContainText('Sending…');
   await expect(row).toHaveAttribute('data-delivery-state', 'pending');
-  await expect(page.getByTestId('prompt-input')).toHaveValue('Continue after compaction.');
-  await expect(page.getByTestId('prompt-submit')).toBeDisabled();
+  // The queue took the message when it was dispatched: the editor is free again and nothing waits in the pending chip.
+  await expect(page.getByTestId('prompt-input')).toHaveValue('');
+  await expect(page.getByTestId('pending-send')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Delivery error' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Acknowledge send' }).click();

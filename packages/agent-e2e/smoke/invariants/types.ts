@@ -39,7 +39,7 @@ export type Transcript = TranscriptEntry[];
 /** What the page showed at one moment: the visible labels and counts of the conversation view. */
 export interface PageSample {
   t: number;
-  /** Connection status labels, for example `Reconnecting`, `Synchronizing` or `Ready`. */
+  /** The status labels seen: business labels such as `Ready` or `Working`; a connection word here is a T5 violation. */
   labels: string[];
   /** Loading placeholders such as a skeleton heading; empty when a conversation or an empty state is shown. */
   loading: string[];

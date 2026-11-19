@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 
-async function openReconnectingSession(page: import('@playwright/test').Page) {
+async function raiseCommandErrorToast(page: import('@playwright/test').Page) {
   await page.goto('/e2e/fixtures/toast-placement.html');
-  const toast = page.locator('.lab-toast').filter({ hasText: 'Native runtime is reconnecting' });
-  // Recovery notices appear after the foreground reconnect grace period.
+  const input = page.getByTestId('prompt-input');
+  await input.fill('Run the refused command');
+  await input.press('Enter');
+  const toast = page.locator('.lab-toast').filter({ hasText: 'The command was refused by the fixture.' });
   await expect(toast).toBeVisible({ timeout: 10_000 });
   await toast.hover(); // Pause the countdown while checking viewport transitions.
   return page.locator('body');
@@ -11,7 +13,7 @@ async function openReconnectingSession(page: import('@playwright/test').Page) {
 
 test('mobile toast stays above the composer through keyboard and draft resizing', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const pane = await openReconnectingSession(page);
+  const pane = await raiseCommandErrorToast(page);
   const input = pane.getByTestId('prompt-input');
   for (const viewport of [{ height: 844, offsetTop: 0 }, { height: 420, offsetTop: 80 }, { height: 340, offsetTop: 160 }, { height: 844, offsetTop: 0 }]) {
     await page.evaluate(value => {
@@ -33,7 +35,7 @@ test('mobile toast stays above the composer through keyboard and draft resizing'
 
 test('desktop keeps the existing bottom-right toast position', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await openReconnectingSession(page);
+  await raiseCommandErrorToast(page);
   const bounds = (await page.locator('.lab-toast-region').boundingBox())!;
   expect(bounds.x + bounds.width).toBeCloseTo(1424, 0);
   expect(bounds.y + bounds.height).toBeCloseTo(884, 0);
@@ -41,7 +43,7 @@ test('desktop keeps the existing bottom-right toast position', async ({ page }) 
 
 test('mobile toast follows the collapsed composer and keeps its toggle accessible', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  const pane = await openReconnectingSession(page);
+  const pane = await raiseCommandErrorToast(page);
   await pane.getByRole('button', { name: 'Hide message input', exact: true }).click();
   const toggle = pane.getByRole('button', { name: 'Show message input', exact: true });
   await expect.poll(async () => {

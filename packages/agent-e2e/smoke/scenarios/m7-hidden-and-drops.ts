@@ -1,5 +1,5 @@
 import { startLatencyProxy } from '../../faults/latency-proxy.mjs';
-import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noStaleLabel, type InvariantResult } from '../invariants/index.js';
+import { catchUpCostsOneTailRequest, draftAndPositionKept, halfOpenSocketRecovers, journalSequencesContiguous, noBlankFrame, noDuplicateItemKey, noSessionConnectionLabel, type InvariantResult } from '../invariants/index.js';
 import { PRIMARY, PageProbe, withContext } from '../lib/probe.js';
 import { mergeInvariantResults, type ScheduleStep } from '../report.js';
 import type { Scenario } from '../scenario.js';
@@ -57,7 +57,7 @@ export const hiddenAndDrops: Scenario = {
           await probe.snapshotKeys();
           const page = await probe.report({ composer: before.composer && after.composer ? { before: before.composer, after: after.composer } : undefined, anchor: { before: before.anchor, after: after.anchor } });
           const wire = recorder.transcript().filter(entry => entry.n > first);
-          conditions.push({ label: `offline ${seconds} s`, results: [catchUpCostsOneTailRequest(wire), noStaleLabel(wire, page), draftAndPositionKept(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
+          conditions.push({ label: `offline ${seconds} s`, results: [catchUpCostsOneTailRequest(wire), noSessionConnectionLabel(page), draftAndPositionKept(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
           (measurements.drops as unknown[]).push({ seconds, scrolledTo, caughtUp, socketsOpenedAfterReturn: wire.filter(entry => 'marker' in entry && entry.marker === 'socket-open').length });
           await probe.page.locator(`${PRIMARY} [data-testid="prompt-input"]`).click();
           await probe.page.keyboard.press('Meta+a').catch(() => {});
@@ -76,7 +76,7 @@ export const hiddenAndDrops: Scenario = {
           await probe.snapshotKeys();
           const page = await probe.report();
           const wire = recorder.transcript().filter(entry => entry.n > first);
-          conditions.push({ label: 'half-open sockets', results: [halfOpenSocketRecovers(wire, 90_000), noStaleLabel(wire, page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
+          conditions.push({ label: 'half-open sockets', results: [halfOpenSocketRecovers(wire, 90_000), noSessionConnectionLabel(page), noBlankFrame(page), noDuplicateItemKey(wire, page), journalSequencesContiguous(wire)] });
           const faultAt = wire.find(entry => 'marker' in entry && entry.marker === 'fault')?.t;
           const replacedAt = wire.find(entry => 'message' in entry && entry.direction === 'relay->browser' && entry.message.type === 'negotiated' && faultAt !== undefined && entry.t > faultAt)?.t;
           (measurements.drops as unknown[]).push({ halfOpen: true, sockets: affected, caughtUp, sessionServedAgainAfterMs: faultAt !== undefined && replacedAt !== undefined ? Math.round(replacedAt - faultAt) : null });

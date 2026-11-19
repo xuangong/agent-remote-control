@@ -88,17 +88,9 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
     saveCompositionDocument(imported.document, () => true); flushRecoveryWrites();
   } });
   await waitFor(() => expect(entered).toBe(true));
-  if (boundary === 'draft edit') {
-    await act(async () => { consumer.textStore(f.scope).set(source.agentId, 'Edited while Ask retained'); release(); });
-  }
-  await settleApp(() => { expect(succession.error).toContain('needs synchronization'); });
-  expect(consumer.tracking().sessions.map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
-  expect(readTrackedSessions(f.scope).map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
-  expect(succession.document.selectedTrack).toBe(sessionKey(independent));
-  expect(new TrackedSessionViews(succession.document, () => {}).get(sessionKey(independent))?.primary.nativeSessionId).toBe('B');
-  const independentSlot = succession.document.slots.find(slot => slot.owners.text.key === independent.agentId)!;
-  const independentImage = independentSlot.owners.image;
+  const independentSlotOf = () => succession.document.slots.find(slot => slot.owners.text.key === independent.agentId)!;
   const assertIndependentImage = async () => {
+    const independentImage = independentSlotOf().owners.image;
     expect(independentImage).toEqual({ scope: f.scope, key: JSON.stringify([f.scope, sessionKey(independent)]) });
     expect(succession.desired!.slot.owners.image).not.toEqual(independentImage);
     const image = (await readImageDraft(independentImage.key))?.images['independent-B-image'];
@@ -106,20 +98,38 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
     expect((await inspectImageDraft(independentImage)).snapshot()).toMatchObject({ status: 'ready', retention: 'page' });
     expect((await readImageDraft(succession.desired!.slot.owners.image.key))?.images['independent-B-image']).toBeUndefined();
   };
-  await assertIndependentImage();
-  expect(succession.document.retained.some(value => value.slot === independentSlot.id)).toBe(true);
-  const primaryOwner = succession.ownerFor(succession.document.slots.find(slot => slot.owners.text.key === source.agentId)!.id), independentOwner = succession.ownerFor(independentSlot.id);
-  expect(primaryOwner).not.toBe(independentOwner);
-  expect(ask.entryFor(source, primaryOwner).record?.target?.nativeSessionId).toBe('T');
-  expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
-  expect(ask.draftBinding(independentOwner).store.get(ask.draftBinding(independentOwner).key)).toBe('Independent Ask draft');
-  expect(consumer.textStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
-  expect(f.requests.filter(item => item.url.endsWith('/attach'))).toEqual([]);
-  expect(f.frames.filter(frame => frame.type === 'subscribe')).toEqual([]);
-  const trackedLayouts = structuredClone(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view })));
-  blocked = false; release();
-  await act(async () => succession.retry());
+  const ownersOf = () => ({ primary: succession.ownerFor(succession.document.slots.find(slot => slot.owners.text.key === source.agentId)!.id), independent: succession.ownerFor(independentSlotOf().id) });
+  let trackedLayouts: unknown;
+  if (boundary === 'draft edit') {
+    // The edit overtakes the application (`local_edit`): the page discovers again and applies the document with the edit, with no Retry.
+    await act(async () => { consumer.textStore(f.scope).set(source.agentId, 'Edited while Ask retained'); release(); });
+    trackedLayouts = structuredClone(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view })));
+  } else {
+    await settleApp(() => { expect(succession.error).toContain('needs synchronization'); });
+    expect(consumer.tracking().sessions.map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
+    expect(readTrackedSessions(f.scope).map(entry => entry.nativeSessionId)).toEqual(['A', 'B']);
+    expect(succession.document.selectedTrack).toBe(sessionKey(independent));
+    expect(new TrackedSessionViews(succession.document, () => {}).get(sessionKey(independent))?.primary.nativeSessionId).toBe('B');
+    await assertIndependentImage();
+    expect(succession.document.retained.some(value => value.slot === independentSlotOf().id)).toBe(true);
+    const { primary: primaryOwner, independent: independentOwner } = ownersOf();
+    expect(primaryOwner).not.toBe(independentOwner);
+    expect(ask.entryFor(source, primaryOwner).record?.target?.nativeSessionId).toBe('T');
+    expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
+    expect(ask.draftBinding(independentOwner).store.get(ask.draftBinding(independentOwner).key)).toBe('Independent Ask draft');
+    expect(consumer.textStore(f.scope).get(independent.agentId)).toBe('Independent B draft');
+    expect(f.requests.filter(item => item.url.endsWith('/attach'))).toEqual([]);
+    expect(f.frames.filter(frame => frame.type === 'subscribe')).toEqual([]);
+    trackedLayouts = structuredClone(succession.document.tracks.map(({ entryId, view }) => ({ entryId, view })));
+    blocked = false; release();
+    await act(async () => succession.retry());
+  }
   await settleApp(() => { expect(succession.binding?.session.nativeSessionId).toBe('B'); });
+  expect(succession.error).toBeUndefined();
+  const { primary: primaryOwner, independent: independentOwner } = ownersOf();
+  expect(primaryOwner).not.toBe(independentOwner);
+  expect(succession.document.retained.some(value => value.slot === independentSlotOf().id)).toBe(true);
+  expect(ask.draftBinding(independentOwner).store.get(ask.draftBinding(independentOwner).key)).toBe('Independent Ask draft');
   expect(consumer.tracking().sessions.map(entry => entry.nativeSessionId)).toEqual(['B']);
   await assertIndependentImage();
   expect(succession.document.selectedTrack).toBe(sessionKey(independent));
@@ -129,7 +139,7 @@ it.each(['retention failure', 'draft edit'])('retains independent B stores and s
   expect(visibleQuery(f.view, '[data-testid="prompt-input"]')?.textContent).toBe(text);
   expect(ask.entryFor(independent, independentOwner).record?.source.nativeSessionId).toBe('B');
   expect(ask.entryFor(independent, independentOwner).record?.target?.nativeSessionId).toBe('U');
-  expect(succession.document.tracks.map(track => track.view?.primarySlot)).toEqual(expect.arrayContaining([succession.desired!.slot.id, independentSlot.id]));
+  expect(succession.document.tracks.map(track => track.view?.primarySlot)).toEqual(expect.arrayContaining([succession.desired!.slot.id, independentSlotOf().id]));
   expect(f.requests.filter(item => item.url.endsWith('/attach')).map(item => item.body?.nativeSessionId)).toEqual(['B']);
 });
 

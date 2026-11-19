@@ -104,9 +104,18 @@ describe('reduceRefresh', () => {
 
   describe('a composition that an edit overtook', () => {
     const pending = (code: string): RefreshEvent => ({ type: 'composition_pending', code });
-    it.each(supersededCodes)('discovers again after %s', code => {
+    // `local_edit` (the composition document changed) and `owner_edit` (a draft, image or display owner changed) mean the
+    // user edited while the application ran: the newer document is applied by discovering again, not left to the Retry.
+    it.each(['retired', 'local_edit', 'owner_edit'])('discovers again after %s', code => {
+      expect(supersededCodes).toContain(code);
       expect(effectsOf(pending(code))).toEqual([{ type: 'rediscover' }]);
       expect(run([pending(code)]).supersededAttempts).toBe(1);
+    });
+    it('bounds the rediscoveries of an edit that keeps overtaking the application', () => {
+      const typing = run(Array.from({ length: maxSupersededRetries }, (_, index) => pending(index % 2 ? 'owner_edit' : 'local_edit')));
+      expect(typing.supersededAttempts).toBe(maxSupersededRetries);
+      expect(effectsOf(pending('local_edit'), typing)).toEqual([]);
+      expect(effectsOf(pending('owner_edit'), typing)).toEqual([]);
     });
     it.each(['authorization', 'replay_gap', 'older_revision', 'track_write', 'invalid_view'])('leaves %s to the explicit Retry', code => {
       expect(effectsOf(pending(code))).toEqual([]);

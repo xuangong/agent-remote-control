@@ -1,0 +1,94 @@
+/* Generated from tokens.ts by renderThemeCss(); edit tokens.ts and run `pnpm --filter @orchardworks/agent-client-web theme:write`. */
+/* Colours are light-dark() pairs: the page follows the system, and data-theme on the root pins one theme. */
+:root {
+  color-scheme: light dark;
+  --orchard-ground: light-dark(#f3efe9, #151517);
+  --orchard-surface: light-dark(#ffffff, #232327);
+  --orchard-fill: light-dark(#f4f4f6, #2f2f34);
+  --orchard-fill-strong: light-dark(#e8e8ec, #3b3b41);
+  --orchard-tint: light-dark(#fff1e6, #3a2d24);
+  --orchard-text: light-dark(#2a2b30, #dcdde2);
+  --orchard-text-strong: light-dark(#1d1d1f, #f2f2f5);
+  --orchard-text-secondary: light-dark(#696d75, #9a9da4);
+  --orchard-ink-faint: light-dark(#a0a3aa, #6a6d74);
+  --orchard-mine: light-dark(#2a2b30, #f2f2f4);
+  --orchard-on-mine: light-dark(#ffffff, #1d1d20);
+  --orchard-brand: light-dark(#ff7f45, #ff7f45);
+  --orchard-on-brand: light-dark(#1d1d1f, #1d1d1f);
+  --orchard-focus: light-dark(#d9581c, #ff7f45);
+  --orchard-danger-text: light-dark(#c4321f, #ff7a6b);
+  --orchard-online: light-dark(#39b56a, #39b56a);
+  --orchard-separator: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.07));
+  --orchard-shadow-ink: light-dark(rgb(20 20 30 / 0.14), rgb(0 0 0 / 0.5));
+  --orchard-backdrop: light-dark(rgb(0 0 0 / 0.25), rgb(0 0 0 / 0.5));
+  --orchard-avatar-resting: light-dark(#c9cbd0, #66686e);
+  --orchard-avatar-eye: light-dark(#16161a, #16161a);
+  --orchard-brand-tile: light-dark(#24242a, #24242a);
+  --orchard-brand-body: light-dark(#ff7f45, #ff7f45);
+  --orchard-brand-stem: light-dark(#2f8f55, #2f8f55);
+  --orchard-brand-leaf: light-dark(#4cc27a, #4cc27a);
+  --orchard-brand-eye: light-dark(#16161a, #16161a);
+  --orchard-radius-panel: 22px;
+  --orchard-radius-bubble: 20px;
+  --orchard-radius-bubble-tail: 6px;
+  --orchard-radius-card: 18px;
+  --orchard-radius-row: 18px;
+  --orchard-radius-group: 16px;
+  --orchard-radius-composer: 24px;
+  --orchard-radius-toggle: 10px;
+  --orchard-radius-pill: 999px;
+  --orchard-space-2xs: 2px;
+  --orchard-space-xs: 4px;
+  --orchard-space-s: 6px;
+  --orchard-space-m: 8px;
+  --orchard-space-l: 10px;
+  --orchard-space-xl: 14px;
+  --orchard-space-2xl: 16px;
+  --orchard-space-3xl: 24px;
+  --orchard-space-4xl: 32px;
+  --orchard-space-column: 580px;
+  --orchard-font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --orchard-font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --orchard-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --orchard-type-caption-size: 11.5px;
+  --orchard-type-caption-leading: 1.4;
+  --orchard-type-caption-weight: 400;
+  --orchard-type-footnote-size: 12.5px;
+  --orchard-type-footnote-leading: 1.5;
+  --orchard-type-footnote-weight: 400;
+  --orchard-type-callout-size: 13px;
+  --orchard-type-callout-leading: 1.5;
+  --orchard-type-callout-weight: 400;
+  --orchard-type-body-size: 14.5px;
+  --orchard-type-body-leading: 1.6;
+  --orchard-type-body-weight: 400;
+  --orchard-type-headline-size: 15px;
+  --orchard-type-headline-leading: 1.4;
+  --orchard-type-headline-weight: 600;
+  --orchard-type-title-size: 18px;
+  --orchard-type-title-leading: 1.3;
+  --orchard-type-title-weight: 700;
+  --orchard-type-large-title-size: 26px;
+  --orchard-type-large-title-leading: 1.2;
+  --orchard-type-large-title-weight: 700;
+  --orchard-type-wordmark-size: 17px;
+  --orchard-type-wordmark-leading: 1;
+  --orchard-type-wordmark-weight: 750;
+  --orchard-elevation-flat: none;
+  --orchard-elevation-popover: 0 8px 24px var(--orchard-shadow-ink);
+  --orchard-elevation-lifted: 0 -8px 32px var(--orchard-shadow-ink);
+  --orchard-elevation-floating: 0 20px 48px var(--orchard-shadow-ink);
+  --orchard-duration-fast: 150ms;
+  --orchard-duration-base: 220ms;
+  --orchard-duration-pop: 360ms;
+  --orchard-duration-bob: 2400ms;
+  --orchard-duration-glance: 5000ms;
+  --orchard-duration-sway: 3200ms;
+  --orchard-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --orchard-ease-flow: cubic-bezier(0.45, 0, 0.55, 1);
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-reduced-motion: reduce) {
+  :root { --orchard-duration-fast: 0ms; --orchard-duration-base: 0ms; --orchard-duration-pop: 0ms; --orchard-duration-bob: 0ms; --orchard-duration-glance: 0ms; --orchard-duration-sway: 0ms; }
+}

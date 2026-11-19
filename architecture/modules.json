@@ -548,6 +548,16 @@
       ]
     },
     {
+      "name": "client-theme",
+      "layer": 1,
+      "paths": [
+        "packages/agent-client-web/src/theme/**"
+      ],
+      "seams": [],
+      "flows": [],
+      "invariants": []
+    },
+    {
       "name": "client-web",
       "layer": 3,
       "paths": [
@@ -911,7 +921,8 @@
       "modules": [
         "timeline",
         "journal",
-        "relay-session-control"
+        "relay-session-control",
+        "client-theme"
       ],
       "imports": [
         "node:*"

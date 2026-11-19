@@ -131,7 +131,7 @@ it('in a shared Window, brings only the selected view\'s dock into view when doc
   const { WindowLayoutContext } = await import('../window-workspace-context.js');
   const { createWindowView } = await import('@orchardworks/agent-remote-protocol');
   const { SessionViewPlacement } = await import('./SessionDock.js');
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
   vi.stubGlobal('cancelAnimationFrame', () => {});
   const revealed: string[] = [];

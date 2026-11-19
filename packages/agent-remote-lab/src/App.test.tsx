@@ -937,7 +937,7 @@ it('uses a rendered root title and skips descendants hidden behind empty roots',
     workspace = useWorkspace(...args); return workspace;
   });
   const baseUrl = 'http://localhost/attached-title/';
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.spyOn(SessionDirectoryClient.prototype, 'attach').mockRejectedValue(new Error('Offline title fixture'));
   vi.spyOn(SessionDirectoryClient.prototype, 'list').mockResolvedValue({ items: [], hasMore: false, revision: '1' });
   vi.spyOn(SessionDirectoryClient.prototype, 'workspaces').mockResolvedValue({ workspaces: [] });

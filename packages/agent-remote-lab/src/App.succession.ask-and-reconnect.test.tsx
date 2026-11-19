@@ -184,7 +184,7 @@ it('retires a slow attachment when navigating away and ignores its late identity
 });
 
 it('follows an Ask native prefix with an execution recipient while preserving the association anchor', async () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
   let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>;
   vi.spyOn(askHooks, 'useAskConversations').mockImplementation((...args) => { ask = realAsk(...args); return ask; });

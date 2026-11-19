@@ -13,7 +13,7 @@ beforeEach(() => {
   vi.stubGlobal('innerHeight', 800);
   viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 400, height: 800 });
   vi.stubGlobal('visualViewport', viewport);
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.matches('.lab-app-bar')) return rect(0, 0, 400, appBarBottom);
     if (this.matches('.lab-timeline-tools')) return rect(10, 57, 390, toolsBottom - 57);

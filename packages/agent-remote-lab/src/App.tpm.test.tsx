@@ -8,7 +8,7 @@ import { SessionDirectoryClient } from './directory-client.js';
 import { replicaState } from './test/fixtures.js';
 import { render, setPromptText, promptText } from './test/setup.js';
 
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
 it('runs TPM commands locally from the ordinary chatbox and exposes an independent View-menu choice', async () => {
   const sendMessage = vi.fn(async () => {});

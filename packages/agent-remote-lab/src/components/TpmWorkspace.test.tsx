@@ -12,7 +12,7 @@ import { TpmWorkspace } from './TpmWorkspace.js';
 import { SessionDockProvider, SessionDockRail } from './SessionDock.js';
 import { WindowLayoutContext, WindowPresentationContext } from '../window-workspace-context.js';
 
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 const item: TpmItem = { key: '["host","work"]', hostId: 'host', hostName: 'Host', online: true, unread: false,
   work: { id: 'work', revision: 1, title: 'Search', providerId: 'codex', mainNativeSessionId: 'main', phase: 'implementing', waiting: 'main_session', paused: false, summary: 'Awaiting changes', nextAction: 'Review result', document: '# Search specification\n\nFind matching items.', acceptance: '- [ ] Search works', evidence: ['Acceptance receipt'], createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z', nextCheckAt: 100,

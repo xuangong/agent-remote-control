@@ -18,7 +18,7 @@ const transport = { onDiagnostic: () => () => {}, onProtocolMessage: () => () =>
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it.each([{ bound: true, selected: true }, { bound: true, selected: false }, { bound: false, selected: false }])('retains the active family on window-shell focus and can select other windows: %j', async ({ bound, selected }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
   const root = createWindowView('root', bound ? target : undefined);
   const side = { ...createWindowView('side', { ...target, nativeSessionId: 'child' }, 'attached'), attachedTo: root.id };
@@ -47,7 +47,7 @@ it.each([
   { placement: 'dock' as const, bound: true }, { placement: 'float' as const, bound: true },
   { placement: 'dock' as const, bound: false }, { placement: 'float' as const, bound: false },
 ])('keeps placement and binding actions in one menu while close stays visible: %j', async ({ placement, bound }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const target = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', title: 'Session' };
   const pane = createWindowView('pane', bound ? target : undefined, placement);
   const selected = createWindowView('selected-pane');
@@ -84,7 +84,7 @@ it.each([
 });
 
 it.each([{ shared: true }, { shared: false }, { shared: true, intent: 'history' as const }])('keeps dock ownership and explicit history intent through the real family: %j', async ({ shared, intent }) => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const session = { hostId: 'host', providerId: 'recorded', nativeSessionId: 'native', agentId: 'agent', title: 'Dock' };
   const replica = new AgentReplica();
   replica.applySnapshot({ protocolVersion: '1.8.0', type: 'agent_snapshot', payload: { ...replicaState.agent!, id: session.agentId, runtimeInfo: { ...replicaState.agent!.runtimeInfo, sessionId: session.nativeSessionId } } });

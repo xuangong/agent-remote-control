@@ -5,7 +5,7 @@ import { SessionDockProvider, SessionDockRail, SessionViewPlacement } from './Se
 import { SessionHeading } from './SessionHeading.js';
 import { SessionTitle } from './SessionTitle.js';
 
-beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }));
+beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
 afterEach(() => vi.unstubAllGlobals());
 
 async function setup(widths = [440, 440, 440]) {

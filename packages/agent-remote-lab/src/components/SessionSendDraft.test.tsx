@@ -23,7 +23,7 @@ import type { OpenedSession } from '../directory-client.js';
 import { sessionViewNavigation } from '../session-view-navigation.js';
 
 beforeEach(() => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 });

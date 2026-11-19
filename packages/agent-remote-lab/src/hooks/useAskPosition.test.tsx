@@ -22,6 +22,7 @@ beforeEach(() => {
     constructor(callback: () => void) { this.callback = callback; observers.add(callback); }
     callback: () => void;
     observe() {}
+    unobserve() {}
     disconnect() { observers.delete(this.callback); }
   });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

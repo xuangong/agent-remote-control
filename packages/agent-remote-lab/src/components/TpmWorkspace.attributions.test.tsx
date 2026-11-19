@@ -9,7 +9,7 @@ import { describeSession } from '../session-description.js';
 import type { SessionEntry } from '../session-tree.js';
 import { TpmWorkspace } from './TpmWorkspace.js';
 
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
 const item: TpmItem = { key: 'work', hostId: 'host', hostName: 'Mac mini', online: false, unread: false,

@@ -44,7 +44,7 @@ vi.mock('./LabWorkbench.js', async importOriginal => {
 
 beforeEach(() => {
   observed.bindings.clear();
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 });

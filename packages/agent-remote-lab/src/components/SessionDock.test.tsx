@@ -6,7 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { SessionDockProvider, SessionDockRail, SessionViewPlacement, MinimizeMainSession } from './SessionDock.js';
 
-beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }));
+beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
 afterEach(() => vi.unstubAllGlobals());
 it('docks, reorders, resizes and floats existing view instances without losing drafts', async () => {
   let mounts = 0;

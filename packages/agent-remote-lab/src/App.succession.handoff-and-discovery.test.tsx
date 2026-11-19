@@ -468,7 +468,7 @@ it.each(['edit', 'retire'] as const)('rejects an accepted but queued Track publi
 });
 
 it('retains closed and nested Ask owners, and supplies T with its own replaceable native image recipient', async () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const realAsk = askHooks.useAskConversations, realSuccession = successionHooks.useSessionSuccession;
   let ask!: ReturnType<typeof realAsk>, succession!: ReturnType<typeof realSuccession>;
   let consumer!: Parameters<typeof realSuccession>[0];
@@ -532,7 +532,7 @@ it('does not treat authorization-hidden succession as an unsupported transport',
 });
 
 it('restores a selected Side path and focus while the primary changes from A to B', async () => {
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   const real = successionHooks.useSessionSuccession;
   let succession!: ReturnType<typeof real>;
   vi.spyOn(successionHooks, 'useSessionSuccession').mockImplementation((...args) => { succession = real(...args); return succession; });

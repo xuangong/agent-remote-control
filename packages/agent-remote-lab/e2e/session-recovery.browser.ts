@@ -55,7 +55,6 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await page.goto(fixture.url + '/');
   const input = page.getByTestId('prompt-input');
   // The movable TPM, Window and Team entries float over the short conversation, so a message action is pressed without a pointer hit test.
-  const pressMessageAction = (name: string) => page.getByRole('button', { name, exact: true }).evaluate(button => (button as HTMLElement).click());
   await expect.poll(() => input.isEnabled()).toBe(true);
   expect(await page.locator('#lab-context').count()).toBe(0);
   await input.fill('Keep draft across background');
@@ -87,10 +86,8 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
     const key = Object.keys(localStorage).find(key => key.startsWith(`agent-remote:recovery:${base}:outbox:`))!;
     return JSON.parse(localStorage.getItem(key)!)[0].operationId;
   }, baseUrl);
-  // On this short phone conversation the floating TPM, Window and Team capsules sit over the message actions (handoff §5.4).
-  // When that is fixed, this check fails: remove it and pressMessageAction, and click the actions directly.
-  expect(await page.getByRole('button', { name: 'Retry message', exact: true }).click({ trial: true, timeout: 1000 }).then(() => 'reachable', () => 'covered')).toBe('covered');
-  await pressMessageAction('Retry message');
+  // The floating capsules start below the timeline toolbar, so the message actions are clickable on this short phone conversation.
+  await page.getByRole('button', { name: 'Retry message', exact: true }).click();
   await expect.poll(() => page.locator('.agent-message-delivery').textContent()).toContain('Sent');
   expect(await page.evaluate(() => (window as any).attempts[0].operationId)).toBe(savedOperation);
   expect(await page.locator('.agent-outgoing-message').count()).toBe(1);
@@ -100,7 +97,7 @@ for (const engine of [chromium, webkit]) it(`restores sessions and failed input 
   await expect.poll(() => input.isEnabled()).toBe(true);
   await expect.poll(() => page.getByRole('button', { name: 'Delete message', exact: true }).isEnabled()).toBe(true);
   await page.screenshot({ path: `/tmp/arc-mobile-recovery-${engine.name()}.png` });
-  await pressMessageAction('Delete message');
+  await page.getByRole('button', { name: 'Delete message', exact: true }).click();
   expect(await page.locator('.agent-outgoing-message').count()).toBe(0);
   await page.goto(fixture.url + '/');
   await expect.poll(() => input.isEnabled()).toBe(true);

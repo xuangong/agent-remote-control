@@ -9,7 +9,7 @@ import { sessionKey } from '../session-tree.js';
 import { useTpmWork, type TpmService } from '../hooks/useTpmWork.js';
 import { ShortcutPlacement } from './shortcut-placement.js';
 
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 it('renders a capsule as a sidebar row with the same name, without floating placement', async () => {

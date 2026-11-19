@@ -7,7 +7,7 @@ import { SessionDescriptionsContext } from '../session-description-context.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionDockProvider, SessionDockRail, SessionViewPlacement } from './SessionDock.js';
 
-beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }));
+beforeEach(() => vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }));
 afterEach(() => vi.unstubAllGlobals());
 
 it('preserves each product view disclosure across placement changes and keeps late navigation scoped to its binding', async () => {

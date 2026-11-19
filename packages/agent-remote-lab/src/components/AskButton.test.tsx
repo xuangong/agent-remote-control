@@ -11,7 +11,7 @@ beforeEach(() => {
   vi.stubGlobal('innerWidth', 800);
   vi.stubGlobal('innerHeight', 600);
   vi.stubGlobal('visualViewport', undefined);
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const root = this.closest<HTMLElement>('.lab-ask-floating');
     const view = visualClientRects ? window.visualViewport : undefined;

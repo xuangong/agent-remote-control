@@ -15,6 +15,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class {
     constructor(private callback: () => void) { observers.add(callback); }
     observe() {}
+    unobserve() {}
     disconnect() { observers.delete(this.callback); }
   });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {

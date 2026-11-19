@@ -5,7 +5,7 @@ import { render } from '../test/setup.js';
 import { useTpmWork, type TpmService } from '../hooks/useTpmWork.js';
 import { TpmMenu } from './TpmMenu.js';
 
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); });
 const main = { hostId: 'host', providerId: 'codex', nativeSessionId: 'main', title: 'Main session' };
 const work: TpmWork = { id: 'work', revision: 1, title: 'Search delivery', providerId: 'codex', mainNativeSessionId: 'main', tpmNativeSessionId: 'tpm', phase: 'validating', waiting: 'user', paused: false, summary: 'Review acceptance', nextAction: 'Choose scope', document: '# Search', acceptance: '- [ ] Query items', evidence: [], createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z', nextCheckAt: 100 };

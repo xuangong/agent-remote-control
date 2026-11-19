@@ -16,7 +16,7 @@ import { WorkspaceReady } from '../workspace-access.js';
 type AskProps = ComponentProps<typeof SessionAsk>;
 const source = { hostId: 'local', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
 const sibling = { ...source, nativeSessionId: 'side', agentId: 'side-agent', title: 'Side' };
-beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }); });
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} }); });
 afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 
 function fixture(entries: AskEntry[]) {

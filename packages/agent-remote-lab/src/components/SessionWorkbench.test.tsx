@@ -1,7 +1,7 @@
 import { act, useState } from 'react';
 import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-client/testing';
 import { expect, it, vi } from 'vitest';
-import { render } from '../test/setup.js';
+import { render, setPromptText } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
 import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
@@ -320,4 +320,33 @@ it('says an offline Host once on the page, and keeps the composer enabled', asyn
   const opening = await render(<SessionWorkbench state={undefined} sessionStatus="connecting" draftSessionKey="session" attachingAgentId="" host={{ online: false, name: 'Mac mini' }}
     loadingNotice={{ title: 'Mac mini is offline', detail: 'The conversation appears here when it is back.' }} actions={{}} />);
   expect(opening.textContent!.split('Mac mini is offline').length - 1).toBe(1);
+});
+
+it('keeps the typed text, the waiting message and the focus when the Window pane replaces the stand-in, and sends the message once the session is ready', async () => {
+  vi.useFakeTimers();
+  try {
+    const send = vi.fn(async () => {});
+    const pane = (kind: 'stand-in' | 'window' | 'ready') => kind === 'stand-in'
+      ? <LabWorkbench key="stand-in" draftOnly opening draftSessionKey="target" sessionStatus="catching_up" actions={{ sendMessage: send }} />
+      : <LabWorkbench key="window" draftSessionKey="target" state={replicaState} sessionStatus={kind === 'ready' ? 'ready' : 'catching_up'} actions={{ sendMessage: send }} />;
+    let show!: (kind: 'stand-in' | 'window' | 'ready') => void;
+    function Harness() { const [kind, setKind] = useState<'stand-in' | 'window' | 'ready'>('stand-in'); show = setKind; return pane(kind); }
+    const container = await render(<Harness />);
+    const input = () => container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+    await act(async () => { input().focus(); setPromptText(input(), 'Queued while opening'); input().dispatchEvent(new Event('input', { bubbles: true })); });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
+    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Sending');
+    await act(async () => { setPromptText(input(), 'Draft in progress'); input().dispatchEvent(new Event('input', { bubbles: true })); });
+    const standIn = input();
+    await act(async () => show('window'));
+    expect(input()).not.toBe(standIn);
+    expect(input().value).toBe('Draft in progress');
+    expect(container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(1);
+    expect(document.activeElement).toBe(input());
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => show('ready'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith('Queued while opening');
+  } finally { vi.useRealTimers(); }
 });

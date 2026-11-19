@@ -91,6 +91,7 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
           handoff={handoff}
           draftSessionKey={succession.selected ? sessionKey(succession.selected) : stackRoot ? sessionKey(stackRoot) : activeAgentId}
           draftOnly={succession.active && !succession.isCurrent()}
+          opening={!windowWorkspace.unavailable}
           mutationBlocked={primarySuccessionGated}
           onPendingInputChange={reportPendingPrimaryInput}
           pendingFirstInputContext={successionContext && successionContext.state !== 'materialized' ? { state: successionContext.state, onRetry: successionContext.onRetry } : undefined}

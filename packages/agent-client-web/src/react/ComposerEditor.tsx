@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { Schema, type Node as ProseMirrorNode } from 'prosemirror-model';
-import { EditorState, NodeSelection, type SelectionBookmark } from 'prosemirror-state';
+import { EditorState, NodeSelection, Selection, type SelectionBookmark } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
 import { baseKeymap } from 'prosemirror-commands';
 import { keymap } from 'prosemirror-keymap';
@@ -30,7 +30,7 @@ function fromDocument(doc: ProseMirrorNode): DraftPart[] {
   doc.forEach(node => { if (node.isText) parts.push({ type: 'text', text: node.text! }); else if (node.type.name === 'resource') parts.push({ type: 'resource', resourceId: String(node.attrs.resourceId), label: String(node.attrs.label) }); else if (node.type.name === 'image') parts.push({ type: 'image', imageId: String(node.attrs.imageId), label: String(node.attrs.label) }); });
   return normalizeDraftParts(parts);
 }
-export interface ComposerEditorHandle { focus(): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
+export interface ComposerEditorHandle { focus(options?: { atEnd?: boolean }): void; openImage(imageId: string): void; insertText(text: string): void; captureSelection(): void; insertParts(parts: readonly DraftPart[]): void }
 interface Props {
   id: string; parts: readonly DraftPart[]; images: Readonly<Record<string, DraftImage>>; disabled: boolean;
   onChange(parts: DraftPart[]): void; onFiles(files: readonly Blob[], replacingImageId?: string): DraftPart[];
@@ -63,7 +63,12 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, Props>(function C
     editor.dispatch(transaction.scrollIntoView()); editor.focus();
   }
   useImperativeHandle(ref, () => ({
-    focus: () => view.current?.focus(),
+    focus: options => {
+      const editor = view.current;
+      if (!editor) return;
+      if (options?.atEnd) editor.dispatch(editor.state.tr.setSelection(Selection.atEnd(editor.state.doc)));
+      editor.focus();
+    },
     openImage: imageId => {
       const editor = view.current;
       if (!editor) return;

@@ -10,11 +10,13 @@ import { ComposerEditor, type ComposerEditorHandle } from './ComposerEditor.js';
 import { useResourceDraft, type UploadResource } from './useResourceDraft.js';
 import { ImageUploadStatus } from './ImageUploadStatus.js';
 import { useImageDraft, type UploadImage } from './useImageDraft.js';
+import type { DraftPart } from './composer-document.js';
 import { draftHasContent, snapshotContent } from './composer-document.js';
 import { useComposerKeyboardDismiss } from './useComposerKeyboardDismiss.js';
 import type { MessagePart } from '@orchardworks/agent-remote-protocol';
 import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
+import { SharedByKey } from './shared-by-key.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
 import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
 import { composerAvailability, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
@@ -61,6 +63,8 @@ export interface AgentComposerProps {
   onUploadImage?: UploadImage;
   onUploadResource?: UploadResource;
   onSendMessageContent?(content: readonly MessagePart[], options?: AgentMessageOptions & { imageDigests?: Readonly<Record<string, string>> }): Promise<void>;
+  /** The view is a stand-in that shows the session while the Window that will own it loads: plain messages typed into it wait for the pane that replaces it. */
+  opening?: boolean;
   draft?: string;
   onDraftChange?(text: string): void;
   /**
@@ -81,6 +85,22 @@ export interface AgentComposerProps {
   onResolveResource?(locator: string, sourceLocator?: string): Promise<ResourceBinding>;
 }
 
+/** A plain-text or image message that waits for its session: data only, so any composer for the session can deliver it. */
+interface PendingMessage {
+  agentId: string; containsImages: boolean; submitted: string; parts: readonly DraftPart[];
+  images: Record<string, { blob: Blob | undefined; uploadId: string }>;
+  imageRecipient: ImageDraftRecipient | undefined; hadImageBinding: boolean;
+}
+
+/** How long a replacing composer keeps trying to take over the focus of the one it replaced. */
+const FOCUS_HANDOVER_MS = 2000;
+
+/** Sessions whose composer was replaced while it had focus, until the commit that mounts the next one has run. */
+const focusHandoffs = new Set<string>();
+
+/** The drafts of the sessions on this page, shared by every composer that shows the same session. */
+const composerDrafts = new SharedByKey<Draft>();
+
 interface Draft {
   text: string;
   selectedSkill?: AgentCommand;
@@ -97,15 +117,18 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, opening = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
   const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
-  const drafts = useRef(new Map<string, Draft>());
   const agentId = sessionKey ?? state?.agent?.id ?? '';
   const editorIdentity = imageDraftBinding ? JSON.stringify([imageDraftBinding.scope, imageDraftBinding.key]) : agentId;
-  const waiting = usePendingSend(JSON.stringify([draftScope, agentId]), visible);
+  // The executor reads `latest` and `richPreparations`, declared below; the queue calls it only after this render has finished.
+  const waiting = usePendingSend<PendingMessage>(JSON.stringify([draftScope, agentId]), visible, {
+    ready: message => readyToDeliver(message),
+    send: (message, signal, dispatch) => deliver(message, signal, dispatch),
+  });
   const currentAgent = useRef(agentId);
   currentAgent.current = agentId;
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -117,14 +140,38 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const mounted = useRef(true);
   const focusRequested = useRef<string>();
   const [, refresh] = useState(0);
-  let draft = drafts.current.get(agentId);
-  if (!draft) {
-    draft = { text: '' };
-    drafts.current.set(agentId, draft);
-  }
-  const currentDraft = draft;
+  const draftKey = JSON.stringify([draftScope, agentId]);
+  const currentDraft = composerDrafts.get(draftKey, () => ({ text: '' }));
+  // The drafts of every session this composer showed stay held until it unmounts; the composer that replaces it finds them.
+  const heldDrafts = useRef(new Map<string, () => void>());
+  useLayoutEffect(() => {
+    if (!heldDrafts.current.has(draftKey)) heldDrafts.current.set(draftKey, composerDrafts.hold(draftKey));
+  }, [draftKey]);
+  useLayoutEffect(() => () => { for (const release of heldDrafts.current.values()) release(); heldDrafts.current.clear(); }, []);
   if (controlledDraft !== undefined) currentDraft.text = controlledDraft;
   function setText(value: string): void { currentDraft.text = value; if (richEnabled) imageDraft.setText(value); else onDraftChange?.(value); }
+  // A composer that is replaced while it has focus hands the focus to the one that takes its place, with the caret after the text.
+  // The editor may still be disabled in its first renders, so the hand-over repeats until the editor takes the focus, the person
+  // focuses something else, or the moment has passed.
+  const focusHandover = useRef<number>();
+  useLayoutEffect(() => { if (focusHandoffs.delete(draftKey)) focusHandover.current = Date.now() + FOCUS_HANDOVER_MS; }, []);
+  useLayoutEffect(() => {
+    const until = focusHandover.current;
+    if (until === undefined) return;
+    const root = composerRef.current;
+    const active = document.activeElement;
+    if (Date.now() > until || (active && active !== document.body && !root?.contains(active))) { focusHandover.current = undefined; return; }
+    if (root?.contains(active)) { focusHandover.current = undefined; return; }
+    if (richEnabled) editorRef.current?.focus({ atEnd: true });
+    else { const input = inputRef.current; if (input && !input.disabled) { input.focus({ preventScroll: true }); input.setSelectionRange(input.value.length, input.value.length); } }
+    if (root?.contains(document.activeElement)) focusHandover.current = undefined;
+  });
+  const rootForFocus = composerRef;
+  useLayoutEffect(() => () => {
+    if (!rootForFocus.current?.contains(document.activeElement)) return;
+    focusHandoffs.add(draftKey);
+    queueMicrotask(() => focusHandoffs.delete(draftKey));
+  }, [draftKey]);
   function focusInput(): void { if (richEnabled) editorRef.current?.focus(); else inputRef.current?.focus(); }
   const { text, pending, feedback } = currentDraft;
   const commandRecovery = feedback && 'commandError' in feedback ? renderCommandError?.(feedback.commandError) : undefined;
@@ -140,7 +187,10 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const availability = composerAvailability({ session, host, replica: state });
   const dispatch = availability.input === 'enabled' && !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' ? availability.dispatch : undefined;
   const sendNow = dispatch === 'now';
-  const canWait = dispatch === 'when_ready';
+  // A stand-in view (`opening`) keeps the editor and takes a plain message into the queue, which the pane that
+  // replaces it delivers once the session is ready; a draft-only view that could not open holds it.
+  const waitsWhileOpening = opening && draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '';
+  const canWait = dispatch === 'when_ready' || waitsWhileOpening;
   // Commands, skills, files and next-turn queueing need the session itself and wait for it (owner decision 3): synchronized, its
   // control check over and its runtime connected, which is when any operation is admitted. Only a plain send waits in the queue.
   const ready = !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' && !session.readOnly && session.operations.interaction_response.allowed;
@@ -187,10 +237,10 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const dispatchReady = sendNow && !operationBusy;
   const sendAllowed = sendNow;
   const queueAllowed = ready && session.operations.queue_message.allowed;
-  const latest = useRef({ agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
-  latest.current = { agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
+  const latest = useRef({ waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
+  latest.current = { waitsWhileOpening, agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
   // A message that waits for a session that cannot take it does not stay Sending, and is never sent unasked later.
-  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !laterMode && agentId !== '' ? 'This session could not be opened.' : undefined;
+  const unsendable = availability.input === 'disabled' && !draftOnly ? availability.words : draftOnly && !waitsWhileOpening && !laterMode && agentId !== '' ? 'This session could not be opened.' : undefined;
   useEffect(() => { if (unsendable) waiting.hold(unsendable); }, [unsendable, agentId, waiting.items.length]);
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
   for (const [abort, owner] of richPreparations.current) {
@@ -204,8 +254,47 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   }
   const addImageFiles: typeof imageDraft.addFiles = (files, replacingImageId) => blockFirstInputImages() ? [] : imageDraft.addFiles(files, replacingImageId);
   const importImageParts: typeof imageDraft.importParts = parts => parts.some(part => part.type === 'image') && blockFirstInputImages() ? [] : imageDraft.importParts(parts);
+  function readyToDeliver(message: PendingMessage): boolean {
+    const current = latest.current;
+    return current.agentId === message.agentId && (!message.containsImages || !current.pendingFirstInputContext && (!message.hadImageBinding || !!current.imageRecipient) && (!message.imageRecipient || current.imageRecipient?.identity === message.imageRecipient.identity && current.imageRecipient.isCurrent())) && current.dispatchReady && Boolean(message.containsImages ? current.onSendMessageContent && current.onUploadImage : current.onSendMessage);
+  }
+  async function deliver(message: PendingMessage, signal: AbortSignal, dispatch: () => boolean): Promise<void> {
+    const { agentId, containsImages, parts, images, submitted } = message;
+    signal.throwIfAborted();
+    const selectedRecipient = latest.current.imageRecipient;
+    const preparation = new AbortController();
+    const abortPreparation = () => preparation.abort();
+    signal.addEventListener('abort', abortPreparation, { once: true });
+    if (selectedRecipient) richPreparations.current.set(preparation, selectedRecipient);
+    const checkRecipient = () => {
+      if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) throw new Error('Native attachment is unavailable.');
+      if (containsImages && latest.current.pendingFirstInputContext) throw new Error(firstInputImageNotice);
+      signal.throwIfAborted(); preparation.signal.throwIfAborted();
+      if (selectedRecipient && (!selectedRecipient.isCurrent() || latest.current.imageRecipient?.identity !== selectedRecipient.identity
+        || latest.current.imageRecipient?.lifetime !== selectedRecipient.lifetime)) throw new Error('The image recipient changed. Retry for the current connection.');
+    };
+    try {
+    checkRecipient();
+    const upload = latest.current.onUploadImage!;
+    const richSend = latest.current.onSendMessageContent;
+    const textSend = latest.current.onSendMessage;
+    const attachments: Record<string, Awaited<ReturnType<UploadImage>>> = {};
+    for (const [id, image] of Object.entries(images)) {
+      if (!image.blob) throw new Error('Local image bytes are missing. Copy the message and attach the image again.');
+      attachments[id] = await upload(image.blob, image.uploadId, { signal: preparation.signal });
+      checkRecipient();
+    }
+    const content = containsImages ? snapshotContent(parts, attachments) : undefined;
+    if (!dispatch()) return;
+    if (content) await richSend!(content, {
+      imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
+    });
+    else await textSend!(submitted.trim());
+    } finally { richPreparations.current.delete(preparation); signal.removeEventListener('abort', abortPreparation); }
+
+  }
   function deferMessage(): void {
-    if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
+    if (latest.current.draftOnly && !latest.current.waitsWhileOpening || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
     if (hasImages && blockFirstInputImages()) return;
     // A second key press before this render saw the first one finds the draft already taken.
     if (!hasImages && !currentDraft.text.trim()) return;
@@ -218,43 +307,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     currentDraft.feedback = undefined;
     waiting.start({
       text: containsImages ? parts.map(part => part.type === 'text' ? part.text : `[${part.label}]`).join('') : submitted,
-      ready() {
-        const current = latest.current;
-        return current.agentId === agentId && (!containsImages || !current.pendingFirstInputContext && (!imageDraftBinding || !!current.imageRecipient) && (!imageRecipient || current.imageRecipient?.identity === imageRecipient.identity && current.imageRecipient.isCurrent())) && current.dispatchReady && Boolean(containsImages ? current.onSendMessageContent && current.onUploadImage : current.onSendMessage);
-      },
-      async send(signal, dispatch) {
-        signal.throwIfAborted();
-        const selectedRecipient = latest.current.imageRecipient;
-        const preparation = new AbortController();
-        const abortPreparation = () => preparation.abort();
-        signal.addEventListener('abort', abortPreparation, { once: true });
-        if (selectedRecipient) richPreparations.current.set(preparation, selectedRecipient);
-        const checkRecipient = () => {
-          if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) throw new Error('Native attachment is unavailable.');
-          if (containsImages && latest.current.pendingFirstInputContext) throw new Error(firstInputImageNotice);
-          signal.throwIfAborted(); preparation.signal.throwIfAborted();
-          if (selectedRecipient && (!selectedRecipient.isCurrent() || latest.current.imageRecipient?.identity !== selectedRecipient.identity
-            || latest.current.imageRecipient?.lifetime !== selectedRecipient.lifetime)) throw new Error('The image recipient changed. Retry for the current connection.');
-        };
-        try {
-        checkRecipient();
-        const upload = latest.current.onUploadImage!;
-        const richSend = latest.current.onSendMessageContent;
-        const textSend = latest.current.onSendMessage;
-        const attachments: Record<string, Awaited<ReturnType<UploadImage>>> = {};
-        for (const [id, image] of Object.entries(images)) {
-          if (!image.blob) throw new Error('Local image bytes are missing. Copy the message and attach the image again.');
-          attachments[id] = await upload(image.blob, image.uploadId, { signal: preparation.signal });
-          checkRecipient();
-        }
-        const content = containsImages ? snapshotContent(parts, attachments) : undefined;
-        if (!dispatch()) return;
-        if (content) await richSend!(content, {
-          imageDigests: Object.fromEntries(Object.values(attachments).map(image => [image.attachmentId, image.sha256])),
-        });
-        else await textSend!(submitted.trim());
-        } finally { richPreparations.current.delete(preparation); signal.removeEventListener('abort', abortPreparation); }
-      },
+      payload: { agentId, containsImages, parts, images, submitted, imageRecipient, hadImageBinding: Boolean(imageDraftBinding) },
     });
     setText('');
     focusInput();
@@ -388,7 +441,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
 
   async function run(kind: 'send' | 'queue' | 'cancel'): Promise<void> {
     if (kind === 'send' && laterMode && latest.current.agentId === agentId) { await submitLater(); return; }
-    if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
+    if (latest.current.draftOnly && !(kind === 'send' && latest.current.waitsWhileOpening) || latest.current.mutationBlocked || latest.current.agentId !== agentId) return;
     if (kind === 'cancel') {
       if (!onCancel || !canInterrupt || currentDraft.interruptPending) return;
       currentDraft.interruptPending = true;

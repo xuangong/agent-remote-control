@@ -39,10 +39,17 @@ export async function startScriptedHost(instance: Pick<Instance, 'origin'>, opti
   };
   const stop = async () => { const running = host; host = undefined; await running?.close(); };
   await start();
-  await actAsLocalUser(instance.origin, async request => {
-    const response = await request('PUT', `v1/remote/hosts/${hostId}/smart-reading`, { providerId: provider.providerId, enabled: true });
-    if (!response.ok) throw new Error(`Smart reading could not be turned on for the scripted Host (${response.status}).`);
-  });
+  try {
+    await actAsLocalUser(instance.origin, async request => {
+      const response = await request('PUT', `v1/remote/hosts/${hostId}/smart-reading`, { providerId: provider.providerId, enabled: true });
+      // 409: the instance runs without journals (start it with ARC_LOCAL_JOURNALS=1).
+      if (!response.ok) throw new Error(`Smart reading could not be turned on for the scripted Host (${response.status}).`);
+    });
+  } catch (error) {
+    // A Host left running keeps its uplink open, and the smoke process would never exit after reporting the error.
+    await stop(); await provider.registration.directory.close?.();
+    throw error;
+  }
   return {
     get hostId() { return hostId; }, provider, start, stop,
     sessionUrl: nativeSessionId => instance.origin + controllerPath({ hostId, providerId: provider.providerId, nativeSessionId }),

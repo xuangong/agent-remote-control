@@ -3,7 +3,7 @@ import {createServer, type ServerResponse} from 'node:http';
 import {once} from 'node:events';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {CopilotAgentProvider, type CopilotAgentProviderOptions} from '../src/provider.js';
+import {CopilotAgentProvider, type CopilotAgentProviderOptions} from '../provider.js';
 import {TimelineStore, projectTimelineRows} from '@orchardworks/agent-timeline';
 import type {AgentSession, ProviderStreamItem} from '@orchardworks/agent-provider-sdk';
 

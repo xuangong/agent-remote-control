@@ -826,12 +826,18 @@ importers:
       '@orchardworks/agent-provider-claude':
         specifier: workspace:*
         version: link:../agent-provider-claude
+      '@orchardworks/agent-provider-copilot':
+        specifier: workspace:*
+        version: link:../agent-provider-copilot
       '@orchardworks/agent-relay-node':
         specifier: workspace:*
         version: link:../agent-relay-node
       '@orchardworks/agent-remote-controller':
         specifier: workspace:*
         version: link:../agent-controller
+      '@orchardworks/agent-remote-debugger':
+        specifier: workspace:*
+        version: link:../agent-remote-debugger
       '@playwright/test':
         specifier: ^1.50.0
         version: 1.62.0

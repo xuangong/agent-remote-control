@@ -23,9 +23,21 @@
       "types": "./dist/local-session-succession.d.ts",
       "import": "./dist/local-session-succession.js"
     },
+    "./session-state-publisher": {
+      "types": "./dist/session-state-publisher.d.ts",
+      "import": "./dist/session-state-publisher.js"
+    },
+    "./window-command": {
+      "types": "./dist/window-command.d.ts",
+      "import": "./dist/window-command.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
+    },
+    "./testing/relay-session-harness": {
+      "types": "./dist/test-utils/relay-session-harness.d.ts",
+      "import": "./dist/test-utils/relay-session-harness.js"
     }
   },
   "types": "./dist/index.d.ts",

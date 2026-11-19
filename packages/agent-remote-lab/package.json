@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Protocol validation site for provider-neutral remote agent sessions.",
+  "exports": {
+    "./directory-client": "./src/directory-client.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -30,8 +33,10 @@
   "devDependencies": {
     "@orchardworks/agent-e2e": "workspace:*",
     "@orchardworks/agent-provider-claude": "workspace:*",
+    "@orchardworks/agent-provider-copilot": "workspace:*",
     "@orchardworks/agent-relay-node": "workspace:*",
     "@orchardworks/agent-remote-controller": "workspace:*",
+    "@orchardworks/agent-remote-debugger": "workspace:*",
     "@playwright/test": "^1.50.0",
     "@types/node": "^24.3.0",
     "@types/qrcode": "1.5.6",

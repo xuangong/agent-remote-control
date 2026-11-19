@@ -8,7 +8,7 @@ import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSock
 import {createAgentRemoteHttpServer} from '@orchardworks/agent-session-runtime';
 import {createAgentHostRuntime} from '@orchardworks/agent-remote-controller';
 import {createCopilotSessionDirectory} from '@orchardworks/agent-remote-controller';
-import {fixture,reply} from '../../agent-provider-copilot/tests/native-fixture.js';
+import {fixture,reply} from '@orchardworks/agent-provider-copilot/testing';
 
 it('broadcasts native handoff over real browser sockets and reconnects both views to the resumed session',async()=>{
   const f=await fixture((body,res,index)=>{if(index>2)reply(res,body,'WEB_RESUMED');});

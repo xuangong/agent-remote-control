@@ -2,7 +2,7 @@ import {expect, it} from 'vitest';
 import type {ServerResponse} from 'node:http';
 import {join} from 'node:path';
 import {CopilotAgentProvider} from '../src/provider.js';
-import {fixture, observe, waitFor, type ModelRequest} from './native-fixture.js';
+import {fixture, observe, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
 
 function replyWithUsage(body: ModelRequest, res: ServerResponse, index: number) {
   const chunk = (delta: unknown, finish_reason: string | null = null) => ({id: `usage-${index}`, object: 'chat.completion.chunk', model: body.model, choices: [{index: 0, delta, finish_reason}]});

@@ -2,7 +2,7 @@ import {mkdtemp, writeFile, rm} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 import {expect, test, type WebSocketRoute} from '@playwright/test';
-import {fixture, reply} from '../../agent-provider-copilot/tests/native-fixture.js';
+import {fixture, reply} from '@orchardworks/agent-provider-copilot/testing';
 import {createDebuggerServer} from '../dist/server.js';
 
 test('mobile Copilot view keeps approvals through reconnect and controls native permissions', async ({page, context}, info) => {

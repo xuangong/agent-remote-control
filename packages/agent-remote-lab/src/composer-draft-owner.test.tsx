@@ -3,7 +3,7 @@ import { Blob as NativeBlob } from 'node:buffer';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { inspectImageDraft, type ImageDraft } from '@orchardworks/agent-client-web/browser';
-import { useImageDraft } from '../../agent-client-web/dist/react/useImageDraft.js';
+import { useImageDraft } from '@orchardworks/agent-client-web/testing';
 import { DraftStore, useBoundDraft } from './draft-store.js';
 import { ComposerDraftOwner } from './composer-draft-owner.js';
 import { readDrafts } from './conversation-recovery.js';

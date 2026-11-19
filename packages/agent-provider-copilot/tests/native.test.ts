@@ -7,7 +7,7 @@ import {mkdir, writeFile, readFile, realpath} from 'node:fs/promises';
 import {join} from 'node:path';
 import {homedir} from 'node:os';
 import type {ServerResponse} from 'node:http';
-import {fixture, observe, reply, waitFor, type ModelRequest} from './native-fixture.js';
+import {fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
 
 it('native apply_patch retains file diffs through Relay projection and saved resume', async () => {
  const f = await fixture((body, res, index) => {

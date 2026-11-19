@@ -11,7 +11,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
  */
 let script = '', css = '', url = '';
 const server = createServer((request, response) => {
-  response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript' : 'text/html; charset=utf-8');
+  response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript; charset=utf-8' : 'text/html; charset=utf-8');
   response.end(request.url === '/fixture.js' ? script : `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><div id="root"></div><script src="/fixture.js"></script>`);
 });
 let browser: Browser;
@@ -20,9 +20,9 @@ beforeAll(async () => {
     import React, { useSyncExternalStore } from 'react';
     import { createRoot } from 'react-dom/client';
     import './session-view-styles.ts';
-    import '../../agent-client-web/src/browser.ts';
-    import { AgentTimeline } from '../../agent-client-web/src/react/AgentTimeline.tsx';
-    import { AgentActivityStatus } from '../../agent-client-web/src/react/AgentActivityStatus.tsx';
+    import '@orchardworks/agent-client-web/browser';
+    import { AgentTimeline } from '@orchardworks/agent-client-web/react';
+    import { AgentActivityStatus } from '@orchardworks/agent-client-web/testing';
     import { remoteSessionState } from '@orchardworks/agent-client';
     import { AgentReplica } from '@orchardworks/agent-client';
     import { deviceStore } from '@orchardworks/agent-client/device-store';

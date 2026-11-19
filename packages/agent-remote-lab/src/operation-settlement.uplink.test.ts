@@ -8,7 +8,7 @@ import { expect, it } from 'vitest';
 import { createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
 import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { createAgentHost } from '../../agent-controller/src/host.js';
+import { createAgentHost } from '@orchardworks/agent-remote-controller';
 import { startDshAgentRemote } from '@orchardworks/dsh/host';
 import { inbox, retainsHandled, session, settlesOnce, version, type Connection, type Fixture, type Frame } from './test/operation-settlement.js';
 

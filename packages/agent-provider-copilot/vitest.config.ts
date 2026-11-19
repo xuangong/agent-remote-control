@@ -3,7 +3,7 @@ import { workspaceSource } from '../../scripts/lib/workspace-source.mjs';
 import { SlowTestReporter } from '../../scripts/lib/slow-test-reporter.mjs';
 
 // The tests under `tests/` start the pinned Copilot CLI as a child process against a scripted loopback model
-// (`tests/native-fixture.ts`): the process tier, outside the speed rule for mock-data tests.
+// (`src/test-utils/native-fixture.ts`): the process tier, outside the speed rule for mock-data tests.
 const processTests = ['tests/**/*.test.ts'];
 
 export default defineConfig({

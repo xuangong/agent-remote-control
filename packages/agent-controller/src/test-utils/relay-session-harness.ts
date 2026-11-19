@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
-import { createHostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
+import { createHostBroker, type HostBroker, type RelaySocket } from '@orchardworks/agent-relay-core';
 import { MemoryJournalStore } from '@orchardworks/agent-remote-journal';
 import { WebSocket, WebSocketServer } from 'ws';
 
@@ -47,10 +47,10 @@ export async function startRelayAndController(options: { journalServed: boolean;
   await once(http, 'listening');
   const port = (http.address() as AddressInfo).port;
   const ORIGIN = `http://127.0.0.1:${port}`;
-  const broker = createHostBroker({ origin: ORIGIN, rpcTimeoutMs: 1000, journals: store });
+  const broker: HostBroker = createHostBroker({ origin: ORIGIN, rpcTimeoutMs: 1000, journals: store });
   closers.push(() => broker.close());
   const pairing = await broker.handleRequest(new Request(`${ORIGIN}/v1/remote/pairings`, { method: 'POST', body: '{}' }));
-  const { key } = await pairing!.json();
+  const { key } = await pairing!.json() as { key: string };
   /** What the Relay wrote to Controllers, in order: the stream openings are counted from it. */
   const toController: Wire[] = [];
   const sockets = new WebSocketServer({ noServer: true });
@@ -175,7 +175,8 @@ export async function startRelayAndController(options: { journalServed: boolean;
   }
 
   return {
-    broker, hostId, agentId, port, origin: ORIGIN, pairingKey: key as string, sessions, openPage, attach, toController, refusals, directory,
+    /** The Relay's request handler: what a test sends to the Relay beside its pages. */
+    broker: broker as { handleRequest(request: Request): Promise<Response | undefined> }, hostId, agentId, port, origin: ORIGIN, pairingKey: key as string, sessions, openPage, attach, toController, refusals, directory,
     /** How many Controller streams the Relay opened for sessions, so far. */
     streamOpens: () => toController.filter(message => message.type === 'stream_open').length,
     /** A terminal takes the session: the Controller records the owner and lets the session go. */

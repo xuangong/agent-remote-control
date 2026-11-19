@@ -14,6 +14,7 @@ export * from './transport/plugin-host.js';
 export * from './transport/remote-host-plugin.js';
 export * from './transport/remote-host-uplink-client.js';
 export * from './transport/uplink-client.js';
+export { attachAgentRemoteWebSocketStream } from './transport/websocket-stream.js';
 export type { AgentRemoteHttpMutationPolicy } from './transport/http-router.js';
 export type { AgentRemoteRequestAccessPolicy } from './transport/request-access-policy.js';
 export type {

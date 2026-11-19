@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {expect,it} from 'vitest';
-import {fixture,observe,reply,waitFor} from '../../agent-provider-copilot/tests/native-fixture.js';
+import {fixture,observe,reply,waitFor} from '@orchardworks/agent-provider-copilot/testing';
 import {createCopilotSessionDirectory} from './copilot-directory.js';
 import {inspectNativeOwner} from './native-session-owner.js';
 

@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, expect, test, vi } from 'vitest';
-import type { SuccessionPrepareInput } from '../../agent-remote-lab/src/directory-client.js';
+import type { SuccessionPrepareInput } from '@orchardworks/agent-remote-lab/directory-client';
 import { ardbSessionDirectory } from '../web/session-operations.js';
 
 afterEach(() => vi.unstubAllGlobals(), 5000);

@@ -18,7 +18,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
     const css = await readFile(new URL('../../agent-client-web/src/styles.css', import.meta.url), 'utf8');
     let browserScript = '';
     const fixture = await previewFixture({ workspace, servePage: async (request, response) => {
-      if (request.url === '/image-test.js') { response.setHeader('content-type', 'application/javascript'); response.end(browserScript); return true; }
+      if (request.url === '/image-test.js') { response.setHeader('content-type', 'application/javascript; charset=utf-8'); response.end(browserScript); return true; }
       if (request.url === '/image-test') {
         response.setHeader('content-type', 'text/html');
         response.end(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><style>${css}</style><div id="root"></div><script src="/image-test.js"></script>`);
@@ -30,7 +30,7 @@ for (const engine of [chromium, webkit]) for (const width of [390, 1280]) {
       import React, { useMemo, useState, useSyncExternalStore } from 'react';
       import { createRoot } from 'react-dom/client';
       import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient } from '@orchardworks/agent-client';
-      import { MarkdownContent } from '../../agent-client-web/src/react/MarkdownContent.tsx';
+      import { MarkdownContent } from '@orchardworks/agent-client-web/react';
       const replica = new AgentReplica();
       const client = new RemoteSessionClient(${JSON.stringify(fixture.agentId)}, new HttpWebSocketTransport(${JSON.stringify(fixture.url + fixture.alice.basePath)}), replica);
       const resolveResource = (locator, source) => client.resolveResource(locator, source);

@@ -7,7 +7,7 @@ import type { AgentPersistenceHandle } from '@orchardworks/agent-provider-sdk';
 import { createDebuggerRuntime } from './runtime.js';
 // @ts-expect-error Test-only adapter fixture is also used by standalone package smoke.
 import { createPrefixAdapter } from './fixtures/prefix-adapter.mjs';
-import { SessionDirectoryClient } from '../../agent-remote-lab/src/directory-client.js';
+import { SessionDirectoryClient } from '@orchardworks/agent-remote-lab/directory-client';
 
 const servers: ReturnType<typeof createProtocolValidationServer>[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((server) => server.close())); });

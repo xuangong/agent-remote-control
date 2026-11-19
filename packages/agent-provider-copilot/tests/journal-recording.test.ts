@@ -8,7 +8,7 @@ import {describe, expect, it} from 'vitest';
 import type {AgentSession, ProviderObservation} from '@orchardworks/agent-provider-sdk';
 import {journalObservation as kept, recordingShape, serializeRecording, type JournalRecording as Recording} from '@orchardworks/agent-provider-sdk/testing';
 import {CopilotAgentProvider} from '../src/provider.js';
-import {fixture, observe, reply, waitFor, type ModelRequest} from './native-fixture.js';
+import {fixture, observe, reply, waitFor, type ModelRequest} from '../src/test-utils/native-fixture.js';
 
 /**
  * Records what the real Copilot CLI does for the scenarios the journal must survive: the observations of the live run, and

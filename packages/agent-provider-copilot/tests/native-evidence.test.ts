@@ -5,7 +5,7 @@ import type { ServerResponse } from 'node:http';
 import { expect, it } from 'vitest';
 import { parseAgentPreparedTextInput, serializeAgentPreparedTextInput, type AgentSessionNativeEvidence } from '@orchardworks/agent-provider-sdk';
 import { CopilotAgentProvider } from '../src/provider.js';
-import { fixture, observe, reply, waitFor, type ModelRequest } from './native-fixture.js';
+import { fixture, observe, reply, waitFor, type ModelRequest } from '../src/test-utils/native-fixture.js';
 
 function coldProvider(f: Awaited<ReturnType<typeof fixture>>) {
   return new CopilotAgentProvider({useLoggedInUser:false,requestTimeoutMs:15000,

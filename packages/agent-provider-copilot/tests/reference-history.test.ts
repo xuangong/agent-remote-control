@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { CopilotAgentProvider } from '../src/provider.js';
-import { fixture, observe, reply, waitFor } from './native-fixture.js';
+import { fixture, observe, reply, waitFor } from '../src/test-utils/native-fixture.js';
 
 it('reads actual native history through the loaded SDK and a cold profile without resuming or changing ownership', async () => {
   const f = await fixture((body, response) => reply(response, body, 'SOURCE_SQLITE_ANSWER'));

@@ -5,7 +5,7 @@ import { createAgentRemoteRelay, createRemoteHostUplinkClient } from '@orchardwo
 import { createGatewayRelay } from '@orchardworks/agent-relay-node/gateway-relay';
 import { createGatewayStaticPages } from '@orchardworks/agent-relay-node/gateway-static';
 import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
-import { createSessionStatePublisher, liveSessionState } from '../../agent-controller/src/session-state-publisher.js';
+import { createSessionStatePublisher, liveSessionState } from '@orchardworks/agent-remote-controller/session-state-publisher';
 import type { SessionActivityState } from '@orchardworks/agent-remote-protocol';
 
 export async function sessionLinkFixture(options: { automaticSignIn?: boolean; listCreatedSessions?: boolean; sessionStates?: boolean } = {}) {

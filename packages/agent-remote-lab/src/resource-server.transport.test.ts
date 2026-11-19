@@ -8,7 +8,7 @@ import WebSocket from 'ws';
 import { RESOURCE_INPUT_CAPABILITIES, type AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
-import { createDebuggerServer } from '../../agent-remote-debugger/src/server.js';
+import { createDebuggerServer } from '@orchardworks/agent-remote-debugger/server';
 const provider: AgentProviderAdapter={descriptor:{providerId:'fixture',displayName:'Fixture'},async createSession(config){let close!:()=>void;const ended=new Promise<void>(resolve=>close=resolve);return {capabilities:{history:true,sendMessage:true,readResource:false,steer:false,cancel:false,resourceInput:RESOURCE_INPUT_CAPABILITIES,interactions:{question:false,planApproval:false,toolApproval:false}},async *observe(){yield {type:'history_boundary' as const};await ended;},async sendMessage(){},async sendMessageContent(){},async respondToInteraction(){},async runtimeInfo(){return {providerId:'fixture',sessionId:config.sessionId,status:'idle' as const};},async dispose(){close();}};},async resumeSession(){throw new Error('unused');}};
 it.each(['lab','debugger'])('%s production composition enables resource uploads on real WebSocket',async kind=>{
  const directory=await mkdtemp(join(tmpdir(),'resource-server-')); let shutdown:()=>Promise<void>=async()=>{};let socket:WebSocket|undefined;

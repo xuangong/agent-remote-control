@@ -3,7 +3,7 @@ import {mkdir, writeFile, realpath} from 'node:fs/promises';
 import {join, resolve} from 'node:path';
 import {promisify} from 'node:util';
 import {expect, it} from 'vitest';
-import {fixture, observe, reply, waitFor} from '../../agent-provider-copilot/tests/native-fixture.js';
+import {fixture, observe, reply, waitFor} from '@orchardworks/agent-provider-copilot/testing';
 
 it('continues SDK history through the real native CLI and resumes that same session back in the adapter', async () => {
   const f = await fixture((body, res) => reply(res, body, 'NATIVE_RESUME_OK'));

@@ -1,7 +1,7 @@
 import { CopilotClient, RuntimeConnection } from '@github/copilot-sdk';
 import { expect, it } from 'vitest';
 import { resolveCopilotExecutable } from '../src/provider.js';
-import { fixture, reply } from './native-fixture.js';
+import { fixture, reply } from '../src/test-utils/native-fixture.js';
 
 // Characterize the pinned runtime before relying on hooks as a release barrier.
 it('cannot prevent native prompt admission by rejecting the submitted-prompt hook', async () => {

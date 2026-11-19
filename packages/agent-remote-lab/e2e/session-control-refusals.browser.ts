@@ -3,7 +3,7 @@ import { build } from 'esbuild';
 import { chromium, expect as browserExpect, type Page } from '@playwright/test';
 import { afterEach, expect, it } from 'vitest';
 
-import { startRelayAndController, SESSION, type Relay } from '../../agent-controller/src/test-utils/relay-session-harness.js';
+import { startRelayAndController, SESSION, type Relay } from '@orchardworks/agent-remote-controller/testing/relay-session-harness';
 
 const started: Relay[] = [];
 afterEach(async () => { for (const relay of started.splice(0)) await relay.dispose(); });

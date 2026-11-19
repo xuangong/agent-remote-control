@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
-import { SessionDirectoryClient } from '../../agent-remote-lab/src/directory-client.js';
+import { SessionDirectoryClient } from '@orchardworks/agent-remote-lab/directory-client';
 import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
 import { createDebuggerRuntime } from './runtime.js';
 // @ts-expect-error Deterministic native fixture shared with the installed package test.

@@ -7,15 +7,15 @@ import { afterAll, beforeAll, expect, it } from 'vitest';
 let url = '';
 let script = '';
 const server = createServer((request, response) => {
-  response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript' : 'text/html');
+  response.setHeader('content-type', request.url === '/fixture.js' ? 'application/javascript; charset=utf-8' : 'text/html');
   response.end(request.url === '/fixture.js' ? script : '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script src="/fixture.js"></script>');
 });
 beforeAll(async () => {
   const source = `
     import React from 'react';
     import { createRoot } from 'react-dom/client';
-    import { useTimelineScroll } from '../../agent-client-web/src/react/useTimelineScroll.ts';
-    import { captureReadingText, readingTextTop } from '../../agent-client-web/src/react/reading-text-anchor.ts';
+    import { useTimelineScroll } from '@orchardworks/agent-client-web/react';
+    import { captureReadingText, readingTextTop } from '@orchardworks/agent-client-web/testing';
     const positions = new Map();
     const count = Number(new URLSearchParams(location.search).get('count') || 1200);
     const shape = new URLSearchParams(location.search).get('shape');

@@ -1,5 +1,5 @@
 import {expect, it} from 'vitest';
-import {fixture, observe, reply, waitFor} from './native-fixture.js';
+import {fixture, observe, reply, waitFor} from '../src/test-utils/native-fixture.js';
 
 const schema = {type: 'object', properties: {role: {type: 'string'}}, required: ['role'], additionalProperties: false};
 

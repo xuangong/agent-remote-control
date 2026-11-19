@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { AgentSessionSettingChange } from '@orchardworks/agent-remote-protocol';
-import { AgentSessionSettings, type SessionControlView } from '../../../agent-client-web/src/react/AgentSessionSettings.js';
+import { AgentSessionSettings, type SessionControlView } from '@orchardworks/agent-client-web/testing';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { replicaState } from '../../src/test/fixtures.js';
 import '../../src/session-view-styles';

@@ -1,5 +1,5 @@
 import {expect, test} from '@playwright/test';
-import {fixture, reply} from '../../agent-provider-copilot/tests/native-fixture.js';
+import {fixture, reply} from '@orchardworks/agent-provider-copilot/testing';
 import {createDebuggerServer} from '../dist/server.js';
 
 test('Copilot patch renders a normalized diff in the shared mobile Session View', async ({page}, info) => {

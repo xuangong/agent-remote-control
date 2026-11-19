@@ -3,8 +3,7 @@ import { createServer } from 'node:http';
 import { expect } from 'vitest';
 import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import type { AgentSession, AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
-import { createAgentRemoteRelay } from '../../../agent-session-runtime/src/relay.js';
-import { attachAgentRemoteWebSocketStream } from '../../../agent-session-runtime/src/transport/websocket-stream.js';
+import { attachAgentRemoteWebSocketStream, createAgentRemoteRelay } from '@orchardworks/agent-session-runtime';
 
 /**
  * Operation settlement over a session wire: one native dispatch per operation id across lost receipts, fresh connections and a

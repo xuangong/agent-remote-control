@@ -14,10 +14,6 @@
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },
   {
-   "test": "packages/agent-relay-node/src/live-launcher.test.ts > live DSH launcher > runs the caller-supplied pnpm executable",
-   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
    "test": "packages/agent-remote-journal/src/session-journal.test.ts > SessionJournal > prepends 200,000 items and keeps the sequence contiguous",
    "reason": "Builds a journal of 200,000 items to prove contiguity and paging at scale; CPU bound by the size under test."
   },

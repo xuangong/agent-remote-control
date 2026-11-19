@@ -7,7 +7,7 @@ import { isAbsolute, join } from 'node:path';
 
 import { DshChildSessions, createDshWebInteractionAdapter, type DshWebInteractionAdapter } from '@orchardworks/agent-provider-dsh';
 import {
-  createAgentRemoteRelay, createRemoteHostUplinkClient, type RemoteHostControlRequest,
+  createAgentRemoteRelay, createRemoteHostUplinkClient, type RemoteHostControlRequest, type RemoteHostUplinkClientOptions,
 } from '@orchardworks/agent-session-runtime';
 import type { Context } from '@deepseek-ai/cordis';
 import { type Agent, type ModelSelection } from '@deepseek-ai/dsh-agent';
@@ -78,10 +78,12 @@ export async function startDshAgentRemote(
   context: WebContext,
   config: Config = {},
   interactions?: DshWebInteractionAdapter,
+  /** The uplink's socket and reconnect timing; a test that serves the Relay's side in memory passes its own. */
+  uplinkPorts?: Pick<RemoteHostUplinkClientOptions, 'connect' | 'reconnectBaseDelayMs' | 'reconnectMaxDelayMs'>,
 ): Promise<DshAgentRemoteHost> {
   const remoteKey = config.remoteKey ?? process.env.AGENT_REMOTE_ACCESS_KEY;
   if (!remoteKey) throw new Error('Remote Host requires a pairing key.');
-  return startRemoteHost(context, config, remoteKey, interactions);
+  return startRemoteHost(context, config, remoteKey, interactions, uplinkPorts);
 }
 
 interface Projection {
@@ -100,6 +102,7 @@ async function startRemoteHost(
   config: Config,
   remoteKey: string,
   interactions?: DshWebInteractionAdapter,
+  uplinkPorts?: Pick<RemoteHostUplinkClientOptions, 'connect' | 'reconnectBaseDelayMs' | 'reconnectMaxDelayMs'>,
 ): Promise<DshAgentRemoteHost> {
   const url = remoteHostUplinkUrl(config.serverUrl ?? process.env.AGENT_REMOTE_SERVER_URL);
   if (!remoteKey || remoteKey.length > 512 || !/^[!-~]+$/.test(remoteKey)) {
@@ -278,7 +281,7 @@ async function startRemoteHost(
       }
     };
     uplink = createRemoteHostUplinkClient({
-      relay: relay!, installationId, name: instanceName, providers: [dsh.descriptor], remoteKey, url,
+      relay: relay!, installationId, name: instanceName, providers: [dsh.descriptor], remoteKey, url, ...uplinkPorts,
       resolveSession: (sessionId) => {
         const projection = projections.get(sessionId);
         return projection ? relay!.requireAgent(projection.bindingId) : undefined;

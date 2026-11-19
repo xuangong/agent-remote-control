@@ -3,20 +3,24 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createServer } from 'node:http';
 import { expect, it } from 'vitest';
-import WebSocket, { WebSocketServer } from 'ws';
+import { createRemoteHostUplinkClient } from '@orchardworks/agent-session-runtime';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
+import { WebSocketServer, type WebSocket } from 'ws';
 import { createAgentHost } from '../../agent-controller/src/host.js';
 import { startDshAgentRemote } from '@orchardworks/dsh/host';
 import { inbox, retainsHandled, session, settlesOnce, version, type Connection, type Fixture, type Frame } from './test/operation-settlement.js';
 
-/** The Controller's uplink over a real WebSocket to a broker: a Host and the dsh plugin settle an operation once across a lost receipt and an uplink reconnect. The standalone wire is `operation-settlement.test.ts`. */
+/** The Controller's uplink to a broker, in memory (`memoryHttp`): a Host and the dsh plugin settle an operation once across a lost receipt and an uplink reconnect. The standalone wire is `operation-settlement.test.ts`. */
 async function remoteFixture(kind: 'host' | 'dsh', inputAcceptance?: { disposition: 'handled' }): Promise<Fixture> {
   let dispatches = 0, sequence = 0, registrations = 0;
   let socket!: WebSocket;
   const streams = new Map<string, ReturnType<typeof inbox>>();
   const responses = new Map<string, any>();
-  const broker = new WebSocketServer({ port: 0, host: '127.0.0.1' });
-  await new Promise<void>(resolve => broker.once('listening', resolve));
+  const server = createServer();
+  const broker = new WebSocketServer({ server });
+  const net = memoryHttp(server);
   broker.on('connection', current => {
     socket = current;
     current.on('message', data => {
@@ -26,19 +30,21 @@ async function remoteFixture(kind: 'host' | 'dsh', inputAcceptance?: { dispositi
       if (frame.streamId) streams.get(frame.streamId)?.push(frame.type === 'stream_message' ? JSON.parse(frame.message) : frame);
     });
   });
-  const url = `http://127.0.0.1:${(broker.address() as { port: number }).port}`;
+  const url = net.url;
+  // A reconnect after a lost socket does not wait out the production backoff.
+  const memoryUplink = { connect: net.uplinkConnect, reconnectBaseDelayMs: 1, reconnectMaxDelayMs: 5 };
   let host: { ready: Promise<unknown>; close(): Promise<void> };
   const priorHome = process.env.DSH_HOME;
   const home = await mkdtemp(join(tmpdir(), 'settlement-dsh-'));
   if (kind === 'host') {
     const native = session(() => dispatches++, undefined, inputAcceptance);
-    host = createAgentHost({ installationId: 'settlement', name: 'Fixture', uplink: { url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: 'test-key' }, registrations: [{
+    host = createAgentHost({ installationId: 'settlement', name: 'Fixture', uplink: { url: url.replace('http:', 'ws:') + '/ws/remote-host', remoteKey: 'test-key' }, uplinkClient: options => createRemoteHostUplinkClient({ ...options, ...memoryUplink }), registrations: [{
       adapter: { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => native, resumeSession: async () => native },
       directory: { providerId: 'fixture', list: async () => [], workspaces: async () => [], create: async () => 'native', open: async () => native, close: async () => { await native.dispose(); } },
     }] });
   } else {
     process.env.DSH_HOME = home;
-    host = await startDshAgentRemote(dshContext(() => dispatches++) as never, { serverUrl: url, remoteKey: 'test-key' });
+    host = await startDshAgentRemote(dshContext(() => dispatches++) as never, { serverUrl: url, remoteKey: 'test-key' }, undefined, memoryUplink);
   }
   await host.ready;
   const requestId = randomUUID();
@@ -59,7 +65,7 @@ async function remoteFixture(kind: 'host' | 'dsh', inputAcceptance?: { dispositi
       };
     },
     async close() {
-      await host.close(); for (const current of broker.clients) current.terminate(); await new Promise<void>(resolve => broker.close(() => resolve()));
+      await host.close(); net.close();
       if (priorHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = priorHome;
       await rm(home, { recursive: true, force: true });
     },

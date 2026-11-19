@@ -3,6 +3,8 @@ import { Duplex, Readable } from 'node:stream';
 
 import { WebSocket, type ClientOptions } from 'ws';
 
+import type { UplinkSocket, UplinkSocketInit } from './transport/remote-host-uplink-client.js';
+
 /**
  * A Node `http.Server` reached without a listener: `fetch` and a WebSocket client whose bytes travel over in-memory socket pairs
  * handed to the server's own `connection` event. The server parses real HTTP, runs its `request` and `upgrade` handlers and frames
@@ -19,6 +21,8 @@ export interface MemoryHttp {
   readonly url: string;
   readonly fetch: typeof fetch;
   webSocket(url: string | URL, options?: ClientOptions): WebSocket;
+  /** The `connect` port of a Controller's uplink client: its connection to this server's `/ws/remote-host` path, in memory. */
+  uplinkConnect(endpoint: URL, init: UplinkSocketInit): UplinkSocket;
   readonly WebSocket: new (url: string | URL, protocols?: string | string[], options?: object) => WebSocket;
   close(): void;
 }
@@ -89,6 +93,7 @@ export function memoryHttp(server: Server): MemoryHttp {
     url: 'http://memory.test',
     fetch: fetchFromMemory,
     webSocket,
+    uplinkConnect: (endpoint, init) => webSocket(endpoint, { headers: { authorization: init.authorization }, maxPayload: init.maxPayload, perMessageDeflate: false }) as unknown as UplinkSocket,
     WebSocket: class extends WebSocket {
       constructor(url: string | URL, protocols?: string | string[], options: object = {}) {
         super(url, protocols as never, { createConnection: connect as never, ...options });

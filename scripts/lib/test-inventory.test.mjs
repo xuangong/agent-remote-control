@@ -69,7 +69,7 @@ test('a Playwright listing gives the runs of every project and the distinct test
   assert.deepEqual(parsePlaywrightList(output), { runs: 3, distinctTests: 2 });
 });
 
-test('the reporter writes per-tier counts and counts only mock-data tests against the speed rule', () => {
+test('the reporter writes per-tier counts and counts only mock-data tests against the speed rule', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'arc-reporter-'));
   const previous = process.env.ARC_SLOW_TEST_DIR;
   process.env.ARC_SLOW_TEST_DIR = directory;
@@ -79,7 +79,7 @@ test('the reporter writes per-tier counts and counts only mock-data tests agains
   const warn = console.warn;
   console.warn = () => {};
   try {
-    new SlowTestReporter().onTestRunEnd([
+    await new SlowTestReporter({ enforce: false }).onTestRunEnd([
       fakeModule('packages/a/src/x.test.ts', 'unit', [fakeTest('fast', 5), fakeTest('slow', 400), fakeTest('very slow', 1500)]),
       fakeModule('packages/a/src/cli-y.test.ts', 'process', [fakeTest('spawns a process', 4000)]),
     ]);

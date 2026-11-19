@@ -61,7 +61,7 @@ Unit and integration tests **must** use mock data. If a test needs the whole sta
 
 ## 4. Speed is a correctness property
 
-A unit or integration test over **1 s is wrong**. Over **300 ms**, look at it. `scripts/lib/slow-test-reporter.mjs` lists both; `scripts/slow-test-allowlist.json` only shrinks.
+A unit or integration test over **1 s is wrong**. Over **300 ms**, look at it. `scripts/lib/slow-test-reporter.mjs` lists both and fails the run on a test over 1 s that `scripts/slow-test-allowlist.json` does not name, after running its file once more alone (load moves a near-limit test, a real cause does not). The allowlist only shrinks, and every entry says why.
 
 Almost every slow test here had one of these causes, and each has one fix:
 

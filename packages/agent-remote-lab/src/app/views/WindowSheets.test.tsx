@@ -30,7 +30,7 @@ function scopeOf(overrides: Partial<Record<keyof Scope, unknown>> = {}, others: 
   };
   return scope as typeof scope & Scope;
 }
-const dialog = (title: string) => [...document.querySelectorAll<HTMLDialogElement>('dialog.ui-sheet')].find(item => item.querySelector('h2')?.textContent === title);
+const dialog = (title: string) => [...document.querySelectorAll<HTMLDialogElement>('dialog.orchard-sheet')].find(item => item.querySelector('h2')?.textContent === title);
 const button = (sheet: HTMLElement, label: string) => [...sheet.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)!;
 
 it('names the Window it deletes and says its sessions stay in All sessions', async () => {
@@ -73,12 +73,12 @@ it('keeps Delete Window from acting while another Window action runs or the Wind
   await render(<WindowSheets scope={scopeOf({ windowActions: { busy: true, deleteCurrent: vi.fn() } })} />);
   expect(button(dialog('Delete this Window?')!, 'Delete Window').disabled).toBe(true);
   await render(<WindowSheets scope={scopeOf({ windowWorkspace: { provisional: true, client: undefined, windows: [] } })} />);
-  expect([...document.querySelectorAll('dialog.ui-sheet')].every(item => button(item as HTMLElement, 'Delete Window').disabled)).toBe(true);
+  expect([...document.querySelectorAll('dialog.orchard-sheet')].every(item => button(item as HTMLElement, 'Delete Window').disabled)).toBe(true);
 });
 
 const inspect = vi.fn(async (_windowId: string | undefined) => ({ manager: undefined }));
 const agentClient = { inspect, assign: vi.fn(async () => ({})) } as never;
-const sheetsOf = () => [...document.querySelectorAll('dialog.ui-sheet')].map(item => item.querySelector('h2')?.textContent);
+const sheetsOf = () => [...document.querySelectorAll('dialog.orchard-sheet')].map(item => item.querySelector('h2')?.textContent);
 
 it.each([
   ['the sheet is closed', { deleteConfirmOpen: false }],

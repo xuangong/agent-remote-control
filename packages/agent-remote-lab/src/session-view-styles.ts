@@ -7,3 +7,4 @@ import './session-view-responsive.css';
 import './session-view-options.css';
 import './ask-resize.css';
 import './ui/ui.css';
+import '@orchardworks/agent-client-web/primitives.css';

@@ -1,4 +1,4 @@
-/** A primitive's root class, doubled so it outranks the Lab's bare element rules, plus the caller's class. */
+/** A primitive's root class plus the caller's. Stylesheet rules double the class to outrank the Lab's bare element rules. */
 export function rootClass(name: string, extra?: string): string {
-  return extra ? `${name} ${name} ${extra}` : `${name} ${name}`;
+  return extra ? `${name} ${extra}` : name;
 }

@@ -1,7 +1,7 @@
 // The Agent control and Delete Window sheets.
 import { AgentControl } from '../../components/AgentControl.js';
 import { windowCatalog } from '../../hooks/useWindowActions.js';
-import { Sheet } from '../../ui/Sheet.js';
+import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../../ui/Button.js';
 import { message } from '../helpers.js';
 import type { AppScope } from '../types.js';

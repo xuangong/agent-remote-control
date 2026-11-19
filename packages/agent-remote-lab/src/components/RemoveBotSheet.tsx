@@ -1,6 +1,6 @@
 import { closingWith, removalMessage } from '../bot-removal.js';
 import type { WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { Sheet } from '../ui/Sheet.js';
+import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
 
 /**

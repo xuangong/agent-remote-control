@@ -11,7 +11,7 @@ import { botDisplayName } from './BotRoster.js';
 import { windowOutline } from '../window-outline.js';
 import { IconButton } from '../ui/IconButton.js';
 import { Button } from '../ui/Button.js';
-import { Sheet } from '../ui/Sheet.js';
+import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { revealView, viewSelection } from '../window-view-selection.js';
 import { useSharedStates } from '../shared-feeds.js';
 

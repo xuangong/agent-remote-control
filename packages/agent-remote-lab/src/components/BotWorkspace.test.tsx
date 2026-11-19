@@ -106,7 +106,7 @@ it('starts a new bot in its own group, named after its session, and opens its co
   try {
     expect(app.container.querySelector('input[aria-label="Section title"]')).toBeNull();
     await act(async () => app.button('New bot').click());
-    const sheet = () => app.container.querySelector<HTMLDialogElement>('dialog.ui-sheet[open]');
+    const sheet = () => app.container.querySelector<HTMLDialogElement>('dialog.orchard-sheet[open]');
     expect(sheet()?.querySelector('h2')?.textContent).toBe('New bot');
     expect(sheet()?.querySelector<HTMLSelectElement>('select[aria-label="Provider"]')?.selectedOptions[0]?.textContent).toBe('Recorded Provider');
     await act(async () => visibleButton(sheet()!, 'Start').click());
@@ -154,7 +154,7 @@ it('keeps an unconfirmed new group and recovers that same creation on Retry', as
   });
   try {
     await act(async () => app.button('New bot').click());
-    await act(async () => visibleButton(app.container.querySelector('dialog.ui-sheet[open]')!, 'Start').click());
+    await act(async () => visibleButton(app.container.querySelector('dialog.orchard-sheet[open]')!, 'Start').click());
     await until(() => expect(app.container.textContent).toContain('The new group is not confirmed.'));
     expect(original.window.views[0]?.binding?.nativeSessionId).toBe('N2');
     await act(async () => app.button('Retry').click());

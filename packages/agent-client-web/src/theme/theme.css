@@ -86,6 +86,10 @@
   --orchard-duration-sway: 3200ms;
   --orchard-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --orchard-ease-flow: cubic-bezier(0.45, 0, 0.55, 1);
+  --orchard-safe-area-top: env(safe-area-inset-top, 0px);
+  --orchard-safe-area-right: env(safe-area-inset-right, 0px);
+  --orchard-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --orchard-safe-area-left: env(safe-area-inset-left, 0px);
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }

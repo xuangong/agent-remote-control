@@ -24,7 +24,7 @@ export function SegmentedControl<T extends string>({ label, options, value, onCh
     buttons.current.get(next.value)?.focus();
   };
   const Root = landmark ? 'nav' : 'div';
-  return <Root className={className ? `ui-segmented ${className}` : 'ui-segmented'} role={landmark ? undefined : 'group'} aria-label={label}
+  return <Root className={className ? `orchard-segmented ${className}` : 'orchard-segmented'} role={landmark ? undefined : 'group'} aria-label={label}
     onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(undefined); }}>
     {options.map((option, index) => <button key={option.value} type="button" aria-pressed={option.value === value}
       tabIndex={option.value === stop ? 0 : -1}

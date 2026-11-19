@@ -1,5 +1,5 @@
 import type { WorkbenchMode } from '../workbench-mode.js';
-import { SegmentedControl } from '../ui/SegmentedControl.js';
+import { SegmentedControl } from '@orchardworks/agent-client-web/primitives';
 
 /** Segments show "Window" and "Bot" so they fit a 260px sidebar; the rest of each name stays for assistive technology. */
 const MODES = [

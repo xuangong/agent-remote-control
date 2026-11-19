@@ -1,8 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
-import { IconButton } from './IconButton.js';
+import { Pill } from './Pill.js';
 
 /**
- * A bottom sheet on a modal dialog, content-sized (`content`), half (`medium`) or nearly full (`large`) height; its body
+ * A bottom sheet on a modal dialog, clearing the home indicator by the bottom safe-area inset, content-sized (`content`), half (`medium`) or nearly full (`large`) height; its body
  * scrolls. The owner's `open` drives it. Escape, a press on the backdrop and Close ask the owner to close it through `onClose`, which also hears about a
  * close the browser makes on its own; keep `onClose` idempotent.
  */
@@ -32,7 +32,7 @@ export function Sheet({ open, title, onClose, detent = 'medium', children }: {
     window.addEventListener('pointerdown', press, true);
     return () => window.removeEventListener('pointerdown', press, true);
   }, [open]);
-  return <dialog ref={dialog} className="ui-sheet" data-detent={detent} aria-labelledby={heading}
+  return <dialog ref={dialog} className="orchard-sheet" data-detent={detent} aria-labelledby={heading}
     // Escape belongs to this modal's cancellation policy rather than a containing panel.
     onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation(); }}
     onCancel={event => { event.preventDefault(); onClose(); }}
@@ -42,8 +42,10 @@ export function Sheet({ open, title, onClose, detent = 'medium', children }: {
       if (pressedBackdrop.current && event.target === event.currentTarget) onClose();
       pressedBackdrop.current = false;
     }}>
-    <div className="ui-sheet-grabber" aria-hidden="true" />
-    <header className="ui-sheet-header"><h2 id={heading}>{title}</h2><IconButton icon="close" label="Close" onClick={() => onClose()} /></header>
-    <div className="ui-sheet-body">{children}</div>
+    <div className="orchard-sheet-grabber" aria-hidden="true" />
+    <header className="orchard-sheet-header"><h2 id={heading}>{title}</h2><Pill className="orchard-sheet-close" aria-label="Close" onClick={() => onClose()}>
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+    </Pill></header>
+    <div className="orchard-sheet-body">{children}</div>
   </dialog>;
 }

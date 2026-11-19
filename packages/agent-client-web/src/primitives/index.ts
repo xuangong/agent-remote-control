@@ -11,3 +11,6 @@ export { StatusLine } from './StatusLine.js';
 export { WorkSummaryLine } from './WorkSummaryLine.js';
 export { ApprovalCard } from './ApprovalCard.js';
 export { SessionChangeLine } from './SessionChangeLine.js';
+export { Sheet } from './Sheet.js';
+export { SegmentedControl, type SegmentedActivation } from './SegmentedControl.js';
+export { FloatingPanel } from './FloatingPanel.js';

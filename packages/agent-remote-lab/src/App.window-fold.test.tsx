@@ -18,7 +18,7 @@ afterAll(() => {
     else delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
   }
 });
-const sheet = () => document.querySelector<HTMLDialogElement>('dialog.ui-sheet[open]');
+const sheet = () => document.querySelector<HTMLDialogElement>('dialog.orchard-sheet[open]');
 
 it("folds a bot's primary group on close and removes it only after confirming", async () => {
   const scope = 'http://localhost/window-fold-primary/'; seedGroup(scope, botGroup('A')); history.replaceState(null, '', '/?window=A');

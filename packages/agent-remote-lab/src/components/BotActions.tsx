@@ -4,7 +4,7 @@ import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { appendedRank, type BotRow, type BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import type { MenuEntry } from '../ui/Menu.js';
-import { Sheet } from '../ui/Sheet.js';
+import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
 import { BotPicture, botDisplayName } from './BotRoster.js';
 import { RemoveBotSheet } from './RemoveBotSheet.js';

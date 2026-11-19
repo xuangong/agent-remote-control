@@ -24,7 +24,7 @@ async function choose(menu: string, label: string) {
   if (!item) throw new Error(`No menu item ${label}`);
   await act(async () => item.click());
 }
-const sheet = () => document.querySelector<HTMLDialogElement>('dialog.ui-sheet[open]');
+const sheet = () => document.querySelector<HTMLDialogElement>('dialog.orchard-sheet[open]');
 async function type(input: HTMLInputElement, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 }

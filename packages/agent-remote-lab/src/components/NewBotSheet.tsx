@@ -1,6 +1,6 @@
 import { useId } from 'react';
 import type { CreateSessionOptions, SessionDirectoryClient } from '../directory-client.js';
-import { Sheet } from '../ui/Sheet.js';
+import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
 import { WorkspaceSelect } from './WorkspaceSelect.js';
 

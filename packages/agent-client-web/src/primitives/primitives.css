@@ -133,8 +133,61 @@
 .orchard-session-change.orchard-session-change { text-align: center; color: var(--orchard-text-secondary);
   font: var(--orchard-type-caption-size) / var(--orchard-type-caption-leading) var(--orchard-font-text); }
 
+/* Segmented control: an orange pill on a fill track. Segments are keyed on [aria-pressed] so the Lab's bare button rules
+   cannot restyle them; the selected one is the brand fill with dark ink. */
+.orchard-segmented.orchard-segmented { display: flex; gap: var(--orchard-space-2xs); padding: 3px; border-radius: var(--orchard-radius-pill); background: var(--orchard-fill); }
+.orchard-segmented.orchard-segmented > button[aria-pressed] {
+  position: relative; flex: 1; min-width: 0; min-height: 28px; margin: 0; padding: var(--orchard-space-xs) var(--orchard-space-xl); border: 0;
+  border-radius: var(--orchard-radius-pill); color: var(--orchard-text); background: transparent; cursor: pointer; opacity: 1; transform: none;
+  font: var(--orchard-type-headline-weight) var(--orchard-type-callout-size) / 1.2 var(--orchard-font-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: background-color var(--orchard-duration-fast) var(--orchard-ease-standard);
+}
+.orchard-segmented.orchard-segmented > button[aria-pressed="true"],
+.orchard-segmented.orchard-segmented > button[aria-pressed="true"]:hover:not(:disabled) { color: var(--orchard-on-brand); background: var(--orchard-brand); }
+.orchard-segmented.orchard-segmented > button[aria-pressed="false"]:hover:not(:disabled) { color: var(--orchard-text-strong); background: var(--orchard-fill-strong); }
+.orchard-segmented.orchard-segmented > button[aria-pressed]:active:not(:disabled) { transform: none; }
+
+/* Sheet: a bottom sheet with the panel's top corners; its body clears the home indicator. */
+.orchard-sheet.orchard-sheet {
+  position: fixed; inset: auto 0 0; width: 100%; max-width: 640px; height: 50dvh; max-height: none; margin: 0 auto; padding: 0; border: 0;
+  border-radius: var(--orchard-radius-panel) var(--orchard-radius-panel) 0 0; color: var(--orchard-text); background: var(--orchard-surface);
+  box-shadow: var(--orchard-elevation-lifted); overflow: clip;
+}
+.orchard-sheet.orchard-sheet[data-detent="large"] { height: calc(100dvh - 44px); }
+.orchard-sheet.orchard-sheet[data-detent="content"] { height: auto; max-height: calc(100dvh - 44px); }
+.orchard-sheet[data-detent="content"] > :is(.orchard-sheet-grabber, .orchard-sheet-header) { flex-shrink: 0; }
+.orchard-sheet.orchard-sheet[open] { display: flex; flex-direction: column; animation: orchard-sheet-in var(--orchard-duration-base) var(--orchard-ease-standard); }
+.orchard-sheet::backdrop { background: var(--orchard-backdrop); }
+@keyframes orchard-sheet-in { from { transform: translateY(100%); } }
+.orchard-sheet-grabber { width: 36px; height: 5px; margin: var(--orchard-space-s) auto 0; border-radius: var(--orchard-radius-pill); background: var(--orchard-fill-strong); }
+.orchard-sheet-header { display: flex; align-items: center; gap: var(--orchard-space-m); padding: var(--orchard-space-s) var(--orchard-space-m) var(--orchard-space-s) var(--orchard-space-2xl); }
+.orchard-sheet-header h2 { flex: 1; margin: 0; color: var(--orchard-text-strong);
+  font: var(--orchard-type-headline-weight) var(--orchard-type-headline-size) / 1.3 var(--orchard-font-text); }
+.orchard-pill.orchard-pill.orchard-sheet-close { width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; color: var(--orchard-text-strong); background: var(--orchard-fill); }
+.orchard-pill.orchard-pill.orchard-sheet-close:hover:not(:disabled) { color: var(--orchard-text-strong); background: var(--orchard-fill-strong); }
+.orchard-sheet-close svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.orchard-sheet-body {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 0 var(--orchard-space-xl) calc(var(--orchard-space-xl) + var(--orchard-safe-area-bottom));
+}
+
+/* Floating panel: 22 px corners on the ground, flat; edge to edge at phone width. */
+.orchard-panel.orchard-panel {
+  min-width: 0; min-height: 0; padding: var(--orchard-space-2xl); border-radius: var(--orchard-radius-panel); color: var(--orchard-text);
+  background: var(--orchard-surface); box-shadow: var(--orchard-elevation-flat);
+}
+@media (max-width: 760px) {
+  .orchard-panel.orchard-panel {
+    border-radius: 0;
+    padding: calc(var(--orchard-space-2xl) + var(--orchard-safe-area-top)) calc(var(--orchard-space-2xl) + var(--orchard-safe-area-right))
+      calc(var(--orchard-space-2xl) + var(--orchard-safe-area-bottom)) calc(var(--orchard-space-2xl) + var(--orchard-safe-area-left));
+  }
+}
+
 /* One focus ring for every primitive control. */
-:is(.orchard-pill.orchard-pill, .orchard-toggle.orchard-toggle, .orchard-work-summary-button.orchard-work-summary-button):focus-visible {
+:is(.orchard-pill.orchard-pill, .orchard-toggle.orchard-toggle, .orchard-work-summary-button.orchard-work-summary-button,
+  .orchard-segmented.orchard-segmented > button[aria-pressed]):focus-visible {
   outline: 2px solid var(--orchard-focus); outline-offset: 2px;
 }
 
@@ -142,9 +195,18 @@
   .orchard-pill.orchard-pill { min-width: 44px; min-height: 44px; }
   .orchard-toggle.orchard-toggle, .orchard-work-summary-button.orchard-work-summary-button { min-height: 44px; }
   .orchard-toggle.orchard-toggle { min-width: 44px; }
+  .orchard-segmented.orchard-segmented > button[aria-pressed] { min-height: 44px; }
+  .orchard-pill.orchard-pill.orchard-sheet-close { width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .orchard-avatar.orchard-avatar[data-bob], .orchard-avatar.orchard-avatar[data-pop], .orchard-mark-glance, .orchard-mark-sway,
-  .orchard-typing > i { animation: none; }
+  .orchard-typing > i, .orchard-sheet.orchard-sheet[open] { animation: none; }
+}
+
+/* Forced colours drop fills and shadows: keep the chosen segment and the sheet's edge visible. */
+@media (forced-colors: active) {
+  .orchard-segmented.orchard-segmented, .orchard-pill.orchard-pill { border: 1px solid ButtonText; }
+  .orchard-segmented.orchard-segmented > button[aria-pressed="true"] { forced-color-adjust: none; color: HighlightText; background: Highlight; }
+  .orchard-sheet.orchard-sheet { border: 1px solid CanvasText; border-bottom: 0; }
 }

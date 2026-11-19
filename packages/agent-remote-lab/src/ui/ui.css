@@ -41,24 +41,6 @@
   .ui-button.ui-button, .ui-button.ui-button[data-size] { min-height: 44px; }
 }
 
-/* A gray track of borderless segments; the pressed one is raised, and semibold because its fill is close to the
-   track's by design. Segments are keyed on [aria-pressed] (0,2,1) and their hover on the pressed state (0,4,1),
-   so neither the bare button rules of app.css nor its hover, active and coarse-pointer rules can restyle them.
-   The track's radius stays concentric with its 2px padding. */
-.ui-segmented { display: flex; gap: 2px; padding: 2px; border-radius: calc(var(--ui-radius-control) + 2px); background: var(--ui-fill); }
-.ui-segmented > button[aria-pressed] { position: relative;
-  flex: 1; min-width: 0; min-height: 24px; padding: 2px 8px; border: 0; border-radius: var(--ui-radius-control);
-  font: 500 var(--ui-size-callout)/1.2 var(--ui-font); color: var(--ui-label); background: transparent; cursor: pointer;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; --ui-focus-offset: 1px;
-  transition: background-color var(--ui-duration-short) var(--ui-ease), box-shadow var(--ui-duration-short) var(--ui-ease);
-}
-.ui-segmented > button[aria-pressed="true"] { background: var(--ui-segment-selected); box-shadow: var(--ui-shadow-pane); font-weight: 600; }
-.ui-segmented > button[aria-pressed="false"]:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-fill); }
-.ui-segmented > button[aria-pressed="true"]:hover:not(:disabled) { color: var(--ui-label); background: var(--ui-segment-selected); }
-.ui-segmented > button[aria-pressed]:active:not(:disabled) { transform: none; }
-.ui-segmented > button[aria-pressed]:focus-visible { outline: 3px solid var(--ui-focus-ring); outline-offset: var(--ui-focus-offset); }
-@media (pointer: coarse) { .ui-segmented > button[aria-pressed] { min-height: 44px; } }
-
 .ui-avatar {
   display: inline-grid; place-items: center; flex: none; width: var(--ui-avatar-size, 28px); height: var(--ui-avatar-size, 28px);
   border-radius: 50%; color: var(--ui-on-accent); background: var(--ui-avatar-color, var(--ui-accent));
@@ -138,23 +120,6 @@ button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, button.ui-list
   .ui-menu .ui-menu-item[role="menuitem"][aria-disabled="true"]:is(:hover, :active, :focus) { color: GrayText; }
 }
 
-.ui-sheet {
-  position: fixed; inset: auto 0 0; width: 100%; max-width: 640px; height: 50dvh; max-height: none; margin: 0 auto; padding: 0; border: 0;
-  border-radius: var(--ui-radius-sheet) var(--ui-radius-sheet) 0 0; color: var(--ui-label); background: var(--ui-background-elevated);
-  box-shadow: var(--ui-shadow-overlay); overflow: clip;
-}
-.ui-sheet[data-detent="large"] { height: calc(100dvh - 44px); }
-.ui-sheet[data-detent="content"] { height: auto; max-height: calc(100dvh - 44px); }
-.ui-sheet[data-detent="content"] > :is(.ui-sheet-grabber, .ui-sheet-header) { flex-shrink: 0; }
-.ui-sheet[open] { display: flex; flex-direction: column; animation: ui-sheet-in var(--ui-duration) var(--ui-ease-spring); }
-.ui-sheet::backdrop { background: var(--ui-backdrop); }
-@keyframes ui-sheet-in { from { transform: translateY(100%); } }
-.ui-sheet-grabber { width: 36px; height: 5px; margin: 6px auto 0; border-radius: 3px; background: var(--ui-fill-strong); }
-.ui-sheet-header { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 16px; }
-.ui-sheet-header h2 { flex: 1; margin: 0; font: 600 var(--ui-size-headline)/1.3 var(--ui-font); }
-.ui-sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px max(12px, env(safe-area-inset-bottom)); }
-/* Forced colors drop the shadow: keep the sheet's edge visible. */
-@media (forced-colors: active) { .ui-sheet { border: 1px solid CanvasText; border-bottom: 0; } }
 .ui-toolbar {
   display: flex; align-items: center; gap: 10px; flex: none; min-height: 52px; padding: 0 12px 0 16px;
   border-bottom: 1px solid var(--ui-separator); color: var(--ui-label); background: var(--ui-background);
@@ -166,21 +131,17 @@ button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, button.ui-list
 .ui-toolbar .ui-toolbar-title:focus { outline: none; }
 .ui-toolbar-subtitle { color: var(--ui-label-secondary); font: var(--ui-size-caption)/1.3 var(--ui-font); }
 .ui-toolbar-trailing { display: flex; align-items: center; gap: 4px; flex: none; }
-/* A toolbar sizes its trailing controls to their content, so segments there size to their labels too. */
-.ui-toolbar .ui-segmented > button[aria-pressed] { flex: 1 0 auto; }
 
-/* Forced colors drop fills and shadows: buttons keep an edge, the chosen segment and the current row stay highlighted,
+/* Forced colors drop fills and shadows: buttons keep an edge, the current row stays highlighted,
    and badges keep their shape. */
 @media (forced-colors: active) {
-  button.ui-button.ui-button, button.ui-icon-button.ui-icon-button, .ui-segmented { border: 1px solid ButtonText; }
-  .ui-segmented > button[aria-pressed="true"], .ui-segmented > button[aria-pressed="true"]:hover:not(:disabled),
+  button.ui-button.ui-button, button.ui-icon-button.ui-icon-button { border: 1px solid ButtonText; }
   .ui-list-row.ui-list-row[aria-current="true"], .ui-list-row.ui-list-row[aria-current="true"]:hover:not(:disabled) {
     forced-color-adjust: none; color: HighlightText; background: Highlight;
   }
   /* forced-color-adjust: none is inherited, so the subtitle and the focus ring of a highlighted primitive are set here. */
   .ui-list-row.ui-list-row[aria-current="true"] .ui-list-row-subtitle { color: inherit; }
   .ui-list-row.ui-list-row[aria-current="true"]:focus-visible { outline-color: HighlightText; }
-  .ui-segmented > button[aria-pressed="true"]:focus-visible { outline-color: CanvasText; }
   .ui-button.ui-button:disabled, .ui-icon-button.ui-icon-button:disabled { border-color: GrayText; }
   .ui-status[data-kind="unread"] { forced-color-adjust: none; background: CanvasText; }
   .ui-status[data-kind="attention"], .ui-status[data-kind="failed"] { border: 1px solid CanvasText; }

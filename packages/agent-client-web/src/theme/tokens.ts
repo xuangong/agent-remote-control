@@ -163,6 +163,8 @@ export function renderThemeCss(): string {
     ...Object.entries(orchardElevation).map(([name, value]) => `--orchard-elevation-${name}: ${value};`),
     ...Object.entries(orchardMotion.durations).map(([name, value]) => `--orchard-duration-${name}: ${value}ms;`),
     ...Object.entries(orchardMotion.easings).map(([name, value]) => `--orchard-ease-${name}: ${value};`),
+    // The device's safe areas, as variables so a test can emulate a notch and a home indicator.
+    ...(['top', 'right', 'bottom', 'left'] as const).map(side => `--orchard-safe-area-${side}: env(safe-area-inset-${side}, 0px);`),
   ];
   const reduced = Object.keys(orchardMotion.durations).map(name => `--orchard-duration-${name}: 0ms;`);
   return [

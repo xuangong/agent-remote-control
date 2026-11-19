@@ -41,6 +41,7 @@ function offenders(path: string, exempt: string[] = []): string[] {
 }
 
 it('keeps every Lab color in the token stylesheet, so dark mode covers it', () => {
+  // Besides ui/tokens.css, only the generated Orchard theme.css (outside the Lab) holds literals.
   const found = stylesheets(lab).filter(path => !path.endsWith(join('ui', 'tokens.css'))).flatMap(path => offenders(path));
   expect(found).toEqual([]);
 });
@@ -106,7 +107,7 @@ it('draws one focus ring: the global rule reads the token and the primitive offs
   expect(body).toContain('outline-offset: var(--ui-focus-offset, 2px);');
   const ui = readFileSync(new URL('./ui.css', import.meta.url), 'utf8');
   for (const [selector, offset] of [['.ui-button.ui-button {', '1px'], ['.ui-icon-button.ui-icon-button {', '1px'],
-    ['.ui-segmented > button[aria-pressed] {', '1px'], ['.ui-list-row.ui-list-row {', '-1px']] as const) {
+    ['.ui-list-row.ui-list-row {', '-1px']] as const) {
     const at = ui.indexOf(selector);
     expect(at, selector).toBeGreaterThanOrEqual(0);
     expect(ui.slice(at, ui.indexOf('}', at)), selector).toContain(`--ui-focus-offset: ${offset};`);
@@ -127,4 +128,29 @@ function legacyCounts(): Record<string, number> {
 it('ratchets the legacy variables down: each stylesheet uses exactly its budget, which only falls', () => {
   // A count above the budget is a new legacy use (use --orchard-* instead); one below it is a removal whose budget was not lowered.
   expect(legacyCounts(), 'legacy-token-budget.json').toEqual(Object.fromEntries(Object.entries(budgetFile.budget).sort(([a], [b]) => a.localeCompare(b))));
+});
+
+const theme = fileURLToPath(new URL('../../../agent-client-web/src/theme/theme.css', import.meta.url));
+const primitives = fileURLToPath(new URL('../../../agent-client-web/src/primitives/primitives.css', import.meta.url));
+/** Set by primitives' inline styles (AssistantAvatar, Wordmark), not by a stylesheet. */
+const scriptedOrchard = ['--orchard-avatar-size', '--orchard-wordmark-size'];
+
+it('keeps the Orchard primitives on Orchard tokens only: no literal colour and no legacy variable', () => {
+  expect(offenders(primitives)).toEqual([]);
+  expect(uncommented(primitives).match(/var\(\s*--(?:ui|obs|agent)-[\w-]+/g) ?? []).toEqual([]);
+});
+
+it('uses no undefined --orchard-* variable in any stylesheet', () => {
+  const defined = new Set([...scriptedOrchard, ...[...uncommented(theme).matchAll(/(--orchard-[\w-]+)\s*:/g)].map(match => match[1]!)]);
+  const files = [...stylesheets(lab), shared, primitives];
+  const undefinedUses = files.flatMap(path => uncommented(path).split('\n').flatMap((line, index) =>
+    [...line.matchAll(/var\(\s*(--orchard-[\w-]+)/g)].flatMap(match => defined.has(match[1]!) ? [] : [`${path}:${index + 1}: ${match[1]}`])));
+  expect(undefinedUses).toEqual([]);
+});
+
+it('writes the primitives\' width queries at the token breakpoints', async () => {
+  const { orchardBreakpoints } = await import('@orchardworks/agent-client-web/theme');
+  const widths = [...uncommented(primitives).matchAll(/\((?:max|min)-width:\s*(\d+)px\)/g)].map(match => Number(match[1]));
+  expect(widths.length).toBeGreaterThan(0);
+  expect(widths.filter(width => !Object.values(orchardBreakpoints).includes(width as never))).toEqual([]);
 });

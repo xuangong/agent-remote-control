@@ -45,7 +45,7 @@ async function choose(container: ParentNode, menu: string, label: string) {
   expect(entry, `${menu} → ${label}`).toBeDefined();
   await act(async () => entry!.click());
 }
-const sheet = (title: string) => [...document.querySelectorAll<HTMLDialogElement>('dialog.ui-sheet')].find(dialog => dialog.querySelector('h2')?.textContent === title);
+const sheet = (title: string) => [...document.querySelectorAll<HTMLDialogElement>('dialog.orchard-sheet')].find(dialog => dialog.querySelector('h2')?.textContent === title);
 const sheetButton = (dialog: HTMLElement, label: string) => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!;
 
 it('puts the toolbar first in the desktop workbench, showing the Window, and leaves it out of compact layouts', async () => {

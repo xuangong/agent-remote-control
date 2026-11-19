@@ -1,8 +1,8 @@
+// @vitest-environment jsdom
 import { act, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
-import { Menu } from './Menu.js';
 import { Sheet } from './Sheet.js';
 
 // jsdom has no modal dialogs. Like browsers, the stub ignores closing a closed dialog and queues the close event as a task.
@@ -91,16 +91,6 @@ it('closes on a press on the backdrop only, not beside its grabber or when a pre
   await settle();
   expect(dialog.open).toBe(false);
   expect(onClose).toHaveBeenCalledOnce();
-});
-
-it('closes only its open menu when the backdrop is pressed', async () => {
-  const { dialog } = await opened(<Menu label="Window actions" items={[{ label: 'Rename', onSelect: vi.fn() }]} />);
-  await act(async () => (dialog.querySelector('button[aria-label="Window actions"]') as HTMLButtonElement).click());
-  expect(dialog.querySelector('[role="menu"]')).not.toBeNull();
-  await press(dialog, 100);
-  expect(dialog.querySelector('[role="menu"]')).toBeNull();
-  expect(dialog.open).toBe(true);
-  expect(onClose).not.toHaveBeenCalled();
 });
 
 it('tells its owner when the browser closes it on its own, and not when the owner closes it', async () => {

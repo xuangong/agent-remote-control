@@ -443,3 +443,17 @@ it('says Not sent for a waiting message when the view could not open its session
   await advance(1000);
   expect(view.send).not.toHaveBeenCalled();
 });
+
+it('lets a message the session refused for certain be retried, and sends it again only on Retry', async () => {
+  const { RemoteOperationError } = await import('@orchardworks/agent-client');
+  const send = vi.fn().mockRejectedValueOnce(new RemoteOperationError('native_session_owned', 'A terminal has control.', false)).mockResolvedValue(undefined);
+  const view = await setup({ connection: 'ready', onSendMessage: send });
+  await view.type('Refused'); await view.click();
+  await advance(0);
+  expect(view.notice()?.textContent).toContain('Not sent');
+  await advance(1000);
+  expect(send).toHaveBeenCalledTimes(1);
+  await view.click('[aria-label="Retry pending send"]');
+  await advance(0);
+  expect(send.mock.calls).toEqual([['Refused'], ['Refused']]);
+});

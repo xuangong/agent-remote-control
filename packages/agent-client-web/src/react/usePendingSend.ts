@@ -1,4 +1,8 @@
+import { isUncertainSend, RemoteOperationError } from '@orchardworks/agent-client';
 import { useEffect, useRef, useState } from 'react';
+
+/** Refusals that mean the session never took the message: it may be sent again. */
+const NOT_DELIVERED = new Set(['native_session_owned', 'session_read_only', 'session_control_changed', 'host_offline', 'host_unavailable', 'controller_offline']);
 
 interface PendingSend {
   text: string;
@@ -59,6 +63,9 @@ export function usePendingSend(sessionKey: string, visible: boolean) {
     }).catch(error => {
       if (!item.dispatched && abort.signal.aborted) item.phase = item.held ? 'error' : 'waiting';
       else {
+        // A session's definite refusal (a terminal in control, the Host offline) delivered nothing: the message can be retried.
+        // Any other failure after dispatch is uncertain and asks the person to check delivery.
+        if (item.dispatched && error instanceof RemoteOperationError && !isUncertainSend(error) && NOT_DELIVERED.has(error.code)) item.dispatched = false;
         item.phase = 'error';
         item.reason = error instanceof Error ? error.message : 'Message could not be sent.';
       }

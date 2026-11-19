@@ -7,6 +7,7 @@ import {
 } from '@orchardworks/agent-remote-protocol';
 import type { WebSocketLike } from './http-websocket-transport.js';
 import { notifyFeedReopened } from './feed-reopen.js';
+import type { ChannelLink } from './relay-link.js';
 import { watchPageResume, pageHidden } from '../page-lifecycle.js';
 import type {
   RemoteConnection, RemoteDisconnectReason, RemoteProtocolObservation, RemoteTransportDiagnostic, RemoteTransportListener,
@@ -93,6 +94,8 @@ export class SessionChannelPool {
   private stateRetry?: ReturnType<typeof setTimeout>;
   private stateRetryDelay: number;
   private feedOpened = false;
+  private link: ChannelLink = 'unknown';
+  private readonly linkListeners = new Set<(link: ChannelLink) => void>();
 
   constructor(private readonly dependencies: Dependencies) {
     this.stateRetryDelay = dependencies.stateRetryMs ?? 1_000;
@@ -156,6 +159,20 @@ export class SessionChannelPool {
       watching = false;
       if (--this.stateWatchers === 0) { clearTimeout(this.stateRetry); this.stateRetry = undefined; }
     };
+  }
+
+  /** The link of the activity channel, which stays open while any feed is watched. */
+  relayLink(): ChannelLink { return this.link; }
+
+  subscribeRelayLink(listener: (link: ChannelLink) => void): () => void {
+    this.linkListeners.add(listener);
+    return () => { this.linkListeners.delete(listener); };
+  }
+
+  private setLink(link: ChannelLink): void {
+    if (this.link === link) return;
+    this.link = link;
+    for (const listener of [...this.linkListeners]) listener(link);
   }
 
   private ensureStateChannel(): void {
@@ -222,6 +239,7 @@ export class SessionChannelPool {
     if (this.disposed) return;
     this.disposed = true;
     this.unwatch();
+    this.linkListeners.clear();
     clearTimeout(this.stateRetry); this.stateRetry = undefined;
     for (const channel of [...this.channels.values()]) this.stopChannel(channel);
     for (const subscription of [...this.subscriptions]) this.retire(subscription);
@@ -315,6 +333,7 @@ export class SessionChannelPool {
         channel.readyTimer = undefined;
         this.startHeartbeat(channel);
         if (mode === 'activity') {
+          this.setLink('up');
           this.stateRetryDelay = this.dependencies.stateRetryMs ?? 1_000;
           if (this.feedOpened) notifyFeedReopened();
           this.feedOpened = true;
@@ -352,7 +371,11 @@ export class SessionChannelPool {
     clearTimeout(channel.openTimer);
     channel.openTimer = undefined;
     if (channel.active && !channel.opened && !this.pageHidden) {
-      channel.openTimer = setTimeout(() => this.failChannel(channel, false), channelOpenTimeoutMs);
+      channel.openTimer = setTimeout(() => {
+        // An activity channel that never opens counts as a lost link, even on the first open.
+        if (channel.mode === 'activity') this.setLink('down');
+        this.failChannel(channel, false);
+      }, channelOpenTimeoutMs);
     }
   }
 
@@ -472,7 +495,10 @@ export class SessionChannelPool {
       if (fallback && subscription.active) this.openDirect(subscription);
       else this.disconnect(subscription);
     }
-    if (channel.mode === 'activity') this.retryStateChannel();
+    if (channel.mode === 'activity') {
+      if (this.link === 'up') this.setLink('down');
+      this.retryStateChannel();
+    }
   }
 
   private stopChannel(channel: Channel): void {

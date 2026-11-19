@@ -1,8 +1,9 @@
-import { act, useState } from 'react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { act, useContext, useEffect, useState } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChannelLink } from '@orchardworks/agent-client';
 import { render } from './test/setup.js';
 import { GatewayController } from './GatewayController.js';
-import { rememberWorkspaceAccess, forgetWorkspaceAccess } from './workspace-access.js';
+import { rememberWorkspaceAccess, forgetWorkspaceAccess, RelayLinkReport } from './workspace-access.js';
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); });
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -354,4 +355,43 @@ it('shows stored rows on a cached unexpired lease before the status answers, and
   await act(async () => answer(Response.json({ error: 'Sign in' }, { status: 401 })));
   expect(readStoredDisplay(scope, target)).toBeUndefined();
   await vi.waitFor(async () => expect(await deviceStore.load(scope, ['host', 'recorded', 'recorded-session'])).toBeUndefined());
+});
+
+describe('the device link indicator', () => {
+  const T5 = /\b(?:Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation)\b/i;
+  function LinkReporter({ link }: { link: ChannelLink }) {
+    const report = useContext(RelayLinkReport);
+    useEffect(() => { report(link); }, [link, report]);
+    return <p>Private controller</p>;
+  }
+  async function mount() {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', async () => Response.json({ basePath: '/u/' + 'a'.repeat(64) + '/', expiresAt: Date.now() + 600_000, refreshAfterMs: 300_000 }));
+    let setLink!: (link: ChannelLink) => void;
+    function Page() { const [link, set] = useState<ChannelLink>('up'); setLink = set; return <GatewayController>{() => <LinkReporter link={link} />}</GatewayController>; }
+    const view = await render(<Page />);
+    return { view, setLink: async (link: ChannelLink) => { await act(async () => setLink(link)); } };
+  }
+
+  it('says Offline 5 s after the reported link goes down, never with a connection word', async () => {
+    const { view, setLink } = await mount();
+    await setLink('down');
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_900); });
+    expect(view.querySelector('.gateway-recovery')).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(200); });
+    const banner = view.querySelector('.gateway-recovery');
+    expect(banner?.textContent).toContain('Offline. Messages will be sent when this device is back online.');
+    expect(banner?.textContent).not.toMatch(T5);
+    await setLink('up');
+    expect(view.querySelector('.gateway-recovery')).toBeNull();
+  });
+
+  it('shows nothing when the link is back up within 5 s', async () => {
+    const { view, setLink } = await mount();
+    await setLink('down');
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await setLink('up');
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(view.querySelector('.gateway-recovery')).toBeNull();
+  });
 });

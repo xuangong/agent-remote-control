@@ -99,12 +99,13 @@ export function sessionActivityLabel(facts: SessionFacts, commandPending?: boole
 No indicator of the socket link exists today. The only device-level signal is GatewayController's access banner (section 2). I1 makes that banner the single indicator and feeds it the session channel's link as well.
 
 ```ts
-// agent-client/src/client/session-channel-transport.ts (SessionChannelPool)
+// agent-client/src/client/session-channel-transport.ts (SessionChannelPool); ChannelLink lives in relay-link.ts, the pure module
 export type ChannelLink = 'unknown' | 'up' | 'down';
 /** The link of the activity channel, which stays open while any feed is watched. `down` after it was up and failed, until it reopens. */
 relayLink(): ChannelLink;
 subscribeRelayLink(listener: (link: ChannelLink) => void): () => void;
 // HttpWebSocketTransport forwards both; 'unknown' without session channels (legacy direct sockets).
+// RemoteAgentTransport declares both as optional, beside watchSessionStates, so the lab reads them from its transport type.
 
 // agent-client/src/client/relay-link.ts (pure)
 export interface RelayLinkFacts { readonly accessReady: boolean; readonly needsSignIn: boolean; readonly channel: ChannelLink; readonly browserOnline: boolean }
@@ -276,7 +277,7 @@ pnpm arch:check
 - `packages/agent-client/src/client/session-channel-transport.ts`;
 - `http-websocket-transport.ts`;
 - `relay-link.ts` and `relay-link.test.ts` (new);
-- `session-channel-transport` tests (the existing file that covers channel failure; add a case);
+- `session-channel-transport.test.ts` (new: agent-client had no unit test of the pool; its channel failures are covered by the seam suite `agent-remote-seams/tests/S3/session-channel-client.integration.test.ts`);
 - `packages/agent-remote-lab/src/GatewayController.tsx`;
 - `packages/agent-remote-lab/src/app/useWorkbenchShell.ts`.
 
@@ -608,6 +609,14 @@ What the control arm shows:
 - R3 reads `send_message.allowed` alone (section 4.1, R3).
 
 **Tests.** `session-presentation.test.ts`: 36 tests, 1,800 combinations in the R1 product (six connections, four leases, three runtimes, five activities, three Hosts, restored or not), about 50 ms of test time. Mutations checked: dropping the Host-offline notice, the agent-unavailable notice, or turning Working into a connection word each fail tests.
+
+### Task 2: device link
+
+**State accounting.** `SessionChannelPool`: +2 fields (`link`, `linkListeners`), +3 methods (`relayLink`, `subscribeRelayLink`, `setLink`), +0 recovery paths: the link only observes the activity channel's ready, failure and open deadline. `relay-link.ts` (new, pure): +1 function. `HttpWebSocketTransport` and `RemoteAgentTransport`: +2 forwarding methods (optional on the interface). Lab: +1 context (`RelayLinkReport`), GatewayController +1 input (channel link) and +1 input (the browser's `online` and `offline` events, which `RelayLinkFacts.browserOnline` names), the banner's words "Reconnecting…" become "Offline. Messages will be sent when this device is back online."; no new timer: the banner keeps `useRecoveryNotice`'s 5 s grace.
+
+**Tests.** `relay-link.test.ts` 7, `session-channel-transport.test.ts` 4 (fake sockets, fake timers), `GatewayController.test.tsx` +2 (27 in the file). The pool's deadline test advances the 20 s open deadline with fake timers.
+
+**Not yet seen by the page.** The browser specs that read `.gateway-recovery` (`e2e/seamless-access.spec.ts`) only check that it is hidden; Task 7 runs them.
 
 ## 11. Decisions (2026-11-20)
 

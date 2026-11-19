@@ -1,4 +1,4 @@
-import { displayLeaseValid } from '@orchardworks/agent-client';
+import { displayLeaseValid, type ChannelLink } from '@orchardworks/agent-client';
 import { createContext } from 'react';
 
 export type WorkspaceAccess = { user?: { id: string; name?: string; email?: string }; basePath: string; expiresAt: number; refreshAfterMs?: number };
@@ -7,6 +7,8 @@ const accessKey = 'agent-remote:workspace-access';
 const automaticKey = 'agent-remote:automatic-sign-in';
 const logoutKey = 'agent-remote:signed-out';
 export const WorkspaceReady = createContext(true);
+/** Where the page's transport reports the device's link to the Relay; GatewayController provides it and shows the one indicator. */
+export const RelayLinkReport = createContext<(link: ChannelLink) => void>(() => undefined);
 
 export function parseAccess(value: unknown): WorkspaceAccess {
   if (!value || typeof value !== 'object' || !('basePath' in value) || !('expiresAt' in value) ||

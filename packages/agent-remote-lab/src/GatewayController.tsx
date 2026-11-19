@@ -1,4 +1,4 @@
-import { watchPageResume } from '@orchardworks/agent-client';
+import { relayLinkView, watchPageResume, type ChannelLink } from '@orchardworks/agent-client';
 import { deviceStore } from '@orchardworks/agent-client/device-store';
 import { controllerPath, readControllerLocation } from '@orchardworks/agent-remote-protocol/model';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -9,7 +9,7 @@ import { AccessPage } from './components/AccessPage.js';
 import { clearConversationRecovery } from './conversation-recovery.js';
 import { flushRecoveryWrites } from './recovery-writes.js';
 import { useRecoveryNotice } from './hooks/useRecoveryNotice.js';
-import { WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
+import { RelayLinkReport, WorkspaceReady, scopeFor, confirmWorkspaceAccess, readStoredLease, revokeStoredRows, retireWorkspace, workspaceSignedOut, previousWorkspacePath, parseAccess, readWorkspaceAccess, rememberWorkspaceAccess, forgetWorkspaceAccess, claimAutomaticSignIn, prepareManualSignIn, setWorkspaceReady, type WorkspaceAccess } from './workspace-access.js';
 
 const jsonPost = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' };
 const navigateToLogin = (url: string) => window.location.replace(url);
@@ -32,7 +32,11 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
   const securityTrigger = useRef<HTMLElement>();
   const [attempt, setAttempt] = useState(0);
   const stop = useRef<() => void>(() => undefined);
-  const notice = useRecoveryNotice('workspace-access', ready ? 'ready' : 'connecting', !ready, !!access);
+  const [channelLink, setChannelLink] = useState<ChannelLink>('unknown');
+  const browserOnline = useBrowserOnline();
+  // The page's one connection indicator: this device's link to the Relay, after the usual grace for a quick socket swap.
+  const link = relayLinkView({ accessReady: ready, needsSignIn, channel: channelLink, browserOnline });
+  const notice = useRecoveryNotice('device-link', 'ready', link.state !== 'online', !!access);
   useEffect(() => {
     let stopped = false;
     let expiry: ReturnType<typeof setTimeout> | undefined;
@@ -197,13 +201,24 @@ export function GatewayController({ children, navigate = navigateToLogin, automa
     <button type="button" disabled={!ready} onClick={event => { securityTrigger.current = event.currentTarget; setSecurityOpen(true); }}>Security</button>
     <button type="button" onClick={() => void logout()}>Sign out</button>
   </>;
-  if (access) return <WorkspaceReady.Provider value={ready}>
+  if (access) return <WorkspaceReady.Provider value={ready}><RelayLinkReport.Provider value={setChannelLink}>
     <div className="gateway-private" key={access.basePath} hidden={securityOpen} {...(securityOpen ? { inert: '' } : {})}>{children(new URL(access.basePath, window.location.origin).href, accountAction, ready)}</div>
     {securityOpen ? <SecurityPanel onClose={closeSecurity} onSignedOut={signedOut} /> : null}
     {notice && !securityOpen ? <div className="gateway-recovery" role="status">
-      {needsSignIn ? <>Sign in to reconnect. <a href={'/auth/login' + returnPath.slice(1)} onClick={rememberTarget}>Sign in</a></> : <>Reconnecting… <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></>}
+      {link.state === 'sign_in' ? <>Sign in to reconnect. <a href={'/auth/login' + returnPath.slice(1)} onClick={rememberTarget}>Sign in</a></> : <>Offline. Messages will be sent when this device is back online. <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></>}
     </div> : null}
-  </WorkspaceReady.Provider>;
+  </RelayLinkReport.Provider></WorkspaceReady.Provider>;
   if (access === undefined && previousWorkspacePath()) return <WorkspaceShell />;
   return entry(access === undefined ? 'checking' : failed ? 'unavailable' : 'signin');
+}
+
+function useBrowserOnline(): boolean {
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine !== false);
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine !== false);
+    window.addEventListener('online', update);
+    window.addEventListener('offline', update);
+    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
+  }, []);
+  return online;
 }

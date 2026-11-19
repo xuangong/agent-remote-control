@@ -1,7 +1,7 @@
 // The Workbench mode, page visibility, access readiness and the Relay transport.
 import { useWorkbenchMode } from '../hooks/useWorkbenchMode.js';
 import { stopLayoutDiagnostics } from '../layout-diagnostics.js';
-import { WorkspaceReady, workspaceFetch, workspaceSocket } from '../workspace-access.js';
+import { RelayLinkReport, WorkspaceReady, workspaceFetch, workspaceSocket } from '../workspace-access.js';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { HttpWebSocketTransport } from '@orchardworks/agent-client';
 import { ReadingPositions } from '../conversation-recovery.js';
@@ -58,6 +58,13 @@ export function useWorkbenchShell(scope: Pick<AppInputs, 'baseUrl' | 'injectedTr
       });
     };
   }, [transport, injectedTransport]);
+  const reportLink = useContext(RelayLinkReport);
+  useEffect(() => {
+    if (!transport.relayLink || !transport.subscribeRelayLink) return;
+    reportLink(transport.relayLink());
+    const stop = transport.subscribeRelayLink(reportLink);
+    return () => { stop(); reportLink('unknown'); };
+  }, [transport, reportLink]);
   return { navigation, windowMode, windowModeRef, pageVisible, accessReady, activated, accessReadyRef, shellRef, readingPositions, transport, mountedTransport };
 }
 

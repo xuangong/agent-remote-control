@@ -23,6 +23,7 @@ import {
 
 import { watchPageResume } from '../page-lifecycle.js';
 import { SessionChannelPool } from './session-channel-transport.js';
+import type { ChannelLink } from './relay-link.js';
 import { SessionStateStore, type SessionStateRef, type SessionStatesView } from './session-states.js';
 import { SessionReadStore, type SessionReadsView } from './session-reads.js';
 import { SessionDraftStore, type SessionDraftsView } from './session-drafts.js';
@@ -105,6 +106,9 @@ export class HttpWebSocketTransport implements RemoteAgentTransport {
   }
   private readonly migrationListeners = new Set<(migration: SessionMigration) => void>();
   private readonly sessionStates = new SessionStateStore();
+  /** The device's link to the Relay, as its activity channel sees it; `unknown` without session channels. */
+  relayLink(): ChannelLink { return this.sessionChannels?.relayLink() ?? 'unknown'; }
+  subscribeRelayLink(listener: (link: ChannelLink) => void): () => void { return this.sessionChannels?.subscribeRelayLink(listener) ?? (() => {}); }
   watchSessionStates(listener: (states: SessionStatesView) => void): () => void {
     if (!this.sessionChannels) { listener(this.sessionStates.view()); return () => {}; }
     const unsubscribe = this.sessionStates.subscribe(listener), stopWatching = this.sessionChannels.watchStates();

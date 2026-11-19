@@ -17,6 +17,8 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
   const entryIndex = useRef(new TimelineEntryIndex());
   const following = useRef(true);
   const anchor = useRef<ReadingAnchor>();
+  // The row element the anchor was taken from: when the read path renames every row, its text finds the same row under its new key.
+  const anchorRow = useRef<HTMLElement>();
   const expectedScroll = useRef<number>();
   const lastScrollTop = useRef(0);
   const draggingScrollbar = useRef(false);
@@ -91,6 +93,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       captureReadingContinuity();
       return;
     }
+    anchorRow.current = entry;
     anchor.current = { key: entry.dataset.entryKey, offset: entry.getBoundingClientRect().top - top,
       ...(!following.current ? { text: captureReadingText(entry, bounds) } : {}) };
     if (currentIdentity.current !== undefined) positionsRef.current?.set(currentIdentity.current, {
@@ -109,7 +112,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       if (bottom - viewport.scrollTop > 1) viewport.scrollTop = bottom;
     } else if (anchor.current) {
       const saved = anchor.current;
-      const entry = entryIndex.current.refresh(viewport).get(saved.key);
+      const entry = entryIndex.current.refresh(viewport).get(saved.key) ?? renamedAnchorRow(viewport);
       if (entry) {
         const textTop = saved.text ? readingTextTop(entry, saved.text) : undefined;
         const adjustment = (textTop ?? entry.getBoundingClientRect().top) - viewport.getBoundingClientRect().top
@@ -136,6 +139,23 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
     if (following.current || !anchor.current || anchorRestored) captureAnchor();
     updateLatest(viewport);
   }
+  /**
+   * The reader's row under a new key. A session served by the Controller has rows without item keys; once its journal serves it (smart
+   * reading turned on, or the journal ready after the page opened) the same rows come with their item keys and every row key changes.
+   * The row whose text is the anchored row's text, when exactly one has it, is the same row; otherwise there is none.
+   */
+  function renamedAnchorRow(viewport: HTMLDivElement): HTMLElement | undefined {
+    const text = anchorRow.current?.textContent;
+    if (!text) return;
+    let match: HTMLElement | undefined;
+    for (const candidate of Array.from(viewport.querySelectorAll<HTMLElement>('[data-entry-key]'))) {
+      if (candidate.textContent !== text) continue;
+      if (match) return;
+      match = candidate;
+    }
+    return match;
+  }
+
   const updateRef = useRef(updatePosition);
   updateRef.current = updatePosition;
 
@@ -149,6 +169,7 @@ export function useTimelineScroll(identity: string, visible = true, positions?: 
       const continuity = continuityRef.current?.positions.get(continuityRef.current.identity);
       following.current = saved?.following ?? continuity?.following ?? true;
       anchor.current = saved?.anchor;
+      anchorRow.current = undefined;
       pendingScrollTop.current = !saved && !following.current ? continuity?.scrollTop : undefined;
       expectedScroll.current = undefined;
       draggingScrollbar.current = false;

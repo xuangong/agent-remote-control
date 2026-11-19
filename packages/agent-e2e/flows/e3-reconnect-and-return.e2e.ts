@@ -4,7 +4,7 @@
 // application chunk does not leave the page empty (O27).
 import type { Browser } from '@playwright/test';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import { startStack, type Stack } from '@orchardworks/agent-e2e/stack';
+import { actAsLocalUser, startStack, type Stack } from '@orchardworks/agent-e2e/stack';
 import { launchBrowser, openPage, openPageIn, resetWindows, rowTexts } from './browser.js';
 import { numberedHistory, rowOffset, send, showsText, timelineScroll, waitForEntries, waitForKeptConversation } from './page.js';
 
@@ -101,7 +101,7 @@ it('E3: the reader keeps their line when a row arrives and when the connection d
   await context.close();
 });
 
-it('E3: with smart reading off, the reader keeps their line through a Controller restart (O24)', async () => {
+it('E3: with smart reading off, the reader keeps their line through a Controller restart (O24), and when smart reading is turned on (O40)', async () => {
   const legacy = await startStack({
     providerId: 'codex', displayName: 'Codex CLI', smartReading: false,
     sessions: { replaced: { title: 'Replaced', history: numberedHistory(60, ' ' + 'padding '.repeat(40)) } },
@@ -117,6 +117,19 @@ it('E3: with smart reading off, the reader keeps their line through a Controller
     await legacy.startController();
     await send(page, 'after the restart');
     await showsText(page, 'Echo: after the restart');
+    expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
+    // The journal now serves the session: the same rows arrive under their item keys, so every row key changes at once.
+    const rowKey = () => page.evaluate(() => document.querySelector<HTMLElement>('[data-entry-key]')?.dataset.entryKey);
+    const controllerKey = await rowKey();
+    await actAsLocalUser(legacy.origin, async request => {
+      const response = await request('PUT', `v1/remote/hosts/${legacy.hostId}/smart-reading`, { providerId: 'codex', enabled: true });
+      expect(response.ok).toBe(true);
+    });
+    await legacy.stopController();
+    await legacy.startController();
+    await send(page, 'after smart reading');
+    await showsText(page, 'Echo: after smart reading');
+    await expect.poll(rowKey, { timeout: 10_000 }).not.toBe(controllerKey);
     expect(Math.abs((await rowOffset(page, 'Row 30 padding'))! - before)).toBeLessThanOrEqual(2);
     await context.close();
   } finally { await legacy.close(); }

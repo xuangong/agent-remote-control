@@ -10,7 +10,7 @@ const followingPositions = new Map<string, { following: boolean; scrollTop?: num
 let root: Root;
 let container: HTMLDivElement;
 
-function Surface({ scrollOrigin = 'top', identity = 'epoch-one', empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender, controls }: { scrollOrigin?: 'top' | 'bottom'; controls?: (scroll: ReturnType<typeof useTimelineScroll>) => void; history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
+function Surface({ scrollOrigin = 'top', identity = 'epoch-one', rowKeys = identity, rowText = (index: number) => `Message ${index}`, empty = false, entryCount = 10, continuityIdentity, history, firstIndex = 0, onRender, controls }: { scrollOrigin?: 'top' | 'bottom'; controls?: (scroll: ReturnType<typeof useTimelineScroll>) => void; rowKeys?: string; rowText?: (index: number) => string; history?: Parameters<typeof useTimelineScroll>[4]; firstIndex?: number; identity?: string; empty?: boolean; entryCount?: number; continuityIdentity?: string; onRender?: (showLatest: boolean) => void }) {
   const scroll = useTimelineScroll(identity, true, positions, continuityIdentity ? { identity: continuityIdentity, positions: followingPositions } : undefined, history, undefined, scrollOrigin);
   controls?.(scroll);
   onRender?.(scroll.showLatest);
@@ -30,13 +30,13 @@ function Surface({ scrollOrigin = 'top', identity = 'epoch-one', empty = false, 
     });
     element.getBoundingClientRect = () => ({ top: 0, bottom: 100 } as DOMRect);
   }}>
-    <div ref={scroll.contentRef}>{empty ? null : Array.from({ length: entryCount }, (_, index) => <div key={index} data-entry-key={`${identity}:${index + firstIndex}`} ref={(element) => {
+    <div ref={scroll.contentRef}>{empty ? null : Array.from({ length: entryCount }, (_, index) => <div key={`${rowKeys}:${index + firstIndex}`} data-entry-key={`${rowKeys}:${index + firstIndex}`} ref={(element) => {
       if (element) element.getBoundingClientRect = () => {
         const viewport = scroll.viewportRef.current!;
         const offset = viewport.scrollTop + (scrollOrigin === 'bottom' ? Math.max(0, viewport.scrollHeight - viewport.clientHeight) : 0);
         return { top: index * 100 - offset, bottom: (index + 1) * 100 - offset } as DOMRect;
       };
-    }}>Message {index}</div>)}</div>
+    }}>{rowText(index)}</div>)}</div>
   </div>;
 }
 
@@ -213,6 +213,28 @@ describe('useTimelineScroll reading memory', () => {
     expect(viewport().scrollTop).toBe(200);
     expect(onRender.mock.calls.at(-1)).toEqual([false]);
     expect(positions.get('epoch-two')?.anchor?.key).toMatch(/^epoch-two:/);
+  });
+
+  // O40: a session read from the Controller has rows without item keys; when its journal starts serving it (smart reading turned on,
+  // or the journal ready after the page opened) the same rows arrive under their item keys, so every row key changes at once.
+  it.each(['top', 'bottom'] as const)('keeps the reader on their row when every row of the session is renamed (%s origin)', (scrollOrigin) => {
+    act(() => root.render(<Surface scrollOrigin={scrollOrigin} rowKeys="controller" />));
+    act(() => {
+      viewport().dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }));
+      viewport().scrollTop = scrollOrigin === 'top' ? 240 : -660;
+      viewport().dispatchEvent(new Event('scroll'));
+    });
+    act(() => root.render(<Surface scrollOrigin={scrollOrigin} rowKeys="journal" />));
+    expect(viewport().scrollTop).toBe(scrollOrigin === 'top' ? 240 : -660);
+    expect(positions.get('epoch-one')).toMatchObject({ following: false, anchor: { key: 'journal:2', offset: -40 } });
+  });
+
+  it('sends the reader to the first row when their renamed row cannot be told apart from another', () => {
+    const rowText = (index: number) => index === 2 || index === 7 ? 'Done.' : `Message ${index}`;
+    act(() => root.render(<Surface rowKeys="controller" rowText={rowText} />));
+    readEarlier();
+    act(() => root.render(<Surface rowKeys="journal" rowText={rowText} />));
+    expect(viewport().scrollTop).toBe(0);
   });
 
   it('keeps following latest across a replacement epoch when the session was following', () => {

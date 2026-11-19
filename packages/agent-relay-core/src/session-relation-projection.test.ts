@@ -14,3 +14,18 @@ test('unlinked projection returns original full source despite equal successor n
  const broker=createHostBroker({origin:'https://relay.example',ownerSubject:'owner',initialState:changed});
  try{expect(broker.sessionRelations('owner')[0]).toMatchObject({source:{providerId:'a',agentId:'A'},sourceBinding:{kind:'fixed',source:origin},nativeSourceRef:origin});}finally{broker.close();}
 });
+test('a guest does not see a relation whose followed current source belongs to the owner', () => {
+ const shared=structuredClone(state);
+ shared.sharing={grants:[{hostId:'authenticated-host',subject:'viewer',label:'Viewer',sessionLimit:5,revoked:false}],reservations:[]};
+ for(const binding of shared.bindings) if(binding.agentId!=='B') binding.creatorSubject='viewer';
+ const broker=createHostBroker({origin:'https://relay.example',ownerSubject:'owner',initialState:shared});
+ try{
+  // The guest created the session and its original source, but the role moved on to a session of the owner's.
+  expect(broker.sessionRelations('viewer')).toEqual([]);
+  expect(JSON.stringify(broker.sessionRelations('owner'))).toContain('"agentId":"B"');
+  // Unlinked, the relation keeps pointing at the original source the guest does own.
+  shared.bindings[2]!.sourceRelation!.linked=false;
+ }finally{broker.close();}
+ const unlinked=createHostBroker({origin:'https://relay.example',ownerSubject:'owner',initialState:shared});
+ try{expect(unlinked.sessionRelations('viewer')).toMatchObject([{source:{agentId:'A'},sourceBinding:{kind:'fixed'}}]);}finally{unlinked.close();}
+});

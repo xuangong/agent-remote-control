@@ -99,6 +99,8 @@ export async function startRelayHarness(options: { store?: MemoryRelayStateStore
   vi.stubGlobal('fetch', authorityFetch);
 
   const request = async (path: string, init: RequestInit = {}) => (await relay.fetch(new Request(origin + path, { ...init, redirect: 'manual' }))) ?? new Response(null, { status: 404 });
+  /** A request to any URL, as one that reached the Relay under another host name or scheme. */
+  const requestAt = async (url: string, init: RequestInit = {}) => (await relay.fetch(new Request(url, { ...init, redirect: 'manual' }))) ?? new Response(null, { status: 404 });
   const json = (path: string, cookie: string, body?: object, method = body ? 'POST' : 'GET') => request(path, {
     method, headers: { origin, cookie, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
 
@@ -174,7 +176,7 @@ export async function startRelayHarness(options: { store?: MemoryRelayStateStore
     vi.unstubAllGlobals();
   }
   return {
-    store, request, json, login, upgrade, listen, host, control, inspect, poll, restart, close
+    store, request, requestAt, json, login, upgrade, listen, host, control, inspect, poll, restart, close
   };
 }
 export type RelayHarness = Awaited<ReturnType<typeof startRelayHarness>>;

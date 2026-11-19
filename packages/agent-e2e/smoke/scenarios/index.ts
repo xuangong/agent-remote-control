@@ -7,7 +7,7 @@ import { relayRestart } from './m3-relay-restart.js';
 import { soak } from './m8-soak.js';
 import { hiddenAndDrops } from './m7-hidden-and-drops.js';
 
-/** The scenarios this version runs, in the order of the plan. The quick subset is M1, M2 and M7. */
+/** The scenarios this version runs, in the order of the plan. The quick subset is M1, M2, M4 and M7; M5 (minutes) and M8 (a soak of `--duration` minutes) are full-run only. */
 export const scenarios: Scenario[] = [badNetwork, controllerRestart, relayRestart, quotaPressure, manySessions, hiddenAndDrops, soak];
 
 export const deferredScenarios: DeferredScenario[] = [

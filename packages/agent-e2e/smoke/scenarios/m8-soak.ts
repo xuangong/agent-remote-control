@@ -37,9 +37,6 @@ export const soak: Scenario = {
         const probe = await PageProbe.create(browserContext, recorder.origin);
         await probe.page.setViewportSize({ width: 1800, height: 900 });
         await probe.open(`${proxy.origin}/?window=${encodeURIComponent(group.id)}`, 'open Window', { rowsDeadlineMs: 90_000 });
-        const live = SESSIONS.map(id => host.provider.session(id));
-        for (let at = 0; at < 100 && live.some(item => !item); at += 1) { await delay(100); SESSIONS.forEach((id, index) => { live[index] ??= host.provider.session(id); }); }
-        if (live.some(item => !item)) throw new Error('The scripted Host did not open every session.');
         let written = SESSIONS.length * 2;
         const started = Date.now();
         const until = started + minutes * 60_000;
@@ -49,7 +46,8 @@ export const soak: Scenario = {
         while (Date.now() < until) {
           const cycleStart = Date.now();
           lastWord = `SOAK${cycles}`;
-          for (const session of live) { await (session as unknown as { sendMessage(text: string): Promise<void> }).sendMessage(lastWord); written += 2; }
+          // A send through the command line reaches the Controller as a person's send does, and opens the session again if the Controller let it go while idle.
+          for (const id of SESSIONS) { await context.pool.command('session', 'send', `${host.hostId}/${host.provider.providerId}/${id}`, lastWord); written += 2; }
           cycles += 1;
           if (Date.now() >= nextSample) { await probe.sampleResources(proxy.openWebSockets(), written); nextSample = Date.now() + SAMPLE_MS; }
           const rest = CYCLE_MS - (Date.now() - cycleStart);

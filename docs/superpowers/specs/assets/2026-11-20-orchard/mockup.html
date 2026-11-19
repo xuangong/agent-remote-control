@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Agent Remote Control · mockup v8（扁平软形状头像）</title>
+<style>
+  :root { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "SF Pro Text", "PingFang SC", sans-serif; }
+  body { margin: 0; background: #eceef2; color: #2a2b30; padding: 32px 40px 60px; }
+  .kicker { font-size: 12px; letter-spacing: .14em; color: #8a8f98; }
+  h1 { font-size: 26px; margin: 6px 0 4px; } .sub { color: #6b7079; font-size: 14px; margin-bottom: 24px; }
+  .label { display: flex; justify-content: space-between; font-weight: 600; font-size: 15px; margin: 0 0 10px; } .label span { color: #8a8f98; font-weight: 400; font-size: 13px; }
+  .stage { background: radial-gradient(120% 90% at 85% 100%, #2f4fb0 0%, #6f8fd8 38%, #c9d6f2 70%, #e3e9f6 100%); border-radius: 18px; padding: 22px; margin-bottom: 30px; }
+  .cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 1240px; margin: 0 0 30px; font-size: 13.5px; line-height: 1.65; }
+  .cmp div { background: #fff; border-radius: 12px; padding: 14px 16px; } .cmp b { display: block; margin-bottom: 4px; }
+
+  .theme-light { --win: rgba(255,255,255,.97); --side: rgba(246,247,250,.72); --panel: rgba(244,245,248,.8); --line: rgba(0,0,0,.05); --text: #2a2b30; --strong: #1d1d1f; --muted: #9a9ea6; --soft: #6e727a;
+    --me: #eff0f3; --chip: #f2f3f6; --tint: #fff6ef; --btn: #2a2b30; --btn-t: #fff; --tog: #3a3b40; }
+  .theme-dark { --win: rgba(30,31,35,.97); --side: rgba(44,45,51,.72); --panel: rgba(38,39,44,.85); --line: rgba(255,255,255,.06); --text: #dcdde2; --strong: #f2f2f5; --muted: #85888f; --soft: #a9acb3;
+    --me: #36373d; --chip: #2e2f35; --tint: #3a3029; --btn: #ececf0; --btn-t: #1e1f23; --tog: #e6e6ea; }
+
+  .app { display: grid; grid-template-columns: 230px 1fr 280px; height: 860px; border-radius: 14px; overflow: hidden; background: var(--win); color: var(--text);
+    box-shadow: 0 30px 60px rgba(20,30,70,.28); font-size: 13.5px; }
+  .side { background: var(--side); backdrop-filter: blur(30px); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 14px 10px; }
+  .dots { display: flex; gap: 7px; padding: 2px 6px 20px; } .dots i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .brand { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 17px; padding: 0 8px 20px; letter-spacing: -.02em; color: var(--strong); }
+  .brand .logo { width: 18px; height: 18px; border-radius: 6px; background: conic-gradient(from 200deg, #ff8a3d, #ff5fa2, #7b6cff, #3fb6ff, #ff8a3d); }
+  .side-h { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; padding: 0 8px 8px; }
+  .who { display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 12px; position: relative; }
+  .who.sel { background: var(--win); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .who .n { font-weight: 600; font-size: 13px; color: var(--strong); }
+  .who .s { color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+  .who .dot { position: absolute; right: 10px; top: 50%; width: 6px; height: 6px; border-radius: 50%; background: #ff7a2f; transform: translateY(-50%); }
+  .me { margin-top: auto; display: flex; gap: 9px; align-items: center; padding: 10px 8px 2px; border-top: 1px solid var(--line); }
+  .me .n { font-weight: 600; font-size: 12.5px; color: var(--strong); } .me .s { color: var(--muted); font-size: 11px; }
+  .me .ini { width: 26px; height: 26px; border-radius: 50%; background: var(--chip); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+
+  /* Original blob mascots drawn with SVG */
+  .pal { width: 34px; height: 34px; flex: none; } .pal.sm { width: 26px; height: 26px; } .pal.lg { width: 84px; height: 84px; } .pal.md { width: 44px; height: 44px; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .top { height: 52px; display: flex; align-items: center; justify-content: center; }
+  .pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px 4px 5px; border-radius: 99px; background: var(--chip); font-weight: 600; color: var(--strong); font-size: 13px; }
+  .pill small { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .feed { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 6px; }
+  .col { max-width: 560px; width: 100%; margin: 0 auto; padding: 0 24px; display: flex; flex-direction: column; gap: 18px; box-sizing: border-box; }
+  .time { text-align: center; color: var(--muted); font-size: 11px; }
+  .soft-line { text-align: center; color: var(--muted); font-size: 11px; }
+  .bme { align-self: flex-end; background: var(--me); padding: 9px 14px; border-radius: 18px; max-width: 75%; line-height: 1.6; }
+  .msg { display: flex; gap: 10px; } .msg .body { flex: 1; min-width: 0; line-height: 1.75; }
+  .msg .nm { font-size: 11.5px; color: var(--muted); margin-bottom: 1px; }
+  .msg ul { margin: 4px 0; padding-left: 18px; } .msg li::marker { color: var(--muted); }
+  .hint-line { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
+  .hint-line u { text-decoration: none; border-bottom: 1px dashed var(--muted); }
+  .ask { background: var(--tint); border-radius: 18px; padding: 10px 14px; line-height: 1.6; max-width: 86%; }
+  .ask .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .b { border-radius: 99px; padding: 5px 14px; font-size: 12.5px; background: var(--win); color: var(--text); }
+  .b.pri { background: var(--btn); color: var(--btn-t); }
+  .think { display: flex; gap: 10px; align-items: center; }
+  .think .t { font-size: 12.5px; color: var(--soft); } .think .t div { color: var(--muted); font-size: 11.5px; }
+  .typing { display: inline-flex; gap: 3px; vertical-align: middle; margin-left: 2px; } .typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); display: block; }
+  .sending { align-self: flex-end; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .sending .bme { opacity: .6; max-width: 100%; } .sending small { color: var(--muted); font-size: 10.5px; }
+  .composer { padding: 6px 24px 4px; }
+  .box { max-width: 560px; margin: 0 auto; display: flex; align-items: center; gap: 10px; background: var(--chip); border-radius: 18px; padding: 10px 10px 10px 14px; }
+  .box .plus { color: var(--muted); font-size: 18px; line-height: 1; } .box .ph { flex: 1; color: var(--muted); }
+  .box .send { width: 28px; height: 28px; border-radius: 50%; background: var(--muted); color: var(--win); display: grid; place-items: center; font-size: 14px; }
+  .foot { text-align: center; color: var(--muted); font-size: 10.5px; padding: 6px 0 12px; }
+
+  .detail { background: var(--panel); backdrop-filter: blur(30px); border-left: 1px solid var(--line); padding: 16px 14px; }
+  .detail .hd { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; }
+  .card-me { text-align: center; padding: 10px 0 6px; } .card-me .nm { font-weight: 700; font-size: 16px; margin-top: 6px; color: var(--strong); } .card-me .rl { color: var(--muted); font-size: 11.5px; }
+  .tabs { display: flex; justify-content: center; gap: 16px; font-size: 12px; color: var(--muted); margin: 10px 0 6px; } .tabs .on { color: var(--strong); font-weight: 600; border-bottom: 2px solid var(--strong); padding-bottom: 4px; }
+  .sec { color: var(--muted); font-size: 11px; margin: 14px 4px 6px; }
+  .group { background: var(--win); border-radius: 12px; overflow: hidden; }
+  .item { display: flex; justify-content: space-between; align-items: center; padding: 9px 12px; font-size: 12px; } .item + .item { border-top: 1px solid var(--line); }
+  .item .v { color: var(--soft); display: flex; align-items: center; gap: 6px; } .item .v i { width: 6px; height: 6px; border-radius: 50%; background: #39b56a; display: block; }
+  .seg { display: flex; background: var(--chip); border-radius: 10px; padding: 2px; font-size: 11.5px; }
+  .seg span { flex: 1; text-align: center; padding: 5px 0; border-radius: 8px; color: var(--soft); } .seg span.on { background: var(--win); color: var(--strong); box-shadow: 0 1px 2px rgba(0,0,0,.07); }
+  .tog { width: 28px; height: 16px; border-radius: 8px; background: var(--tog); position: relative; } .tog::after { content: ""; position: absolute; right: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--win); }
+
+  /* v6 */
+  .theme-light { --win: #ffffff; --side: #ffffff; --panel: #ffffff; --bgtint: #f3efe9; --me: #2a2b30; --me-t: #fff; --bub: #f4f4f6; --chip: #f4f4f6; --text: #2a2b30; --muted: #a0a3aa; }
+  .theme-dark { --win: #232327; --side: #232327; --panel: #232327; --bgtint: #151517; --me: #f2f2f4; --me-t: #1d1d20; --bub: #2f2f34; --chip: #2f2f34; }
+  .app { background: var(--bgtint); gap: 10px; padding: 10px; grid-template-columns: 244px 1fr 268px; box-sizing: border-box; font-size: 14.5px; }
+  .side, .main, .detail { background: var(--win); border: none; border-radius: 22px; backdrop-filter: none; }
+  .side { padding: 14px 12px; } .dots { padding-bottom: 14px; }
+  .who { padding: 10px; border-radius: 18px; gap: 12px; margin-bottom: 2px; }
+  .who.sel { background: #fff1e6; box-shadow: none; } .theme-dark .who.sel { background: #3a2d24; }
+  .who .n { font-size: 14.5px; } .who .s { font-size: 12.5px; max-width: 140px; }
+  .av { width: 40px; height: 40px; border-radius: 14px; display: grid; place-items: center; flex: none; }
+  .av .pal { width: 40px; height: 40px; } .pal { overflow: visible; filter: none; }
+  .c1, .c2, .c3 { background: transparent; }
+  .theme-dark .c1, .theme-dark .c2, .theme-dark .c3 { background: transparent; }
+  .me { border-top: none; background: var(--chip); border-radius: 16px; padding: 9px 10px; }
+  .top { height: 58px; } .pill { background: transparent; font-size: 15px; gap: 8px; } .pill .pal.sm { width: 28px; height: 28px; }
+  .col { gap: 14px; max-width: 580px; }
+  .bme { background: var(--me); color: var(--me-t); border-radius: 20px 20px 6px 20px; padding: 10px 15px; }
+  .msg .body { background: var(--bub); border-radius: 20px 20px 20px 6px; padding: 10px 15px; flex: none; max-width: 82%; }
+  .msg .nm { display: none; } .msg > .pal { align-self: flex-end; }
+  .hint-line { margin-bottom: 6px; }
+  .ask { background: #fff1e6; max-width: 100%; } .theme-dark .ask { background: #3a2d24; }
+  .msg .body:has(.ask) { background: transparent; padding: 0; }
+  .b { padding: 6px 16px; font-size: 13px; } .b.pri { background: #ff8a3d; color: #fff; }
+  .sending .bme { opacity: .55; }
+  .box { border-radius: 24px; padding: 12px 12px 12px 16px; } .box .send { background: #ff8a3d; color: #fff; width: 32px; height: 32px; }
+  .detail { padding: 16px; }
+  .card-me { background: #fff1e6; border-radius: 20px; padding: 22px 0 16px; margin-top: 10px; } .theme-dark .card-me { background: #3a2d24; }
+  .card-me .pal.lg { width: 72px; height: 72px; } .card-me .nm { font-size: 18px; }
+  .tabs { margin-top: 14px; gap: 6px; } .tabs span { padding: 5px 12px; border-radius: 99px; } .tabs .on { background: var(--chip); border: none; padding-bottom: 5px; }
+  .sec { font-size: 12px; margin-top: 16px; }
+  .group { background: var(--chip); border-radius: 16px; } .item + .item { border-top: none; }
+  .seg { border-radius: 99px; padding: 3px; } .seg span { border-radius: 99px; } .seg span.on { background: #ff8a3d; color: #fff; box-shadow: none; }
+  .tog { background: #ff8a3d; width: 34px; height: 20px; border-radius: 10px; } .tog::after { width: 16px; height: 16px; background: #fff; }
+  .brand { font-family: "SF Pro Rounded", ui-rounded, -apple-system, sans-serif; font-weight: 750; letter-spacing: -.02em; gap: 9px; }
+  .olog { flex: none; }
+  .lg-look { animation: lglook 5s ease-in-out infinite; } @keyframes lglook { 0%, 40%, 100% { transform: translate(0,0); } 50%, 80% { transform: translate(3px,1px); } }
+  .lg-sway { animation: lgsway 3.2s ease-in-out infinite; transform-origin: 34px 16px; transform-box: view-box; } @keyframes lgsway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(7deg); } }
+</style>
+</head>
+<body>
+<div class="kicker">AGENT REMOTE CONTROL · MOCKUP V9</div>
+<h1>v9：Orchard — 品牌、头像和布局合在一起</h1>
+<div class="sub">和 v1 的信息完全一样，改的是角色、说话方式、克制程度和材质。</div>
+<div class="cmp">
+  <div><b>v2 的布局为什么还显得严肃</b>
+  · 三栏用细线硬切开，像文档编辑器或后台。<br>
+  · 助手的回答是不带底色的正文加列表，读起来像文档，不像聊天。<br>
+  · 详情面板是一组一组的设置表格，像系统偏好设置。<br>
+  · 字小、灰多、留白均匀，没有轻重和节奏。</div>
+  <div><b>v7 头像</b>
+  · 简单图形（圆角三角、圆、侧三角），边缘不是死板的几何线，会像橡皮泥一样慢慢流动变形，每个助手节奏不同。<br>
+  · 质感：柔和高光、背光一侧的阴影、细微颗粒，像手捏的软泥；只留两只小眼睛，偶尔左右看一下。<br>
+  · 布局沿用 v6：<br>
+  · 侧栏、对话、详情变成三块浮起来的圆角面板，中间留缝，底色透出暖色背景。<br>
+  · 助手的回答也放进气泡，和你的气泡一左一右；选中的助手用它自己的颜色铺底。<br>
+  · 详情以“名片”为主，设置收成几颗胶囊；字号加大，灰色减少。</div>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    
+    
+    
+    <filter id="clay" x="-25%" y="-25%" width="150%" height="150%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="3.2" result="b"/><feSpecularLighting in="b" surfaceScale="6" specularConstant="1" specularExponent="16" lighting-color="#ffffff" result="s"><fePointLight x="14" y="4" z="40"/></feSpecularLighting><feComposite in="s" in2="SourceAlpha" operator="in" result="si"/><feOffset in="SourceAlpha" dx="2.5" dy="3.5" result="o"/><feGaussianBlur in="o" stdDeviation="3" result="ob"/><feComposite in="SourceAlpha" in2="ob" operator="out" result="rim"/><feFlood flood-color="#000" flood-opacity=".22"/><feComposite in2="rim" operator="in" result="shade"/><feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="7" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .5 -.12" result="g"/><feComposite in="g" in2="SourceAlpha" operator="in" result="gi"/><feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shade"/><feMergeNode in="gi"/></feMerge><feComposite in2="si" operator="arithmetic" k2="1" k3=".5"/></filter><symbol id="tri" viewBox="0 0 64 64" overflow="visible"><g><path d="M45 30C52 43 52 55 32 55C12 55 12 43 19 30C26 17 38 17 45 30Z" transform="rotate(-8 32 36)"><animate attributeName="d" dur="5.5s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1;.45 0 .55 1" values="M45 30C52 43 52 55 32 55C12 55 12 43 19 30C26 17 38 17 45 30Z;M46 31C54 44 50 56 31 56C13 55 10 44 18 31C25 16 39 18 46 31Z;M44 29C51 42 53 54 33 55C11 56 13 42 20 29C27 18 37 16 44 29Z;M45 30C52 43 52 55 32 55C12 55 12 43 19 30C26 17 38 17 45 30Z" transform="rotate(-8 32 36)"/></path></g><g><ellipse cx="27" cy="40" rx="3.6" ry="6.2" fill="#16161a"/><ellipse cx="37" cy="40" rx="3.6" ry="6.2" fill="#16161a"/><animateTransform attributeName="transform" type="translate" values="0 0;1 .6;0 0;-1 .4;0 0" dur="7s" repeatCount="indefinite"/></g></symbol><symbol id="cir" viewBox="0 0 64 64" overflow="visible"><g><path d="M32 7C46 7 57 18 57 32C57 46 46 57 32 57C18 57 7 46 7 32C7 18 18 7 32 7Z"><animate attributeName="d" dur="6.5s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1;.45 0 .55 1" values="M32 7C46 7 57 18 57 32C57 46 46 57 32 57C18 57 7 46 7 32C7 18 18 7 32 7Z;M33 6C48 8 58 19 56 33C55 47 45 58 31 57C17 56 7 45 8 31C9 17 19 5 33 6Z;M31 8C45 6 58 17 58 31C58 45 47 56 33 58C19 59 6 47 6 33C6 19 17 9 31 8Z;M32 7C46 7 57 18 57 32C57 46 46 57 32 57C18 57 7 46 7 32C7 18 18 7 32 7Z"/></path></g><g><ellipse cx="26" cy="31" rx="3.6" ry="6.2" fill="#16161a"/><ellipse cx="38" cy="31" rx="3.6" ry="6.2" fill="#16161a"/><animateTransform attributeName="transform" type="translate" values="0 0;1 .6;0 0;-1 .4;0 0" dur="7s" repeatCount="indefinite"/></g></symbol><symbol id="tri2" viewBox="0 0 64 64" overflow="visible"><g><path d="M12 14C12 6 20 6 28 10C44 18 56 24 56 32C56 40 44 46 28 54C20 58 12 58 12 50C12 38 12 26 12 14Z"><animate attributeName="d" dur="6s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1;.45 0 .55 1" values="M12 14C12 6 20 6 28 10C44 18 56 24 56 32C56 40 44 46 28 54C20 58 12 58 12 50C12 38 12 26 12 14Z;M11 15C11 5 21 7 29 11C45 19 57 25 56 33C55 41 43 46 27 53C19 57 11 57 11 49C11 37 11 27 11 15Z;M13 13C13 7 19 5 27 9C43 17 55 23 57 31C57 39 45 45 29 55C21 59 13 59 13 51C13 39 13 25 13 13Z;M12 14C12 6 20 6 28 10C44 18 56 24 56 32C56 40 44 46 28 54C20 58 12 58 12 50C12 38 12 26 12 14Z"/></path></g><g><ellipse cx="23" cy="29" rx="3.6" ry="6.2" fill="#16161a"/><ellipse cx="33" cy="33" rx="3.6" ry="6.2" fill="#16161a"/><animateTransform attributeName="transform" type="translate" values="0 0;1 .6;0 0;-1 .4;0 0" dur="7s" repeatCount="indefinite"/></g></symbol>
+  </defs>
+</svg>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <g id="kid"><g transform="rotate(-14 32 44)">
+    <g class="lg-sway"><path d="M33 20c0-4 1-7 4-9" stroke="#2f8f55" stroke-width="3.2" stroke-linecap="round" fill="none"/><path d="M37 11.5c2-7 10-9 15-6-2 6-10 8-15 6z" fill="#4cc27a"/></g>
+    <path d="M33 19c-17 0-29 12-29 28 0 10 4 19 8 24h42c4-5 8-14 8-24 0-16-12-28-29-28z" fill="#ff7f45"/>
+    <g class="lg-look"><ellipse cx="25" cy="35" rx="3.9" ry="6" fill="#16161a"/><ellipse cx="36" cy="35" rx="3.9" ry="6" fill="#16161a"/></g>
+  </g></g>
+  <clipPath id="lgr"><rect width="64" height="64" rx="15"/></clipPath>
+  <symbol id="orchard" viewBox="0 0 64 64"><g clip-path="url(#lgr)"><rect width="64" height="64" fill="#24242a"/><use href="#kid"/></g></symbol>
+</defs></svg>
+<template id="app">
+<div class="app">
+  <aside class="side">
+    <div class="dots"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+    <div class="brand"><svg class="olog" width="26" height="26"><use href="#orchard"/></svg>orchard</div>
+    <div class="side-h">我的助手 <span>＋</span></div>
+    <div class="who sel"><span class="av c1"><svg class="pal" fill="#ff8a3d"><use href="#tri"/></svg></span><div><div class="n">Chief</div><div class="s">想问你一件小事</div></div></div>
+    <div class="who"><span class="av c2"><svg class="pal" fill="#3d8bff"><use href="#cir"/></svg></span><div><div class="n">Builder</div><div class="s">在跑测试，稍等～</div></div><span class="dot"></span></div>
+    <div class="who"><span class="av c3"><svg class="pal" fill="#8b6cff"><use href="#tri2"/></svg></span><div><div class="n">Reviewer</div><div class="s">看完啦，有 3 点想法</div></div></div>
+    <div class="me"><div class="ini">X</div><div><div class="n">我的空间</div><div class="s">Personal space</div></div></div>
+  </aside>
+
+  <section class="main">
+    <div class="top"><div class="pill"><svg class="pal sm" fill="#ff8a3d"><use href="#tri"/></svg>Chief <small>⌄</small></div></div>
+    <div class="feed"><div class="col">
+      <div class="time">今天 18:57</div>
+      <div class="bme">帮我整理一份 IM 设计原则，写进 notes.md，再讲讲每条？</div>
+      <div class="msg"><svg class="pal sm" fill="#ff8a3d"><use href="#tri"/></svg><div class="body">
+        <div class="nm">Chief</div>
+        <div class="hint-line"><u>翻了 3 个文件，写好了 notes.md</u></div>
+        <div>好了！我挑了三条：</div>
+        <ul><li>内容先到：打开就能看，网络在后台慢慢补。</li><li>发送不等待：先发出去，状态我会告诉你。</li><li>过程可选：平时只看结果，想看细节再点开。</li></ul>
+        <div>先确定最重要的一点：你更在意哪条？</div>
+      </div></div>
+
+      <div class="soft-line">· 换到新的会话继续 ·</div>
+
+      <div class="bme">第二条展开讲讲，加个例子</div>
+      <div class="msg"><svg class="pal sm" fill="#ff8a3d"><use href="#tri"/></svg><div class="body">
+        <div class="nm">Chief</div>
+        <div class="ask">我想在 notes.md 里加一小段例子，可以吗？
+          <div class="acts"><span class="b pri">好的</span><span class="b">先别</span><span class="b">看看要改什么</span></div></div>
+      </div></div>
+
+      <div class="think"><svg class="pal md" fill="#ff8a3d"><use href="#tri"/></svg><div class="t">Chief 在想例子怎么写<div>认真工作中 <span class="typing"><i></i><i></i><i></i></span></div></div></div>
+
+      <div class="sending"><div class="bme">顺便把标题改成「IM 原则」</div><small>发送中</small></div>
+    </div></div>
+    <div class="composer"><div class="box"><span class="plus">＋</span><span class="ph">给 Chief 发消息…</span><span class="send">↑</span></div></div>
+    <div class="foot">Chief 可以使用工具来完成任务</div>
+  </section>
+
+  <aside class="detail">
+    <div class="hd">详情 <span>✕</span></div>
+    <div class="card-me"><svg class="pal lg" fill="#ff8a3d"><use href="#tri"/></svg><div class="nm">Chief</div><div class="rl">你的 AI 助手</div></div>
+    <div class="tabs"><span class="on">详情</span><span>会话</span><span>文件</span></div>
+    <div class="sec">通知</div>
+    <div class="group"><div class="item">完成任务或需要我时<div class="tog"></div></div></div>
+    <div class="sec">过程显示</div>
+    <div class="seg"><span class="on">简洁</span><span>过程</span><span>完整</span></div>
+    <div class="sec">它在哪里工作</div>
+    <div class="group">
+      <div class="item">Agent<span class="v">Claude Code</span></div>
+      <div class="item">电脑<span class="v"><i></i>Mac mini</span></div>
+      <div class="item">会话<span class="v">2 段 ›</span></div>
+    </div>
+    <div class="sec">模型</div>
+    <div class="group"><div class="item">当前模型<span class="v">Opus 5.5 ⌄</span></div><div class="item">思考<span class="v">默认 ⌄</span></div></div>
+  </aside>
+</div>
+</template>
+
+<div class="label">浅色 · 玻璃 <span>侧栏和详情透出桌面颜色</span></div>
+<div class="stage" id="light"></div>
+<div class="label">深色 · 玻璃 <span>同一界面</span></div>
+<div class="stage" id="dark"></div>
+<script>
+  const t = document.getElementById('app');
+  for (const [id, cls] of [['light', 'theme-light'], ['dark', 'theme-dark']]) {
+    const node = t.content.cloneNode(true); node.querySelector('.app').classList.add(cls);
+    document.getElementById(id).appendChild(node);
+  }
+</script>
+</body>
+</html>

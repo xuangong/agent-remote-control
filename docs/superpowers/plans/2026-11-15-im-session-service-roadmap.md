@@ -116,3 +116,17 @@ Shipped from main `e144b5a6`: the IM session service through S6a (journals, Rela
 - Worker `1701a6e0` deployed with the default `wrangler.jsonc` (journals off in production); previous Worker `8162e064`. Rolling the Relay back below this release stops sessions on updated Controllers.
 - Controller 0.3.0 released on GitHub as latest (`controller-v0.3.0`, sha256 `b8c6f4c9…`). Every Controller must update: older ones register and can be updated from the website but cannot open sessions.
 - Next iteration: enabling journals in production (deploy the partitions Worker, then the journals-enabled configuration) is proposed to the owner first.
+
+## Next: Orchard, the IM experience (2026-11-20)
+
+The owner judged the released page a diagnostic tool rather than an IM product and approved [the Orchard design](../specs/2026-11-20-orchard-im-experience-design.md): assistants as the visual centre, layered disclosure (L0 glance, L1 conversation, L2 detail, L3 diagnosis), three process modes, a composer never blocked by connection state, and the product name Orchard. The I steps come before the rest of P2 to P5; each ships on its own and is reviewed by the owner on `pnpm local`.
+
+| Step | Work | Gate |
+|---|---|---|
+| I1 Quiet open | T4 and T5 on the current page: no per-session connection label, composer enabled during open and sync with sends queued until ready, control check alongside the timeline subscription. | No connection label in any frame and a typed message shows as sending within 100 ms, at 4x CPU and 100 ms round trip. |
+| J Production journals | Deploy the partitions Worker, then the journals-enabled configuration; smart reading per provider. | Owner approves the deploy. T2 measured in production-like conditions on `pnpm local`. |
+| I2 Design system | Tokens, light and dark themes, primitives, avatar generation, the Orchard logo. | Component pages for every primitive in both themes; WCAG AA contrast. |
+| I3 Assistant view | Bot mode in the three-panel layout: assistant sidebar, bubbles, work-summary line with L2, inline approvals, session-change line, process modes, details panel (agent, machine, sessions, settings). | Every item visible today is reachable in L2 or L3; one e2e flow for the main path. |
+| I4 Workbench and phone | Window mode on the new tokens, the phone layout, the Orchard brand across the site. | Component and e2e suites at desktop and phone widths. |
+
+After I4: the rest of P2 (operation queue and business states), S6b, P3, P4 and P5 as above.

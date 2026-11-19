@@ -1,0 +1,55 @@
+<style>
+  .lg-wrap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .lg { background: #fff; border-radius: 22px; padding: 20px; cursor: pointer; border: 2px solid transparent; color: #1d1d1f; }
+  .lg.selected { border-color: #ff8a3d; }
+  .lg h3 { margin: 0 0 4px; font-size: 16px; } .lg p { margin: 0 0 14px; color: #6b7079; font-size: 12.5px; line-height: 1.6; min-height: 40px; }
+  .hero { display: grid; place-items: center; height: 200px; background: #f3f3f5; border-radius: 18px; }
+  .tile { overflow: hidden; display: block; }
+  .sizes { display: flex; align-items: flex-end; gap: 14px; margin: 14px 0; padding: 12px; background: #f6f6f8; border-radius: 14px; }
+  .mark { display: flex; align-items: center; gap: 9px; font-family: "SF Pro Rounded", ui-rounded, -apple-system, sans-serif; font-weight: 750; font-size: 18px; letter-spacing: -.02em; }
+  .row { display: flex; gap: 8px; } .row .mark-box { flex: 1; border-radius: 14px; padding: 10px 12px; background: #fff; border: 1px solid #eee; }
+  .row .mark-box.dark { background: #232327; color: #fafafa; border-color: #232327; }
+  .look { animation: look 5s ease-in-out infinite; } @keyframes look { 0%, 40%, 100% { transform: translate(0, 0); } 50%, 80% { transform: translate(3px, 1px); } }
+  .blink { animation: blink 4.2s infinite; transform-origin: 30px 34px; transform-box: view-box; } @keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+  .sway { animation: sway 3.2s ease-in-out infinite; transform-origin: 34px 16px; transform-box: view-box; } @keyframes sway { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(7deg); } }
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <!-- One character: a tilted mochi that fills its tile and is cropped by the bottom edge. Eyes look up and to the left; one sprout leaf. -->
+  <g id="kid">
+    <g transform="rotate(-14 32 44)">
+      <g class="sway"><path d="M33 20c0-4 1-7 4-9" stroke="#2f8f55" stroke-width="3.2" stroke-linecap="round" fill="none"/>
+        <path d="M37 11.5c2-7 10-9 15-6-2 6-10 8-15 6z" fill="#4cc27a"/></g>
+      <path d="M33 19c-17 0-29 12-29 28 0 10 4 19 8 24h42c4-5 8-14 8-24 0-16-12-28-29-28z" class="body"/>
+      <g class="look"><g class="blink"><ellipse cx="25" cy="35" rx="3.9" ry="6" fill="#16161a"/><ellipse cx="36" cy="35" rx="3.9" ry="6" fill="#16161a"/></g></g>
+    </g>
+  </g>
+  <clipPath id="r"><rect width="64" height="64" rx="15"/></clipPath>
+  <symbol id="t1" viewBox="0 0 64 64"><g clip-path="url(#r)"><rect width="64" height="64" fill="#24242a"/><use href="#kid" fill="#ff7f45" style="--x:0"/></g></symbol>
+  <symbol id="t2" viewBox="0 0 64 64"><g clip-path="url(#r)"><rect width="64" height="64" fill="#ff7f45"/><use href="#kid" fill="#fff8f0"/></g></symbol>
+  <symbol id="t3" viewBox="0 0 64 64"><g clip-path="url(#r)"><rect width="64" height="64" fill="#fff1e3"/><use href="#kid" fill="#ff7f45"/></g></symbol>
+</defs></svg>
+
+<h2>歪头版，学参考图的做法</h2>
+<p class="subtitle">参考图好在三点：角色撑满整个图标、被下边缘裁掉一截（像从底下探出头）；头歪着、眼睛往上看，有表情；除了眼睛几乎什么都没有。这里去掉了耳朵，只保留一片嫩芽作为“果园”的记号。三种配色，同一个角色。</p>
+
+<div class="lg-wrap">
+  <div class="lg" data-choice="t1" onclick="toggleSelect(this)">
+    <h3>1 · 深色底，橙色小家伙</h3><p>和参考图最接近，在深色和浅色界面里都显眼。</p>
+    <div class="hero"><svg class="tile" width="150" height="150"><use href="#t1"/></svg></div>
+    <div class="sizes"><svg class="tile" width="64" height="64"><use href="#t1"/></svg><svg class="tile" width="32" height="32"><use href="#t1"/></svg><svg class="tile" width="20" height="20"><use href="#t1"/></svg><svg class="tile" width="16" height="16"><use href="#t1"/></svg></div>
+    <div class="row"><div class="mark-box"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t1"/></svg>orchard</div></div><div class="mark-box dark"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t1"/></svg>orchard</div></div></div>
+  </div>
+  <div class="lg" data-choice="t2" onclick="toggleSelect(this)">
+    <h3>2 · 橙色底，奶白小家伙</h3><p>品牌色铺满，小家伙是奶白色。最温暖，放在 Dock 里辨识度高。</p>
+    <div class="hero"><svg class="tile" width="150" height="150"><use href="#t2"/></svg></div>
+    <div class="sizes"><svg class="tile" width="64" height="64"><use href="#t2"/></svg><svg class="tile" width="32" height="32"><use href="#t2"/></svg><svg class="tile" width="20" height="20"><use href="#t2"/></svg><svg class="tile" width="16" height="16"><use href="#t2"/></svg></div>
+    <div class="row"><div class="mark-box"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t2"/></svg>orchard</div></div><div class="mark-box dark"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t2"/></svg>orchard</div></div></div>
+  </div>
+  <div class="lg" data-choice="t3" onclick="toggleSelect(this)">
+    <h3>3 · 奶油底，橙色小家伙</h3><p>最轻柔，和 v8 界面的浅色主题最搭；深色界面里稍弱。</p>
+    <div class="hero"><svg class="tile" width="150" height="150"><use href="#t3"/></svg></div>
+    <div class="sizes"><svg class="tile" width="64" height="64"><use href="#t3"/></svg><svg class="tile" width="32" height="32"><use href="#t3"/></svg><svg class="tile" width="20" height="20"><use href="#t3"/></svg><svg class="tile" width="16" height="16"><use href="#t3"/></svg></div>
+    <div class="row"><div class="mark-box"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t3"/></svg>orchard</div></div><div class="mark-box dark"><div class="mark"><svg class="tile" width="28" height="28"><use href="#t3"/></svg>orchard</div></div></div>
+  </div>
+</div>

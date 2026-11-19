@@ -9,7 +9,7 @@ import type { AgentInteractionRequest, AgentSession, ProviderObservation } from 
 import { journalObservation, recordingShape, serializeRecording, type JournalRecording } from '@orchardworks/agent-provider-sdk/testing';
 
 import { ClaudeAgentProvider } from './provider.js';
-import { nativeFixture, nativeReply, nativeStalled, type NativeBlock } from './test-utils/native-fixture.js';
+import { nativeFixture, nativePaced, nativeReply, nativeStalled, type NativeBlock } from './test-utils/native-fixture.js';
 
 /**
  * Records what the real Claude Code CLI does for the scenarios a journal must survive: the observations of the live run, and the
@@ -323,6 +323,31 @@ describe('the recordings of the real Claude Code CLI', () => {
       : nativeReply(response, [{ type: 'tool_use', id: 'par-1', name: 'Bash', input: { command: 'printf ONE', description: 'one' } }, { type: 'tool_use', id: 'par-2', name: 'Bash', input: { command: 'printf TWO', description: 'two' } }]),
     async (session, seen) => { await session.sendMessage('Run both'); await turnsDone(seen, 1); });
   }, 60_000);
+
+  it('parallel-edits: six approved Edits of one streamed message, the first finishing while later ones still stream', async () => {
+    // As in a real run: the first Edit is approved and written while the model still streams the third and fourth, and the CLI links the
+    // fourth to that result, so the second and third leave the parent chain the public read follows.
+    const files = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const gapMs = 800;
+    const run = await recorded('parallel-edits', (body, response) => {
+      if (sawInput(body, 'edit-f')) return nativeReply(response, [{ type: 'text', text: 'EDITED' }]);
+      if (sawInput(body, 'par-read-f')) return void nativePaced(response, [{ type: 'thinking', thinking: 'Edit all six.' }, ...files.map(name => ({ type: 'tool_use' as const, id: `edit-${name}`, name: 'Edit', input: { file_path: inWorkspace(body, `${name}.txt`), old_string: 'old', new_string: 'new' } }))], gapMs);
+      return nativeReply(response, files.map(name => ({ type: 'tool_use', id: `par-read-${name}`, name: 'Read', input: { file_path: inWorkspace(body, `${name}.txt`) } })));
+    }, async (session, seen) => {
+      await session.sendMessage('Rename in all six');
+      // Edit a is approved after c streamed and before d streams; the others after d streamed.
+      await requested(seen, 1);
+      await pause(gapMs * 2.5);
+      await answer(session, seen, 0, { kind: 'tool_approval', decision: 'allow', scope: 'once' });
+      await pause(gapMs * 1.5);
+      for (let at = 1; at < files.length; at += 1) { await requested(seen, at + 1); await answer(session, seen, at, { kind: 'tool_approval', decision: 'allow', scope: 'once' }); }
+      await turnsDone(seen, 1);
+    }, { config: { permissionMode: 'default' }, setup: async fixture => { for (const name of files) await writeFile(join(fixture.cwd, `${name}.txt`), 'old\n'); } });
+    // A reread shows the tool rows in the order the live stream showed them.
+    const toolOrder = (observations: ProviderObservation[]) => [...new Set(observations.flatMap(({ event }) => event.type === 'timeline' && event.item.type === 'tool_call' && event.item.name === 'Edit' ? [event.item.callId] : []))];
+    expect(toolOrder(run.live)).toEqual(files.map(name => `edit-${name}`));
+    expect(toolOrder(run.reread)).toEqual(toolOrder(run.live));
+  }, 90_000);
 
   it('images: a user image, an image a tool returns, and a folded input with an image', async () => {
     await recorded('images', (body, response) => {

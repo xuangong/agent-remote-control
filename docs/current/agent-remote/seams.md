@@ -35,10 +35,10 @@ Recording at an older commit: check it out in a temporary worktree under `.workt
 
 - **Parties.** A provider adapter (the SDK port) and the session runtime with the timeline projection; the publisher's `SessionTimelineSource` is the output.
 - **Contract.** `AgentProviderAdapter.open` yields `ProviderStreamItem`: `ProviderObservation` (an event and `ProviderItemIdentity { key, completes, liveOnly }`), `ProviderHistoryBoundary` and `ProviderTimelineReplacement`. The runtime projects them to canonical rows with item keys; `loadOlderHistory` returns older rows.
-- **Guarantees.** (1) An item has the same key live and when reread after a reopen. (2) History read at open holds every item that is not `liveOnly`. (3) Observations of one session arrive in order; `completes` ends an item. (4) Native interpretation stays in the adapter: the runtime sees only SDK types.
+- **Guarantees.** (1) An item has the same key live and when reread after a reopen, and a reread shows the items it shares with the live run in the live order. (2) History read at open holds every item that is not `liveOnly`. (3) Observations of one session arrive in order; `completes` ends an item. (4) Native interpretation stays in the adapter: the runtime sees only SDK types.
 - **Errors.** Adapters raise typed provider errors (unavailable, native owned, unsupported), never a raw native failure. An observation that becomes a row without an identity, or with an empty key or the reserved `controller:` prefix, is an identity breach: the publisher unserves the journal.
-- **Fixtures.** `agent-provider-<name>/recordings`: 18 Claude, 12 Codex and 8 Copilot recordings with golden rows; OpenCode and DSH have none yet.
-- **Tests today.** `packages/agent-remote-seams/tests/S1` (40): each recording is replayed twice and gives its golden rows; reread keys are keys of the live run; no row lacks an identity or uses a reserved key; every recording has golden rows. The adapter conformance suite inside each provider package is the contract test of the port.
+- **Fixtures.** `agent-provider-<name>/recordings`: 19 Claude, 12 Codex and 8 Copilot recordings with golden rows; OpenCode and DSH have none yet.
+- **Tests today.** `packages/agent-remote-seams/tests/S1` (41): each recording is replayed twice and gives its golden rows; reread keys are keys of the live run, in the live order; no row lacks an identity or uses a reserved key; every recording has golden rows. The adapter conformance suite inside each provider package is the contract test of the port.
 - **Not yet.** Older-history pages continuing the sequence (needs an adapter fixture with older pages); scripted recordings for OpenCode and DSH.
 
 ## S2 Controller to Relay uplink

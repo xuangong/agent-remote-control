@@ -38,6 +38,19 @@ export function nativeReply(response: ServerResponse, content: NativeBlock[] | a
   response.end(sse(nativeEvents(response, content as NativeBlock[], usage, true)));
 }
 
+/**
+ * A finished reply whose blocks arrive `gapMs` apart, as a slow model streams them. The CLI runs a tool as soon as its block ends, so a
+ * tool can finish while later blocks of the same message still stream.
+ */
+export async function nativePaced(response: ServerResponse, content: NativeBlock[], gapMs: number, usage = { inputTokens: 10, outputTokens: 5 }): Promise<void> {
+  response.writeHead(200, { 'content-type': 'text/event-stream' });
+  for (const event of nativeEvents(response, content, usage, true)) {
+    response.write(sse([event]));
+    if (event.type === 'content_block_stop') await new Promise(resolve => { setTimeout(resolve, gapMs); });
+  }
+  response.end();
+}
+
 /** A reply that never finishes: its blocks so far, then silence until the turn is interrupted. The last block stays open. */
 export function nativeStalled(response: ServerResponse, content: NativeBlock[], usage = { inputTokens: 10, outputTokens: 5 }): void {
   response.writeHead(200, { 'content-type': 'text/event-stream' });

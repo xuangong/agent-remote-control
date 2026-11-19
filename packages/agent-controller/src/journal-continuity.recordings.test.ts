@@ -34,16 +34,14 @@ describe.each(['copilot', 'codex', 'claude'] as const)('journal continuity of %s
       }
     });
 
-    it('opened five times adds no item after the first, and leaves none open', async () => {
-      for (const name of names) {
-        const run = recording(provider, name);
-        const journal = await journalOfRun(run.live);
-        await journal.reread(run.reread);
-        const keys = journal.keys();
-        for (let open = 0; open < 5; open += 1) expect(await journal.reread(run.reread), `${name}, open ${open + 1}`).toEqual(UNCHANGED);
-        expect(journal.keys(), name).toEqual(keys);
-        expect(journal.openKeys().filter(key => !key.startsWith('tool:')), name).toEqual([]);
-      }
+    it.each(names)('%s: opened five times adds no item after the first, and leaves none open', async name => {
+      const run = recording(provider, name);
+      const journal = await journalOfRun(run.live);
+      await journal.reread(run.reread);
+      const keys = journal.keys();
+      for (let open = 0; open < 5; open += 1) expect(await journal.reread(run.reread), `${name}, open ${open + 1}`).toEqual(UNCHANGED);
+      expect(journal.keys(), name).toEqual(keys);
+      expect(journal.openKeys().filter(key => !key.startsWith('tool:')), name).toEqual([]);
     });
   });
 
@@ -270,7 +268,7 @@ function copilotScenarios(): void {
 
 function claudeScenarios(present: (...wanted: string[]) => string[]): void {
   describe.skipIf(present('settled').length === 0)('Claude Code', () => {
-    it.each(unchangedOnReopen('claude', ['settled', 'restart', 'after-reopen', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'images', 'hook', 'slash-command', 'subagent']))('%s: reopening gives unchanged, and a second reread adds nothing', async name => {
+    it.each(unchangedOnReopen('claude', ['settled', 'restart', 'after-reopen', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'parallel-edits', 'images', 'hook', 'slash-command', 'subagent']))('%s: reopening gives unchanged, and a second reread adds nothing', async name => {
       const run = use('claude', name);
       const journal = await journalOfRun(run.live);
       expect(journal.openKeys()).toEqual([]);
@@ -362,6 +360,13 @@ function claudeScenarios(present: (...wanted: string[]) => string[]): void {
       expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
     });
 
+    it('parallel-edits: six Edits whose first result was written while the others streamed keep the live order when reread', async () => {
+      const run = use('claude', 'parallel-edits');
+      const journal = await journalOfRun(run.live);
+      expect(journal.keys().filter(key => key.startsWith('tool:edit-'))).toEqual(['a', 'b', 'c', 'd', 'e', 'f'].map(name => `tool:edit-${name}`));
+      expect(await journal.reread(run.reread)).toEqual(UNCHANGED);
+    });
+
     it('interrupted: an interrupted turn leaves no item open, the partial text history keeps is the live text, and five reopens are unchanged', async () => {
       const run = use('claude', 'interrupted');
       const journal = await journalOfRun(run.live);
@@ -397,7 +402,7 @@ function claudeScenarios(present: (...wanted: string[]) => string[]): void {
     });
 
     it('the live-only items of the recordings are the interactions and what a local command prints, and nothing else', async () => {
-      const kinds = await liveOnlyKinds('claude', present('settled', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'images', 'hook', 'slash-command', 'subagent'));
+      const kinds = await liveOnlyKinds('claude', present('settled', 'thinking', 'approval', 'plan-approval', 'todos', 'steer', 'queued', 'interrupted', 'parallel-tools', 'parallel-edits', 'images', 'hook', 'slash-command', 'subagent'));
       expect(kinds).toEqual(['assistant', 'interaction']);
     });
   });

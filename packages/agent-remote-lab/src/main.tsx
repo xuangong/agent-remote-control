@@ -1,4 +1,5 @@
 import { lazy, Suspense, StrictMode } from 'react';
+import { startAppearance } from './appearance.js';
 import { createRoot } from 'react-dom/client';
 
 import { WorkspaceShell } from './components/WorkspaceShell.js';
@@ -14,6 +15,9 @@ const appModule = previousWorkspacePath() ? loadApp() : undefined;
 const App = lazy(() => appModule ?? loadApp());
 import { trackFocusModality } from './focus-modality.js';
 import './session-view-styles.js';
+
+// The stored appearance is shown before anything renders, so the first paint already has the chosen theme.
+startAppearance();
 
 const stopTrackingFocus = trackFocusModality(document);
 if (import.meta.hot) import.meta.hot.dispose(stopTrackingFocus);

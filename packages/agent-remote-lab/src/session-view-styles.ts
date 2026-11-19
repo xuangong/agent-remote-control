@@ -1,4 +1,5 @@
 // Keep the product and standalone Session View cascade in the same order.
+import '@orchardworks/agent-client-web/theme.css';
 import './ui/tokens.css';
 import './app.css';
 import '@orchardworks/agent-client-web/styles.css';

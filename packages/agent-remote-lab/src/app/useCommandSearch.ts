@@ -8,7 +8,8 @@ import { byRecentUse } from '../window-recency.js';
 import { useEffect, useMemo } from 'react';
 import { sessionKey } from '../session-tree.js';
 import type { CommandItem } from '../shell/command-search.js';
-import { commandSessions, sessionSubtitle } from '../shell/command-items.js';
+import { appearanceItems, commandSessions, sessionSubtitle } from '../shell/command-items.js';
+import { currentAppearance } from '../appearance.js';
 import { applePlatform } from '../platform.js';
 import type { SessionSuccessionBindingSlice } from './useSessionSuccessionBinding.js';
 import type { PanelsAndShortcutsSlice } from './usePanelsAndShortcuts.js';
@@ -69,7 +70,9 @@ export function useCommandSearch(scope: Pick<AppInputs & SessionSuccessionBindin
         if (switching) inMode('bot', () => searchRuns.current.focusShownMode('bot'));
       } })));
     const botSessions = new Set(windowMode ? [] : botRoster.sections.flatMap(section => section.rows.map(row => `session:${sessionKey(row.binding)}`)));
-    return [...actions, ...windowItems, ...bots, ...sessionItems.filter(item => !botSessions.has(item.id))];
+    const appearance = currentAppearance();
+    const appearances = appearance ? appearanceItems(appearance.appearance, next => appearance.set(next)) : [];
+    return [...actions, ...appearances, ...windowItems, ...bots, ...sessionItems.filter(item => !botSessions.has(item.id))];
   }
   return { commandItems };
 }

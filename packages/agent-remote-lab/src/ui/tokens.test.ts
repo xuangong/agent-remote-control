@@ -11,18 +11,39 @@ function find(text: string, from = 0): number {
   return index;
 }
 
-/** The declarations of the first `:root` block in the token stylesheet; throws unless it lies wholly between `from` and `to`. */
-function block(from: number, to: number): Map<string, string> {
+/** The declarations of the first `:root` block in the token stylesheet at or after `from`, as written. */
+function block(from: number): Map<string, string> {
   const open = find(':root', from);
   const close = find('}', open); // Assumes a flat `:root` block: it ends at the first `}`.
-  if (close >= to) throw new Error(`tokens.css has no :root block between offsets ${from} and ${to}`);
-  const body = source.slice(find('{', open) + 1, close);
+  const body = source.slice(find('{', open) + 1, close).replace(/\/\*[\s\S]*?\*\//g, '');
   return new Map([...body.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(match => [match[1]!, match[2]!.trim()]));
 }
-const darkAt = find('@media (prefers-color-scheme: dark)');
+/** The two arguments of `light-dark(a, b)`, split at its top-level comma; undefined for any other value. */
+function lightDark(value: string): [string, string] | undefined {
+  if (!value.startsWith('light-dark(') || !value.endsWith(')')) return undefined;
+  const inner = value.slice('light-dark('.length, -1);
+  let depth = 0;
+  for (let index = 0; index < inner.length; index++) {
+    if (inner[index] === '(') depth++;
+    else if (inner[index] === ')') depth--;
+    else if (inner[index] === ',' && depth === 0) return [inner.slice(0, index).trim(), inner.slice(index + 1).trim()];
+  }
+  throw new Error(`${value} has no top-level comma`);
+}
+/** What each token computes to in one appearance: its pair's side, with `var(--ui-*)` references expanded. */
+function resolve(declared: Map<string, string>, side: 0 | 1): Map<string, string> {
+  const value = (name: string): string => {
+    const written = declared.get(name);
+    if (written === undefined) throw new Error(`tokens.css does not define ${name}`);
+    const chosen = lightDark(written)?.[side] ?? written;
+    return chosen.replace(/var\((--ui-[\w-]+)\)/g, (_all, reference: string) => value(reference));
+  };
+  return new Map([...declared.keys()].map(name => [name, value(name)]));
+}
 const reducedAt = find('@media (prefers-reduced-motion: reduce)');
-const light = block(0, darkAt);
-const dark = block(darkAt, reducedAt);
+const declared = block(0);
+const light = resolve(declared, 0);
+const dark = resolve(declared, 1);
 
 function luminance(hex: string): number {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`${hex} is not a #rrggbb color`);
@@ -54,20 +75,23 @@ function over(token: string, surface: string): string {
   return mix(hex, surface, Number(match[4]));
 }
 
-/** The sorted names of the tokens whose value is a literal color. */
-function colorNames(tokens: Map<string, string>): string[] {
-  return [...tokens].filter(([, value]) => /^#|^rgb/.test(value)).map(([name]) => name).sort();
-}
-const colorTokens = colorNames(light);
 const surfaces = ['--ui-background', '--ui-background-grouped', '--ui-background-elevated', '--ui-sidebar', '--ui-selection'];
 const texts = ['--ui-label', '--ui-label-secondary', '--ui-accent-text', '--ui-status-failure', '--ui-status-success', '--ui-status-attention', '--ui-status-working'];
 const syntaxColors = ['--ui-syntax-keyword', '--ui-syntax-string', '--ui-syntax-literal', '--ui-syntax-comment', '--ui-syntax-type', '--ui-syntax-definition'];
 
-it('defines every color token for both appearances', () => {
-  expect(colorTokens.length).toBeGreaterThan(20);
-  expect(colorNames(dark), 'dark color tokens').toEqual(colorTokens);
-  expect([...dark.keys()].filter(name => !light.has(name)), 'tokens only dark defines').toEqual([]);
+it('keeps every token at its value from before the light-dark() pairs, so no screen changes colour', () => {
+  const frozen = JSON.parse(readFileSync(new URL('./legacy-tokens.frozen.json', import.meta.url), 'utf8')) as { light: Record<string, string>; dark: Record<string, string> };
+  const picked = (tokens: Map<string, string>) => Object.fromEntries(Object.keys(frozen.light).map(name => [name, tokens.get(name)]));
+  expect(picked(light), 'light').toEqual(frozen.light);
+  expect(picked(dark), 'dark').toEqual(frozen.dark);
+});
+
+it('declares each color once, follows the system and lets data-theme pin an appearance', () => {
+  expect(source.slice(0, reducedAt).match(/:root\s*\{/g), 'one :root block of tokens').toHaveLength(1);
+  expect(source).not.toContain('prefers-color-scheme');
   expect(source).toContain('color-scheme: light dark');
+  expect(source).toContain(':root[data-theme="light"] { color-scheme: light; }');
+  expect(source).toContain(':root[data-theme="dark"] { color-scheme: dark; }');
 });
 
 it.each([['light', light], ['dark', dark]] as const)('keeps %s text readable on every surface (WCAG AA)', (_appearance, tokens) => {
@@ -112,7 +136,7 @@ it.each([['light', light], ['dark', dark]] as const)('keeps %s state colors read
 });
 
 it('turns motion off when the system asks for reduced motion', () => {
-  const reduced = block(reducedAt, source.length);
+  const reduced = block(reducedAt);
   expect(Object.fromEntries(reduced)).toMatchObject({ '--ui-duration-short': '0ms', '--ui-duration': '0ms' });
 });
 

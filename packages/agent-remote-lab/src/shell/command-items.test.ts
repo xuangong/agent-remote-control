@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { createWindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { commandSessions, sessionSubtitle, sessionViewLocation } from './command-items.js';
+import { appearanceItems, commandSessions, sessionSubtitle, sessionViewLocation } from './command-items.js';
 
 const session = (id: string, title = id, hostId = 'local') => ({ hostId, providerId: 'claude', nativeSessionId: id, title });
 const window = (id: string, sessions: string[]): WorkspaceWindow => ({ schemaVersion: 3, id, revision: 0, title: id, selectedPrimaryViewId: null, selectedViewId: null,
@@ -30,4 +30,13 @@ it('finds the view showing a session, in the current Window first', () => {
   expect(sessionViewLocation(windows, 'A', key('y'))).toEqual({ windowId: 'A', viewId: 'A1' });
   expect(sessionViewLocation(windows, 'A', key('z'))).toEqual({ windowId: 'B', viewId: 'B1' });
   expect(sessionViewLocation(windows, 'A', key('none'))).toBeUndefined();
+});
+
+it('offers the three appearances, marks the current one and sets the one chosen', () => {
+  const chosen: string[] = [];
+  const items = appearanceItems('dark', next => chosen.push(next));
+  expect(items.map(item => [item.title, item.subtitle])).toEqual([['Appearance: System', undefined], ['Appearance: Light', undefined], ['Appearance: Dark', 'Current']]);
+  expect(items.every(item => item.kind === 'action')).toBe(true);
+  items[1]!.run();
+  expect(chosen).toEqual(['light']);
 });

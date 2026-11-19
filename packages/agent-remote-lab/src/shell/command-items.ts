@@ -1,6 +1,8 @@
 import type { AgentProviderDescriptor, WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { RemoteHost } from '../components/HostPairing.js';
 import { sessionKey } from '../session-tree.js';
+import type { Appearance } from '@orchardworks/agent-client-web/browser';
+import type { CommandItem } from './command-search.js';
 
 /** A session the palette lists: its identity and title, as All sessions opens it. */
 export interface CommandSession { hostId: string; providerId: string; nativeSessionId: string; title: string; parentNativeSessionId?: string }
@@ -34,4 +36,11 @@ export function sessionViewLocation(windows: readonly WorkspaceWindow[], current
     const view = window.views.find(candidate => candidate.binding && sessionKey(candidate.binding) === key);
     if (view) return { windowId: window.id, viewId: view.id };
   }
+}
+
+const appearanceTitles: Record<Appearance, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+/** The palette's three appearance actions; the current one says so. */
+export function appearanceItems(current: Appearance, set: (next: Appearance) => void): CommandItem[] {
+  return (['system', 'light', 'dark'] as const).map(appearance => ({ id: `appearance:${appearance}`, kind: 'action', title: `Appearance: ${appearanceTitles[appearance]}`,
+    keywords: ['theme', 'dark mode', 'light mode', 'color scheme'], ...(appearance === current ? { subtitle: 'Current' } : {}), run: () => set(appearance) }));
 }

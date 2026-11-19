@@ -1,52 +1,56 @@
-/* Semantic design tokens. Light by default, dark with the system appearance.
-   Every literal color of the Lab lives in this file; stylesheets.test.ts enforces it. */
+/* Semantic design tokens: each color is one light-dark() pair, so the page follows the system and the root's data-theme
+   (set by bindAppearance) pins either appearance. Every literal color of the Lab lives in this file; stylesheets.test.ts enforces it. */
 :root {
   color-scheme: light dark;
 
-  --ui-background: #ffffff;
-  --ui-background-grouped: #f2f2f7;
-  --ui-background-elevated: #ffffff;
-  --ui-sidebar: #f2f2f7;
-  --ui-selection: #e8f0fc;
+  --ui-background: light-dark(#ffffff, #1c1c1e);
+  --ui-background-grouped: light-dark(#f2f2f7, #000000);
+  --ui-background-elevated: light-dark(#ffffff, #2c2c2e);
+  --ui-sidebar: light-dark(#f2f2f7, #2c2c2e);
+  --ui-selection: light-dark(#e8f0fc, #16304d);
 
-  --ui-label: #1d1d1f;
-  --ui-label-secondary: #636366;
-  --ui-label-tertiary: #aeaeb2; /* Below text contrast: only non-text, placeholder and disabled content */
-  --ui-separator: rgb(60 60 67 / 0.18);
-  --ui-control-border: #7c7c80;
-  --ui-fill: rgb(120 120 128 / 0.12);
-  --ui-fill-strong: rgb(120 120 128 / 0.2);
-  --ui-segment-selected: #ffffff; /* The raised segment of a segmented control, lighter than its track */
+  --ui-label: light-dark(#1d1d1f, #f5f5f7);
+  --ui-label-secondary: light-dark(#636366, #98989d);
+  --ui-label-tertiary: light-dark(#aeaeb2, #636366); /* Below text contrast: only non-text, placeholder and disabled content */
+  --ui-separator: light-dark(rgb(60 60 67 / 0.18), rgb(255 255 255 / 0.15));
+  --ui-control-border: light-dark(#7c7c80, #8e8e93);
+  --ui-fill: light-dark(rgb(120 120 128 / 0.12), rgb(118 118 128 / 0.24));
+  --ui-fill-strong: light-dark(rgb(120 120 128 / 0.2), rgb(118 118 128 / 0.36));
+  --ui-segment-selected: light-dark(#ffffff, #636366); /* The raised segment of a segmented control, lighter than its track */
 
   --ui-accent: #0071e3;
-  --ui-accent-text: #0066cc;
+  --ui-accent-text: light-dark(#0066cc, #409cff);
   --ui-accent-hover: #0064c8; /* Primary buttons under the pointer: the accent moved toward black */
-  --ui-failure-on-fill: #b8000e; /* Destructive text on a gray fill */
-  --ui-row-hover: rgb(120 120 128 / 0.12); /* A hovered sidebar or list row */
+  --ui-failure-on-fill: light-dark(#b8000e, #ffa39e); /* Destructive text on a gray fill */
+  --ui-row-hover: light-dark(rgb(120 120 128 / 0.12), rgb(118 118 128 / 0.06)); /* A hovered sidebar or list row */
   --ui-on-accent: #ffffff;
   --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
-  --ui-focus-ring: #0071e3;
+  --ui-focus-ring: light-dark(#0071e3, #409cff);
 
-  --ui-status-attention: #c93400;
-  --ui-on-attention: #ffffff;
-  --ui-on-failure: #ffffff; /* Ink on the failure fill */
-  --ui-status-working: #0066cc; /* Used as text (running state), so it shares the accessible accent text color */
-  --ui-status-success: #1a7431;
-  --ui-status-failure: #d70015;
+  --ui-status-attention: light-dark(#c93400, #ffb340);
+  --ui-on-attention: light-dark(#ffffff, #000000);
+  --ui-on-failure: light-dark(#ffffff, #1d1d1f); /* Ink on the failure fill: white is 2.8:1 on the dark failure red */
+  --ui-status-working: light-dark(#0066cc, #409cff); /* Used as text (running state), so it shares the accessible accent text color */
+  --ui-status-success: light-dark(#1a7431, #30d158);
+  --ui-status-failure: light-dark(#d70015, #ff6961);
 
-  --ui-code-background: #f5f5f7;
-  --ui-code-text: #1d1d1f;
+  --ui-code-background: light-dark(#f5f5f7, #2c2c2e);
+  --ui-code-text: light-dark(#1d1d1f, #f5f5f7);
   /* Syntax colors of the read-only source viewer, after Xcode's default themes */
-  --ui-syntax-keyword: #9b2393;
-  --ui-syntax-string: #c41a16;
-  --ui-syntax-literal: #1c00cf;
-  --ui-syntax-comment: #5d6c79;
-  --ui-syntax-type: #0b4f79;
-  --ui-syntax-definition: #0f68a0;
-  --ui-backdrop: rgb(0 0 0 / 0.25);
-  --ui-shadow-ink: #1d1d1f; /* The color custom shadows mix from: a text color would turn them into a glow in dark mode */
-  --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.08), 0 0 0 0.5px rgb(0 0 0 / 0.06);
-  --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.16), 0 0 0 0.5px rgb(0 0 0 / 0.1);
+  --ui-syntax-keyword: light-dark(#9b2393, #fc5fa3);
+  --ui-syntax-string: light-dark(#c41a16, #fc6a5d);
+  --ui-syntax-literal: light-dark(#1c00cf, #d0bf69);
+  --ui-syntax-comment: light-dark(#5d6c79, #8e99a6);
+  --ui-syntax-type: light-dark(#0b4f79, #5dd8ff);
+  --ui-syntax-definition: light-dark(#0f68a0, #41a1c0);
+  --ui-backdrop: light-dark(rgb(0 0 0 / 0.25), rgb(0 0 0 / 0.5));
+  --ui-shadow-ink: light-dark(#1d1d1f, #000000); /* The color custom shadows mix from: a text color would glow in dark mode, so it is black there */
+  --ui-shadow-pane-ink: light-dark(rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.4));
+  --ui-shadow-pane-edge: light-dark(rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.08));
+  --ui-shadow-pane: 0 1px 3px var(--ui-shadow-pane-ink), 0 0 0 0.5px var(--ui-shadow-pane-edge);
+  --ui-shadow-overlay-ink: light-dark(rgb(0 0 0 / 0.16), rgb(0 0 0 / 0.5));
+  --ui-shadow-overlay-edge: light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.12));
+  --ui-shadow-overlay: 0 12px 40px var(--ui-shadow-overlay-ink), 0 0 0 0.5px var(--ui-shadow-overlay-edge);
 
   --ui-radius-control: 6px;
   --ui-radius-pane: 10px;
@@ -67,54 +71,8 @@
   --ui-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ui-ease-spring: cubic-bezier(0.16, 1, 0.3, 1); /* An ease-out curve without overshoot, for sheets and panels */
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ui-background: #1c1c1e;
-    --ui-background-grouped: #000000;
-    --ui-background-elevated: #2c2c2e;
-    --ui-sidebar: #2c2c2e;
-    --ui-selection: #16304d;
-
-    --ui-label: #f5f5f7;
-    --ui-label-secondary: #98989d;
-    --ui-label-tertiary: #636366;
-    --ui-separator: rgb(255 255 255 / 0.15);
-    --ui-control-border: #8e8e93;
-    --ui-fill: rgb(118 118 128 / 0.24);
-    --ui-fill-strong: rgb(118 118 128 / 0.36);
-    --ui-segment-selected: #636366;
-
-    --ui-accent: #0071e3;
-    --ui-accent-text: #409cff;
-    --ui-accent-hover: #0064c8;
-    --ui-failure-on-fill: #ffa39e;
-    --ui-row-hover: rgb(118 118 128 / 0.06);
-    --ui-on-accent: #ffffff;
-    --ui-on-light-fill: #1d1d1f; /* Ink on the light fills of a colored avatar, such as yellow */
-    --ui-focus-ring: #409cff;
-
-    --ui-status-attention: #ffb340;
-    --ui-on-attention: #000000;
-    --ui-on-failure: #1d1d1f; /* Ink on the failure fill: white is 2.8:1 on the dark failure red */
-    --ui-status-working: #409cff;
-    --ui-status-success: #30d158;
-    --ui-status-failure: #ff6961;
-
-    --ui-code-background: #2c2c2e;
-    --ui-code-text: #f5f5f7;
-    --ui-syntax-keyword: #fc5fa3;
-    --ui-syntax-string: #fc6a5d;
-    --ui-syntax-literal: #d0bf69;
-    --ui-syntax-comment: #8e99a6;
-    --ui-syntax-type: #5dd8ff;
-    --ui-syntax-definition: #41a1c0;
-    --ui-backdrop: rgb(0 0 0 / 0.5);
-    --ui-shadow-ink: #000000; /* Black, so shadows stay shadows on dark surfaces */
-    --ui-shadow-pane: 0 1px 3px rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.08);
-    --ui-shadow-overlay: 0 12px 40px rgb(0 0 0 / 0.5), 0 0 0 0.5px rgb(255 255 255 / 0.12);
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 
 @media (prefers-reduced-motion: reduce) {
   :root { --ui-duration-short: 0ms; --ui-duration: 0ms; }

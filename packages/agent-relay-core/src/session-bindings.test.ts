@@ -15,9 +15,10 @@ const host = (): Host => ({ id: 'h1', installationId: 'installation', name: 'Hos
 type Answer = (path: string, body: Record<string, any>) => RpcResponse | Promise<RpcResponse>;
 const ok = (body: unknown): RpcResponse => ({ status: 200, body: JSON.stringify(body) });
 
-function setup(answer: Answer, options: { ownerSubject?: string } = {}) {
+function setup(answer: Answer, options: { ownerSubject?: string; onStateChange?: () => Promise<void> } = {}) {
   const clock = new ManualClock();
-  const state: BrokerState = createBrokerState({ initialState: undefined, now: () => clock.time, keepsAssociations: false, keepsSharing: options.ownerSubject !== undefined });
+  const state: BrokerState = createBrokerState({ initialState: undefined, now: () => clock.time, keepsAssociations: false, keepsSharing: options.ownerSubject !== undefined,
+    ...(options.onStateChange ? { onStateChange: options.onStateChange } : {}) });
   const subject = host();
   state.hosts.set(subject.id, subject);
   const ownerSubject = options.ownerSubject;
@@ -188,5 +189,65 @@ describe('a shared Host\'s guest', () => {
     run.state.sharing = new (await import('./host-sharing.js')).HostSharing({ grants: [{ hostId: 'h1', subject: 'guest', sessionQuota: 5 } as never], reservations: [] }, () => {});
     await expect(run.bindings.userMutation(run.host, 'attach', { providerId: 'codex', nativeSessionId: 'n1' }, 'guest')).rejects.toMatchObject({ status: 403, code: 'session_forbidden' });
     expect(run.calls).toEqual([]);
+  });
+});
+
+describe('revoked bindings and guarded creations', () => {
+  let created = 0;
+  const createAnswer: Answer = (path, body) => path === '/remote/create' ? ok({ agentId: `runtime-${++created}`, nativeSessionId: `created-${created}` })
+    : path === '/remote/attach' ? ok({ agentId: 'runtime-1', nativeSessionId: body.nativeSessionId }) : { status: 404, body: '{}' };
+  const op = (index: number) => `00000000-0000-4000-8000-0000000000d${index}`;
+  const bind = (run: ReturnType<typeof setup>, nativeSessionId: string, agentId: string): Binding => {
+    const binding: Binding = { hostId: 'h1', providerId: 'codex', nativeSessionId, agentId, generation: 0 };
+    run.state.bindings.set(agentId, binding); run.state.nativeBindings.set(JSON.stringify(['h1', 'codex', nativeSessionId]), binding);
+    return binding;
+  };
+
+  it('does not ask the Controller to reopen a session whose binding was revoked', async () => {
+    const run = setup(attachAnswer());
+    const binding = bind(run, 'n1', 'public-1');
+    run.state.bindings.delete('public-1');
+    await expect(run.bindings.recoverBinding(run.host, binding)).rejects.toMatchObject({ status: 404, code: 'session_unavailable' });
+    expect(run.calls).toEqual([]);
+  });
+
+  it('does not restore a binding that was revoked while its reattachment was waiting to be saved', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    // The Controller answers while a revocation is already being saved; the reattachment's own save queues behind it.
+    const run: ReturnType<typeof setup> = setup((path, body) => {
+      void run.state.commit(() => ({ value: undefined, publish() { run.state.bindings.delete('public-1'); } }));
+      return attachAnswer('runtime-1')(path, body);
+    }, { onStateChange: () => gate });
+    const binding = bind(run, 'n1', 'public-1');
+    const outcome = expect(run.bindings.recoverBinding(run.host, binding)).rejects.toMatchObject({ status: 404, code: 'session_unavailable' });
+    await new Promise(resolve => setImmediate(resolve));
+    release();
+    await outcome;
+    expect(binding.generation).toBe(0);
+    expect(run.bindings.runtimeAgentId(run.host, binding)).toBe('public-1');
+  });
+
+  it('keeps a guest to the creation quota the Host owner granted', async () => {
+    const run = setup(createAnswer, { ownerSubject: 'owner' });
+    run.state.sharing.set('h1', 'guest', 'Guest', 1);
+    await run.bindings.waitForCreation(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(1) }, 'guest'));
+    await expect(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(2) }, 'guest')).rejects.toMatchObject({ status: 409, code: 'session_quota_exceeded' });
+    expect(run.calls.filter(call => call.path === '/remote/create')).toHaveLength(1);
+    expect(run.state.sharing.quota('h1', 'guest')).toEqual({ limit: 1, used: 1 });
+  });
+
+  it('refuses a creation whose source contradicts its native source identity, and takes one that agrees', async () => {
+    const run = setup(createAnswer);
+    bind(run, 'source-1', 'source-agent');
+    const source = { providerId: 'codex', nativeSessionId: 'source-1' };
+    await expect(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(3), creationSource: source, sourceNativeSessionId: 'another' }))
+      .rejects.toMatchObject({ status: 400, code: 'invalid_request', message: expect.stringContaining('contradicts') });
+    await expect(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(4), creationSource: { providerId: 'other', nativeSessionId: 'source-1' }, sourceNativeSessionId: 'source-1' }))
+      .rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    expect(run.calls).toEqual([]);
+    await run.bindings.waitForCreation(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(5), creationSource: source }));
+    await run.bindings.waitForCreation(run.bindings.userMutation(run.host, 'create', { providerId: 'codex', operationId: op(6), creationSource: source, sourceNativeSessionId: 'source-1' }));
+    expect(run.calls.filter(call => call.path === '/remote/create')).toHaveLength(2);
   });
 });

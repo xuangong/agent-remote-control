@@ -220,3 +220,125 @@ describe('host session requests', () => {
     await expect(run.session.rpc(run.host()!, 'GET', '/remote/catalog')).rejects.toMatchObject({ status: 503, code: 'host_offline' });
   });
 });
+
+/** The checks that keep a Host connection inside what its credential and its registration allow. */
+describe('host session authorization', () => {
+  const invitation = (installationId?: string) => [hashOf('invite'), { expires: 1_000_000, ...(installationId ? { installationId } : {}) }] as const;
+  const deviceKey = (name: string, installationId: string) => [hashOf(name), { expires: Number.MAX_SAFE_INTEGER, installationId, kind: 'device' as const }] as const;
+  const stateOf = (...keys: Array<readonly [string, any]>) => ({ keys: keys.map(([hash, key]) => [hash, key] as [string, any]), hosts: [], bindings: [], creations: [] });
+  const hostCall = () => ({ calls: [] as unknown[], deferred: undefined as undefined | ((value: unknown) => void), async hostCall(_hostId: string, call: unknown) {
+    this.calls.push(call); return new Promise(resolve => { this.deferred = resolve; });
+  } });
+
+  it('acknowledges the outbox only when the Controller asked for it and the Relay serves one', async () => {
+    const served = await hostSessionFixture({ ports: { options: { outbox: hostCall() } } }).connect({ grants: { outboxRequested: true } });
+    expect(served.of('registered')[0]).toMatchObject({ outbox: 1 });
+    const unserved = await hostSessionFixture().connect({ grants: { outboxRequested: true } });
+    expect(unserved.of('registered')[0]).not.toHaveProperty('outbox');
+    const unasked = await hostSessionFixture({ ports: { options: { outbox: hostCall() } } }).connect();
+    expect(unasked.of('registered')[0]).not.toHaveProperty('outbox');
+  });
+
+  it('delivers an outbox answer only on the connection and generation that asked', async () => {
+    const outbox = hostCall();
+    const run = hostSessionFixture({ ports: { options: { outbox } } });
+    const first = await run.connect({ grants: { outboxRequested: true } });
+    await first.receive({ uplinkVersion: 2, type: 'outbox_request', requestId: 'r1', call: { action: 'poll' } });
+    outbox.deferred!({ entries: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(first.of('outbox_response')).toEqual([expect.objectContaining({ requestId: 'r1', status: 200 })]);
+    await first.receive({ uplinkVersion: 2, type: 'outbox_request', requestId: 'r2', call: { action: 'poll' } });
+    const second = await run.connect({ grants: { outboxRequested: true } });
+    outbox.deferred!({ entries: [] });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(second.of('outbox_response')).toEqual([]);
+    expect(first.of('outbox_response')).toHaveLength(1);
+  });
+
+  it('refuses diagnostic delivery while the connection is backed up, without asking the Controller', async () => {
+    let deliver: ((entries: never[]) => Promise<{ status: number }>) | undefined;
+    const diagnostics = { record: () => undefined, connect: (_hostId: string, send: typeof deliver) => { deliver = send; return () => undefined; } };
+    const run = hostSessionFixture({ ports: { options: { diagnostics } as never } });
+    const socket = await run.connect();
+    socket.bufferedAmount = 1;
+    const outcome = await Promise.race([deliver!([]), Promise.resolve('asked the Controller')]);
+    expect(outcome).toEqual({ status: 503 });
+    expect(socket.of('rpc_request')).toEqual([]);
+  });
+
+  it('keeps one device credential per installation when a device registers, and no other installation loses its key', async () => {
+    const run = hostSessionFixture({ accountBacked: true, initialState: stateOf(deviceKey('key', 'machine'), deviceKey('stale', 'machine'), deviceKey('other', 'other-machine')) });
+    await run.connect();
+    expect([...run.state.keys.keys()].sort()).toEqual([hashOf('key'), hashOf('other')].sort());
+  });
+
+  it('issues a device credential after an invitation registers with a rotation, and registers the Host once the Controller saved it', async () => {
+    const run = hostSessionFixture({ accountBacked: true, initialState: stateOf(invitation(), deviceKey('old', 'machine'), deviceKey('other', 'other-machine')) });
+    const socket = await run.connect({ key: 'invite', rotation: true });
+    expect(socket.of('registered')).toEqual([]);
+    const issued = socket.of('credential_issued')[0]!;
+    expect(issued.credential).toMatch(/^arc_device_/);
+    expect(run.state.keys.has(hashOf(issued.credential))).toBe(true);
+    await socket.receive({ uplinkVersion: 2, type: 'credential_saved' });
+    expect(socket.of('registered')).toHaveLength(1);
+    // The installation keeps only the new credential; another installation keeps its own.
+    expect([...run.state.keys.keys()].sort()).toEqual([hashOf(issued.credential), hashOf('other')].sort());
+  });
+
+  it('registers a device that rotates at once and issues no credential before it asks', async () => {
+    const run = hostSessionFixture({ accountBacked: true, initialState: stateOf(deviceKey('key', 'machine')) });
+    const socket = await run.connect({ rotation: true });
+    expect(socket.of('registered')).toHaveLength(1);
+    expect(socket.of('credential_issued')).toEqual([]);
+  });
+
+  it('refuses a new device credential at 128 and issues one at 127', async () => {
+    const filler = (count: number) => Array.from({ length: count }, (_, index) => deviceKey(`filler-${index}`, `filler-${index}`));
+    const full = hostSessionFixture({ accountBacked: true, initialState: stateOf(deviceKey('key', 'machine'), ...filler(127)) });
+    const crowded = await full.connect({ rotation: true });
+    await expect(full.host()!.issueCredential!()).rejects.toMatchObject({ status: 429, code: 'capacity_exceeded' });
+    expect(crowded.of('credential_issued')).toEqual([]);
+    const room = hostSessionFixture({ accountBacked: true, initialState: stateOf(deviceKey('key', 'machine'), ...filler(126)) });
+    const open = await room.connect({ rotation: true });
+    await room.host()!.issueCredential!();
+    expect(open.of('credential_issued')).toHaveLength(1);
+  });
+
+  it('does not open a browser stream the page may no longer use, and sends what it buffered once it may', async () => {
+    const run = hostSessionFixture();
+    const socket = await run.connect();
+    let allowed = false;
+    const stream = { timer: undefined, ready: false, buffered: ['frame'], authorized: () => allowed, socket: { readyState: 1, send: () => undefined, close: () => undefined } };
+    run.host()!.streams.set('s1', stream as never);
+    await socket.receive({ uplinkVersion: 2, type: 'stream_opened', streamId: 's1' });
+    expect(stream.ready).toBe(false);
+    expect(socket.of('stream_message')).toEqual([]);
+    allowed = true;
+    await socket.receive({ uplinkVersion: 2, type: 'stream_opened', streamId: 's1' });
+    expect(stream.ready).toBe(true);
+    expect(socket.of('stream_message')).toEqual([expect.objectContaining({ streamId: 's1', message: 'frame' })]);
+  });
+
+  it('closes with 1008 and the reason when a registration is no longer authorized, and not with a server failure', async () => {
+    const recovery = { hostId: 'recovered', installationId: 'machine', revocationId: '00000000-0000-4000-8000-000000000001' };
+    const run = hostSessionFixture({ initialState: stateOf([hashOf('key'), { expires: 1_000_000, installationId: 'machine', kind: 'device', recovery }]) });
+    const socket = await run.connect();
+    expect(socket.closes).toEqual([{ code: 1008, reason: expect.stringContaining('recovery invitation') }]);
+    expect(run.state.hosts.size).toBe(0);
+  });
+
+  it('ignores a provider snapshot from a Host that did not advertise provider management, and takes one from a Host that did', async () => {
+    const snapshot = { uplinkVersion: 2, type: 'provider_snapshot', providers: [{ providerId: 'claude', displayName: 'Claude' }] };
+    const plain = hostSessionFixture();
+    const refused = await plain.connect();
+    await refused.receive(snapshot);
+    expect(refused.closes.at(-1)).toEqual({ code: 1008, reason: 'Provider management was not advertised' });
+    expect(plain.host()!.providers.map(provider => provider.providerId)).toEqual(['codex']);
+    const managed = hostSessionFixture();
+    const accepted = await managed.connect({ register: false });
+    await accepted.receive({ ...registration(), providerManagement: true });
+    await accepted.receive(snapshot);
+    expect(accepted.closes).toEqual([]);
+    expect(managed.host()!.providers.map(provider => provider.providerId)).toEqual(['claude']);
+  });
+});

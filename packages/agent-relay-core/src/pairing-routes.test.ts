@@ -8,7 +8,7 @@ import { hashOf } from './test-utils/fake-host-link.js';
 
 const NOW = 1_000_000;
 
-function setup(options: { accountBacked?: boolean; ownerSubject?: string; gatewaySetup?: boolean; keyLifetimeMs?: number; successionEnrollment?: boolean } = {}) {
+function setup(options: { accountBacked?: boolean; ownerSubject?: string; gatewaySetup?: boolean; keyLifetimeMs?: number; successionEnrollment?: boolean; journals?: boolean } = {}) {
   const accountBacked = options.accountBacked ?? false;
   const state = createBrokerState({ initialState: undefined, now: () => NOW, keepsAssociations: false, keepsSharing: options.ownerSubject !== undefined });
   const offered: Array<[string, number]> = [];
@@ -17,8 +17,8 @@ function setup(options: { accountBacked?: boolean; ownerSubject?: string; gatewa
       ...(options.ownerSubject ? { ownerSubject: options.ownerSubject } : {}), ...(options.successionEnrollment ? { successionEnrollment: {} as never } : {}), onPairing: (key, expiresAt) => { offered.push([key, expiresAt]); } },
     access: createAccess({ state, ownerSubject: options.ownerSubject }), brokerState: state, now: () => NOW, ids: sequentialRelayIds(), accountBacked, keyHash: hashOf,
     visibleHosts: subject => [{ id: 'h1', online: true, subject }] as never,
-    rpc: async () => { throw new Error('No Controller.'); }, disconnected: () => undefined, previews: {} as never, deletion: { revoked: () => undefined, drain: () => undefined, deleteOne: async () => false },
-    journals: undefined, journalSessions: undefined, credentialExpiry: { expire: () => () => undefined, enforce: () => undefined }, sessionBindings: {} as never,
+    rpc: async () => { throw new Error('No Controller.'); }, disconnected: () => undefined, previews: { forget: () => undefined } as never, deletion: { revoked: () => undefined, drain: () => undefined, deleteOne: async () => false },
+    journals: options.journals ? {} as never : undefined, journalSessions: undefined, credentialExpiry: { expire: () => () => undefined, enforce: () => undefined }, sessionBindings: { forgetHost: () => undefined } as never,
   });
   const call = async (method: string, path: string, body?: unknown, subject?: string) => {
     const request = new Request(`https://relay.example${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
@@ -90,3 +90,40 @@ describe('pairing keys', () => {
     await expect(run.call('GET', '/v1/remote/unknown')).resolves.toBeUndefined();
   });
 });
+
+describe('smart reading and revocation', () => {
+  const addHost = (state: ReturnType<typeof setup>['state']) => {
+    state.hosts.set('h1', { id: 'h1', installationId: 'inst', name: 'Host', providers: [{ providerId: 'codex', displayName: 'Codex' }], legacyDsh: false, generation: 1, pending: new Map(), streams: new Map() });
+    state.keys.set('device-hash', { expires: NOW + 1000, installationId: 'inst', kind: 'device' });
+    state.keys.set('other-hash', { expires: NOW + 1000, installationId: 'other', kind: 'device' });
+  };
+
+  it('changes smart reading only for a body that names a provider and a boolean, and nothing else', async () => {
+    const run = setup({ journals: true }); addHost(run.state);
+    const bad = [{ providerId: 'codex' }, { providerId: 'codex', enabled: 'yes' }, { providerId: 'codex', enabled: true, extra: 1 }, { enabled: true }];
+    for (const body of bad) await expect(run.call('PUT', '/v1/remote/hosts/h1/smart-reading', body)).rejects.toMatchObject({ status: 400 });
+    expect(run.state.hosts.get('h1')!.smartReading).toBeUndefined();
+    await expect(run.call('PUT', '/v1/remote/hosts/h1/smart-reading', { providerId: 'codex', enabled: true })).resolves.toMatchObject({ status: 200, body: { providers: ['codex'] } });
+  });
+
+  it('lets only the owner of a shared Relay revoke a Host, and takes the Host and its credentials away', async () => {
+    const run = setup({ accountBacked: true, ownerSubject: 'owner' }); addHost(run.state);
+    await expect(run.call('POST', '/v1/remote/hosts/h1/revoke', {}, 'guest')).rejects.toMatchObject({ status: 403, code: 'owner_required' });
+    expect(run.state.hosts.has('h1')).toBe(true);
+    expect(run.state.keys.has('device-hash')).toBe(true);
+    await expect(run.call('POST', '/v1/remote/hosts/h1/revoke', {}, 'owner')).resolves.toMatchObject({ status: 200, body: { ok: true } });
+    expect(run.state.hosts.has('h1')).toBe(false);
+    expect([...run.state.keys.keys()]).toEqual(['other-hash']);
+  });
+
+  it('serves the account revocation only to an account-backed Relay, and only as a POST to a revoke path', async () => {
+    const standalone = setup(); addHost(standalone.state);
+    await expect(standalone.call('POST', '/v1/remote/hosts/h1/revoke', {})).resolves.toBeUndefined();
+    expect(standalone.state.hosts.has('h1')).toBe(true);
+    const backed = setup({ accountBacked: true }); addHost(backed.state);
+    await expect(backed.call('GET', '/v1/remote/hosts/h1/revoke')).resolves.toBeUndefined();
+    await expect(backed.call('GET', '/v1/remote/unknown')).resolves.toBeUndefined();
+    expect(backed.state.hosts.has('h1')).toBe(true);
+  });
+});
+

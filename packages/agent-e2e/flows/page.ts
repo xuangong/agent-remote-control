@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import type { ScriptedRow } from '@orchardworks/agent-e2e/stack';
+import { SESSION_CONNECTION_PATTERN, sessionConnectionWordsIn } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 
 /** The page's own words and controls, so a flow reads as what a person does. Selectors live here and nowhere else. */
 
@@ -66,10 +67,11 @@ export const rowOffset = (page: Page, text: string): Promise<number | undefined>
 /**
  * Passes the page's WebSockets through to the Relay and lets a flow cut them, as a network drop does: `drop()` closes every open socket
  * of the page, and the page opens new ones by itself. With `held`, the Relay's first timeline page of a session, and every frame after it
- * on that socket, waits until `release()`; the page has by then everything else (the account, the Hosts, the subscription) but no
+ * on that socket, waits until `release()` (with `'agent_snapshot'`, the first snapshot of the session instead of the first timeline page); the page has by then everything else (the account, the Hosts, the subscription) but no
  * conversation rows from the Relay. Install it before the page loads.
  */
-export async function watchSockets(page: Page, held = false) {
+export async function watchSockets(page: Page, held: boolean | 'agent_snapshot' = false) {
+  const holdFrom = held === 'agent_snapshot' ? '"type":"agent_snapshot"' : '"type":"timeline_page"';
   const open = new Set<import('@playwright/test').WebSocketRoute>();
   const releases: Array<() => void> = [];
   let released = !held;
@@ -81,7 +83,7 @@ export async function watchSockets(page: Page, held = false) {
     const waiting: Array<string | Buffer> = [];
     let holding = false;
     server.onMessage(message => {
-      if (!released && (holding || (typeof message === 'string' && message.includes('"type":"timeline_page"')))) { holding = true; waiting.push(message); return; }
+      if (!released && (holding || (typeof message === 'string' && message.includes(holdFrom)))) { holding = true; waiting.push(message); return; }
       socket.send(message);
     });
     releases.push(() => { holding = false; for (const message of waiting.splice(0)) socket.send(message); });
@@ -134,3 +136,28 @@ export async function showSidebar(page: Page) {
 }
 
 export const composerOf = (page: Page) => page.getByRole('textbox', { name: 'Message', exact: true });
+
+/**
+ * Records, from before the first paint, every T5 connection word that any frame of the page shows: a MutationObserver checks the
+ * `innerText` of the visible page (hidden nodes have none) after every change, except while the Relay's sign-in page is up. Install it before the page loads.
+ */
+export async function watchWords(page: Page): Promise<{ seen(): Promise<string[]> }> {
+  await page.addInitScript(({ source, flags }) => {
+    const pattern = new RegExp(source, flags);
+    const found = new Set<string>();
+    (window as unknown as { __connectionWordTexts: Set<string> }).__connectionWordTexts = found;
+    const look = () => {
+      // The Relay's sign-in page (.arc-access) is not a session; its own words are out of scope.
+      if (document.querySelector('.arc-access')) return;
+      const text = document.body?.innerText ?? '';
+      for (const line of text.split('\n')) if (pattern.test(line)) found.add(line.trim());
+    };
+    new MutationObserver(look).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });
+  }, { source: SESSION_CONNECTION_PATTERN.source, flags: SESSION_CONNECTION_PATTERN.flags.replace(/[gy]/g, '') });
+  return {
+    seen: async () => {
+      const texts = await page.evaluate(() => [...((window as unknown as { __connectionWordTexts?: Set<string> }).__connectionWordTexts ?? [])]);
+      return [...new Set(texts.flatMap(text => sessionConnectionWordsIn(text)))];
+    },
+  };
+}

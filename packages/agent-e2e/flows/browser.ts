@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { watchSockets } from './page.js';
+import { watchSockets, watchWords } from './page.js';
 import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /** One headless browser for a file of flows; every flow opens its own signed-out context, which the Relay signs in as the local user. */
@@ -23,8 +23,13 @@ export async function resetWindows(context: BrowserContext, origin: string): Pro
 
 export interface PageOptions {
   viewport?: { width: number; height: number };
-  /** Keep the Relay's timeline page back until `sockets.release()`, so the page shows only what it has on the device. */
-  hold?: boolean;
+  /** Emulate a phone: touch input and the mobile viewport behaviour. */
+  mobile?: boolean;
+  /**
+   * Keep Relay frames back until `sockets.release()`. `true` holds from the first timeline page, so the page shows only what it has on the
+   * device; `'agent_snapshot'` holds from the session's first snapshot, so a session this device never opened has no state yet.
+   */
+  hold?: boolean | 'agent_snapshot';
 }
 
 /** A page on `url` in `context`, which already has its Window. Its WebSockets pass through a route that a flow can cut (`sockets.drop()`), wait on (`sockets.recoveredFrom`) or hold back (`hold`). */
@@ -32,13 +37,14 @@ export async function openPageIn(context: BrowserContext, url: string, options: 
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   const sockets = await watchSockets(page, options.hold);
+  const words = await watchWords(page);
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  return { page, sockets };
+  return { page, sockets, words };
 }
 
 /** A fresh context, signed in as the local user with a Window that holds nothing, and a page on `url`. */
 export async function openPage(browser: Browser, url: string, options: PageOptions = {}) {
-  const context = await browser.newContext({ viewport: options.viewport ?? { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: options.viewport ?? { width: 1280, height: 800 }, ...(options.mobile ? { isMobile: true, hasTouch: true } : {}) });
   await resetWindows(context, new URL(url).origin);
   return { context, ...await openPageIn(context, url, options) };
 }

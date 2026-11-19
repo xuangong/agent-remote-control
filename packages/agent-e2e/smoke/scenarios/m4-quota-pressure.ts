@@ -27,6 +27,7 @@ export const quotaPressure: Scenario = {
   id: 'M4',
   title: 'Quota pressure',
   quick: true,
+  journals: true,
   async run(context) {
     const foreign = await context.pool.foreignActiveSessions();
     if (foreign.length > 0) throw new Error(`Sessions this run did not create are active (${foreign.length}); restarting the instance would interrupt them.`);

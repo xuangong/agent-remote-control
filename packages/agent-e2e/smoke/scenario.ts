@@ -38,6 +38,8 @@ export interface Scenario {
   title: string;
   /** Part of `pnpm smoke:quick`. */
   quick: boolean;
+  /** Pairs a scripted Host that publishes journals, so the instance must run with `ARC_LOCAL_JOURNALS=1`. */
+  journals?: boolean;
   run(context: RunContext): Promise<ScenarioOutcome>;
 }
 

@@ -56,8 +56,9 @@ export async function journalStoreFiles(instance) {
  * Restarts the instance from its existing build (`pnpm local up --no-build`) with journals on. With `journalLimits` the Relay runs
  * with those limits (`ARC_LOCAL_JOURNAL_LIMITS`); without, with its defaults, whatever the caller's own environment says. With `emptyStore` it is stopped
  * first and its Relay journal files are removed, so the Relay starts with no journals and the Controller must republish.
+ * The command line is signed in again when the restart left it signed out.
  */
-export async function restartInstance(instance, { checkout, emptyStore = false, journalLimits, exec = (file, args, options) => run(file, args, options), remove = rm } = {}) {
+export async function restartInstance(instance, { checkout, emptyStore = false, journalLimits, exec = (file, args, options) => run(file, args, options), remove = rm, signInWaitMs = 20_000 } = {}) {
   const { ARC_LOCAL_JOURNAL_LIMITS: _inherited, ...inherited } = process.env;
   const env = { ...inherited, ARC_LOCAL_JOURNALS: '1', ...(journalLimits ? { ARC_LOCAL_JOURNAL_LIMITS: JSON.stringify(journalLimits) } : {}) };
   const local = (...args) => exec('pnpm', ['--silent', 'local', ...args], { cwd: checkout, env, encoding: 'utf8', timeout: 240_000, maxBuffer: 8 * 1024 * 1024 });
@@ -72,5 +73,24 @@ export async function restartInstance(instance, { checkout, emptyStore = false, 
     }
   }
   await local('up', '--no-build');
-  return { emptyStore, removedFiles: removed.length, journalLimits: journalLimits ?? null, ms: Date.now() - startedAt };
+  const commandLine = await ensureCommandLineSignedIn({ checkout, exec, waitMs: signInWaitMs });
+  return { emptyStore, removedFiles: removed.length, journalLimits: journalLimits ?? null, commandLine, ms: Date.now() - startedAt };
+}
+
+/**
+ * Makes sure the instance's command line is signed in, which `up` tries once and only reports when it fails (a restart that
+ * meets the site's sign-in limit, for example). A scenario that sends through the command line after a restart needs it, so
+ * this asks `login status` and runs `login` again, waiting `waitMs` between attempts, before it gives up with an error.
+ */
+export async function ensureCommandLineSignedIn({ checkout, exec = (file, args, options) => run(file, args, options), attempts = 4, waitMs = 20_000, wait = delay } = {}) {
+  const dev = (...args) => exec('agent-remote-controller-dev', args, { cwd: checkout, encoding: 'utf8', timeout: 60_000 });
+  const signedIn = async () => { try { return JSON.parse((await dev('login', 'status')).stdout).signedIn === true; } catch { return false; } };
+  if (await signedIn()) return 'signed-in';
+  let failure = '';
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try { await dev('login'); } catch (error) { failure = String(error?.stdout || error?.message || error).slice(0, 300); }
+    if (await signedIn()) return 'signed-in-again';
+    if (attempt < attempts) await wait(waitMs);
+  }
+  throw new Error(`The instance's command line stayed signed out after ${attempts} sign-ins${failure ? ` (${failure})` : ''}; run agent-remote-controller-dev login.`);
 }

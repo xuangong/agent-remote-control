@@ -26,6 +26,7 @@ export const manySessions: Scenario = {
   id: 'M5',
   title: 'Many sessions',
   quick: false,
+  journals: true,
   async run(context) {
     const sessionCount = positiveInteger('--sessions', 200);
     const groupSize = Math.min(50, sessionCount);

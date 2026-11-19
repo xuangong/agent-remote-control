@@ -21,6 +21,7 @@ export const soak: Scenario = {
   id: 'M8',
   title: 'Soak',
   quick: false,
+  journals: true,
   async run(context) {
     const minutes = positiveInteger('--duration', 30);
     const recorder = new TranscriptRecorder();

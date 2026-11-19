@@ -2,6 +2,7 @@
 // and writes `.arc-local/smoke/<date>/report.json`, `summary.txt` and the wire transcripts. It reports; it never gates a task.
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import { ensureCommandLineSignedIn } from '../faults/instance-process.mjs';
 import { findingsFromFailures } from './findings.js';
 import { createRunContext } from './lib/run-context.js';
 import { scenarioStatus, summarize, writeReport, type RunReport, type ScenarioReport } from './report.js';
@@ -30,6 +31,13 @@ const timer = setTimeout(() => { log(`outer deadline of ${outerDeadlineMs / 60_0
 timer.unref();
 
 const git = (...gitArgs: string[]) => execFileSync('git', gitArgs, { cwd: checkout, encoding: 'utf8' }).trim();
+// The scripted Hosts turn smart reading on, which an instance started without journals refuses; say so before anything runs.
+const needsJournals = selected.filter(item => item.journals).map(item => item.id);
+if (needsJournals.length > 0 && process.env.ARC_LOCAL_JOURNALS !== '1') {
+  throw new Error(`${needsJournals.join(', ')} need an instance with journals: export ARC_LOCAL_JOURNALS=1, run pnpm local up, then run the smoke again with it exported.`);
+}
+// Scenarios send through the command line, and a restart can leave it signed out.
+await ensureCommandLineSignedIn({ checkout });
 const { context, close } = await createRunContext({ checkout, seed, quick, runDirectory, log });
 const info = JSON.parse(execFileSync('agent-remote-controller-dev', ['--build-info'], { cwd: checkout, encoding: 'utf8' }));
 const run: RunReport = { format: 'arc-smoke-report-1', startedAt: new Date().toISOString(), mode: quick ? 'quick' : 'full', commit: git('rev-parse', '--short=12', 'HEAD'),

@@ -10,6 +10,7 @@ import type { SessionSuccessionContextStore } from '../session-succession-contex
 import type { SessionSuccessionCoordinator } from '../session-succession.js';
 import type { NativeSessionRef, TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import type { TpmOptions } from '../tpm.js';
+import type { StateFiles } from '../state-file.js';
 import type { NativeOwnerIdentity, NativeHandoffGrant } from '../native-session-owner.js';
 import type { HostExecutionPolicy } from '../execution-policy.js';
 import type { OperationCacheOptions } from '@orchardworks/agent-session-runtime';
@@ -108,6 +109,8 @@ export interface AgentHostRuntimeOptions {
   /** Internal wiring until provider readiness and product projection are certified together. */
   succession?: { controllerId: string; enrollment?: true } & ({
     stateDirectory: string;
+    /** The role and context state files; the default is the disk under `stateDirectory`. `storeBytes` lowers the ceiling of one state file. */
+    files?: { roles?: StateFiles; contexts?: StateFiles; storeBytes?: number };
     /** Adapter-owned evidence. No provider is inferred to support succession from idle status. */
     native?: Pick<SessionSuccessionPorts, 'supports' | 'supportsBoundedProjection' | 'createIdle' | 'reconcileDelivery'> & {
       inspect: (source: NativeSessionRef) => Promise<Omit<import('../local-succession-preparation.js').SuccessionReadiness, 'boundary' | 'inFlightInputs'>>;

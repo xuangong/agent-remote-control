@@ -58,7 +58,7 @@ it('registers two real Host uplinks, injects scoped tools, delivers both ways wi
     const call=async(target:typeof mac,nativeId:string,name:string,args:unknown)=>JSON.parse(await target.extensions.get(nativeId)!.tools!.find(tool=>tool.name===name)!.execute(args));
     expect(win.extensions.get(member.nativeSessionId)?.tools?.some(tool=>tool.name==='describe_team_member')).toBe(false);
     win.sessions.get(member.nativeSessionId)!.voidReceipt=true;
-    const fixtureBytes=process.env.TEAM_RESOURCE_FIXTURE_PATH ? await readFile(process.env.TEAM_RESOURCE_FIXTURE_PATH) : Buffer.alloc(4*1024*1024+32768,93),fixturePath=join(root,'fixture.zip');await writeFile(fixturePath,fixtureBytes);
+    /* four full 32 KiB chunks and a short last one: the transfer is chunked the same at any larger size */const fixtureBytes=process.env.TEAM_RESOURCE_FIXTURE_PATH ? await readFile(process.env.TEAM_RESOURCE_FIXTURE_PATH) : Buffer.alloc(4*32768+100,93),fixturePath=join(root,'fixture.zip');await writeFile(fixturePath,fixtureBytes);
     const resource=await call(mac,leader.nativeSessionId,'upload_team_resource',{path:fixturePath,operationId:'fixture-upload'});
     expect(resource.sha256).toBe(createHash('sha256').update(fixtureBytes).digest('hex'));
     await expect(call(win,member.nativeSessionId,'download_team_resource',{resourceId:resource.resourceId})).rejects.toThrow('access');

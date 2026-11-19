@@ -2,34 +2,6 @@
  "description": "Tests over 1 s in the unit, contract and integration tiers, each with the reason it is slow. An entry leaves when its test is fast; none is added without a reason and an owner step in the open items of the target architecture.",
  "tests": [
   {
-   "test": "packages/agent-controller/src/team-host.test.ts > registers two real Host uplinks, injects scoped tools, delivers both ways without a browser and archives after native idle",
-   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
-   "test": "packages/agent-controller/src/copilot.test.ts > Copilot registration executable preflight > allows the native CLI to finish a cold version probe before advertising",
-   "reason": "Waits for a fix or an extraction named in the open items of the target architecture."
-  },
-  {
-   "test": "packages/agent-controller/src/session-source-create.test.ts > private role-file capacity refusal is authoritative before directory create and leaves no witness admission",
-   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
-  },
-  {
-   "test": "packages/agent-controller/src/session-succession-runtime.test.ts > lost source creation response recovers its original durable result without native replay",
-   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
-  },
-  {
-   "test": "packages/agent-controller/src/tpm-review.test.ts > paginates bounded catalog summaries without losing work identities or exposing large artifacts",
-   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
-  },
-  {
-   "test": "packages/agent-controller/src/controller-update.test.ts > installs a verified package without lifecycle scripts and preserves the active version",
-   "reason": "Uses a real socket, child process or probe timeout; a transport or process test kept in the unit project."
-  },
-  {
-   "test": "packages/agent-controller/src/native-prefix-role-runtime.test.ts > codex first prefix attachment restores tpm tools with exact recipient and release fencing",
-   "reason": "Runs the Controller runtime over real state directories with fsync; moves to the StateFiles port once AgentHostOptions passes it through."
-  },
-  {
    "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting",
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },

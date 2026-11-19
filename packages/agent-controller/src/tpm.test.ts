@@ -4,9 +4,7 @@ import type { AgentManagerEvent, SessionWireAgent } from '@orchardworks/agent-se
 import type { TpmWork } from '@orchardworks/agent-remote-protocol';
 import { TpmCoordinator, type TpmSessionAccess } from './tpm.js';
 import { memoryStateFiles } from './memory-state-files.js';
-
-// The coordinator settles in the background; poll it at a short interval (the default 50 ms interval adds up over a file of waits).
-const poll = ((read: () => unknown, options?: object) => expect.poll(read, { interval: 2, ...options })) as typeof expect.poll;
+import { poll } from './test-utils/poll.js';
 
 class SessionManager {
   readonly listeners = new Set<(event: AgentManagerEvent) => void>();

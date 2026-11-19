@@ -284,7 +284,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   const successionService: SessionSuccessionService | undefined = successionConfig && 'stateDirectory' in successionConfig
     ? new SessionSuccessionService(successionConfig.stateDirectory, successionConfig.controllerId, {
       ...successionWiring.ports(),
-    }) : undefined;
+    }, successionConfig.files) : undefined;
   const succession: { controllerId: string; store: SessionSuccessionStore; contexts: SessionSuccessionContextStore; coordinator: SessionSuccessionCoordinator } | undefined = successionService ? { controllerId: successionConfig!.controllerId, store: successionService.store, contexts: successionService.contexts, coordinator: successionService.coordinator }
     : successionConfig && 'store' in successionConfig ? successionConfig : undefined;
   const successionReady = Promise.all([succession?.store.ready, succession?.contexts.ready, successionService?.ready]);

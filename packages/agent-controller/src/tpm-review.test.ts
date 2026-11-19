@@ -1,3 +1,4 @@
+import { memoryStateFiles } from './memory-state-files.js';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -39,7 +40,7 @@ async function fixture() {
     async recover(_providerId, nativeSessionId, extensions) { recovery.push({ nativeSessionId, extensions }); },
     create: async () => { throw new Error('Unexpected creation'); }, execute: async (_agent, _operation, work) => work.dispatch(),
   };
-  const coordinator = new TpmCoordinator({ stateDirectory: directory, now: () => 100000, tickMs: 1000000, minimumReviewMs: 1 }, access);
+  const coordinator = new TpmCoordinator({ stateDirectory: directory, files: memoryStateFiles(), now: () => 100000, tickMs: 1000000, minimumReviewMs: 1 }, access);
   await coordinator.ready;
   cleanups.push(async () => { await coordinator.close(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const tick = async () => { available = true; await coordinator.tick(); await new Promise(resolve => setTimeout(resolve, 20)); };

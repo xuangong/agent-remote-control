@@ -7,7 +7,7 @@ import { AgentOperationRejectedError, type AgentSession, type ProviderStreamItem
 import type { TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
 import { createAgentHostRuntime, type AgentHostDirectory } from './host.js';
 import { SessionSuccessionStore } from './session-succession-store.js';
-import { jsonBytes, SUCCESSION_STORE_BYTES } from './succession-persistence.js';
+import { jsonBytes } from './succession-persistence.js';
 import * as directoryMutation from './directory-mutation.js';
 import * as fs from 'node:fs/promises';
 import { SessionReferenceStore } from './session-reference.js';
@@ -34,7 +34,7 @@ class Native implements AgentSession {
   async sendMessage() {} async respondToInteraction() {}
   async dispose() { this.closed = true; this.stop?.(); }
 }
-async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false, shutdownTimeoutMs?: number) {
+async function fixture(certificate: boolean | undefined, nativeId = 'reader', cache?: { maxResultBytes?: number; maxBytes?: number; ttlMs?: number; now?: () => number }, policy = false, fileGrants = false, shutdownTimeoutMs?: number, storeBytes?: number) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'source-create-')));
   closeables.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   let creates = 0, certificates = 0, granted = true, loseResult = false, rejectNative = false;
@@ -66,7 +66,7 @@ async function fixture(certificate: boolean | undefined, nativeId = 'reader', ca
     async open(id) { await beforeOpen(id); const session = new Native(id, root); sessions.push(session); return session; },
     close: async () => { closingDirectory(); await Promise.all(sessions.map(session => session.dispose())); },
   };
-  const createHost = () => createAgentHostRuntime({ controllerId: 'controller', shutdownTimeoutMs, succession: { controllerId: 'controller', stateDirectory: root, enrollment: true },
+  const createHost = () => createAgentHostRuntime({ controllerId: 'controller', shutdownTimeoutMs, succession: { controllerId: 'controller', stateDirectory: root, enrollment: true, ...(storeBytes ? { files: { storeBytes } } : {}) },
     ...(cache ? { operationCache: cache } : {}), ...(policy ? { executionPolicy: { allowedWorkspaceRoots: [root], defaultWorkspace: root, lockPermissions: true } } : {}),
     registrations: [{ directory, adapter: { descriptor: { providerId: 'fixture', displayName: 'Fixture' }, createSession: async () => { throw new Error('unexpected'); }, resumeSession: async () => { throw new Error('unexpected'); } } }] });
   let host = createHost(); closeables.push(() => host.close());
@@ -314,10 +314,11 @@ test.each([
 });
 
 test('private role-file capacity refusal is authoritative before directory create and leaves no witness admission', async () => {
-  const f = await fixture(true);
+  // The refusal is a rule of the byte ceiling, so the test runs at a small injected ceiling.
+  const ceiling = 256 * 1024, f = await fixture(true, 'reader', undefined, false, false, undefined, ceiling);
   await f.host.control({ method: 'GET', path: '/remote/providers' });
   const saved: any = { version: 8, roles: [], associationAdmissions: [], associationResults: [] };
-  const desired = SUCCESSION_STORE_BYTES - 1000;
+  const desired = ceiling - 1000;
   while (jsonBytes(saved) < desired - 17000) {
     const n = saved.associationResults.length;
     saved.associationResults.push({ id: `fill-${n}`, fingerprint: 'fingerprint', scope: 'x'.repeat(16384), operationId: `fill-${n}`, source: ref('other-source'), reader: ref('other-reader') });

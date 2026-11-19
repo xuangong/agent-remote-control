@@ -268,12 +268,14 @@ async function sequence(id: OperatingCase, repeat: number, fault?: string) {
   }
 }
 
-// Fixed sequential execution: eighteen nominal sequences and six declared fault attempts.
-// A measurement run (input and output directories given) repeats each case three times; a test run runs each once.
-const repeats = process.env.TASK9E_INPUT_DIRECTORY === undefined ? [1] : [1, 2, 3];
-for (const id of operatingCases) for (const repeat of repeats) {
+// A measurement run (input and output directories given) executes the eighteen nominal sequences, repeated three times, and the six declared
+// fault attempts. A test run keeps one nominal sequence as the proof that the Durable Object storage path holds a full-size state; the
+// fault and sizing rules run over node:sqlite in succession-accounting.test.ts.
+const measuring = process.env.TASK9E_INPUT_DIRECTORY !== undefined;
+const repeats = measuring ? [1, 2, 3] : [1];
+for (const id of measuring ? operatingCases : (['L'] as const)) for (const repeat of repeats) {
   test(`operating ${id} sample ${repeat}`, () => sequence(id, repeat), 30000);
 }
-for (const id of ['L', 'O'] as const) for (const fault of ['late-progress', 'hold', 'reject']) {
+if (measuring) for (const id of ['L', 'O'] as const) for (const fault of ['late-progress', 'hold', 'reject']) {
   test(`operating ${id} ${fault}`, () => sequence(id, 1, fault), 30000);
 }

@@ -18,16 +18,18 @@ export interface Paint { label: string; ms: number; fromDeviceStore: boolean; ti
 export class PageProbe {
   private readonly paints: Paint[] = [];
   private readonly rowKeys: string[][] = [];
+  private readonly resources: NonNullable<PageReport['resources']> = [];
   private timelinePageAt: number | undefined;
-  private constructor(readonly page: any, private readonly clockOrigin: number) {}
+  private constructor(readonly page: any, private readonly clockOrigin: number, private readonly cdp: any) {}
 
   static async create(context: any, clockOrigin: number): Promise<PageProbe> {
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);
     await page.addInitScript(observerSource);
-    const probe = new PageProbe(page, clockOrigin);
     const cdp = await context.newCDPSession(page);
+    const probe = new PageProbe(page, clockOrigin, cdp);
     await cdp.send('Network.enable');
+    await cdp.send('Performance.enable');
     cdp.on('Network.webSocketFrameReceived', (event: any) => {
       if (probe.timelinePageAt === undefined && typeof event.response?.payloadData === 'string' && event.response.payloadData.includes('"timeline_page"')) probe.timelinePageAt = Date.now();
     });
@@ -104,10 +106,21 @@ export class PageProbe {
   async snapshotKeys(): Promise<string[]> { const keys = (await this.rows()).map(row => row.key); this.rowKeys.push(keys); return keys; }
   setHidden(hidden: boolean): Promise<void> { return this.page.evaluate((value: boolean) => (window as any).__smoke.setHidden(value), hidden); }
 
+  /**
+   * One tick of the page's resource series: heap after a collection, rows held beyond the `expectedRows` the scenario knows it wrote
+   * (timeline entries and roster rows; never below zero) and the sockets the caller counts.
+   */
+  async sampleResources(sockets: number, expectedRows = 0): Promise<void> {
+    await this.cdp.send('HeapProfiler.collectGarbage').catch(() => {});
+    const { metrics } = await this.cdp.send('Performance.getMetrics') as { metrics: Array<{ name: string; value: number }> };
+    const rows: number = await this.page.evaluate(() => document.querySelectorAll('.agent-timeline-entry, .lab-bot-row').length);
+    this.resources.push({ t: Date.now() - this.clockOrigin, heapBytes: metrics.find(metric => metric.name === 'JSHeapUsedSize')?.value ?? 0, rows: Math.max(0, rows - expectedRows), sockets });
+  }
+
   async report(extra: Partial<PageReport> = {}): Promise<PageReport> {
     const raw: RawSample[] = await this.page.evaluate(() => (window as any).__smoke?.log.slice() ?? []);
     const finalRows = toPageRows(await this.rows());
-    return { samples: toPageSamples(raw, this.clockOrigin), paints: [...this.paints], rowKeys: [...this.rowKeys], finalRows, ...extra };
+    return { samples: toPageSamples(raw, this.clockOrigin), paints: [...this.paints], rowKeys: [...this.rowKeys], finalRows, ...(this.resources.length > 0 ? { resources: [...this.resources] } : {}), ...extra };
   }
 
   async close(): Promise<void> { await this.page.close().catch(() => {}); }

@@ -48,6 +48,8 @@ export const observerSource = `(() => {
       kind: node.querySelector('.agent-message-user') ? 'user_message' : node.querySelector('.agent-message-assistant') ? 'assistant_message' : node.querySelector('.agent-tool-chevron') ? 'tool_call' : 'other',
       text: (node.innerText || '').trim(),
     })),
+    // Marks the elements of the selector whose label (or text) names one of the labels, so a later survivors() says which are still the same element.
+    markLabelled: (selector, labels) => { window.__smokeMarks = [...document.querySelectorAll(selector)].filter(node => labels.some(label => (node.getAttribute('aria-label') || node.textContent || '').includes(label))); return window.__smokeMarks.length; },
     mark: () => { window.__smokeMarks = [...root().querySelectorAll('.agent-timeline-entry')]; return window.__smokeMarks.length; },
     survivors: () => ({ total: window.__smokeMarks?.length ?? 0, alive: (window.__smokeMarks ?? []).filter(node => node.isConnected).length }),
     scrollerSize: () => { const target = scroller(); return { scrollHeight: target.scrollHeight, clientHeight: target.clientHeight, scrollTop: target.scrollTop, rows: root().querySelectorAll('.agent-timeline-entry').length, className: target.className }; },

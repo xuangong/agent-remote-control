@@ -45,7 +45,7 @@ class PeerSocket {
 /** The Relay's end of a socket pair, with the peer's end. Frames cross in a microtask, as they do between runtimes. */
 function socketPair() {
   const messages = new Set<(data: string, binary: boolean) => void | Promise<void>>();
-  const closes = new Set<() => void>();
+  const closes = new Set<(details?: { code: number; wasClean?: boolean }) => void>();
   const server: RelaySocket & { drop(): void } = {
     readyState: 1, bufferedAmount: 0,
     send(data: string) { if (server.readyState !== 1) throw new Error('Socket is closed'); queueMicrotask(() => peer.deliver(data)); },
@@ -57,7 +57,7 @@ function socketPair() {
   };
   const peer = new PeerSocket(
     data => queueMicrotask(() => { for (const listener of messages) void listener(data, false); }),
-    (code, reason) => { if (server.readyState !== 1) return; server.readyState = 3; for (const listener of closes) listener(); void code; void reason; });
+    (code) => { if (server.readyState !== 1) return; server.readyState = 3; for (const listener of closes) listener({ code, wasClean: true }); });
   return { server, peer };
 }
 
@@ -119,7 +119,7 @@ export async function startRelayHarness(options: { store?: MemoryRelayStateStore
   async function upgrade(path: string, headers: Record<string, string>) {
     if (path.startsWith('/ws/remote-host') && !path.includes('control=1')) path += `${path.includes('?') ? '&' : '?'}control=1`;
     const prepared = await relay.prepareUpgrade(new Request(origin + path, { headers: { ...headers, upgrade: 'websocket' } }));
-    if (!prepared || prepared instanceof Response) throw new Error(`The upgrade of ${path} was refused with ${prepared instanceof Response ? prepared.status : 'no answer'}.`);
+    if (!prepared || prepared instanceof Response) throw new Error(`The upgrade of ${path} was refused with ${prepared instanceof Response ? prepared.status : 'no answer'}.`, { cause: prepared });
     const { server, peer } = socketPair();
     prepared.accept(server);
     sockets.push({ peer, server });

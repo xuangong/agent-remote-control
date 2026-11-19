@@ -46,8 +46,9 @@ describe('binding a session over a view', () => {
     expect(bindPlan(botOver)).toEqual({ kind: 'open-beside', placement: 'primary' });
   });
   it('keeps a bot whose session the Host reported missing: another session still opens beside it, as at the baseline', () => {
-    // The plan takes no fact about a missing session. The view shows as empty, but it is still a bot of the group, so it keeps its
-    // place and the directory's session takes a new primary group next to it; the same rule 6 answer as for a bot with a live session.
+    // The plan takes no fact about a missing session. The view shows as empty, but the Window keeps its binding, so it is still a bot
+    // of the group and keeps its place: a new session (its own New session button) or one from the directory takes a new primary
+    // group next to it, the rule 6 answer for any bot (bot design, stage 2b). The e2e pin is in window-workspaces.spec.ts.
     const facts = { ...botOver, targetIsBot: true, hasGroup: true, botAppearance: true };
     expect(bindPlan(facts)).toEqual({ kind: 'open-beside', placement: 'primary' });
     expect(bindPlan({ ...facts, targetPlacement: 'dock' })).toEqual({ kind: 'open-beside', placement: 'dock', afterId: 'bot' });

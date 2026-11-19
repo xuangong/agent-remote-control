@@ -729,7 +729,7 @@ test('Windows show session states, from shared states for sessions this page doe
   } finally { await page.close(); await fixture.close(); }
 });
 
-test('a session the Host no longer has shows as an empty view, without reopening', async ({ page, context }) => {
+test('a session the Host no longer has shows as an empty view, without reopening, and another session opens beside it', async ({ page, context }) => {
   const fixture = await sessionLinkFixture({ automaticSignIn: true });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -773,8 +773,18 @@ test('a session the Host no longer has shows as an empty view, without reopening
     expect(attaches.filter(id => id === primary.binding!.nativeSessionId).length).toBeGreaterThan(0);
     await page.waitForTimeout(6000);
     expect(attaches).toHaveLength(attempts);
-    // The Window keeps the reference until the view holds another session.
+    // The Window keeps the reference, so the view stays a bot of the group and keeps its conversation (rule 6): its own
+    // New session opens a new primary group beside it and leaves the missing view in place until it is removed.
     expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(primary.binding!.nativeSessionId);
+    await primaryView.getByRole('button', { name: 'New session', exact: true }).click();
+    await page.getByTestId('session-create').click();
+    await expect.poll(async () => (await inspect()).views.filter(view => view.placement === 'primary').length).toBe(2);
+    const created = (await inspect()).views.find(view => view.placement === 'primary' && view.id !== primary.id)!;
+    expect(created.binding?.nativeSessionId).not.toBe(primary.binding!.nativeSessionId);
+    expect((await inspect()).selectedPrimaryViewId).toBe(created.id);
+    await expect(page.locator(`.lab-primary-group[data-primary-group-id="${created.id}"]`).getByTestId('prompt-input')).toBeEnabled();
+    expect((await inspect()).views.find(view => view.id === primary.id)?.binding?.nativeSessionId).toBe(primary.binding!.nativeSessionId);
+    await expect(primaryView.locator('.lab-missing-session-note')).toBeVisible();
     expect(errors).toEqual([]);
   } finally { await fixture.close(); }
 });

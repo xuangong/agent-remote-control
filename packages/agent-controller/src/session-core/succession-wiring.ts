@@ -63,7 +63,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
         if (!boundedSourceIdentity(source.controllerId) || !boundedSourceIdentity(source.providerId) || !directory.createNativePrefix || !directory.verifyNativePrefix) return false;
         const lease = await acquireNative(source);
         try {
-          const session = ctx.nativeAttachments.get(lease.agent)?.session;
+          const session = ctx.ledger.attachmentOf(lease.agent)?.session;
           const handle = (await session?.runtimeInfo())?.persistence;
           if (!session?.promptEditEvidence || session.promptEditEvidence.version !== 1 || !handle) return false;
           nativePrefixResumeHandle(source.providerId, source.nativeSessionId, handle);
@@ -127,7 +127,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
         if (!delivery.preparedInput) return ctx.nativeSuccession?.reconcileDelivery(delivery);
         const lease = await acquireNative(delivery.target);
         try {
-          const evidence = ctx.nativeAttachments.get(lease.agent)?.session.nativeEvidence;
+          const evidence = ctx.ledger.attachmentOf(lease.agent)?.session.nativeEvidence;
           if (!evidence || evidence.availability().status !== 'configured' || (evidence.availability() as { version?: number }).version !== 2) return undefined;
           const result = await evidence.inspectInput(delivery.preparedInput.witness);
           return result.status === 'materialized' ? { outcome: 'materialized', nativeEvidence: serializeAgentInputMaterialization(result) } : undefined;
@@ -205,16 +205,16 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
   }
   /** Applies enablement changes to live sessions whose provider can change tools during a session. */
   async function applyWorkerTools(): Promise<void> {
-    const { bindings, liveAgent, nativeAttachments, nativeRef, providers, roles, workerSupport, workerToolsApplied } = ctx;
+    const { bindings, liveAgent, ledger, nativeRef, providers, roles, workerSupport } = ctx;
     if (!workerSupport) return;
     for (const binding of [...bindings.values()]) {
-      const agent = liveAgent(binding.agentId), session = agent && nativeAttachments.get(agent)?.session;
+      const agent = liveAgent(binding.agentId), session = agent && ledger.attachmentOf(agent)?.session;
       if (!session?.updateToolNamespaces || providers.require(binding.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== 'live') continue;
       const ref = nativeRef(binding);
       if (await roles.extensions(ref, () => ref)) continue;
       const enabled = workerSupport.enabled(ref);
-      if ((workerToolsApplied.get(binding.agentId) ?? false) === enabled) continue;
-      try { await session.updateToolNamespaces(enabled ? [workerSupport.namespace(() => ref, false)] : []); workerToolsApplied.set(binding.agentId, enabled); }
+      if (ledger.workerToolsApplied(binding.agentId) === enabled) continue;
+      try { await session.updateToolNamespaces(enabled ? [workerSupport.namespace(() => ref, false)] : []); ledger.recordWorkerTools(binding.agentId, enabled); }
       catch { /* The next enablement change or attachment applies it again. */ }
     }
   }
@@ -232,8 +232,8 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     }
   }
   async function inspectSuccession(source: NativeSessionRef, lease: RemoteHostSessionLease, preparation?: NativePrefixSelection) {
-    const { assertHandoffState, bindings, liveAgent, nativeAttachments, nativeSuccession, operationCache, succession, successionBoundary, successionService, team, tpm } = ctx;
-    const session = nativeAttachments.get(lease.agent)?.session;
+    const { assertHandoffState, bindings, liveAgent, ledger, nativeSuccession, operationCache, succession, successionBoundary, successionService, team, tpm } = ctx;
+    const session = ledger.attachmentOf(lease.agent)?.session;
     if (preparation ? !session?.promptEditEvidence || session.promptEditEvidence.version !== 1 : !nativeSuccession && (!session || !hasCurrentNativeEvidence(session))) throw new SuccessionPreparationRejected('succession_unsupported_provider', 'This provider has not certified quiescent succession.');
     const context = succession?.contexts.forTarget(source);
     if (!preparation && context?.deliveries.some(item => item.preparedInput && !['started', 'handled'].includes(item.inputAcceptance?.disposition ?? '') && ['accepted', 'unknown', 'materialized'].includes(item.state))) await successionService?.reconcileFirstInput(context.operationId);
@@ -250,7 +250,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     return { ...state, boundary, inFlightInputs: successionBoundary?.pending(source) ?? 0 };
   }
   async function retainVerification(prepared: import('@orchardworks/agent-remote-protocol').PreparedSuccession): Promise<RetainedSuccessionVerification> {
-    const { bindings, liveAgent, nativeAttachments, succession } = ctx;
+    const { bindings, liveAgent, ledger, succession } = ctx;
     const entries: Array<{ target: NativeSessionRef; lease: RemoteHostSessionLease; session: AgentSession; token?: AgentNativeValidityToken; isCurrent?: (token: AgentNativeValidityToken) => boolean }> = [];
     const releases: Array<() => void> = [];
     let released = false;
@@ -259,7 +259,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       if (released) throw new Error('Succession verification attachment was released.');
       for (const entry of entries) {
         const binding = bindings.getByNative(entry.target.providerId, entry.target.nativeSessionId);
-        if (!binding || liveAgent(binding.agentId) !== entry.lease.agent || nativeAttachments.get(entry.lease.agent)?.session !== entry.session
+        if (!binding || liveAgent(binding.agentId) !== entry.lease.agent || ledger.attachmentOf(entry.lease.agent)?.session !== entry.session
           || entry.token && !entry.isCurrent?.(entry.token)) throw new Error('Native succession attachment or evidence changed.');
       }
     };
@@ -267,7 +267,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       const requireEvidence = !!prepared.preparation || !!succession?.store.progress(prepared.operationId)?.nativeCreation;
       for (const target of [prepared.from, prepared.to]) {
         const lease = await acquireNative(target); releases.push(() => lease.release());
-        const session = nativeAttachments.get(lease.agent)?.session;
+        const session = ledger.attachmentOf(lease.agent)?.session;
         if (!session) throw new Error('Native succession attachment is unavailable.');
         const evidence = prepared.preparation ? session.promptEditEvidence : session.nativeEvidence;
         if (requireEvidence && (prepared.preparation ? !session.promptEditEvidence || session.promptEditEvidence.version !== 1 : !hasCurrentNativeEvidence(session))) throw new Error('Native succession attachment evidence is unavailable.');

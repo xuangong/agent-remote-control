@@ -20,11 +20,9 @@ import type { SessionRefContext } from '../session-refs.js';
 import type { SessionCallerCatalog } from '../session-callers.js';
 import type { SessionCaller, SessionCallResult } from '../session-routes.js';
 import type { Admission } from './admission.js';
+import type { AttachmentLedger } from './attachment-ledger.js';
 import type { ProviderRegistry } from './provider-registry.js';
 import type { AgentHostProviderRegistration, AgentHostRuntimeOptions, SessionBinding } from './types.js';
-
-/** What a native attachment was opened from: the provider's session, and the identity of the creation result or prefix handle it was opened with. */
-export interface NativeAttachment { session: AgentSession; nativeCreation?: string; nativePrefix?: string }
 
 /** The adapter-owned succession evidence of a Controller configured with a state directory. */
 export type NativeSuccession = Extract<NonNullable<AgentHostRuntimeOptions['succession']>, { stateDirectory: string }>['native'];
@@ -64,15 +62,12 @@ export interface SessionCoreContext {
   readonly sessionRefs: SessionRefContext | undefined;
   readonly roles: SessionRoles;
   readonly providers: ProviderRegistry;
-  readonly prepared: Map<string, AgentSession>;
-  readonly uncertainAgents: Set<string>;
   readonly journals: JournalPublisher;
   readonly terminalRefresh: TerminalRefresh;
   readonly automationAccess: TpmSessionAccess;
   readonly sessionCatalog: SessionCallerCatalog;
   readonly workerSupport: WorkerSupport | undefined;
-  readonly workerToolsApplied: Map<string, boolean>;
-  readonly nativeAttachments: WeakMap<SessionWireAgent, NativeAttachment>;
+  readonly ledger: AttachmentLedger;
   readonly successionConfig: AgentHostRuntimeOptions['succession'];
   readonly nativeSuccession: NativeSuccession;
   liveAgent(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;

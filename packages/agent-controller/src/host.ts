@@ -17,6 +17,7 @@ import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import { createAttachmentLedger } from './session-core/attachment-ledger.js';
 import { createProviderRegistry } from './session-core/provider-registry.js';
 import { createIdleSessions } from './idle-sessions.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
@@ -238,8 +239,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       lockPermissions: registration.nativePermissionControl ? false : options.executionPolicy!.lockPermissions }) })) };
   if (!options.registrations.length && !options.providerEnabled) throw new Error('Agent Host requires at least one provider registration.');
   const providers = createProviderRegistry(({ directory }) => new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
-  const prepared = new Map<string, AgentSession>();
-  const nativeAttachments = new WeakMap<SessionWireAgent, { session: AgentSession; nativeCreation?: string; nativePrefix?: string }>();
+  const ledger = createAttachmentLedger();
   /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
   const observeListing = (registration: AgentHostProviderRegistration): AgentHostProviderRegistration => ({ ...registration, directory: new Proxy(registration.directory, {
     get(target, key) {
@@ -267,9 +267,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     descriptor: adapter.descriptor,
     ...(adapter.journal === undefined ? {} : { journal: adapter.journal }),
     async createSession(config: AgentSessionConfig) {
-      const session = prepared.get(config.sessionId);
+      const session = ledger.takeProjection(config.sessionId);
       if (!session) throw new Error('Agent Host projection session is unavailable.');
-      prepared.delete(config.sessionId);
       return session;
     },
     resumeSession: adapter.resumeSession.bind(adapter),
@@ -318,7 +317,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return successionBoundary ? successionBoundary.inputResult(nativeRef(bindingFor(agent)), operation, scope, result) : result;
     },
     retain: agent => idle.retain(bindingFor(agent).agentId),
-    uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
+    uncertain: agent => { ledger.markUncertain(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
   const bindings = new SessionBindings();
@@ -342,7 +341,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
-  const uncertainAgents = new Set<string>();
   const cancelTimeoutMs = positiveTimeout(options.cancelTimeoutMs ?? 5000);
   const shutdownTimeoutMs = positiveTimeout(options.shutdownTimeoutMs ?? 5000);
   const admission = createAdmission();
@@ -421,7 +419,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     }) } : value;
     relay.registerProvider({ descriptor: value.adapter.descriptor,
       ...(value.adapter.journal === undefined ? {} : { journal: value.adapter.journal }),
-      async createSession(config) { const session = prepared.get(config.sessionId); if (!session) throw new Error('Agent Host projection session is unavailable.'); prepared.delete(config.sessionId); return session; },
+      async createSession(config) { const session = ledger.takeProjection(config.sessionId); if (!session) throw new Error('Agent Host projection session is unavailable.'); return session; },
       resumeSession: value.adapter.resumeSession.bind(value.adapter),
     });
     const observed = observeListing(registration);
@@ -493,7 +491,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   } }) : undefined;
   const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true,
     stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
-  const workerToolsApplied = new Map<string, boolean>();
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();
@@ -509,8 +506,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   };
   Object.assign(ctx, {
     options, admission, relay, bindings, idle, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
-    tpm, team, enrollment, sessionRefs, roles, workerSupport, workerToolsApplied, nativeAttachments, successionConfig, nativeSuccession,
-    providers, prepared, uncertainAgents, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
+    tpm, team, enrollment, sessionRefs, roles, workerSupport, ledger, successionConfig, nativeSuccession,
+    providers, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
     nativePrefixExtensions: successionWiring.nativePrefixExtensions,
     liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
     workerExtensions: successionWiring.workerExtensions, markShared: successionWiring.markShared, nativeFamily, originalCreation, originalNativePrefix, assertHandoffState, acquireSession,

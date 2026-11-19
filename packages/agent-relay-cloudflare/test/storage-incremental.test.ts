@@ -1,23 +1,15 @@
-import { DatabaseSync } from 'node:sqlite';
-import { afterEach, expect, test } from 'vitest';
+import { expect, test } from 'vitest';
 import { createRelayState, hostedRecordEncodingCosts, type HostedRelayState, type RelayStateCommitMetrics } from '@orchardworks/agent-relay-core';
 import { deriveSuccessionCapacity } from '@orchardworks/agent-relay-core/succession-capacity';
 import { SqliteRelayStore } from '../src/storage.js';
 import { encodeSqlSnapshot } from '../src/storage-codec.js';
+import { sqliteStorage } from './sqlite-storage.js';
 import { accountingAuth as auth } from './accounting-worker-fixture.js';
 import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { operatingEncoding, prepareOperatingDatasets } from './storage-operating-fixture.js';
 
-const databases: DatabaseSync[] = [];
-afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 function sqlite() {
-  const db = new DatabaseSync(':memory:'); databases.push(db);
-  const storage = { sql: { exec(query: string, ...bindings: any[]) { const statement = db.prepare(query);
-    bindings = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value);
-    const rows = statement.columns().length ? statement.all(...bindings) : (statement.run(...bindings), []);
-    return { toArray: () => rows }; } },
-    transactionSync<T>(change: () => T) { db.exec('BEGIN'); try { const result = change(); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; } },
-    async sync() {} } as unknown as DurableObjectStorage;
+  const { db, storage } = sqliteStorage();
   const manifests = () => db.prepare('SELECT kind, identity, byte_length, chunk_count, digest FROM relay_snapshot_manifests ORDER BY kind, identity').all();
   return { storage, manifests };
 }

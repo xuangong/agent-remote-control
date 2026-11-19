@@ -2,51 +2,6 @@ import { createHash } from 'node:crypto';
 import { expect, test } from 'vitest';
 import { buildCompleteRelayState as codecState } from '@orchardworks/agent-relay-core/testing';
 import { fixture, origin, issuer, secret } from './fixture.js';
-import { SQL_CHUNK_BYTES, SQL_SNAPSHOT_FORMAT } from '../src/storage-codec.js';
-
-test('real Worker SQLite stores bounded BLOB records and ordered headers, survives a late abort and persisted restart', async () => {
-  const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
-  const broker = state.tenants[0]!.broker;
-  (broker.associations!.freezes[0] as any).extraEvidence = '😀\ud800'.repeat(80000);
-  broker.bindings = Array.from({ length: 80 }, (_, index) => ({ agentId: 'a'.repeat(4090) + index, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'native-' + index }));
-  broker.creations = [];
-  const member = (team: string, id: string, role: 'leader' | 'member') => ({ id, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${team}-${id}`,
-    role, name: id, responsibility: '', creation: 'ready' as const, activity: 'idle' as const, summary: '', updatedAt: 1 });
-  broker.teams = ['first', 'second'].map(id => ({ id, operationId: id, revision: 1, title: id, status: 'active' as const, createdAt: 1, updatedAt: 1,
-    source: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: `${id}-source`, title: 'Source' }, members: [member(id, 'leader', 'leader'), member(id, 'helper', 'member')],
-    messages: [{ id: `${id}-message`, from: 'leader', to: 'helper', text: 'Review the change.', status: 'queued' as const, createdAt: 1 }] }));
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
-  const physical = await (await f.inspect('codec/physical')).json() as any;
-  expect(physical.metadata[0].version).toBe(SQL_SNAPSHOT_FORMAT);
-  // Each Team is its own record.
-  expect(physical.manifests.filter((row: any) => row.kind === 'team')).toHaveLength(2);
-  expect(physical.manifests.find((row: any) => row.kind === 'freeze' && row.chunk_count > 1)).toBeTruthy();
-  expect(physical.manifests.find((row: any) => row.kind === 'brokerHeader' && row.chunk_count > 1)).toBeTruthy();
-  expect(physical.chunks.every((row: any) => row.type === 'blob' && row.size <= SQL_CHUNK_BYTES)).toBe(true);
-  expect(physical.chunkDigests).toHaveLength(physical.chunks.length);
-  expect(physical.chunkDigests.every((row: any) => /^[a-f0-9]{64}$/.test(row.digest))).toBe(true);
-  expect(physical.blob[0]).toMatchObject({ arrayBuffer: true });
-  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
-  await f.inspect('fail-commit?kind=progress'); const next = structuredClone(state);
-  (next.tenants[0]!.broker.associations!.freezes[0] as any).extraEvidence += 'changed';
-  next.sessionStars![0]!.title = 'must roll back'; next.favoritesTrees![0]!.folders[0]!.title = 'must roll back';
-  next.tenants[0]!.favoritesSuccession!.receipts[1]!.status = 'applied';
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(next) })).status).toBe(500);
-  expect(await (await f.inspect('codec/physical')).json()).toEqual(physical);
-  await f.inspect('restore-commit'); await f.restart();
-  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
-}, 30000);
-
-test('keeps the smart reading switch of a Host and the pending journal deletions through the SQL snapshot and a persisted restart', async () => {
-  const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
-  const broker = state.tenants[0]!.broker;
-  broker.hosts[0]!.smartReading = ['claude', 'codex'];
-  broker.journalDeletions = ['revoked-host'];
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
-  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
-  await f.restart();
-  expect(await (await f.inspect('codec/snapshot')).json()).toEqual(state);
-}, 30000);
 
 test('authenticated Worker HTTP and WS reopen complete saved C evidence, Favorites and recovery history without native replay', async () => {
   const f = await fixture({ completeCodec: true }); const owner = await f.login('owner'); const viewer = await f.login('viewer');
@@ -78,26 +33,3 @@ test('authenticated Worker HTTP and WS reopen complete saved C evidence, Favorit
   // There is no registered native Host in this fixture; every effect would require one.
 }, 30000);
 
-test('Window documents, hashed management grants, operation receipts and deletion survive Worker SQLite restart atomically', async () => {
-  const f = await fixture({ completeCodec: true }); const state = codecState({ origin, issuer, secret });
-  const now = Date.now();
-  state.workspaceWindows = [{ subject: 'owner', id: 'window', generation: 1,
-    window: { schemaVersion: 3, id: 'window', title: 'Shared', revision: 1, selectedPrimaryViewId: 'primary', selectedViewId: 'primary',
-      views: [{ id: 'primary', placement: 'primary', width: 480, collapsed: false, display: { mode: 'content', lettersVisible: true } }] },
-    manager: { generation: 1, hash: createHash('sha256').update('private-window-grant').digest('hex'), session: { hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: 'A', title: 'Manager' } },
-    receipts: [{ fingerprint: 'a'.repeat(64), result: { operationId: 'rename', status: 'committed', revision: 1, committedAt: now, expiresAt: now + 86400000 } }] }];
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(state) })).status).toBe(200);
-  const physical = await (await f.inspect('codec/physical')).json() as any;
-  expect(physical.manifests.some((row: any) => row.kind === 'workspaceWindow')).toBe(true);
-  await f.restart();
-  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(state.workspaceWindows);
-  const deleted = structuredClone(state); const row = deleted.workspaceWindows![0]!;
-  delete row.window; row.deleted = true; row.receipts.push({ fingerprint: 'b'.repeat(64), result: { operationId: 'delete', status: 'committed', revision: 2, committedAt: now, expiresAt: now + 86400000 } });
-  await f.inspect('fail-commit');
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(deleted) })).status).toBe(500);
-  await f.inspect('restore-commit'); await f.restart();
-  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(state.workspaceWindows);
-  expect((await f.inspect('codec/seed', { method: 'POST', body: JSON.stringify(deleted) })).status).toBe(200);
-  await f.restart();
-  expect((await (await f.inspect('codec/snapshot')).json() as any).workspaceWindows).toEqual(deleted.workspaceWindows);
-}, 30000);

@@ -95,7 +95,8 @@ function observableScheduler() {
   return { scheduler, runPending: async () => { await pending?.(); } };
 }
 
-type WorldOptions = { authority?: AccountAuthority; releases?: Parameters<typeof createReleaseHost>[0]; authorityOutageGraceMs?: number; hostLiveness?: Parameters<typeof createHostedRelay>[0]['hostLiveness']; diagnosticContext?: Parameters<typeof createHostedRelay>[0]['diagnosticContext'] };
+type WorldOptions = { authority?: AccountAuthority; releases?: Parameters<typeof createReleaseHost>[0]; authorityOutageGraceMs?: number; hostLiveness?: Parameters<typeof createHostedRelay>[0]['hostLiveness']; diagnosticContext?: Parameters<typeof createHostedRelay>[0]['diagnosticContext'];
+  /** Any other option of the hosted Relay, such as a preview domain. */ relay?: Partial<Parameters<typeof createHostedRelay>[0]> };
 
 /**
  * A hosted Relay over a fake clock with a controllable authority and release host. `signIn` is `login` plus the browser cookie;
@@ -106,7 +107,7 @@ export async function startRelayWorld(options: WorldOptions = {}) {
   const authority = options.authority ?? createAccountAuthority();
   const { scheduler, runPending } = observableScheduler();
   const harness = await startRelayHarness({ configure: {
-    scheduler, ...(options.releases ? createReleaseHost(options.releases) : {}),
+    ...options.relay, scheduler, ...(options.releases ? createReleaseHost(options.releases) : {}),
     ...(options.authorityOutageGraceMs === undefined ? {} : { authorityOutageGraceMs: options.authorityOutageGraceMs }),
     ...(options.hostLiveness ? { hostLiveness: options.hostLiveness } : {}),
     ...(options.diagnosticContext ? { diagnosticContext: options.diagnosticContext } : {}),
@@ -134,6 +135,12 @@ export async function startRelayWorld(options: WorldOptions = {}) {
     authority, signIn, refusedUpgrade,
     advance: (ms: number) => vi.advanceTimersByTimeAsync(ms),
     refreshNow: runPending,
+    /** Runs `check` until it stops throwing, moving the clock a few milliseconds between tries; frames and commits settle within them. */
+    async settled(check: () => Promise<void> | void) {
+      for (let attempt = 0; ; attempt++) {
+        try { await check(); return; } catch (error) { if (attempt >= 200) throw error; await vi.advanceTimersByTimeAsync(10); }
+      }
+    },
   });
 }
 export type RelayWorld = Awaited<ReturnType<typeof startRelayWorld>>;

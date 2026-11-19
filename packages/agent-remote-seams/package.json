@@ -9,7 +9,8 @@
     "test": "vitest run --testTimeout=1000 && vitest run --config vitest.transport.config.ts --testTimeout=15000",
     "contracts:record": "vitest run --config vitest.record.config.ts",
     "test:transport": "vitest run --config vitest.transport.config.ts --testTimeout=15000",
-    "test:integration": "vitest run --testTimeout=1000"
+    "test:integration": "vitest run --testTimeout=1000",
+    "test:unit": "vitest run --testTimeout=1000"
   },
   "devDependencies": {
     "@orchardworks/agent-client": "workspace:*",

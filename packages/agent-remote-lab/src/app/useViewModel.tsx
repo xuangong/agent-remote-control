@@ -153,7 +153,8 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
         observation={focusedAskEntry?.record?.target ? tracking.observations[sessionKey(focusedAskEntry.record.target)] : undefined}
         onOpen={() => { if (canOpenFocusedAsk && focusedAskSession) openAsk(focusedAskSession, focusedAskState); }} /> : null;
 
-  const shortcutPlacement: 'sidebar' | 'floating' = sidebarShortcuts ? 'sidebar' : 'floating';
+  // A compact screen keeps the entries in its launcher bar, which the layout reserves; only a wide screen without the sidebar floats them.
+  const shortcutPlacement: 'sidebar' | 'bar' | 'floating' = sidebarShortcuts ? 'sidebar' : compactLayout ? 'bar' : 'floating';
 
   // The Host, provider, directory and new-session panels: written once, placed in the compact drawer or on the desktop page.
   // On desktop the page itself is the Favorites region, and its toolbar the Favorites heading: the section inside it carries no second name or heading.

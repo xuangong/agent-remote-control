@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState, type ComponentProps } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type ComponentProps } from 'react';
 import { hasWindowAppearance, type WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from '../hooks/useWindowWorkspace.js';
 import { useTrackingPosition } from '../hooks/useTrackingPosition.js';
+import { ShortcutPlacement } from '../shell/shortcut-placement.js';
 import type { SessionActivityStatus } from '../session-activity-status.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useSharedStates } from '../shared-feeds.js';
@@ -20,7 +21,9 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
   // Statuses come from sessionStatus, which reads the shared states: render again when they change.
   useSharedStates();
   const [open, setOpen] = useState(false);
-  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position');
+  // It floats unless it sits in the compact launcher bar; the sidebar lists the Windows itself and shows no Window entry.
+  const floating = useContext(ShortcutPlacement) !== 'bar';
+  const { root, style, handlers, edge } = useTrackingPosition('agent-remote:window-position', undefined, { enabled: floating });
   const trigger = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const expanded = open && visible && !inert;
@@ -39,7 +42,7 @@ export function WindowMenu({ workspace, current, visible, inert = false, onOverv
     return () => document.removeEventListener('pointerdown', dismiss);
   }, [expanded, root]);
   function close() { setOpen(false); trigger.current?.focus({ preventScroll: true }); }
-  return <div ref={root} className="lab-tracking-floating lab-window-floating" data-edge={edge} style={style} {...handlers}
+  return <div ref={root} className={floating ? 'lab-tracking-floating lab-window-floating' : 'lab-launcher lab-launcher-window'} data-edge={edge} style={style} {...(floating ? handlers : {})}
     data-hidden={!visible || undefined} data-open={expanded || undefined} data-attention={pendingElsewhere || undefined} aria-hidden={!visible || undefined}
     {...(!visible || inert ? { inert: '' } : {})}
     onKeyDown={event => { if (event.key === 'Escape' && expanded) { event.preventDefault(); event.stopPropagation(); close(); } }}>

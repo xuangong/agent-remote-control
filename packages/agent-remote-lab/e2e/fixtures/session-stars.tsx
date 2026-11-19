@@ -93,8 +93,13 @@ localStorage.setItem(`agent-remote-opened:${baseUrl}`, JSON.stringify([{ ...sess
 const hostService = { ...(sidebarFixture ? { controllerRelease: async () => ({ release: null }) } : {}), hosts: async () => ({ hosts: [{ id: 'host', name: sidebarFixture ? 'zhangxians-Mac-mini.local · CLI' : 'Work Mac', online: renameFixture !== 'offline', ...(sidebarFixture ? { access: 'owner' as const, environment: { detectedAt: Date.now(), os: { platform: 'darwin', name: 'macOS', arch: 'arm64', release: '25.0' }, shell: { name: 'zsh', source: 'account' as const }, shells: [], browsers: ['Chrome', 'Edge', 'Safari'].map(name => ({ id: name.toLowerCase(), name, status: 'found' as const })), vscode: { status: 'found' as const }, wsl: false, container: false } } : {}), providers: [{ providerId: 'recorded', displayName: 'Recorded', ...(renameFixture && renameFixture !== 'unsupported' ? { sessionRename: true as const } : {}) }] }] }), pair: async () => { throw new Error('Pairing is not used'); } };
 const requestedStatus = new URLSearchParams(location.search).get('status');
 const status = requestedStatus === 'waiting' || requestedStatus === 'idle' ? requestedStatus : 'running';
+// A long conversation, for layouts that must keep its text uncovered.
+const longConversation = new URLSearchParams(location.search).has('long');
+const entries = longConversation ? Array.from({ length: 30 }, (_, index) => ({ providerId: 'recorded', seqStart: index + 1, seqEnd: index + 1, timestamp: '2026-09-20T00:00:00Z',
+  sourceSeqRanges: [{ startSeq: index + 1, endSeq: index + 1 }], collapsed: [], resources: [],
+  item: { type: 'assistant_message' as const, messageId: `message-${index + 1}`, text: `Item ${index + 1}. ${'Readable conversation text that must stay uncovered. '.repeat(4)}` } })) : [];
 const app = (accountAction: ReactNode) => <App baseUrl={baseUrl} userScoped transport={transport} directory={directory} hostService={hostService}
-  initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false } }} initialSessionStatus="ready"
+  initialState={{ ...replicaState, agent: { ...replicaState.agent!, status }, timeline: { ...replicaState.timeline, hasOlder: false, ...(longConversation ? { entries, nextSeq: entries.length + 1 } : {}) } }} initialSessionStatus="ready"
   accountAction={accountAction} />;
 createRoot(document.getElementById('root')!).render(new URLSearchParams(location.search).has('gateway')
   ? <GatewayController>{(_baseUrl, accountAction) => app(accountAction)}</GatewayController>

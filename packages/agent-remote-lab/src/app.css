@@ -1020,7 +1020,7 @@ textarea {
   .lab-shell, .lab-shell.lab-header-hidden, .lab-shell.lab-inspector-open { padding: 0; gap: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
   /* Expose the navigation as its own opaque top edge to native WebKit chrome. */
   .lab-mobile-navigation { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 10px; grid-row: 1; grid-column: 1; min-width: 0; padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); border-bottom: 1px solid var(--obs-border); background: var(--obs-surface); }
-  .lab-mobile-navigation:not([inert]):has(.lab-session-popover-panel) { z-index: 140; }
+  .lab-mobile-navigation:not([inert]):has(.lab-session-popover-panel:not([hidden])) { z-index: 140; }
   .lab-mobile-navigation > button, .lab-mobile-navigation > .lab-title-favorites > button, .lab-mobile-navigation .lab-view-options-trigger { flex: 0 0 auto; min-height: 48px; padding-inline: 8px; border-color: transparent; color: var(--obs-action); }
   .lab-mobile-navigation > select, .lab-mobile-navigation > .lab-mobile-side-path > select { flex: 1 1 0; width: 0; min-width: 0; min-height: 44px; border-color: transparent; background: var(--obs-surface); }
   .lab-mobile-session-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
@@ -1261,6 +1261,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lab-ask-floating,
 .lab-tracking-floating,
+.lab-launcher,
 .lab-sidebar-shortcut {
   --tracking-working-surface: color-mix(in oklab, var(--obs-success) 24%, var(--obs-surface));
   --tracking-pending-surface: color-mix(in oklab, var(--ui-status-attention) 22%, var(--obs-surface));
@@ -1273,7 +1274,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-tracking-floating button.lab-session-popover-trigger:where(:hover:not(:disabled)) { --tracking-edge-color: var(--obs-action); }
 .lab-tracking-floating .lab-session-popover-trigger:active { cursor: grabbing; }
 .lab-tracking-floating .lab-session-popover-panel { position: fixed; left: var(--tracking-panel-left); right: auto; top: var(--tracking-panel-top); bottom: var(--tracking-panel-bottom); width: var(--tracking-panel-width); max-height: var(--tracking-panel-height); }
-.lab-tracking-floating .agent-session-title[data-session-status="unknown"] { color: var(--agent-muted); }
+:is(.lab-tracking-floating, .lab-launcher) .agent-session-title[data-session-status="unknown"] { color: var(--agent-muted); }
 .lab-tracking-counts { display: inline-flex; align-items: center; gap: 8px; }
 .lab-tracking-count {
   font-family: "Baloo 2 Digits", ui-rounded, system-ui, sans-serif;
@@ -1282,12 +1283,12 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 }
 .lab-tracking-badge { position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border: 2px solid var(--obs-surface); border-radius: 50%; background: var(--obs-text); }
 .lab-tracking-attention { position: absolute; top: 0; right: 0; width: 9px; height: 9px; border-radius: 50%; background: var(--obs-warning); }
-:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
-:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="pending"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-launcher, .lab-sidebar-shortcut-track)[data-attention="true"] .lab-session-popover-trigger { --tracking-edge-color: var(--obs-warning); }
+:is(.lab-tracking-floating, .lab-launcher, .lab-sidebar-shortcut-track)[data-alert="pending"] .lab-session-popover-trigger {
   animation: lab-tracking-pending-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-pending-surface); --tracking-edge-color: var(--ui-status-attention);
 }
-:is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert="idle"] .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-launcher, .lab-sidebar-shortcut-track)[data-alert="idle"] .lab-session-popover-trigger {
   animation: lab-tracking-idle-pulse 1.6s ease-in-out infinite;
   background: var(--tracking-idle-surface); --tracking-edge-color: var(--obs-text-secondary);
 }
@@ -1300,7 +1301,7 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
   50% { background-color: var(--tracking-idle-surface); }
 }
 @media (prefers-reduced-motion: reduce) {
-  :is(.lab-tracking-floating, .lab-sidebar-shortcut-track)[data-alert] .lab-session-popover-trigger { animation: none; }
+  :is(.lab-tracking-floating, .lab-launcher, .lab-sidebar-shortcut-track)[data-alert] .lab-session-popover-trigger { animation: none; }
 }
 .lab-tracked-change { display: inline-flex; align-items: center; flex: 0 0 auto; gap: 4px; min-height: 36px; padding: 6px; border-color: transparent; background: transparent; font-size: 11px; color: var(--obs-text-secondary); }
 .lab-tracked-change > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -1342,11 +1343,11 @@ html[data-input-modality="pointer"] :focus { outline: none !important; }
 .lab-favorites-current > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--obs-text-secondary); }
 
 /* The edge closes on applied content, never on an animation timer. */
-.lab-tracking-floating .lab-session-popover-trigger {
+:is(.lab-tracking-floating, .lab-launcher) .lab-session-popover-trigger {
   position: relative;
   transition-property: background-color, color, transform;
 }
-.lab-tracking-floating .lab-session-popover-trigger:has(.lab-tracking-catch-up[data-state="catching_up"]) { border-color: transparent; }
+:is(.lab-tracking-floating, .lab-launcher) .lab-session-popover-trigger:has(.lab-tracking-catch-up[data-state="catching_up"]) { border-color: transparent; }
 .lab-tracking-catch-up { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; color: var(--tracking-edge-color); }
 .lab-tracking-catch-up svg { display: block; overflow: visible; }
 .lab-tracking-catch-up rect { fill: none; stroke: currentColor; stroke-width: 1px; stroke-linecap: butt; transition: stroke-dashoffset 160ms ease-out; }

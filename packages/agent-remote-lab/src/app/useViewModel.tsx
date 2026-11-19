@@ -222,7 +222,7 @@ export function useViewModel(scope: Pick<AppInputs & SessionSuccessionBindingSli
     // A Team member follows prompt edits and handoffs alike: Team routing moves its seat to the successor.
     const result = succession.resolveTarget(source, requested);
     if (mapped && sessionKey(mapped.binding) !== sessionKey(result.target)) throw new Error('The session view binding is still synchronizing.');
-    if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution locator is still synchronizing.');
+    if (member && sessionKey(member) !== sessionKey(result.target)) throw new Error('The Team execution is not confirmed yet. Retry to look for it again.');
     return { ...result, target: { ...result.target, ...(member ? { teamId: member.teamId, teamMemberId: member.teamMemberId } : {}) } };
   }, directory: source => labSessionSuccessionDirectory(new SessionDirectoryClient(baseUrl, undefined, source.hostId)), refreshSettled: succession.refreshSettled,
     successionContextFor: succession.successionContextFor, synchronize: () => void succession.refresh() } };

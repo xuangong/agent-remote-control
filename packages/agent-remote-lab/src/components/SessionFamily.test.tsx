@@ -671,7 +671,7 @@ it('shows a view whose locator is still synchronizing as opening, without an ale
   expect(attach).not.toHaveBeenCalled();
 });
 
-it('reports a locator that stays synchronizing with a Retry that reads it again', async () => {
+it('reports a locator that stays unconfirmed with a Retry that reads it again', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   try {
     const { SessionConversation, locatorSynchronizingNoticeMs } = await import('./SessionConversation.js');
@@ -688,7 +688,7 @@ it('reports a locator that stays synchronizing with a Retry that reads it again'
     expect(container.querySelector('[role="alert"]')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(locatorSynchronizingNoticeMs); });
     const alert = container.querySelector('[role="alert"]');
-    expect(alert?.textContent).toContain('still synchronizing');
+    expect(alert?.textContent).toContain('not confirmed yet');
     await act(async () => alert!.querySelector('button')!.click());
     expect(synchronize).toHaveBeenCalledOnce();
     expect(container.querySelector('[role="alert"]')).toBeNull();

@@ -31,7 +31,7 @@ export function useSessionSuccessionBinding(scope: Pick<AppInputs & ProviderStat
     validateTarget(selection, viewId, document) {
       const roster = teamRosterRef.current;
       const target = teamViewTarget(document, roster?.baseUrl === baseUrl ? roster.teams : undefined, selection, viewId);
-      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error('The Team execution locator is still synchronizing. Its history and draft are preserved.');
+      if (target && sessionKey(target) !== sessionKey(selection)) throw new Error('The Team execution is not confirmed yet. Its history and draft are preserved.');
     },
     scope: baseUrl, transport, enabled: activated && accessReady,
     initial: initialSession, initialDisplayState: cachedState, initialLayout: initialSession ? initialLayout : undefined,

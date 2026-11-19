@@ -21,6 +21,6 @@ export interface SessionViewOperations {
 /** Succession discovery is (re)reading the current locators; a view may keep the target it last resolved until it finishes. */
 export class SessionLocatorSynchronizingError extends Error {
   /** `stale`: the locator was restored from the last confirmed discovery because the Relay could not be reached; views keep showing it while input waits. */
-  constructor(readonly stale = false) { super('The current session locator is still synchronizing.'); this.name = 'SessionLocatorSynchronizingError'; }
+  constructor(readonly stale = false) { super('This conversation is not confirmed yet. Retry to look for it again.'); this.name = 'SessionLocatorSynchronizingError'; }
 }
 export const SessionViewOperationsContext = createContext<SessionViewOperations | undefined>(undefined);

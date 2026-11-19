@@ -424,6 +424,7 @@
       "paths": [
         "packages/agent-controller/src/host.ts",
         "packages/agent-controller/src/providers.ts",
+        "packages/agent-controller/src/succession-host-testing.ts",
         "packages/agent-controller/src/index.ts"
       ],
       "seams": [

@@ -67,6 +67,24 @@ function defaultClearance(horizontal: { left: number; right: number }, view: Vie
   return Math.max(0, Math.round(bottom - view.y + gap - defaultColumnTop));
 }
 
+/** The composer of a conversation: a default placement stays above it, since its controls sit at the right edge. */
+const composerSelector = '.lab-composer-dock';
+
+/**
+ * The top of the highest composer that a default placement over this span would otherwise cover, or undefined when none is in
+ * the visible area. With a keyboard leaving a short visible area, the bottom of the area pushes the column up over the composer.
+ */
+function composerCeiling(horizontal: { left: number; right: number }, view: View): number | undefined {
+  let ceiling: number | undefined;
+  for (const element of document.querySelectorAll(composerSelector)) {
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0 && rect.right > horizontal.left && rect.left < horizontal.right && rect.bottom > view.y && rect.top < view.y + view.height) {
+      ceiling = Math.min(ceiling ?? rect.top, rect.top);
+    }
+  }
+  return ceiling;
+}
+
 /**
  * Arranges the entries again when a keep-clear element appears, disappears or changes size: a session view mounts its timeline
  * toolbar after the entries are placed. The watcher runs while at least one entry is registered.
@@ -115,7 +133,10 @@ export function arrangeFloatingEntries() {
     const { width, height } = entry.element.getBoundingClientRect(), size = { width, height };
     const held = entry.held();
     const desired = held ?? { x: view.x + placement.x, y: view.y + placement.y };
-    const point = clamp(desired, size, view);
+    let point = clamp(desired, size, view);
+    // A default placement never covers the composer; an entry the owner placed stays where the owner put it.
+    const ceiling = !entry.placement && !held ? composerCeiling(entry.element.getBoundingClientRect(), view) : undefined;
+    if (ceiling !== undefined && point.y + size.height + gap > ceiling) point = { x: point.x, y: Math.max(view.y + margin, ceiling - size.height - gap) };
     return [{ entry, size, desired, point, held: !!held, moved: point.x !== desired.x || point.y !== desired.y,
       solid: width > 0 && height > 0 && getComputedStyle(entry.element).visibility !== 'hidden' }];
   }).sort((a, b) => b.desired.y + b.size.height - a.desired.y - a.size.height);

@@ -42,7 +42,10 @@ for (const visualClientRects of [false, true]) {
     // below the timeline toolbar that the visible area shows; the toolbar's rect is in the layout viewport, so the pan is taken off.
     expect(initial.x + initial.width).toBeCloseTo(378, 1);
     const toolbarBottom = await page.locator('.lab-primary-conversation .lab-timeline-tools').evaluate(element => element.getBoundingClientRect().bottom - window.visualViewport!.offsetTop);
-    expect(initial.y).toBe(276 + Math.max(0, Math.round(toolbarBottom + 8 - 60)));
+    // The column also stays above the composer, which the short visible area would otherwise leave it covering.
+    const composerTop = await page.locator('.lab-primary-conversation .lab-composer-dock').evaluate(element => element.getBoundingClientRect().top - window.visualViewport!.offsetTop);
+    const height = (await root.boundingBox())!.height;
+    expect(initial.y).toBe(Math.min(276 + Math.max(0, Math.round(toolbarBottom + 8 - 60)), Math.round(composerTop - height - 8)));
     // Dragged up and left: the column now starts low enough in the panned visible area that a drag down would reach its bottom edge.
     const bounds = (await trigger.boundingBox())!;
     await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);

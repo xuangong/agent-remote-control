@@ -4,11 +4,11 @@ import { render } from '../test/setup.js';
 import { arrangeFloatingEntries, useTrackingPosition } from './useTrackingPosition.js';
 
 const rect = (x: number, y: number, width: number, height: number) => ({ x, y, left: x, top: y, right: x + width, bottom: y + height, width, height, toJSON: () => ({}) });
-let appBarBottom = 0, toolsBottom = 0, askHeadingBottom = 0;
+let appBarBottom = 0, toolsBottom = 0, askHeadingBottom = 0, composerTop = 0, composerBottom = 0;
 let viewport: EventTarget & { offsetLeft: number; offsetTop: number; width: number; height: number };
 beforeEach(() => {
   localStorage.clear();
-  appBarBottom = 0; toolsBottom = 0; askHeadingBottom = 0;
+  appBarBottom = 0; toolsBottom = 0; askHeadingBottom = 0; composerTop = 0; composerBottom = 0;
   vi.stubGlobal('innerWidth', 400);
   vi.stubGlobal('innerHeight', 800);
   viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 400, height: 800 });
@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.matches('.lab-app-bar')) return rect(0, 0, 400, appBarBottom);
+    if (this.matches('.lab-composer-dock')) return rect(10, composerTop, 380, composerBottom - composerTop);
     if (this.matches('.lab-timeline-tools')) return rect(10, 57, 390, toolsBottom - 57);
     if (this.matches('.lab-workbench-heading-group')) return rect(0, 49, 400, askHeadingBottom - 49);
     const root = this.closest<HTMLElement>('.lab-tracking-floating');
@@ -245,5 +246,41 @@ it('ignores the heading of a floating Ask', async () => {
     askHeadingBottom = 310;
     const container = await render(<><div className="lab-ask-viewport" data-presentation="floating"><div className="lab-workbench-heading-group" /></div><Entry name="b" /></>);
     expect(top(container, 'b')).toBe(114);
+  } finally { remove(); }
+});
+
+function Composer() { return <div className="lab-composer-dock" />; }
+
+it('keeps a default column above the composer when a keyboard leaves a short visible area', async () => {
+  const remove = stylesheetDefault(230);
+  try {
+    // The visible area is 340 px tall from y 80; the composer fills its lower half, so the bottom of the area would push the column over it.
+    composerTop = 300; composerBottom = 420;
+    Object.assign(viewport, { offsetTop: 80, height: 340 });
+    const container = await render(<><Composer /><Entry name="a" /><Entry name="b" /></>);
+    for (const name of ['a', 'b']) expect(top(container, name) + 44 + 8).toBeLessThanOrEqual(composerTop);
+    expect(top(container, 'a')).not.toBe(top(container, 'b'));
+  } finally { remove(); }
+});
+
+it('leaves a default column where it was when the composer is outside the visible area', async () => {
+  const remove = stylesheetDefault(330);
+  try {
+    // The composer is above the visible area, which the keyboard panned down.
+    composerTop = 200; composerBottom = 260;
+    Object.assign(viewport, { offsetTop: 300, height: 400 });
+    const container = await render(<><Composer /><Entry name="a" /></>);
+    expect(top(container, 'a')).toBe(300 + 330);
+  } finally { remove(); }
+});
+
+it('does not move an entry the owner placed above a composer', async () => {
+  const remove = stylesheetDefault(114);
+  try {
+    composerTop = 300; composerBottom = 420;
+    Object.assign(viewport, { offsetTop: 80, height: 340 });
+    place('a', 300, 250);
+    const container = await render(<><Composer /><Entry name="a" /></>);
+    expect(top(container, 'a')).toBe(330);
   } finally { remove(); }
 });

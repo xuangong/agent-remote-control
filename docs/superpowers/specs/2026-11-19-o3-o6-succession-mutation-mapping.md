@@ -100,3 +100,47 @@ Counts are real test counts from a package run (it.each variants counted). Decis
 | Node Relay `remote-host-broker`, `broker-lifecycle` | 20 | unique wiring | the Node uplink broker over a real port; the slowest test loaded three packages inside its own time (1.9 s, over the 1 s gate in the baseline run) and now loads them at the top of the file |
 
 Totals for the groups above: moved 53, deleted 38, kept as wiring 15 + 96 + 81 + 12 + 88 + 84 + 49 + 20 + 8 + 20 = 473, owner tests 58 (not decisions). The wiring groups other than the moved ones were decided by file, with the reasons above, not by a mutation survey of their owners.
+
+## O3 remainder: mutation census of the gateway and broker owners (final slice)
+
+Run on a detached copy of dc6c1b44, every mutation reverted before the next. A regex generator made one-line mutations (negate an `if`, drop a guard, flip a comparison, swap `&&` and `||`, flip a returned boolean, add 1 to a constant, drop a call), taking every Nth site of each module, N from 3 to 64 by module size (about 6 to 18 sites each). Each mutation ran the module's owner unit tests and every `gateway-*` and `broker*` file of relay-core (`--testTimeout=5000`, outer 45 to 120 s), with failures read per test from the JSON reporter. About 100 minutes on a machine shared with another run.
+
+**Modules (233 sites).** Without a unit test of their own: `gateway`, `broker`, `socket-edge`, `session-directory-routes`, `session-read-routes`, `host-service-routes`, `window-routes`, `controller-routes`, `preview-routes`, `team-routes`. With owner tests: `host-session`, `broker-state`, `client-admission`, `session-bindings`, `session-drafts`, `session-outbox`, `session-reads`, `session-migrations`, `session-stars`, `session-titles`, `session-identity`, `session-successions`, `journal-sessions`, `journal-session-stream`, `journal-host-stream`, `journal-partition`, `journal-deletion`, `journal-uplink`, `host-journals`, `pairing-routes`.
+
+| Result | Mutations |
+|---|---:|
+| Completed (6 hung and are not counted) | 227 |
+| Caught by an owner test | 89 |
+| Caught only by gateway or broker tests | 54 (33 in modules with no unit test) |
+| Caught by nothing | 84 |
+
+**Per test.** Of the 265 gateway and broker tests, 94 catch a mutation (the per-file counts below; the census summary said 96) that no owner test catches (kept with proof; 30 of them only through a mutation that breaks more than 40 tests), 152 catch mutations only in modules that have no unit test (the only coverage; kept), 17 caught nothing in the sample (8 `gateway.test`, 8 `gateway-window-wait`, 1 `broker.test`) and are not judged. No test is a deletion candidate.
+
+| Files | Unique against owner / only coverage / caught nothing |
+|---|---|
+| `broker.test` | 24 / 49 / 1 |
+| `broker-heartbeat` | 4 / 10 / 0 |
+| `broker-journal-sessions` | 10 / 17 / 0 |
+| `broker-journal-switch` | 2 / 32 / 0 |
+| `broker-journals`, `broker-journal-grant`, `broker-timeline-admission` | 0 / 23 / 0 |
+| `gateway-*` feature files (21) | 54 / 13 / 0 |
+| `gateway-window-wait` | 0 / 4 / 8 |
+| `gateway.test` | 0 / 4 / 8 |
+
+**Owner tests that miss what the wiring tests catch** (the next unit tests to write; then the wiring copies can be re-judged): `host-session` lines 200, 216, 261, 308, 322, 340, 355, 391; `session-bindings` 223, 431; `session-stars` 47; `session-titles` 12; `pairing-routes` 150, 175.
+
+**`succession-service`, every site (233).** 113 caught by an owner test, 66 only by `succession-replay`, none only by gateway or broker, 54 by nothing. The 7 candidates of the O3 row are kept:
+
+| Test | Mutations no owner unit test catches |
+|---|---|
+| `rejects malformed authenticated readback...` | line 103 (no other test fails on it), 124, 198 to 200 |
+| `cannot report cancellation when its durable fence cannot be written` | line 146 (also 6 other replay tests) |
+| `requires revision headroom for the final cancellation...` | line 46 (no other test fails on it) |
+| `refuses a stale immutable quote...` | line 158, 124, 198 to 200 |
+| `keeps an admitted exact freeze when the Controller declines...` | line 168, 124 |
+| `rejects delayed describe after Host generation changes...` | only line 124 (the `successionEnrollmentVersion < 2` threshold), which 21 replay tests also catch: deletable once an owner unit test pins it |
+| `maps ordinary star capacity refusal...` | lines 119, 158, 124, 198 to 200 |
+
+**Caught by nothing** (some may be equivalent; clear gaps): `succession-service` 53, 146, 162 (association revision exhaustion), 78 (enrollment unavailable), 116, 168, 196, 202, 207; `host-session` 370 (provider management not advertised), 408 (credential capacity 128); `broker` 262, 354; `gateway` 380, 537 (origin check), 710 (command-line approval sign-in), 668, 933, 1143 (status and close codes); `session-bindings` 98, 134, 416, 467; `session-migrations` 13, 29; the authorization checks `session-directory-routes:51` and `session-read-routes:35`; `controller-routes:57`, `host-service-routes:118`, `team-routes:62`. Hung under mutation, not examined: `broker-state` 139, 148; `host-session` 90, 249, 284; `session-reads` 62.
+
+Not judged: modules that were not mutated (`call-for-support`, `teams`, `preview-*`, `favorites`, access and authentication internals); tests that assert their rules cannot be ruled on by this census.

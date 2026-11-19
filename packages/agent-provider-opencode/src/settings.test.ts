@@ -7,10 +7,12 @@ import { OpenCodeSettings, nativeSelections, openCodeModel, type OpenCodeSelecti
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0)) await close(); });
+/** How long a test lets `set` wait for a missing catalog option: the reader's bounded wait, short enough for a unit test. */
+const catalogWaitMs = 150;
 async function fixture(restricted = false) {
   const result = await controlsFixture(restricted); cleanups.push(() => result.close());
   const selected: OpenCodeSelection = { model: 'test/main', agent: 'build' };
-  const settings = new OpenCodeSettings(result.transport, 'ses_controls', '/project', selected);
+  const settings = new OpenCodeSettings(result.transport, 'ses_controls', '/project', selected, catalogWaitMs);
   await settings.refresh(); return { ...result, selected, settings };
 }
 

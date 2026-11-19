@@ -41,6 +41,8 @@ export class OpenCodeSettings {
     private readonly nativeId: string,
     private readonly cwd: string,
     private readonly selected: OpenCodeSelection,
+    /** How long `set` keeps reading the catalogs for an option that is not there yet; the request timeout, at most 5 s. */
+    private readonly catalogWaitMs = Math.min(transport.timeout, 5000),
   ) {}
 
   async refresh(): Promise<SessionInfo> {
@@ -137,7 +139,7 @@ export class OpenCodeSettings {
     if (!this.transport.restricted && ['model', 'agent', 'variant'].includes(id) && !setting?.options.some(option => option.value === value)) {
       // Native catalogs can be empty while a new location's provider plugins initialize.
       // Read until the requested option is authoritative; never retry the mutation itself.
-      const deadline = Date.now() + Math.min(this.transport.timeout, 5000);
+      const deadline = Date.now() + this.catalogWaitMs;
       let observedCatalog = false;
       do {
         const remaining = deadline - Date.now();

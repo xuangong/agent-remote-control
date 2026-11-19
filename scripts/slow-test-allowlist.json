@@ -102,18 +102,6 @@
    "reason": "Starts the real Copilot CLI or its SDK worker, so it is a native-tier test kept in the unit project; it moves to a .local test or a recording replay."
   },
   {
-   "test": "packages/agent-provider-opencode/src/settings.test.ts > discovers enabled models, primary agents and exact native model variants",
-   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
-  },
-  {
-   "test": "packages/agent-provider-opencode/src/settings.test.ts > settles a missing option from observed catalogs when the final bounded read expires",
-   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
-  },
-  {
-   "test": "packages/agent-provider-opencode/src/settings.test.ts > keeps a catalog timeout explicit when no fresh catalog was observed",
-   "reason": "Waits a real catalog timeout of the OpenCode settings reader; needs the timeout as an injected delay."
-  },
-  {
    "test": "packages/agent-relay-cloudflare/test/storage-incremental.test.ts > every commit of L stores exactly its complete encoding, and the caches agree with complete accounting",
    "reason": "Encodes and stores a Relay of 1,000s of records to prove commit cost; CPU bound by the size under test."
   },

@@ -20,7 +20,7 @@ test('installed public ARDB contains its local service and recovers exact prefix
   const artifacts = join(directory, 'tarballs'), prefix = join(directory, 'installed');
   await mkdir(artifacts); await mkdir(prefix);
   try {
-    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'codex-daemon-client', 'agent-provider-codex', 'agent-session-runtime', 'agent-client', 'agent-client-web', 'agent-remote-debugger'];
+    const names = ['agent-platform', 'agent-provider-sdk', 'agent-remote-protocol', 'agent-timeline', 'codex-daemon-client', 'agent-provider-codex', 'agent-session-runtime', 'agent-client', 'agent-client-web', 'agent-remote-debugger'];
     const dependencies = {};
     for (const name of names) {
       const path = join(repository, 'packages', name), manifest = JSON.parse(await readFile(join(path, 'package.json'), 'utf8'));

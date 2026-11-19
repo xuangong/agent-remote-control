@@ -1,7 +1,10 @@
 {
   "name": "@orchardworks/agent-timeline",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "description": "Canonical timeline rows, item identity and projection of rows to timeline entries.",
   "exports": {
@@ -11,7 +14,9 @@
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",

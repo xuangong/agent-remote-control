@@ -51,13 +51,14 @@ it('E4: a terminal takes the session, the page turns read-only and offers contro
   expect(await page.getByRole('button', { name: 'Interrupt and take control', exact: true }).count()).toBe(1);
   // The refused text stays on the page as a failed message that can be retried; nothing reached the provider.
   expect(await page.locator('.agent-outgoing-message', { hasText: 'too late' }).count()).toBe(1);
-  // The composer's queue keeps the rejected text in view as "Check delivery" and holds later messages behind it until the person has checked the conversation and dismissed it.
+  // The composer's queue keeps the refused text in view and holds later messages behind it until the person dismisses it: as "Not sent"
+  // when the page already knew a terminal owned the session, as "Check delivery" when the session refused it after dispatch.
   const refused = page.locator('[data-testid="pending-send"]', { hasText: 'too late' });
-  await expect.poll(() => refused.innerText()).toContain('Check delivery');
+  await expect.poll(() => refused.innerText()).toMatch(/Not sent|Check delivery/);
   // A terminal owner is named, so the offer is to interrupt it; taking over returns the composer, and the next send reaches the provider.
   await page.getByRole('button', { name: 'Interrupt and take control', exact: true }).click();
   await expect.poll(() => composer(page).isEditable(), { timeout: 15_000 }).toBe(true);
-  await refused.getByRole('button', { name: 'Dismiss message after checking delivery' }).click();
+  await refused.getByRole('button', { name: /^(Cancel pending send|Dismiss message after checking delivery)$/ }).click();
   await composer(page).fill('control is back');
   await composer(page).press('Enter');
   await showsText(page, 'Echo: control is back');

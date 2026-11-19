@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { watchSockets, watchWords } from './page.js';
-import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
-/** One headless browser for a file of flows; every flow opens its own signed-out context, which the Relay signs in as the local user. */
-export async function launchBrowser(): Promise<Browser> { return chromium.launch({ headless: true }); }
+/** One headless browser for a file of flows; every flow opens its own signed-out context, which the Relay signs in as the local user. `E2E_BROWSER=webkit` runs the flows in WebKit. */
+export async function launchBrowser(): Promise<Browser> { return (process.env.E2E_BROWSER === 'webkit' ? webkit : chromium).launch({ headless: true }); }
 
 /**
  * Deletes every Window of the signed-in local user. The Relay keeps Windows per user, not per browser, so a flow that opened a session

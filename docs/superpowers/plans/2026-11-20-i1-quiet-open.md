@@ -1,6 +1,6 @@
 # I1: Quiet open
 
-**State: implemented, open item E9 (section 10).** I1 is the first Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), decisions 4 and 5 and step I1; [IM session service design](../specs/2026-11-15-im-session-service-design.md), targets T4 and T5, Presentation, Removed in smart mode). It meets T4 and T5 on the current page. There is no visual redesign, no protocol change and no Controller change.
+**State: implemented.** I1 is the first Orchard step (roadmap "Next: Orchard"; [Orchard design](../specs/2026-11-20-orchard-im-experience-design.md), decisions 4 and 5 and step I1; [IM session service design](../specs/2026-11-15-im-session-service-design.md), targets T4 and T5, Presentation, Removed in smart mode). It meets T4 and T5 on the current page. There is no visual redesign, no protocol change and no Controller change.
 
 ## 1. For the owner
 
@@ -661,9 +661,15 @@ Component and browser specs, the refusals spec, `toast-placement` (a refused sen
 
 ### Task 8
 
-`flows/e9-quiet-open.e2e.ts`, `PageOptions.hold: 'agent_snapshot'`, `watchWords`. Both tests run at desktop and at 390x844 with touch emulation. WebKit is not run: `launchBrowser()` in `flows/browser.ts` is Chromium-only (WebKit builds are installed); adding it is left open. E4's refused text is now the queue chip.
+`flows/e9-quiet-open.e2e.ts`, `PageOptions.hold: 'agent_snapshot'`, `PageOptions.mobile`, `watchWords`. Both tests run at desktop and at 390x844 with touch emulation, and `E2E_BROWSER=webkit` runs them in WebKit (`launchBrowser()` in `flows/browser.ts`; the mobile WebKit run at 390x844 passed). E4's refused text is now the queue chip, "Not sent" or "Check delivery" by whether the page already knew a terminal owned the session.
 
-**E9 is flaky (open, needs an owner decision).** About half the whole-file runs fail at either viewport: the first editable composer is the stand-in pane that `SessionDocks` renders before the Window loads (`ConversationPane` → `LabWorkbench`); about 100 ms later the Window renders the conversation through `SessionFamily` → `SessionConversation` → `LabWorkbench`, a different component path, so React creates a second composer and the first one's text, focus and queued message are lost. No T5 word was seen in any run. One instance from the first frame needs both trees to render the conversation through the same mount (`SessionConversationMount` with the slot id the Window path uses). Deferring the stand-in's composer was tried and reverted: the page cannot tell a Window that is loading from no Window, and 47 App tests have none.
+**The remount, found and fixed.** The first editable composer is a stand-in pane that `SessionDocks` renders while the Window loads (`ConversationPane` to `LabWorkbench`); about 100 ms later the Window renders the conversation through `SessionFamily`, `SessionConversationMount` and `SessionConversation`, a different component path, so React mounted a second composer and the first one's text, queued message and focus were lost (E9 failed in about half the whole-file runs). Two defects, both fixed in the composer:
+- **State followed the instance.** The draft (`drafts`) and the waiting queue (`usePendingSend`) were per composer instance. They are now shared by `[draftScope, sessionKey]` (`shared-by-key.ts`): the composer that replaces another one in the same commit finds both, an entry is dropped once no composer holds it (after the commit), and the first composer to claim a queued message owns it, so two composers for one session never send it twice. A queued message is plain data (`PendingMessage`); the composer that is mounted delivers it through its own `ready` and `send`. The focus: a composer unmounted while it had focus hands it to the one that replaces it, with the caret after the text, retrying for 2 s while the editor is still disabled (`FOCUS_HANDOVER_MS`).
+- **The stand-in ignored Enter.** It is draft-only, and a draft-only composer returned from `run('send')`, so the typed message stayed in the editor and was never queued. The stand-in now passes `opening` (`SessionDocks`, no Window and Windows available), and a draft-only composer that is `opening` takes a plain message into the queue as Sending; a draft-only view that is not `opening` still holds it as Not sent.
+
+Not done: mounting the stand-in in the Window's slot (`SessionConversationMount` with the Window's slot id). The stand-in renders `LabWorkbench` directly, and the Window path renders it through `SessionConversation`, so one instance would need `SessionConversation` to serve both; the keyed state makes the second mount harmless instead.
+
+State accounting: `AgentComposer` props +1 (`opening`), the per-instance `drafts` ref and the `usePendingSend` instance map removed, one module-level draft store and one queue store (`SharedByKey`, 20 lines) added; `usePendingSend` takes an executor (`ready`, `send`) and queued items carry a payload instead of closures. `SessionWorkbench` props +1 (`opening`). Tests: `AgentComposer.handoff.test.tsx` (5: text, queue and focus survive a replacement; no focus taken when the old composer had none; two composers send once; entries are dropped when the last one unmounts; a stand-in that is opening queues as Sending), `SessionWorkbench.test.tsx` (the stand-in replaced by the Window pane keeps text, Sending item and focus, and sends once when ready). E9: 14 of 14 whole-file runs (desktop and 390x844) after the fix, against about 6 of 12 before.
 
 ### Task 9
 
@@ -692,7 +698,7 @@ Build `563fee30`, the same Copilot session, journals and smart reading on, 10 op
 
 Against section 8: no open shows a T5 word (0 of 40); the editor was editable at the composer's first paint in every open; Sending p95 at 4x and 100 ms is 55 ms (target 100; Task 6's candidate needed no second change); focus and later text kept 40 of 40; the grant time is not worse. At 1x and 100 ms acknowledgement is slower than control because the control arm's six measured sends were typed after the session was ready, while every I1 send was typed during the open and waited for it. The runner types into the Window's pane, so it does not see E9's stand-in swap (Task 8).
 
-**Not done in this step.** `pnpm local` verification steps 3 to 5 beyond the runner (screenshots, the Bot mode check), the owner's review, and E9's flakiness. No Codex session was created.
+**Not done in this step.** `pnpm local` verification steps 3 to 5 beyond the runner (screenshots, the Bot mode check), and the owner's review. No Codex session was created.
 
 ## 11. Decisions (2026-11-20)
 

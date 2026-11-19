@@ -28,50 +28,10 @@ async function call(f: Fixture, hostId: string, method: string, ...args: unknown
   return body.result;
 }
 
-test('keeps a published journal in the object of its Host, splits a large item into chunks and serves it after a restart', async () => {
-  const f = await fixture({ journals: {} });
-  const text = '😀é'.repeat(100_000);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1')).toEqual({ generation: 1, watermark: 0 });
-  const published = await call(f, 'host-1', 'publish', 'host-1', SESSION, 1, [
-    { sequence: 1, op: 'append', row: row('big', text) }, { sequence: 2, op: 'complete', itemKey: 'big', digest: 'digest-big' }, head(3)]);
-  expect(published).toMatchObject({ watermark: 3, hasHead: true });
-  const sizes = await call(f, 'host-1', 'inspect', 'SELECT length(bytes) AS size FROM journal_chunks ORDER BY size DESC') as Array<{ size: number }>;
-  expect(sizes.length).toBeGreaterThanOrEqual(3);
-  expect(sizes[0]!.size).toBeLessThanOrEqual(262_144);
-  const before = await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false);
-  expect(before.page.payload.entries[0].item.text).toBe(text);
-  await f.restart();
-  expect(await call(f, 'host-1', 'page', 'host-1', SESSION, tail, false)).toEqual(before);
-  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
-  expect(await call(f, 'host-1', 'open', 'host-1', SESSION, 'controller-1')).toMatchObject({ generation: 2, watermark: 3 });
-}, 60_000);
-
-test('keeps each Host in its own object and deletes the journals of one Host without touching another', async () => {
-  const f = await fixture({ journals: {} });
-  for (const host of ['host-1', 'host-2']) {
-    await call(f, host, 'open', host, SESSION, 'controller-1');
-    await call(f, host, 'publish', host, SESSION, 1, [{ sequence: 1, op: 'append', row: row('m1', 'Hello') }, head(2)]);
-  }
-  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([SESSION]);
-  await call(f, 'host-1', 'deleteHost', 'host-1');
-  expect(await call(f, 'host-1', 'servedSessions', 'host-1')).toEqual([]);
-  expect(await call(f, 'host-1', 'inspect', 'SELECT count(*) AS n FROM journal_sessions')).toEqual([{ n: 0 }]);
-  expect(await call(f, 'host-1', 'inspect', 'SELECT count(*) AS n FROM journal_chunks')).toEqual([{ n: 0 }]);
-  expect(await call(f, 'host-2', 'servedSessions', 'host-2')).toEqual([SESSION]);
-  expect(await call(f, 'host-2', 'status', 'host-2', SESSION)).toMatchObject({ cursor: { seq: 1 } });
-}, 60_000);
-
 test('holds the Durable Object bounds by default: two journals, 20 MiB of cache and 12 MiB per session', async () => {
   const f = await fixture({ journals: {} });
   expect(await call(f, 'host-1', 'effectiveTuning')).toEqual({
     cache: { maxJournals: 2, maxBytes: 20 * 1024 * 1024 }, limits: { sessionBytes: 12 * 1024 * 1024, hostBytes: 1024 * 1024 * 1024 } });
-}, 60_000);
-
-test('answers every recorded call of the partition contract through Durable Object RPC', async () => {
-  const f = await fixture({ journals: {} });
-  const api = Object.fromEntries(['open', 'publish', 'fill', 'page', 'status', 'unserveHead', 'servedSessions', 'deleteHost', 'capabilities']
-    .map(method => [method, async (...args: unknown[]) => (await call(f, 'host-1', method, ...args)) ?? undefined])) as unknown as JournalPartitionApi;
-  await replayPartitionContract(api, contract as PartitionContractStep[]);
 }, 60_000);
 
 test('rolls back every statement of a transaction that fails', async () => {

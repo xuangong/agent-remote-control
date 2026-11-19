@@ -1,20 +1,26 @@
 import { useState, type ReactNode } from 'react';
 import type { WindowBotDetails, WindowSessionBinding } from '@orchardworks/agent-remote-protocol';
+import { AssistantAvatar } from '@orchardworks/agent-client-web/primitives';
+import type { AvatarMood } from '@orchardworks/agent-client-web/theme';
 import type { BotRosterModel, BotRow, BotSection } from '../bot-roster.js';
 import type { BotPlace } from '../workbench-mode.js';
 import { sessionKey } from '../session-tree.js';
-import { Avatar } from '../ui/Avatar.js';
 import { Icon } from '../ui/Icon.js';
 import { Menu, MenuPanel, type MenuEntry } from '../ui/Menu.js';
 import { replyTime } from '../reply-time.js';
 import { TypingDots } from './TypingBubble.js';
 
-/** The name a bot is known by; its avatar letter comes from here. A label or role never replaces it. */
+/** The name a bot is known by. A label or role never replaces it. */
 export function botDisplayName(binding: WindowSessionBinding): string {
   return binding.title || binding.nativeSessionId;
 }
-export function BotPicture({ picture, name, size = 26 }: Pick<WindowBotDetails, 'picture'> & { name: string; size?: number }) {
-  return <Avatar name={name} picture={picture} size={size} />;
+/** How a bot's avatar moves: it pops when it needs you (even asleep), rests grey while asleep, and bobs while working. */
+export function botMood(status: string | undefined, asleep: boolean | undefined): AvatarMood {
+  return status === 'Needs you' ? 'needs_you' : asleep ? 'resting' : status === 'Working' ? 'working' : 'idle';
+}
+/** A bot's avatar: generated from its view id, which survives a handoff, unless its stored picture overrides it. */
+export function BotPicture({ id, picture, size = 26, mood = 'idle' }: Pick<WindowBotDetails, 'picture'> & { id: string; size?: number; mood?: AvatarMood }) {
+  return <AssistantAvatar id={id} {...(picture ? { picture } : {})} size={size} mood={mood} />;
 }
 export function botPlaceKey(place: BotPlace): string {
   return place.kind === 'bot' ? JSON.stringify([place.groupId, place.viewId]) : place.kind === 'session' ? sessionKey(place.session) : place.groupId;
@@ -41,7 +47,7 @@ function BotMember({ row, current, compact, hostName, onSelect, onContextMenu }:
         if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
         event.preventDefault(); onContextMenu(event.currentTarget);
       } : undefined}>
-      <BotPicture picture={row.details.picture} name={name} size={compact ? 36 : 26} />
+      <BotPicture id={row.viewId} picture={row.details.picture} size={compact ? 36 : 26} mood={botMood(row.status, row.details.asleep)} />
       <span className="lab-bot-row-text">
         <span className="lab-bot-name-line"><strong className="lab-bot-name">{name}</strong>
           {row.role ? <span className="lab-bot-role">{row.role}</span> : null}

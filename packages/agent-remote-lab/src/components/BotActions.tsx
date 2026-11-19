@@ -6,7 +6,7 @@ import type { BotPlace } from '../workbench-mode.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { Sheet } from '@orchardworks/agent-client-web/primitives';
 import { Button } from '../ui/Button.js';
-import { BotPicture, botDisplayName } from './BotRoster.js';
+import { BotPicture, botDisplayName, botMood } from './BotRoster.js';
 import { RemoveBotSheet } from './RemoveBotSheet.js';
 
 /** Where a bot runs, for its Info sheet. App knows the Hosts, the providers and the bot's handoff chain. */
@@ -109,7 +109,7 @@ export function useBotActions({ scope, workspace, onSelect, onError, botInfo }: 
   const sheets: ReactNode = !open || !row ? null
     : open.kind === 'info' ? <Sheet open title={name} detent="content" onClose={close}>
       <div className="lab-bot-info-head">
-        <BotPicture picture={row.details.picture} name={name} size={56} />
+        <BotPicture id={row.viewId} picture={row.details.picture} size={56} mood={botMood(row.status, row.details.asleep)} />
         {row.role || row.details.label ? <p className="lab-bot-name-line">{row.role ? <span className="lab-bot-role">{row.role}</span> : null}
           {row.details.label ? <span className="lab-bot-label">{row.details.label}</span> : null}</p> : null}
       </div>

@@ -401,6 +401,9 @@ test('reads long Bot labels with independent roster and conversation scrolling',
     const bot = modeRegion(page, 'bot'), nav = bot.getByRole('navigation', { name: 'Bots', exact: true });
     const row = nav.locator('[data-bot-place]').filter({ hasText: label }); await expect(row).toHaveCount(1); await row.click();
     await expect(row).toHaveAccessibleName(title);
+    // The stored picture wins over the generated avatar: its shape and its colour.
+    await expect(row.locator('.orchard-avatar')).toHaveAttribute('data-shape', 'squircle');
+    expect(await row.locator('.orchard-avatar-body').evaluate(element => getComputedStyle(element).fill)).toBe('rgb(53, 131, 107)');
     await expect(row.getByText(label, { exact: true })).toBeVisible(); await noOverflow(page);
     await screenshot(page, 'long-label-roster');
     const roster = bot.locator('.lab-bot-roster'), timeline = bot.getByTestId('timeline');

@@ -89,12 +89,12 @@ it('can close a minimized group without restoring or selecting it first', async 
 it('folds a primary group into a slim card naming its bot, with picture, role tag and status', async () => {
   const collapsed = vi.fn();
   const view = await render(<SessionDockProvider enabled><SessionDockRail onCollapsePrimaryGroup={collapsed} primaryGroups={[{ id: 'a', title: 'Release check', width: 400, collapsed: true, selected: false,
-    fold: { name: 'Release check', role: 'Team Leader', status: 'Needs you' }, content: <textarea aria-label="draft" /> }]} /></SessionDockProvider>);
+    fold: { id: 'a', name: 'Release check', role: 'Team Leader', status: 'Needs you' }, content: <textarea aria-label="draft" /> }]} /></SessionDockProvider>);
   const pane = view.querySelector<HTMLElement>('[data-primary-group-id="a"]')!;
   const card = pane.querySelector<HTMLButtonElement>('button.lab-folded-bot')!;
   expect(card.getAttribute('aria-label')).toBe('Restore primary group: Release check');
   expect(card.getAttribute('aria-description')).toBe('Team Leader · Needs you');
-  expect(card.querySelector('.ui-avatar')).not.toBeNull();
+  expect(card.querySelector<HTMLElement>('.orchard-avatar')?.dataset.mood).toBe('needs_you');
   expect(card.querySelector('.lab-folded-bot-status')?.getAttribute('data-attention')).toBe('true');
   expect(card.querySelector('.lab-folded-bot-name')?.textContent).toBe('Release check');
   expect(card.querySelector('.lab-folded-bot-role')?.textContent).toBe('Team Leader');
@@ -107,16 +107,17 @@ it('folds a primary group into a slim card naming its bot, with picture, role ta
 
 it('dims the folded card of a sleeping bot and says Asleep unless it needs the owner', async () => {
   const pane = (status?: 'Needs you') => <SessionDockProvider enabled><SessionDockRail onCollapsePrimaryGroup={vi.fn()} primaryGroups={[{ id: 'a', title: 'Night shift', width: 400, collapsed: true, selected: false,
-    fold: { name: 'Night shift', asleep: true, ...(status ? { status } : {}) }, content: null }]} /></SessionDockProvider>;
+    fold: { id: 'a', name: 'Night shift', asleep: true, ...(status ? { status } : {}) }, content: null }]} /></SessionDockProvider>;
   const view = await render(pane());
   const card = () => view.querySelector<HTMLButtonElement>('button.lab-folded-bot')!;
   expect(card().getAttribute('data-asleep')).toBe('true');
   expect(card().getAttribute('aria-description')).toBe('Asleep');
+  expect(card().querySelector<HTMLElement>('.orchard-avatar')?.dataset.mood).toBe('resting');
 });
 
 it('stands a folded bot as a slim card, wider than a minimized view, with its picture, name and role', async () => {
   const view = await render(<SessionDockProvider enabled><SessionDockRail primaryGroups={[
-    { id: 'bot', title: 'Release check', width: 400, collapsed: true, selected: false, content: <div />, fold: { name: 'Release check', role: 'Side' } },
+    { id: 'bot', title: 'Release check', width: 400, collapsed: true, selected: false, content: <div />, fold: { id: 'bot', name: 'Release check', role: 'Side' } },
     { id: 'plain', title: 'Notes', width: 400, collapsed: true, selected: false, content: <div /> }]}
     onCollapsePrimaryGroup={vi.fn()} onClosePrimaryGroup={vi.fn()} onRemovePrimaryGroup={vi.fn()} /></SessionDockProvider>);
   const pane = (id: string) => view.querySelector<HTMLElement>(`[data-primary-group-id="${id}"]`)!;

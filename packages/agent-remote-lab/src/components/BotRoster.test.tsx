@@ -16,7 +16,7 @@ it('renders accessible metadata and fallback Host identity without hidden member
   expect(container.textContent).not.toMatch(/Failed|New result/);
   expect(container.textContent).toContain('host-a'); expect(container.textContent).toContain('host-b');
   expect(visibleButton(container, 'A1').getAttribute('aria-current')).toBe('true');
-  expect(container.querySelector('[data-shape="squircle"]')?.getAttribute('style')).toContain('#123456');
+  expect(container.querySelector<SVGPathElement>('[data-shape="squircle"] .orchard-avatar-body')?.style.fill).toBe('#123456');
   await act(async () => visibleButton(container, 'A1').click());
   expect(selected).toEqual({ kind: 'bot', groupId: 'A', viewId: 'A1' });
   expect([...container.querySelectorAll('h2,h3')].at(-1)?.textContent).toBe('Other sessions');
@@ -119,4 +119,23 @@ it('leaves a long press to the phone: a compact roster has no context menu', asy
   await act(async () => visibleButton(container, 'A1').dispatchEvent(pressed));
   expect(pressed.defaultPrevented).toBe(false);
   expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('draws each bot\'s avatar from its view id, lets a stored picture win and shows its mood', async () => {
+  const group = botGroup('A');
+  group.window.views.push({ ...group.window.views[0]!, id: 'A2', binding: botTarget('A2') }, { ...group.window.views[0]!, id: 'A3', binding: botTarget('A3') });
+  group.bots!.members = { A1: { picture: { shape: 'triangle', color: '#22b3c2', gaze: 2 } }, A2: { picture: { shape: 'sideways', color: '#ff6fa8' } }, A3: { asleep: true } };
+  const model = projectBotRoster([group], [], { status: binding => binding.nativeSessionId === 'A1' ? 'waiting' : binding.nativeSessionId === 'A2' ? 'running' : 'idle' });
+  const container = await render(<BotRoster model={model} onSelect={() => {}} directoryControls={null} />);
+  const avatar = (name: string) => visibleButton(container, name).querySelector<HTMLElement>('.orchard-avatar')!;
+  const fill = (name: string) => avatar(name).querySelector<SVGPathElement>('.orchard-avatar-body')!.style.fill;
+  for (const name of ['A1', 'A2', 'A3']) {
+    expect(avatar(name).dataset.shape, name).toMatch(/^(circle|squircle|triangle|sideways)$/);
+    expect(avatar(name).dataset.mood, name).toBeTruthy();
+  }
+  expect([avatar('A1').dataset.shape, fill('A1')]).toEqual(['triangle', '#22b3c2']);
+  expect([avatar('A2').dataset.shape, fill('A2')]).toEqual(['sideways', '#ff6fa8']);
+  expect([avatar('A1').dataset.mood, avatar('A2').dataset.mood]).toEqual(['needs_you', 'working']);
+  expect(avatar('A3').dataset.mood).toBe('resting');
+  expect(fill('A3')).toBe('var(--orchard-avatar-resting)');
 });

@@ -8,7 +8,7 @@ import { SessionTitleInteractionContext } from './SessionTitleInteraction.js';
 import { useSessionDockDrag } from '../hooks/useSessionDockDrag.js';
 import type { WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SessionStatesView } from '@orchardworks/agent-client';
-import { Avatar } from '../ui/Avatar.js';
+import { BotPicture, botMood } from './BotRoster.js';
 import { useSharedFeed } from '../shared-feeds.js';
 
 const defaultWidth = 440, minimumWidth = 320, maximumWidth = 1600;
@@ -181,7 +181,8 @@ export function MinimizeMainSession() {
 
 /** The bot a folded pane shows: its picture, name, role tag and status from the shared channel. */
 export interface FoldedBot {
-  name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean;
+  /** The bot's view id, which its avatar is generated from. */
+  id: string; name: string; picture?: WindowBotDetails['picture']; role?: string; status?: 'Needs you' | 'Working' | 'Failed'; asleep?: boolean;
   /** Its status from the shared session states, read by the card itself so a states frame renders only the card. */
   statusOf?(states: SessionStatesView | undefined): FoldedBot['status'];
 }
@@ -201,7 +202,7 @@ export function FoldedBotCard({ label, fold: given, controls, onRestore }: { lab
     aria-description={[fold.role, fold.asleep && fold.status !== 'Needs you' ? 'Asleep' : fold.status].filter(Boolean).join(' · ') || undefined} title={fold.name}
     onClick={onRestore}>
     {/* Its picture with the status beside it, then its name and role running down the slim card. */}
-    <span className="lab-folded-bot-picture"><Avatar name={fold.name} picture={fold.picture} size={28} />
+    <span className="lab-folded-bot-picture"><BotPicture id={fold.id} picture={fold.picture} size={28} mood={botMood(fold.status, fold.asleep)} />
       {fold.status ? <span className="lab-folded-bot-status" data-attention={fold.status === 'Needs you' || undefined} data-failed={fold.status === 'Failed' || undefined} /> : null}</span>
     <span className="lab-folded-bot-name">{fold.name}</span>
     {fold.role ? <span className="lab-folded-bot-role">{fold.role}</span> : null}

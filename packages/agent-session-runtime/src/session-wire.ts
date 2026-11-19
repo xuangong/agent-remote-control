@@ -88,6 +88,8 @@ export interface SessionWireOptions {
   authorize?: (action: 'read_resource' | 'resolve_resource' | 'image_upload' | 'resource_upload' | 'send_message') => boolean | Promise<boolean>;
   executeOperation?: SessionWireOperationExecutor;
   maxBufferedManagerEvents?: number;
+  /** How long content bursts share one activity update; status changes are immediate. Defaults to 500 ms. */
+  activityCoalesceMs?: number;
   onFailure?: (failure: SessionWireFailure) => void;
 }
 
@@ -546,7 +548,7 @@ export function createSessionWire(
       catch (error) {
         failSession({ kind: 'manager_event_delivery', error: error instanceof Error ? error : new Error('Activity delivery failed.') });
       }
-    }, 500);
+    }, options.activityCoalesceMs ?? 500);
   }
 
   function publishActivity(): void {

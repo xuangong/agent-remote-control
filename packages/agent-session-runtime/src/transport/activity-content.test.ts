@@ -2,15 +2,17 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AgentSession, ProviderObservation, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
 import { afterEach, expect, it } from 'vitest';
-import WebSocket from 'ws';
 import { AgentManager } from '../agent-manager.js';
 import { createOperationCache } from '../operation-cache.js';
 import { createOperationExecutor } from '../operation-settlement.js';
 import type { AgentRemoteRelay } from '../relay.js';
+import { memoryHttp } from '../memory-http.js';
 import { attachAgentRemoteWebSocketStream } from './websocket-stream.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
+// The wire's coalescing delay is 5 ms here; a pause of 40 ms is eight delays, so a second update would have arrived.
+const COALESCE_MS = 5;
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const row = (sourceKey: string, text: string, delivery: 'history' | 'live' = 'live'): ProviderObservation => ({
   type: 'observation', sourceKey, nativeRevision: 1, occurredAt: 1, delivery,
@@ -49,27 +51,26 @@ async function fixture(history: ProviderObservation[] = []) {
   const server = createServer();
   const stream = attachAgentRemoteWebSocketStream(server, { requireAgent: () => manager,
     executeOperation: (scope: string) => createOperationExecutor(operations, scope) } as unknown as AgentRemoteRelay, {
-    authorizer: { authenticate: () => ({ subject: 'test' }), authorize: () => true },
+    authorizer: { authenticate: () => ({ subject: 'test' }), authorize: () => true }, activityCoalesceMs: COALESCE_MS,
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
-  cleanup.push(async () => { await stream.close(); await new Promise<void>(resolve => server.close(() => resolve())); });
+  const net = memoryHttp(server);
+  cleanup.push(async () => { net.close(); await stream.close(); });
   const connect = async () => {
-    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/v1/session-channel?observation=activity`);
+    const socket = net.webSocket('ws://memory.test/v1/session-channel?observation=activity');
     const messages: any[] = [];
     socket.on('message', raw => { messages.push(JSON.parse(raw.toString())); });
     await once(socket, 'open');
-    await expect.poll(() => messages.some(item => item.type === 'ready'), { timeout: 1500 }).toBe(true);
+    await expect.poll(() => messages.some(item => item.type === 'ready'), { timeout: 1500, interval: 2 }).toBe(true);
     socket.send(JSON.stringify({ protocolVersion: '1.8.0', type: 'subscribe', subscriptionId: 1, agentId: 'tracked',
       message: { protocolVersion: '1.8.0', type: 'negotiate', observation: 'activity' } }));
     const activity = () => messages.filter(item => item.message?.type === 'agent_activity').map(item => item.message.payload);
-    await expect.poll(() => activity().length, { timeout: 1500 }).toBe(1);
+    await expect.poll(() => activity().length, { timeout: 1500, interval: 2 }).toBe(1);
     return { socket, messages, activity };
   };
   return { manager, push, connect };
 }
 
-it('coalesces accepted timeline rows over a real socket without turning connection metadata or duplicates into content', async () => {
+it('coalesces accepted timeline rows over an in-memory socket without turning connection metadata or duplicates into content', async () => {
   const f = await fixture(); const c = await f.connect();
   expect(c.activity()).toEqual([{ agentId: 'tracked', status: 'idle', cursor: { epoch: 'original', seq: 1 } }]);
   for (const state of ['reconnecting', 'connected'] as const) f.push({
@@ -77,7 +78,7 @@ it('coalesces accepted timeline rows over a real socket without turning connecti
       runtimeInfo: { providerId: 'fake', sessionId: 'native', status: 'idle', connection: { state } } },
   });
   await f.manager.loadTimeline({ requestId: 'old', agentId: 'tracked', direction: 'before', cursor: { epoch: 'original', seq: 1 }, limit: 10 });
-  await pause(600);
+  await pause(40);
   expect(c.activity()).toHaveLength(1);
   const answer = row('answer', 'New answer');
   f.push(answer); f.push(answer);
@@ -85,10 +86,10 @@ it('coalesces accepted timeline rows over a real socket without turning connecti
   f.push({ ...row('tool', ''), event: { type: 'timeline', provider: 'fake', item: {
     type: 'tool_call', callId: 'tool', name: 'command', detail: { type: 'shell', command: 'pwd' }, status: 'completed', error: null,
   } } });
-  await expect.poll(() => f.manager.timelineCursor().seq, { timeout: 1500 }).toBe(4);
-  await expect.poll(() => c.activity().length, { timeout: 1500 }).toBe(2);
+  await expect.poll(() => f.manager.timelineCursor().seq, { timeout: 1500, interval: 2 }).toBe(4);
+  await expect.poll(() => c.activity().length, { timeout: 1500, interval: 2 }).toBe(2);
   expect(c.activity().at(-1)).toEqual({ agentId: 'tracked', status: 'idle', cursor: { epoch: 'original', seq: 4 } });
-  await pause(600);
+  await pause(40);
   expect(c.activity()).toHaveLength(2);
   expect(c.messages.filter(item => item.message).map(item => item.message.type)).toEqual(['negotiated', 'agent_activity', 'agent_activity']);
   expect(JSON.stringify(c.messages)).not.toContain('New answer');
@@ -101,24 +102,24 @@ it('reconnects at the same content boundary and publishes one complete baseline 
   const c = await f.connect();
   expect(c.activity()[0].cursor).toEqual({ epoch: 'original', seq: 1 });
   f.push({ type: 'timeline_replacement', observations: [row('initial', 'Already read', 'history'), row('restored', 'Recovered history', 'history')] });
-  await expect.poll(() => c.activity().length, { timeout: 1500 }).toBe(2);
+  await expect.poll(() => c.activity().length, { timeout: 1500, interval: 2 }).toBe(2);
   const baseline = c.activity().at(-1).cursor;
   expect(baseline.epoch).not.toBe('original'); expect(baseline.seq).toBe(2);
   expect(c.activity().map(item => item.cursor.seq)).toEqual([1, 2]);
   f.push(row('restored', 'Recovered history'));
-  await pause(600);
+  await pause(40);
   expect(c.activity()).toHaveLength(2);
   f.push(row('after-recovery', 'Actual new content'));
-  await expect.poll(() => c.activity().length, { timeout: 1500 }).toBe(3);
+  await expect.poll(() => c.activity().length, { timeout: 1500, interval: 2 }).toBe(3);
   expect(c.activity().at(-1).cursor).toEqual({ epoch: baseline.epoch, seq: 3 });
   c.socket.close(); await once(c.socket, 'close');
 });
 
-it('delivers the replacement baseline before immediately queued live content on the real activity socket', async () => {
+it('delivers the replacement baseline before immediately queued live content on the activity socket', async () => {
   const f = await fixture(); const c = await f.connect();
   f.push({ type: 'timeline_replacement', observations: [row('initial', 'Already read', 'history'), row('restored', 'Recovered history', 'history')] });
   f.push(row('immediately-live', 'New content after recovery'));
-  await expect.poll(() => c.activity().length, { timeout: 1500 }).toBe(3);
+  await expect.poll(() => c.activity().length, { timeout: 1500, interval: 2 }).toBe(3);
   const cursors = c.activity().map(item => item.cursor);
   expect(cursors[1].epoch).not.toBe('original');
   expect(cursors).toEqual([
@@ -127,7 +128,7 @@ it('delivers the replacement baseline before immediately queued live content on 
   c.socket.close(); await once(c.socket, 'close');
 });
 
-it('keeps quiet review cursors stable across real socket reconnects and exposes visible results', async () => {
+it('keeps quiet review cursors stable across socket reconnects and exposes visible results', async () => {
   const f = await fixture(); const c = await f.connect();
   const review = (key: string, status: 'pending' | 'silent' | 'visible') => {
     const value = row(key, key);
@@ -136,13 +137,13 @@ it('keeps quiet review cursors stable across real socket reconnects and exposes 
   };
   f.push(review('Automatic input', 'pending'));
   f.push(review('Quiet acknowledgement', 'silent'));
-  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('silent');
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500, interval: 2 }).toBe('silent');
   expect(c.activity().at(-1).cursor).toEqual({ epoch: 'original', seq: 1 });
   c.socket.close(); await once(c.socket, 'close');
   const restored = await f.connect();
   expect(restored.activity()[0]).toMatchObject({ cursor: { epoch: 'original', seq: 1 }, background: { status: 'silent' } });
   f.push(review('A useful finding', 'visible'));
-  await expect.poll(() => restored.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(4);
+  await expect.poll(() => restored.activity().at(-1)?.cursor.seq, { timeout: 1500, interval: 2 }).toBe(4);
   expect(restored.activity().at(-1).background.status).toBe('visible');
   expect(JSON.stringify(restored.messages)).not.toContain('A useful finding');
   restored.socket.close(); await once(restored.socket, 'close');
@@ -158,9 +159,9 @@ it('retains live lifecycle-only review failures after ordinary work resumes', as
   f.push(quiet);
   f.push({ type: 'observation', sourceKey: 'review-failed', occurredAt: 2, delivery: 'live',
     event: { type: 'background_activity_updated', provider: 'fake', turnId: 'review-turn', background: { id: 'review', kind: 'review', status: 'failed' } } });
-  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('failed');
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500, interval: 2 }).toBe('failed');
   f.push(row('ordinary', 'An ordinary reply'));
-  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(3);
+  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500, interval: 2 }).toBe(3);
   const history = await f.manager.loadTimeline({ requestId: 'restored', agentId: 'tracked', direction: 'tail', limit: 10 });
   expect(history.payload.entries.find(entry => entry.item.type === 'assistant_message' && entry.item.text === 'Quiet response')?.item.background?.status).toBe('failed');
   c.socket.close(); await once(c.socket, 'close');
@@ -174,10 +175,10 @@ it('publishes a quiet or visible metadata-only assessment without needing anothe
   const result = (status: 'silent' | 'visible'): ProviderObservation => ({ type: 'observation', sourceKey: status, delivery: 'live', occurredAt: 2,
     event: { type: 'background_activity_updated', provider: 'fake', background: { id: 'review', kind: 'review', status, summary: 'Private assessment' } } });
   f.push(result('silent'));
-  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('silent');
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500, interval: 2 }).toBe('silent');
   expect(c.activity().at(-1)?.cursor.seq).toBe(1);
   f.push(result('visible'));
-  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500 }).toBe('visible');
+  await expect.poll(() => c.activity().at(-1)?.background?.status, { timeout: 1500, interval: 2 }).toBe('visible');
   expect(c.activity().at(-1)?.cursor.seq).toBe(2);
   expect(JSON.stringify(c.messages)).not.toContain('Private assessment');
   c.socket.close(); await once(c.socket, 'close');
@@ -191,7 +192,7 @@ it('restores historical outcomes without making an old review the current attent
   const c = await f.connect();
   expect(c.activity()[0]?.background).toBeUndefined();
   f.push(row('ordinary', 'Ordinary reply'));
-  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500 }).toBe(3);
+  await expect.poll(() => c.activity().at(-1)?.cursor.seq, { timeout: 1500, interval: 2 }).toBe(3);
   const history = await f.manager.loadTimeline({ requestId: 'restored', agentId: 'tracked', direction: 'tail', limit: 10 });
   expect(history.payload.entries.find(entry => entry.item.background?.id === 'old-review')?.item.background?.status).toBe('failed');
   c.socket.close(); await once(c.socket, 'close');

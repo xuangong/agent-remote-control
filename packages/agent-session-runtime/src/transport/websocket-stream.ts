@@ -34,6 +34,8 @@ export interface AgentRemoteWebSocketAuthorizer {
 export interface AgentRemoteWebSocketStreamOptions {
   authorizer?: AgentRemoteWebSocketAuthorizer;
   accessPolicy?: AgentRemoteRequestAccessPolicy;
+  /** Passed to each session wire: how long content bursts share one activity update. */
+  activityCoalesceMs?: number;
 }
 
 export function attachAgentRemoteWebSocketStream(
@@ -151,6 +153,7 @@ export function attachAgentRemoteWebSocketStream(
       if (socket.readyState === WebSocket.OPEN) socket.send(json);
     }, {
       sessionControls: relay.sessionControls,
+      ...(options.activityCoalesceMs === undefined ? {} : { activityCoalesceMs: options.activityCoalesceMs }),
       imageScope: () => principal.subject,
       executeOperation: relay.executeOperation(principal.subject),
       authorize: async action => {

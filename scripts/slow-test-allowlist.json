@@ -148,14 +148,6 @@
   {
    "test": "packages/agent-remote-lab/src/App.attach-budget.test.tsx > asks for a missing session once across mode switches, state frames, bot switches, page resumes and an access pause",
    "reason": "Mounts the whole Workbench App to check composition: how its hooks, layout and the recorded Relay wire together. The state rules it touches have unit tables in packages/agent-remote-lab/src/state; the mount itself costs the time, and goes only when App.tsx's hook wiring is split (open item O15)."
-  },
-  {
-   "test": "packages/agent-session-runtime/src/transport/activity-content.test.ts > coalesces accepted timeline rows over a real socket without turning connection metadata or duplicates into content",
-   "reason": "Real WebSocket with real coalescing timers; moves to the in-memory browserStream once the timers are injected."
-  },
-  {
-   "test": "packages/agent-session-runtime/src/transport/activity-content.test.ts > reconnects at the same content boundary and publishes one complete baseline for replacement history",
-   "reason": "Real WebSocket with real coalescing timers; moves to the in-memory browserStream once the timers are injected."
   }
  ]
 }

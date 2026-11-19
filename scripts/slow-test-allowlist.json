@@ -38,30 +38,6 @@
    "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
   },
   {
-   "test": "packages/agent-relay-node/src/gateway-relay.test.ts > stops an already-open browser stream when its grant expires",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > lets the production Host uplink reconnect after an authority outage without pairing again",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/gateway-relay.test.ts > expires an idle hosted channel and rejects unauthenticated channel upgrades",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > does not extend access during an authority outage",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > keeps browser access through a short authority outage when configured with grace",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
-   "test": "packages/agent-relay-node/src/gateway-lifecycle.test.ts > enforces authority leases on Host upgrades that include a query string",
-   "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
-  },
-  {
    "test": "packages/agent-relay-node/src/preview-tunnel.test.ts > renews through owner authentication and preserves the mapped URL and tunnel while refusing removal revival",
    "reason": "Real listener with real lease, grace or traffic timers of the Node host; a transport test that needs an injected clock in the gateway."
   },

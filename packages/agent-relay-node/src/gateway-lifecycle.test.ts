@@ -8,11 +8,13 @@ import { join } from 'node:path';
 import { WebSocket } from 'ws';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createGatewayRelay } from './gateway-relay.js';
+import { manualClock } from './testing/manual-clock.js';
 const secret = 'lifecycle-test-secret-01234567890123456789';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.reverse()) await close(); cleanups.length = 0; });
 /** Lease tests run without outage grace unless they pass one. */
 async function fixture(graceMs = 0) {
+  const clock = manualClock(); cleanups.push(async () => clock.restore());
   let disabled = false; let unavailable = false; const authenticatedAt = Date.now();
   const authority = createServer(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
@@ -31,7 +33,7 @@ async function fixture(graceMs = 0) {
   let relay: ReturnType<typeof createGatewayRelay>;
   let url: string;
   let closed = true;
-  const start = async () => { relay = createGatewayRelay({ origin: url ?? 'http://127.0.0.1:0', issuer, secret, stateFile, authorityOutageGraceMs: graceMs }); const address = await relay.listen(url ? Number(new URL(url).port) : 0); url = address.url; closed = false; };
+  const start = async () => { relay = createGatewayRelay({ origin: url ?? 'http://127.0.0.1:0', issuer, secret, stateFile, authorityOutageGraceMs: graceMs, scheduler: clock.scheduler, brokerScheduler: clock.brokerScheduler }); const address = await relay.listen(url ? Number(new URL(url).port) : 0); url = address.url; closed = false; };
   const stop = async () => { if (!closed) { closed = true; await relay.close(); } }; cleanups.push(stop);
   await start();
   const begin = await fetch(url! + '/auth/login', { redirect: 'manual' });
@@ -45,7 +47,7 @@ async function fixture(graceMs = 0) {
   const cookie = exchange.headers.get('set-cookie')!.split(';')[0]!;
   const state = await exchange.json() as { basePath: string; refreshAfterMs?: number };
   const request = (path: string, body?: unknown) => fetch(url! + path, { headers: { connection: 'close', origin: url!, cookie, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
-  return { get url() { return url!; }, state, request, cookie, ticket, start, stop, stateFile, disable: () => { disabled = true; }, outage: () => { unavailable = true; }, recover: () => { unavailable = false; } };
+  return { clock, get url() { return url!; }, state, request, cookie, ticket, start, stop, stateFile, disable: () => { disabled = true; }, outage: () => { unavailable = true; }, recover: () => { unavailable = false; } };
 }
 it('renews an opaque browser session, restores it after restart and revokes it on logout', async () => {
   const f = await fixture(); expect(f.cookie).not.toContain(f.ticket); expect(f.state.refreshAfterMs).toBeGreaterThan(0);
@@ -85,7 +87,7 @@ it('restores enrolled Hosts with the same credentials and enforces device revoca
 it('does not extend access during an authority outage', async () => {
   const f = await fixture(); const state = await (await f.request('/auth/status')).json(); f.outage();
   expect((await f.request('/auth/refresh', {})).status).toBe(503);
-  await new Promise(resolve => setTimeout(resolve, Math.max(0, state.expiresAt - Date.now() + 30)));
+  await f.clock.advance(Math.max(0, state.expiresAt - Date.now() + 30));
   expect((await f.request(f.state.basePath + 'v1/remote/hosts')).status).toBe(503);
 }, 10000);
 
@@ -93,7 +95,7 @@ it('keeps browser access through a short authority outage when configured with g
   const f = await fixture(60_000); const state = await (await f.request('/auth/status')).json(); f.outage();
   const refreshed = await f.request('/auth/refresh', {});
   expect(refreshed.status).toBe(200);
-  await new Promise(resolve => setTimeout(resolve, Math.max(0, state.expiresAt - Date.now() + 30)));
+  await f.clock.advance(Math.max(0, state.expiresAt - Date.now() + 30));
   expect((await f.request(f.state.basePath + 'v1/remote/hosts')).status).toBe(200);
 }, 10000);
 
@@ -108,7 +110,7 @@ it('lets the production Host uplink reconnect after an authority outage without 
     onCredential: async () => {}, resolveSession: () => undefined, control: async () => ({ status: 404, body: '{}' }),
     reconnectBaseDelayMs: 50, reconnectMaxDelayMs: 100, onStateChange: value => states.push(value) });
   cleanups.push(() => uplink.close()); await uplink.ready;
-  f.outage();
+  f.outage(); await f.clock.advance(1600);
   await vi.waitFor(() => expect(states).toContain('disconnected'), { timeout: 3500, interval: 20 });
   expect(states).not.toContain('rejected');
   await f.stop(); await f.start();
@@ -125,5 +127,6 @@ it('enforces authority leases on Host upgrades that include a query string', asy
   expect(JSON.parse((await registered)[0].toString()).type).toBe('credential_issued');
   const saved = once(host, 'message'); host.send(JSON.stringify({ uplinkVersion: 2, type: 'credential_saved' }));
   await saved; f.outage();
-  expect((await once(host, 'close'))[0]).toBe(1013);
+  const closed = once(host, 'close'); await f.clock.advance(1600);
+  expect((await closed)[0]).toBe(1013);
 }, 5000);

@@ -5,11 +5,13 @@ import { WebSocket } from 'ws';
 import { afterEach, expect, it } from 'vitest';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { createGatewayRelay } from './gateway-relay.js';
+import { manualClock } from './testing/manual-clock.js';
 
 const secret = 'test-only-32-byte-secret-value-0123456789';
 const issuer = 'https://gateway.example';
 let close: (() => Promise<void>) | undefined;
-afterEach(async () => { await close?.(); close = undefined; });
+let clock: ReturnType<typeof manualClock> | undefined;
+afterEach(async () => { await close?.(); close = undefined; clock?.restore(); clock = undefined; });
 function ticket(audience: string, sub = 'alice', changes: Record<string, unknown> = {}) {
   const iat = Math.floor(Date.now() / 1000);
   const head = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'arc-relay+jwt' })).toString('base64url');
@@ -106,7 +108,8 @@ it('enforces exact Origin, HttpOnly cookie and no query token authentication', a
   expect(cookie).toContain('HttpOnly'); expect(cookie).toContain('SameSite=Strict');
 }, 10000);
 it('stops an already-open browser stream when its grant expires', async () => {
-  const f = await setup(); const alice = await f.login('alice');
+  clock = manualClock();
+  const f = await setup({ scheduler: clock.scheduler, brokerScheduler: clock.brokerScheduler }); const alice = await f.login('alice');
   const pair = await (await alice.request('v1/remote/pairings', {})).json() as { key: string };
   const host = new WebSocket(f.url.replace('http:', 'ws:') + '/ws/remote-host?control=1', { headers: { authorization: `Bearer ${pair.key}` } });
   await once(host, 'open'); const registered = once(host, 'message');
@@ -122,6 +125,7 @@ it('stops an already-open browser stream when its grant expires', async () => {
   const stream = new WebSocket((f.url + alice.state.basePath + 'v1/sessions/expires-agent/events').replace('http:', 'ws:'), { headers: { authorization: `Bearer ${short}`, origin: f.url } });
   const closed = once(stream, 'close');
   await once(stream, 'open');
+  await clock!.advance(2500);
   expect((await closed)[0]).toBe(1008);
   expect((await fetch(f.url + '/auth/status', { headers: { authorization: `Bearer ${short}` } })).status).toBe(401);
   host.close();
@@ -381,7 +385,8 @@ it('reuses a hosted channel for isolated session subscriptions and rechecks user
 }, 10000);
 
 it('expires an idle hosted channel and rejects unauthenticated channel upgrades', async () => {
-  const f = await setup(); const alice = await f.login('alice');
+  clock = manualClock();
+  const f = await setup({ scheduler: clock.scheduler, brokerScheduler: clock.brokerScheduler }); const alice = await f.login('alice');
   const url = f.url + alice.state.basePath + 'v1/session-channel?observation=session';
   expect(await rejected(url, { origin: f.url })).toBe(401);
   expect(await rejected(url, { origin: 'https://evil.example', cookie: alice.cookie })).toBe(403);
@@ -389,5 +394,6 @@ it('expires an idle hosted channel and rejects unauthenticated channel upgrades'
   const socket = new WebSocket(url.replace('http:', 'ws:'), { headers: { authorization: `Bearer ${short}`, origin: f.url } });
   const ended = once(socket, 'close');
   await once(socket, 'open');
+  await clock!.advance(2500);
   expect((await ended)[0]).toBe(1008);
 }, 5000);

@@ -27,6 +27,9 @@ export type GatewayRelayOptions = HostedAuthOptions & {
   windowChangesWaitMs?: HostedRelayOptions['windowChangesWaitMs'];
   controllerReleases?: HostedRelayOptions['controllerReleases'];
   authorityOutageGraceMs?: HostedRelayOptions['authorityOutageGraceMs'];
+  /** Wakes the Relay at its next lease, grant or challenge expiry; tests install one they advance by hand. */
+  scheduler?: HostedRelayOptions['scheduler'];
+  brokerScheduler?: HostedRelayOptions['brokerScheduler'];
   /** The largest durable Relay state, in bytes. Defaults to 64 MiB; a test sets a small one to reach the ceiling cheaply. */
   maxStateBytes?: number;
   /** Trusted equivalent transport origins; production entrypoints do not configure aliases. */
@@ -126,7 +129,7 @@ export function createGatewayRelay(options: GatewayRelayOptions) {
         if (previewOrigin && new URL(previewOrigin).port === '0') { const preview = new URL(previewOrigin); preview.port = String(address.port); previewOrigin = preview.origin; }
         if (!originKnown) await openDurableParts();
         const initial = storage ? migrateLegacyNodeState(storage.initial, auth) : undefined;
-        runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}), ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
+        runtime = createHostedRelay({ ...auth, previewOrigin, previewDomain: options.previewDomain, clientAddress: request => clientAddresses.get(request) ?? 'unknown', maxTenants: options.maxTenants, keyLifetimeMs: options.keyLifetimeMs, recentAuthentication: options.recentAuthentication, windowChangesWaitMs: options.windowChangesWaitMs, ...(options.scheduler ? { scheduler: options.scheduler } : {}), ...(options.brokerScheduler ? { brokerScheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}), ...(options.authorityOutageGraceMs !== undefined ? { authorityOutageGraceMs: options.authorityOutageGraceMs } : {}),
           ...(storage ? { successionEnrollment: true, successionEncodingCosts: { ...hostedRecordEncodingCosts(auth), acceptsSnapshot: storage.acceptsSnapshot } } : {}),
           ...(options.stateFile ? { diagnosticStorage: openGatewayDiagnostics(options.stateFile, auth) } : {}),
           ...(options.stateFile ? { teamResources: (namespace: string) => new InputResourceStore({ directory: join(options.stateFile + '.resources', createHmac('sha256', auth.secret).update(JSON.stringify([auth.origin, auth.issuer, namespace])).digest('hex')) }) } : {}),

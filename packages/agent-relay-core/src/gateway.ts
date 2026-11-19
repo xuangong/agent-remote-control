@@ -47,7 +47,7 @@ import { previewRequest, previewResponseHeaders } from './preview-http.js';
 import { previewTrafficBody, previewTrafficSocket } from './preview-traffic.js';
 import { adaptPreviewContent, PreviewContentError } from './preview-content.js';
 import type { TunnelSocket } from '@orchardworks/agent-remote-tunnel';
-import type { BrokerRequestContext, RelaySocket } from './transport.js';
+import type { BrokerRequestContext, BrokerScheduler, RelaySocket } from './transport.js';
 import { gatewayCookieName, readGatewayCookie, validateGatewayOrigin, verifyGatewayGrant, type HostedGrant } from './auth.js';
 
 export type HostedRelayOptions = HostedAuthOptions & {
@@ -68,6 +68,8 @@ export type HostedRelayOptions = HostedAuthOptions & {
   teamResources?: (namespace: string) => import('./team-resources.js').TeamResourceStore;
   diagnosticContext?: RelayDiagnosticContext;
   scheduler?: RelayScheduler;
+  /** The timers of each account's Broker: credential expiry, heartbeats and deadlines. Defaults to real timers. */
+  brokerScheduler?: BrokerScheduler;
   maxTenants?: number;
   /** Window long-poll wait in milliseconds, from 1 to 25000. Defaults to 25000. */
   windowChangesWaitMs?: number;
@@ -433,7 +435,7 @@ export function createHostedRelay(options: HostedRelayOptions) {
         }
         throw refusal;
       } : undefined;
-      const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness, ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
+      const broker = createHostBroker({ origin: auth.origin, publicUrl: auth.origin, keyLifetimeMs: options.keyLifetimeMs, ...options.hostLiveness, ...(options.brokerScheduler ? { scheduler: options.brokerScheduler } : {}), ...(options.controllerReleases ? { controllerReleases: options.controllerReleases } : {}),
         ownerSubject: grant.subject, durable, accountBacked, initialState, diagnostics, gatewaySetup: auth.provider === 'mainsite',
         teamResources: options.teamResources?.(grant.namespace),
         outbox: { hostCall: (hostId, call) => sessionOutbox.hostCall(hostId, call) },

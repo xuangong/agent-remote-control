@@ -111,6 +111,8 @@ never gate a task and are not part of `pnpm test`.
 ARC_LOCAL_JOURNALS=1 pnpm local up        # the instance the run uses; a restart fault runs `up --no-build` with the same variable
 pnpm smoke:quick                           # M1, M2 and M7 in a few minutes
 pnpm smoke M3 --seed 7 --rounds 4          # one scenario, a replayable seed
+pnpm smoke M4 M5 --seed 7                  # quota pressure and 200 sessions: a scripted Host (no model turns) pairs with the instance; M4 restarts it with tiny journal limits and restores the defaults
+pnpm smoke M8 --duration 30                # the soak, in minutes (30 is the plan's length)
 pnpm smoke                                 # every scenario
 ```
 

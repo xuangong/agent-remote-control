@@ -98,7 +98,9 @@ export class SlowTestReporter {
     const warn = over(warnMs), slow = over(failMs);
     if (process.env.ARC_SLOW_TEST_DIR) {
       mkdirSync(process.env.ARC_SLOW_TEST_DIR, { recursive: true });
-      const name = basename(process.cwd());
+      // A package with a second Vitest config (the seams' transport config) writes a second report beside the first.
+      const config = this.configFile ? basename(this.configFile).replace(/^vitest\.?|config\.[mc]?[jt]s$/g, '').replace(/\.$/, '') : '';
+      const name = basename(process.cwd()) + (config ? `.${config}` : '');
       writeFileSync(join(process.env.ARC_SLOW_TEST_DIR, `${name}.json`), `${JSON.stringify({ package: name, tests: total,
         over300ms: warn.length, over1s: slow.length, tiers: countTiers(everything), slowest: over(100).map(({ moduleId, ...entry }) => entry) }, null, 1)}\n`);
     }

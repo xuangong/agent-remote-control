@@ -57,6 +57,8 @@ Every timeline observation carries the identity of its item (`itemIdentity`), eq
 
 The tool result a row carries is `slimToolUseResult` of the native one (type, file path, patch hunks, image metadata, small scalars) in the live frame and in the transcript alike, so a transcript with whole files in its results restores far under the catalog's 32 MB cap; the transcript is read line by line and only those fields are kept. The `source_uuid` of a folded input was observed in Claude Code 2.1.319; an attachment without it (an older CLI) is restored under the attachment's own uuid, which costs one `changed` replacement per folded input. A compaction's summary row is dropped from a reread, as the live stream never shows it.
 
+A reread lists its rows in the transcript's line order, the order Claude Code wrote them and the stream showed them. The SDK read follows the parent chain instead, which a tool that finishes while later blocks of its message still stream breaks: the next block links to that result, and the SDK appends the blocks that left the chain after the message's last chained row (the `parallel-edits` recording).
+
 At a turn's end, a block that streamed and never got its record ends with an empty body. A user row a finished sub-agent wakes the session with is not shown, as in the stream.
 
 ## Interactions and controls

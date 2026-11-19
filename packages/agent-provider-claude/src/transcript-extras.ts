@@ -13,7 +13,7 @@ export type ClaudeTranscriptMessage = SessionMessage & { tool_use_result?: unkno
  * - input folded into a running turn, a `queued_command` attachment, as a user row after the conversation entry it followed, with the
  *   uuid the Controller gave the input (`source_uuid`), which is the uuid its live row has;
  * and drops what the stream never shows: the user row a finished sub-agent wakes the session with, and the summary row a compaction writes.
- * Returns `messages` itself when nothing changes.
+ * Rows come in the order the transcript was written (see `inWrittenOrder`). Returns `messages` itself when nothing changes.
  */
 export function withTranscriptExtras(sessionId: string, messages: SessionMessage[], rows: readonly Row[] | undefined): SessionMessage[] {
   if (!rows?.length) return messages;
@@ -35,8 +35,9 @@ export function withTranscriptExtras(sessionId: string, messages: SessionMessage
     list.push({ type: 'user', uuid, session_id: sessionId, parent_tool_use_id: null, parent_agent_id: null, message: { role: 'user', content } } as SessionMessage);
     after.set(anchor, list);
   }
-  let changed = after.size > 0;
-  const result = messages.flatMap((message): SessionMessage[] => {
+  const ordered = inWrittenOrder(messages, rows);
+  let changed = after.size > 0 || ordered !== messages;
+  const result = ordered.flatMap((message): SessionMessage[] => {
     const row = byUuid.get(message.uuid);
     // What the stream never shows is dropped; input folded after it stays, attached where it was.
     if (row && (row.isCompactSummary === true || record(row.origin) && row.origin.kind === 'task-notification')) { changed = true; return after.get(message.uuid) ?? []; }
@@ -45,6 +46,22 @@ export function withTranscriptExtras(sessionId: string, messages: SessionMessage
     return [withResult, ...(after.get(message.uuid) ?? [])];
   });
   return changed ? result : messages;
+}
+
+/**
+ * The messages in the order their rows were written. Claude Code appends each row as it happens, so the file's line order is the order
+ * the stream showed. The parent chain is not: a tool that finishes while later blocks of its message still stream gets its result written
+ * between them, the next block links to that result, and the blocks before it leave the chain. The public read follows the chain and adds
+ * what left it after the message's last chained row. Within one chain the two orders agree, as a row is written after its parent. A
+ * message the transcript lacks stays after the message it followed.
+ */
+function inWrittenOrder(messages: SessionMessage[], rows: readonly Row[]): SessionMessage[] {
+  const line = new Map<string, number>();
+  rows.forEach((row, at) => { if (!line.has(row.uuid)) line.set(row.uuid, at); });
+  let previous = -1;
+  const positions = messages.map((message, at) => { previous = line.get(message.uuid) ?? previous; return { message, line: previous, at }; });
+  if (positions.every((entry, at) => at === 0 || positions[at - 1]!.line <= entry.line)) return messages;
+  return positions.sort((a, b) => a.line - b.line || a.at - b.at).map(entry => entry.message);
 }
 
 const isConversation = (row: Row | undefined): boolean => row !== undefined && (row.type === 'user' || row.type === 'assistant') && row.isSidechain !== true;

@@ -141,3 +141,42 @@ it('restores a long transcript with big Edit and Read results far under the cata
   expect(JSON.stringify(restored)).toContain('structuredPatch');
   expect(JSON.stringify(restored)).not.toContain(big.slice(0, 1000));
 }, 60_000);
+
+/**
+ * The rows Claude Code 2.1.319 writes for six Edits of one streamed message, the first approved and written while the third streams
+ * (the parallel-edits recording): the fourth links to that result, so the second and third leave the parent chain. The public read
+ * follows the chain and adds what left it after the message's last chained row; the stream showed the rows in file order.
+ */
+const parallelTranscript = (() => {
+  const lines: Array<Record<string, unknown>> = [{ type: 'user', uuid: 'u1', parentUuid: null, message: { role: 'user', content: 'Rename in all six' } }];
+  const use = (uuid: string, parent: string, id: string) => lines.push({ type: 'assistant', uuid, parentUuid: parent, message: { id: 'm1', role: 'assistant', content: [{ type: 'tool_use', id, name: 'Edit', input: {} }] } });
+  const result = (uuid: string, parent: string, id: string) => lines.push({ type: 'user', uuid, parentUuid: parent, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'updated' }] } });
+  lines.push({ type: 'assistant', uuid: 'think', parentUuid: 'u1', message: { id: 'm1', role: 'assistant', content: [{ type: 'thinking', thinking: 'Edit all six.' }] } });
+  use('ua', 'think', 'edit-a'); use('ub', 'ua', 'edit-b'); use('uc', 'ub', 'edit-c');
+  result('ra', 'ua', 'edit-a');
+  use('ud', 'ra', 'edit-d'); use('ue', 'ud', 'edit-e');
+  result('rb', 'ub', 'edit-b'); result('rc', 'uc', 'edit-c'); result('rd', 'ud', 'edit-d'); result('re', 'ue', 'edit-e');
+  use('uf', 're', 'edit-f'); result('rf', 'uf', 'edit-f');
+  lines.push({ type: 'assistant', uuid: 'done', parentUuid: 'rf', message: { id: 'm2', role: 'assistant', content: [{ type: 'text', text: 'EDITED' }] } });
+  return lines;
+})();
+const messageOf = (uuid: string) => { const line = parallelTranscript.find(entry => entry.uuid === uuid)!; return row(uuid, line.type as 'user' | 'assistant', (line.message as { content: unknown }).content); };
+/** What `getSessionMessages` of SDK 0.3.247 returns for that transcript. */
+const sdkOrder = ['u1', 'think', 'ua', 'ra', 'ud', 'ue', 're', 'uf', 'ub', 'uc', 'rb', 'rc', 'rd', 'rf', 'done'];
+
+it('orders a reread as the transcript was written, which is the order the stream showed, when parallel tools leave the parent chain', async () => {
+  const restored = await extras(sdkOrder.map(messageOf), await transcript(parallelTranscript));
+  expect(restored.map(message => message.uuid)).toEqual(parallelTranscript.map(entry => entry.uuid));
+  const tools = new ClaudeEventProjector(sessionId, 'history');
+  const toolOrder = [...new Set(restored.flatMap(message => tools.project(message)).flatMap(({ event }) => event.type === 'timeline' && event.item.type === 'tool_call' ? [event.item.callId] : []))];
+  expect(toolOrder).toEqual(['edit-a', 'edit-b', 'edit-c', 'edit-d', 'edit-e', 'edit-f']);
+});
+
+it('keeps a row the transcript lacks after the row it followed', async () => {
+  const extra = row('synthetic', 'assistant', [{ type: 'text', text: 'x' }]);
+  const messages = sdkOrder.map(messageOf);
+  messages.splice(sdkOrder.indexOf('ub'), 0, extra);
+  const restored = await extras(messages, await transcript(parallelTranscript));
+  const order = restored.map(message => message.uuid);
+  expect(order.indexOf('synthetic')).toBe(order.indexOf('uf') + 1);
+});

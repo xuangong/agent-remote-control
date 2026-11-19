@@ -51,14 +51,20 @@ A whole-app test (`src/App*.test.tsx`) stays only when it checks composition: se
 | `handoff-command` | 2 of 2 | none |
 | `agent-client` `reduceRefresh` / `settlementOf` / `sessionSuccessionHistory` | 35 of 40 / 23 of 26 / 40 of 49 | none after a gap in the history table was closed (a chain that returns to a session, and an unknown session asked for with history intent) |
 | `useAgentCreation` hook | 26 of 35 | none (the double activation test, deleted, caught 3 mutations and the hook and module tests catch all 3) |
+| `useSessionSuccession` effects (`hooks/useSessionSuccession.effects.test`, 25 tests, fake ports and clock) | 18 of 30 (12 survive: 2 redundant guards that must fail together, 4 limits and guards of the replay read, the resume of image recipients, the abort that the sequence check already covers, the evidence restore, the attach effect while discovering, the refresh wait deadline, the authority reset) | none: the 8 mutations an old test catches (mount discovery, the feed hint, the stale retry, the rediscover effect, the attach once rule, the attach-failure report, the settlement deadline, the live-budget release) are all caught here |
+| `useQuotesAndReferences` hook (`app/useQuotesAndReferences.test`, 17 tests) | 21 of 24 (3 equivalent: a client for another Host, a missing directory, the capture time) | none: the 7 mutations an old test catches are all caught here |
 
 Deleted, each after that check: `App.succession` "keeps the Handoff chooser available while pending input blocks preparation" (owners `succession-gates`, `useSendingAndSuccession.test`, `SessionSuccessionDialog.test`), "rejects malformed Handoff provider arguments" (2 tests; owners `handoff-command.test`, `useSendingAndSuccession.test`) and `App.test` "starts only one Agent transition when the create control is activated twice before rerender" (owners `agent-creation.test`, `useAgentCreation.test`).
 
-Not deleted although the owner catches everything the old test catches: the tests below still check wiring or UI that has no unit owner yet. The next cuts are a hook test for the effects of `useSessionSuccession` (refresh, attach, discovery), one for `useQuotesAndReferences`, and a view-model test for the Handoff command list of docks and Team members.
+Deleted after the hook tests above: `App.succession.opening-and-refresh` "waits for the original native session to recover after a %s handoff" (calls `refreshSettled` on the hook; the mutations it catches, the discovery on mount and the settled-discovery sequence, are caught by `useSessionSuccession.effects.test` "after a cancelled Handoff reads again and settles", which also holds the wait while the session recovers) and `App.succession.handoff-and-discovery` "keeps ordinary fixed navigation available when initial HTTP discovery reports unsupported %s" (its mutations, the discovery on mount and the rediscover effect, are caught by the "route_not_found" test; the reducer table owns the rule).
+
+Not deleted although the owner catches everything the old test catches: the tests below still check wiring or UI that has no unit owner yet. The next cut is a view-model test for the Handoff command list of docks and Team members.
+
+The hook mutation check (30 mutations of `useSessionSuccession`, 24 of `useQuotesAndReferences`, one line each, all reverted): an old test catches a mutation the hook tests miss in no case. Mount discovery is caught by 138 old tests, so the count says nothing about a test's subject; each old test is judged by the rule it names. Two mutations are caught by the hook tests only as a hang under the outer deadline (the live-budget release and the settled-discovery sequence).
 
 ### The 161 `App.succession` tests
 
-102 test declarations, 161 tests before this step, 158 now. Each line: file and line, tests the declaration runs, name, disposition.
+100 test declarations, 161 tests before this step, 156 now. Each line: file and line, tests the declaration runs, name, disposition.
 
 #### Window, Track and owner stores: 46 tests, 0 deleted, 46 kept
 
@@ -94,7 +100,7 @@ Kept: each test mounts the App with the Window document, the composition documen
 
 #### Native attachment and recovery: 40 tests, 0 deleted, 40 kept
 
-Kept: each test drives a fixture socket, the real RemoteSessionClient, the succession hook and the view state together, with the real deadlines made inputs. Owners: `RemoteSessionClient` tests in `agent-client`; `useSessionSuccession` binding.
+Kept: each test drives a fixture socket, the real RemoteSessionClient, the succession hook and the view state together, with the real deadlines made inputs. Owners: `RemoteSessionClient` tests in `agent-client`; `useSessionSuccession.effects.test` for attach and binding.
 
 - `ask-and-reconnect:49` (1) keeps a synchronized native binding alive while composition replay is pending — kept
 - `ask-and-reconnect:98` (3) keeps a matching session alive while %s is still recovering — kept
@@ -120,9 +126,9 @@ Kept: each test drives a fixture socket, the real RemoteSessionClient, the succe
 - `ask-and-reconnect:244` (4) fences shared prompt editing from $initial after awaiting $stage over HTTP and WebSocket — kept
 - `handoff-and-discovery:580` (8) fences held $operation work from source $initial after its successor is confirmed — kept
 
-#### Refresh, settlement and discovery effects: 27 tests, 0 deleted, 27 kept
+#### Refresh, settlement and discovery effects: 27 tests, 2 deleted, 25 kept
 
-Kept: the reducers are unit-owned, and the test checks the hook that runs their effects (timers, attach, the Relay feed). The mutation check found no mutation of `reduceRefresh` (35 of 40 caught by its table) or `settlementOf` (23 of 26) that an old test catches and the tables miss, but `useSessionSuccession` has no effect-level test yet, so the wiring stays here. Owners: `reduceRefresh`, `settlementOf`, `committedRefreshOf`, `handoffOutcome`, `newerFavoritesHints`, `classifyFailure` in `agent-client/src/succession`.
+Kept: the reducers are unit-owned, and the test checks the hook that runs their effects (timers, attach, the Relay feed). The mutation check found no mutation of `reduceRefresh` (35 of 40 caught by its table) or `settlementOf` (23 of 26) that an old test catches and the tables miss. The effects are now owned by `useSessionSuccession.effects.test`; what stays here is scenario composition with the real transport, the committed-refresh evidence (`refreshCommitted`, not yet mutated in the hook test), the composition saved by a hint, and the Retry UI. Owners: `reduceRefresh`, `settlementOf`, `committedRefreshOf`, `handoffOutcome`, `newerFavoritesHints`, `classifyFailure` in `agent-client/src/succession`.
 
 - `handoff-and-discovery:177` (2) first complete A-B-C discovery retains the origin owners with independent B=%s — kept
 - `handoff-and-discovery:208` (2) reopening current B preserves its %s outcome until explicit Retry — kept
@@ -131,13 +137,13 @@ Kept: the reducers are unit-owned, and the test checks the hook that runs their 
 - `handoff-and-discovery:343` (1) uses C when current advances during initial A enrollment after the discovery page reported B — kept
 - `handoff-and-discovery:382` (2) keeps prompt-edit behavior independent of succession history owners: %s — kept
 - `handoff-and-discovery:394` (1) treats succession notifications as hints until authorized HTTP recovery completes — kept
-- `handoff-and-discovery:522` (1) keeps ordinary fixed navigation available when initial HTTP discovery reports unsupported %s — kept
+- `handoff-and-discovery:522` (1) keeps ordinary fixed navigation available when initial HTTP discovery reports unsupported %s — deleted (owner `useSessionSuccession.effects.test`, `reduceRefresh` table)
 - `handoff-and-discovery:528` (1) does not treat authorization-hidden succession as an unsupported transport — kept
 - `handoff-and-discovery:557` (1) retains an authorized desired B after its replay endpoint becomes unavailable — kept
 - `opening-and-refresh:311` (1) removes handoff navigation when fresh authorized replay is denied — kept
 - `opening-and-refresh:324` (1) waits for the selected native successor before reporting a committed refresh complete — kept
 - `opening-and-refresh:344` (1) finishes committed recovery when an earlier native attachment synchronizes during replay — kept
-- `opening-and-refresh:373` (1) waits for the original native session to recover after a %s handoff — kept
+- `opening-and-refresh:373` (1) waits for the original native session to recover after a %s handoff — deleted (owner `useSessionSuccession.effects.test`, `settlementOf` table)
 - `opening-and-refresh:397` (1) does not complete a committed refresh while its previously confirmed native session is restoring — kept
 - `opening-and-refresh:415` (1) allows a manual refresh to confirm the retained source after a native restoration deadline — kept
 - `opening-and-refresh:444` (1) keeps the last confirmed locator when a refresh after the feed reopened cannot reach the Relay — kept
@@ -197,7 +203,7 @@ Kept: the Team layout and group binding rules are unit-owned in part; the test c
 
 #### Quotes: 3 tests, 0 deleted, 3 kept
 
-Kept: the start, landing and target rules are unit-owned (9 of 11 mutations caught, the survivors are equivalent) and the old tests catch only those; they also check the selection in the timeline, the excerpt and the next message sent from the target, and `useQuotesAndReferences` has no hook test yet. Owners: `quote-flow`, `quote-selection`, `quote-targets`.
+Kept: the start, landing and target rules are unit-owned (9 of 11 mutations caught, the survivors are equivalent) and the old tests catch only those; they also check the selection in the timeline, the excerpt and the next message sent from the target, and they are the only check of the quote bar's destination lists, its attachment chips and the sent frame. The hook test (`useQuotesAndReferences.test`) catches all 7 mutations of the hook they catch (the dock placement, the window edit, the destination of the stored quote, the quoted event, the landing choice, the selected-only excerpt, the select event), so the rules no longer need them; the UI has no unit owner yet. Owners: `quote-flow`, `quote-selection`, `quote-targets`, `useQuotesAndReferences.test`.
 
 - `windows-and-teams:441` (1) quotes messages of several turns selected in one session view into another view, which sends them with its nex — kept
 - `windows-and-teams:480` (2) quotes into a session view of the %s — kept

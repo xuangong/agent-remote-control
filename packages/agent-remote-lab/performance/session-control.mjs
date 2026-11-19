@@ -26,6 +26,7 @@ for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) options[argv
 const opens = Number(options.opens ?? 30), sends = Number(options.sends ?? 4), rttMs = Number(options.rtt ?? 0), throttle = Number(options.throttle ?? 1);
 const typeDuringOpen = options['type-during-open'] === 'true';
 const PROMPT = 'Reply with the single word OK.';
+const runId = Date.now().toString(36);
 const outFile = resolve(options.out ?? '.tmp/session-control.json');
 const controller = (...args) => JSON.parse(execFileSync('agent-remote-controller-dev', args, { cwd: root, encoding: 'utf8', timeout: 180_000 }));
 const directOrigin = options.origin ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
@@ -64,7 +65,7 @@ const observer = `(() => {
     const words = WORDS.filter(([, pattern]) => pattern.test(text)).map(([word]) => word);
     const marker = window.__marker;
     const delivered = !!marker && [...pane.querySelectorAll('.agent-timeline-entry:not(.agent-outgoing-message) .agent-message-user')].some(node => node.textContent.includes(marker));
-    const state = { labels, words, composer: !!input, enabled: editable(input), sending: pane.querySelectorAll('[data-delivery-state], [data-testid="pending-send"]').length, delivered };
+    const state = { labels, words, composer: !!input, enabled: editable(input), inPane: pane !== document, sending: pane.querySelectorAll('[data-delivery-state], [data-testid="pending-send"]').length, delivered };
     const key = JSON.stringify(state);
     if (key !== last) { last = key; seen.push({ t: Date.now(), ...state }); }
   };
@@ -95,7 +96,7 @@ async function page() {
   await handle.addInitScript(observer);
   return { handle, frames };
 }
-const promptInput = async handle => (await handle.locator(PANE).count() ? handle.locator(PANE) : handle).getByRole('textbox', { name: 'Message', exact: true });
+const promptInput = handle => handle.locator(PANE).getByRole('textbox', { name: 'Message', exact: true });
 const enabledAt = (seen, from) => seen.find(state => state.t >= from && state.enabled && state.labels.some(label => label === 'Ready'))?.t;
 
 const sinceStart = (at, from) => at === undefined || from === undefined ? null : at - from;
@@ -110,10 +111,11 @@ for (let index = 0; index < opens; index++) {
   let typed = {};
   if (typeDuringOpen) {
     // The open's ordinal marks its row, so the delivered row is told apart from the history's identical prompts.
-    const marker = `${PROMPT} (${result.label ?? 'open'} ${index + 1})`;
-    await handle.waitForFunction(() => window.__seen?.some(state => state.enabled), undefined, { timeout: 30_000 });
-    const editableAt = (await handle.evaluate(() => window.__seen)).find(state => state.enabled)?.t;
-    const input = await promptInput(handle);
+    const marker = `${PROMPT} (${result.label ?? 'open'} ${runId}-${index + 1})`;
+    // The link's session lives in the Window's selected primary group; the shell painted before the Window loads is replaced.
+    await handle.waitForFunction(() => window.__seen?.some(state => state.enabled && state.inPane), undefined, { timeout: 30_000 });
+    const editableAt = (await handle.evaluate(() => window.__seen)).find(state => state.enabled && state.inPane)?.t;
+    const input = promptInput(handle);
     await handle.evaluate(text => { window.__marker = text; }, marker);
     await input.fill(marker);
     const framesBefore = frames.length;
@@ -122,13 +124,15 @@ for (let index = 0; index < opens; index++) {
     const focusKept = await handle.evaluate(() => !!document.activeElement?.closest('[data-testid="prompt-input"]'));
     await handle.keyboard.type(' next');
     const textKept = (await input.textContent())?.includes('next') ?? false;
-    await handle.waitForFunction(() => window.__seen?.some(state => state.delivered), undefined, { timeout: 120_000 }).catch(() => undefined);
+    // A composer that refuses the key while the session opens shows no sending mark: nothing was sent, and the open records it.
+    const accepted = await handle.waitForFunction(() => window.__seen?.some(state => window.__enterAt !== undefined && state.t >= window.__enterAt && (state.sending > 0 || state.delivered)), undefined, { timeout: 5000 }).then(() => true, () => false);
+    if (accepted) await handle.waitForFunction(() => window.__seen?.some(state => state.delivered), undefined, { timeout: 120_000 }).catch(() => undefined);
     let ackAt;
-    for (const deadline = Date.now() + 30_000; Date.now() < deadline && ackAt === undefined; await delay(20)) ackAt = frames.slice(framesBefore).find(frame => frame.type === 'command_acknowledged')?.t;
+    for (const deadline = Date.now() + (accepted ? 30_000 : 0); Date.now() < deadline && ackAt === undefined; await delay(20)) ackAt = frames.slice(framesBefore).find(frame => frame.type === 'command_acknowledged')?.t;
     const enterAt = await handle.evaluate(() => window.__enterAt);
     const seen = await handle.evaluate(() => window.__seen);
     typed = { editableMs: sinceStart(editableAt, start), sendingMs: sinceStart(seen.find(state => state.t >= enterAt && state.sending > 0)?.t, enterAt),
-      acknowledgedMs: sinceStart(ackAt, enterAt), deliveredMs: sinceStart(seen.find(state => state.delivered)?.t, enterAt), focusKept, textKept };
+      acknowledgedMs: sinceStart(ackAt, enterAt), deliveredMs: sinceStart(seen.find(state => state.delivered)?.t, enterAt), enterRefused: !accepted, focusKept, textKept };
     await input.fill('');
     await waitIdle();
   } else {
@@ -140,7 +144,8 @@ for (let index = 0; index < opens; index++) {
   const composerAt = enabledAt(seen, start);
   const granted = frames.find(frame => frame.type === 'session_control' && frame.access === 'control')?.t;
   result.opens.push({ start, readyMs: composerAt === undefined ? null : composerAt - start, negotiatedToComposerMs: negotiated !== undefined && composerAt !== undefined ? composerAt - negotiated : null,
-    negotiatedToGrantMs: negotiated !== undefined && granted !== undefined ? granted - negotiated : null, ...opening(seen), ...typed });
+    negotiatedToGrantMs: negotiated !== undefined && granted !== undefined ? granted - negotiated : null, ...opening(seen), ...typed,
+    states: seen.map(({ t, ...state }) => ({ ms: t - start, ...state })) });
   await handle.close();
   await delay(700);
   save();
@@ -152,7 +157,7 @@ for (let index = 0; index < sends; index++) {
   await handle.goto(url, { waitUntil: 'domcontentloaded' });
   await handle.waitForFunction(() => window.__seen?.some(state => state.enabled && state.labels.includes('Ready')), undefined, { timeout: 30_000 });
   await delay(800);
-  const input = await promptInput(handle);
+  const input = promptInput(handle);
   for (const ordinal of ['first', 'second']) {
     const requestsBefore = frames.length;
     const t0 = Date.now();
@@ -189,7 +194,7 @@ result.summary = {
   ...(typeDuringOpen ? { typedDuringOpen: {
     editableMs: summary(result.opens.map(sample => sample.editableMs).filter(Number.isFinite)), sendingMs: summary(result.opens.map(sample => sample.sendingMs).filter(Number.isFinite)),
     acknowledgedMs: summary(result.opens.map(sample => sample.acknowledgedMs).filter(Number.isFinite)), deliveredMs: summary(result.opens.map(sample => sample.deliveredMs).filter(Number.isFinite)),
-    focusKept: result.opens.filter(sample => sample.focusKept).length, textKept: result.opens.filter(sample => sample.textKept).length } } : {}),
+    enterRefused: result.opens.filter(sample => sample.enterRefused).length, focusKept: result.opens.filter(sample => sample.focusKept).length, textKept: result.opens.filter(sample => sample.textKept).length } } : {}),
   secondSend: { sendingMs: summary(result.sends.filter(send => send.ordinal === 'second').map(send => send.sendingMs).filter(Number.isFinite)), acknowledgedMs: summary(result.sends.filter(send => send.ordinal === 'second').map(send => send.acknowledgedMs).filter(Number.isFinite)) },
 };
 if (proxy) result.proxy = { ...proxy.counts };

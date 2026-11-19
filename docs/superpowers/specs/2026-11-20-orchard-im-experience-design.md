@@ -46,6 +46,17 @@ The owner asked for an IM-grade experience, and for the UI and UX work to be par
 5. **One connection indicator.** The device's own link to the Relay is the only connection signal, and it sits in the sidebar. Host and runtime state are said in words on the assistant: "Mac mini 离线，消息会在它上线后送达", or "在休息，需要时自动醒来" for a released runtime.
 6. **Product name: Orchard.** It follows the organisation name `orchardworks`. Assistants are the fruit of the orchard, and the logo is its farmer. The rename touches only what users see: the wordmark, the page title, the icons, and the login and about pages. Package names, the CLI command, the protocol names and the Controller product name stay as they are.
 
+## Phone
+
+The phone is a first-class target, not a later port (owner, 2026-11-20). Every step is designed and accepted at phone width (390 x 844) as well as desktop:
+- **Assistants.** The assistant list is the home screen.
+- **Conversation.** Opening an assistant shows its conversation full-screen, with a back gesture.
+- **Details.** The details panel is a sheet that slides up from the assistant's name.
+- **Composer.** The composer stays above the keyboard, without layout jumps. Return inserts a line on iPhone, and the send button sends.
+- **Touch targets** are at least 44 px. No floating control covers content.
+- **Safe-area insets** are respected. The page works as an installed home-screen web app.
+- **Motion and battery.** Avatar motion pauses when the page is hidden.
+
 ## Visual language
 
 - **Feel.** Soft and friendly, not formal. The softness comes from shape and voice, not decoration: no gradients, textures, emoji stickers or faces with mouths.
@@ -115,7 +126,7 @@ These are the I steps in the roadmap. Each ships on its own.
    - The details panel shows the agent, the machine, the sessions, settings, upcoming routines when P5 lands, and files.
    - Inline approvals, the work-summary line, the session-change line.
    - Assistant-voiced status sentences.
-4. **I4 Workbench and phone.** Window mode on the new tokens, a phone layout of the assistant view, and the Orchard brand across the site.
+4. **I4 Workbench.** Window mode on the new tokens and the Orchard brand across the site. The phone layout is not deferred to I4. I2 primitives and the I3 assistant view ship with their phone layouts and phone acceptance.
 
 ## Acceptance
 
@@ -124,6 +135,7 @@ These are the I steps in the roadmap. Each ships on its own.
   - a message typed during open shows as sending within 100 ms and is delivered once the session is ready.
 - **Every piece of information visible today is reachable in L2 or L3.** A component test per item kind opens L2 and finds it.
 - **Both themes pass contrast checks** (WCAG AA for text). Motion stops under `prefers-reduced-motion`.
+- **Every step passes its component and e2e checks at phone width (390 x 844) and desktop width.** A main flow runs in a mobile WebKit context.
 - **The owner reviews each step on `pnpm local`** before it merges.
 
 ## Tests

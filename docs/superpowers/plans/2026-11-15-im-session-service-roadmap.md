@@ -127,7 +127,7 @@ The owner judged the released page a diagnostic tool rather than an IM product a
 | J Production journals | Deploy the partitions Worker, then the journals-enabled configuration; smart reading per provider. | Owner approves the deploy. T2 measured in production-like conditions on `pnpm local`. |
 | I2 Design system | Tokens, light and dark themes, primitives, avatar generation, the Orchard logo. | Component pages for every primitive in both themes; WCAG AA contrast. |
 | I3 Assistant view | Bot mode in the three-panel layout: assistant sidebar, bubbles, work-summary line with L2, inline approvals, session-change line, process modes, details panel (agent, machine, sessions, settings). | Every item visible today is reachable in L2 or L3; one e2e flow for the main path. |
-| I4 Workbench and phone | Window mode on the new tokens, the phone layout, the Orchard brand across the site. | Component and e2e suites at desktop and phone widths. |
+| I4 Workbench | Window mode on the new tokens, the Orchard brand across the site. The phone layout ships with I2 and I3, not here. | Component and e2e suites at desktop and phone widths. |
 
 After I4: the rest of P2 (operation queue and business states), S6b, P3, P4 and P5 as above.
 

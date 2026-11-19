@@ -1,5 +1,5 @@
 import type { ImageDraftBinding, ImageDraftRecipient } from '@orchardworks/agent-client-web/browser';
-import { holdsUnconfirmedRows, isUncertainSend, leaseActivityLabel, leaseView, remoteSessionState, type RemoteSessionState, type SessionDescription, type SessionAttribution } from '@orchardworks/agent-client';
+import { isUncertainSend, remoteSessionState, sessionActivityLabel, sessionNotice, sessionNoticeWords, type RemoteSessionState, type SessionDescription, type SessionAttribution, type SessionFacts, type SessionNotice } from '@orchardworks/agent-client';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionViewFrame } from './SessionViewFrame.js';
 import { useFeedbackToast, useToastAnchor } from './Toast.js';
@@ -25,14 +25,15 @@ import { SessionHeadingActionsPresentationContext } from './SessionHeadingAction
 import { SessionTimelineTools } from './SessionTimelineTools.js';
 
 import { useTimelineScroll } from '../hooks/useTimelineScroll.js';
-import { useRecoveryNotice } from '../hooks/useRecoveryNotice.js';
 
 
 import type { TraceEntryRequest } from '../trace-model.js';
 
 export type LabWorkbenchActions = SessionViewActions;
 
-export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice }: { entrySelection?: TimelineEntrySelection;
+export function SessionWorkbench({ sessionDescription, onNavigateAttribution, todo, displayPreferences, onDisplayPreferencesChange, defaultDisplayMode = 'simple', fixedDisplayMode, sessionState: suppliedSessionState, handoff, workspaceLink, readingPositions: suppliedReadingPositions, draftScope, imageDraftBinding, imageRecipient, isAuthenticationError = noAuthenticationError, authenticationNotice, renderSessionSettingError, renderCommandError, readOnly: recordingReadOnly = false, draftOnly = false, mutationBlocked = false, pendingFirstInputContext, onPendingInputChange, onInspectEntry, revealEntry, state, sessionStatus: connectionStatus, attachingAgentId, actions: suppliedActions, visible = true, questionDrafts, onQuestionDraftChange, messageDraft, draftSessionKey, onMessageDraftChange, onOpenChildSession, childrenFor, resolveSessionLink, conversationPath, headingStart, headingMode = 'inline', sessionManager, headingContext, composerContext, composerNotice, composerStatus, nativeTakeover, consoleCommands, onExecuteConsoleCommand, entrySelection, timelineStart, timelineEnd, sendLater, loadingNotice, host }: { entrySelection?: TimelineEntrySelection;
+  /** The session's Host as the Relay last said: an offline Host is said once, and the composer stays enabled. */
+  host?: SessionFacts['host'];
   /** Said in place of Opening session while the conversation cannot load yet, for example because its Host is offline. */
   loadingNotice?: { title: string; detail: string };
   /** Sends from a draft-only composer whose Host is offline: the message waits for the Host. */
@@ -93,58 +94,19 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
   const [inspected, setInspected] = useState<{ agentId: string; command: AgentCommand }>();
   const selectedCommand = inspected?.agentId === state?.agent?.id ? inspected?.command : undefined;
   const hasReplica = state !== undefined;
-  const isAttaching = !hasReplica && attachingAgentId !== undefined;
-  const connectionFailure = sessionStatus === 'connecting'
-    ? state?.diagnostics.find((diagnostic) => !diagnostic.recoverable)
-    : sessionStatus === 'unavailable' ? [...(state?.diagnostics ?? [])].reverse().find((diagnostic) => !diagnostic.recoverable)
-    : undefined;
   const nativeFailure = state?.agent?.runtimeInfo.failure;
-  const agentFailure = state?.agent?.status === 'failed'
-    ? nativeFailure?.message.trim() || state.agent.lastError?.trim() || 'The Agent reported a failed runtime without error details.'
-    : undefined;
   const failureInTimeline = !!nativeFailure?.turnId && state?.timeline.entries.some(entry =>
     entry.turnId === nativeFailure.turnId && entry.item.type === 'error' && entry.item.message === nativeFailure.message);
-  const runtimeConnection = session.runtime;
   const runtimeMutationDisabled = mutationBlocked || !session.operations.interaction_response.allowed;
-  const runtimeNotice = runtimeConnection?.state === 'reconnecting'
-    ? 'Native runtime is reconnecting. Changes are temporarily unavailable.'
-    : runtimeConnection?.state === 'restoring'
-      ? 'Native runtime is restoring this session. Changes are temporarily unavailable.'
-      : runtimeConnection?.state === 'unavailable'
-        ? 'Native runtime is unavailable. Changes are unavailable.'
-        : undefined;
-  const runtimeError = connectionFailure?.message
-    ?? (runtimeConnection?.state === 'unavailable' ? runtimeNotice : undefined);
-  const recoveryNoticeDue = useRecoveryNotice(
-    draftSessionKey ?? attachingAgentId ?? state?.agent?.id ?? '', sessionStatus,
-    runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring',
-    visible && !readOnly && !runtimeError && !agentFailure,
-  );
-  useFeedbackToast('Session runtime', visible && !readOnly ? runtimeError
-    ?? (recoveryNoticeDue ? runtimeNotice ?? reconnectingNotice(state) : undefined) : undefined,
-    runtimeError ? 'error' : 'info');
+  // The one business notice of the session (target T5), said once: above the timeline for a refused, failed or unavailable
+  // session, in the composer's context for an offline Host, and by the composer's control notice for a read-only lease.
+  const facts: SessionFacts = { session, host, replica: state };
+  const notice = sessionNotice(facts);
   const activity = session.activity;
-  // Rows held from the device or across a replacement stand in for the opening words with the session's last business label.
-  const rowsHeld = session.holdingRows || holdsUnconfirmedRows(state);
-  const nativeLabel = leaseActivityLabel(leaseView(state?.sessionControl).state);
-  const activityLabel = nativeLabel ? nativeLabel
-    : agentFailure ? 'Agent failed'
-    : sessionStatus === 'unavailable' ? 'Unavailable'
-    : connectionFailure ? 'Connection failed'
-    : sessionStatus === 'disconnected' ? 'Reconnecting'
-    : !rowsHeld && sessionStatus === 'connecting' ? 'Opening session'
-    : !rowsHeld && session.controlChecking ? 'Checking access'
-    : !rowsHeld && sessionStatus === 'catching_up' ? 'Synchronizing'
-    : sessionStatus === 'idle' ? 'Disconnected'
-    : !state?.agent ? 'Opening session'
-    : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
-    : runtimeConnection?.state === 'restoring' ? 'Restoring'
-    : runtimeConnection?.state === 'unavailable' ? 'Unavailable'
-    : activity === 'closed' ? 'Closed'
-    : activity === 'starting' ? 'Starting'
-    : activity === 'waiting' ? 'Waiting for response'
-    : activity === 'running' ? 'Working'
-    : 'Ready';
+  const activityLabel = sessionActivityLabel(facts) ?? '';
+  const timelineNotice = notice && (notice.kind === 'unavailable' || notice.kind === 'agent_unavailable' || notice.kind === 'failed' && !failureInTimeline) ? notice : undefined;
+  const hasTarget = (draftSessionKey ?? attachingAgentId) !== undefined;
+  const hostNotice = notice?.kind === 'host_offline' && !(state === undefined && loadingNotice) ? sessionNoticeWords(notice) : undefined;
   const viewOptions = fixedDisplayMode ? null : <SessionViewOptions key={displayScope} preferences={preferences} onChange={changeDisplayPreferences} />;
   const layoutClass = [todo ? 'lab-workbench-with-todo' : '', selectedCommand ? 'lab-command-details-open' : '', headingMode === 'toolbar' ? 'lab-workbench-toolbar-heading' : ''].filter(Boolean).join(' ');
   return <TimelineDisplay.Provider value={preferences.mode}><TimelineLettersVisible.Provider value={preferences.lettersVisible}>
@@ -152,9 +114,9 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     <div className="lab-workbench-heading-group" hidden={headingMode === 'toolbar' && !headingContext && !details}>
     <SessionHeading hidden={headingMode === 'toolbar'}
       leading={headingMode === 'inline' ? <>{headingStart}{workspaceLink}{viewOptions}<span className="lab-heading-search-slot" ref={setHeadingSearchTarget} /></> : undefined}
-      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{hasReplica ? activityLabel : ''}</span></> : undefined}>
+      trailing={headingMode === 'inline' ? <>{sessionManager}<span className="lab-conversation-status">{activityLabel}</span></> : undefined}>
         {conversationPath}
-        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica || isAttaching ? 'Conversation' : 'Ready for a session'}</h2>
+        <h2 hidden={!!conversationPath} className="agent-session-title" data-session-status={activity}>{hasReplica || hasTarget ? 'Conversation' : 'Ready for a session'}</h2>
         {headingMode === 'inline' ? toggle : null}
     </SessionHeading>
     {details}
@@ -165,14 +127,15 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
     <WorkbenchTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
       searchTriggerTarget={headingMode === 'inline' ? headingSearchTarget : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}
       visible={visible} readingPositions={readingPositions} actions={actions} revealEntry={revealEntry}
-      agentFailure={failureInTimeline ? undefined : agentFailure} connectionFailure={connectionFailure} runtimeNotice={runtimeNotice} runtimeMutationDisabled={runtimeMutationDisabled}
+      notice={timelineNotice} hasTarget={hasTarget} runtimeMutationDisabled={runtimeMutationDisabled}
       onInspectEntry={onInspectEntry} onOpenChildSession={onOpenChildSession} childrenFor={childrenFor} resolveSessionLink={resolveSessionLink}
       questionDrafts={questionDrafts} onQuestionDraftChange={onQuestionDraftChange} entrySelection={entrySelection} timelineStart={timelineStart} timelineEnd={timelineEnd} loadingNotice={loadingNotice} />
     {headingMode === 'toolbar' && timelineToolsTarget ? createPortal(<SessionHeadingActionsPresentationContext.Provider value="inline">{workspaceLink}{sessionManager}{viewOptions}{toggle}</SessionHeadingActionsPresentationContext.Provider>, timelineToolsTarget) : null}
     <div className="lab-composer-region">
     {composerStatus}
-    <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover && !draftOnly} data-collapsed={composerHidden || undefined}>
+    <div ref={toastAnchor} className="lab-composer-dock" hidden={!state?.agent && !nativeTakeover && !draftOnly && !hasTarget} data-collapsed={composerHidden || undefined}>
       <div className="lab-composer-context" hidden={composerHidden}>
+        {hostNotice ? <p className="lab-composer-host-notice" role="status">{hostNotice}</p> : null}
         {composerContext}
         {composerNotice}
         {reauthenticate ? authenticationNotice : null}
@@ -189,6 +152,7 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
           <DraftComposer
             keyboardDismissBoundaryRef={composerTouchBoundary}
             sessionState={session}
+            host={host}
             draftOnly={draftOnly}
             mutationBlocked={mutationBlocked}
             onPendingInputChange={onPendingInputChange}
@@ -237,11 +201,6 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
 
 const noAuthenticationError = () => false;
 /** Stream capacity explains what frees a slot, and a paused session says how it resumes; other interruptions only reconnect. */
-function reconnectingNotice(state: AgentReplicaState | undefined): string {
-  const latest = state?.diagnostics.at(-1);
-  return latest && ['session_capacity', 'session_paused'].includes(latest.code) ? latest.message : 'Timeline synchronization is reconnecting.';
-}
-
 function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | undefined, isAuthenticationError: (error: unknown) => boolean, presentedInline: readonly string[]): { actions: LabWorkbenchActions; reauthenticate: boolean } {
   const activeSession = useRef(sessionId);
   activeSession.current = sessionId;
@@ -274,12 +233,16 @@ function useActionFeedback(actions: LabWorkbenchActions, sessionId: string | und
 }
 
 const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, readOnly, state, sessionStatus, attachingAgentId, visible, readingPositions, actions, revealEntry,
-  agentFailure, connectionFailure, runtimeNotice, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
+  notice, hasTarget, runtimeMutationDisabled, onInspectEntry, onOpenChildSession, childrenFor, resolveSessionLink,
   questionDrafts, onQuestionDraftChange, toolsTargetRef, toolsCollapsible, toolsScope, searchTriggerTarget, entrySelection, timelineStart, timelineEnd, loadingNotice }: Pick<Parameters<typeof SessionWorkbench>[0], 'readOnly' | 'state' | 'sessionStatus' | 'attachingAgentId' | 'visible' | 'actions' | 'revealEntry' | 'onInspectEntry' | 'onOpenChildSession' | 'childrenFor' | 'resolveSessionLink' | 'questionDrafts' | 'onQuestionDraftChange' | 'timelineStart' | 'timelineEnd' | 'entrySelection' | 'loadingNotice'> & {
-    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string; agentFailure?: string;
+    readingPositions: NonNullable<Parameters<typeof useTimelineScroll>[2]>; toolsTargetRef(node: HTMLDivElement | null): void; toolsCollapsible: boolean; toolsScope?: string;
+    /** The session's notice when it belongs above the timeline: refused, failed or unavailable. */
+    notice?: SessionNotice;
+    /** The view has a session to show, resolved or not: the empty state is only for a view with none. */
+    hasTarget: boolean;
     /** A visible heading hosts the search trigger so it never covers Timeline content; null until it mounts. */
     searchTriggerTarget?: HTMLElement | null;
-    connectionFailure?: { message: string }; runtimeNotice?: string; runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
+    runtimeMutationDisabled: boolean; nativeTakeover?: boolean;
   }) {
   const searchScope = JSON.stringify([state?.agent?.id, state?.timeline.epoch]);
   const [openSearchScope, setOpenSearchScope] = useState<string>();
@@ -295,7 +258,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
   const display = useContext(TimelineDisplay);
   const lettersVisible = useContext(TimelineLettersVisible);
   useLayoutEffect(() => { setSearchSelection(undefined); }, [lettersVisible]);
-  const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, agentFailure, connectionFailure, runtimeNotice, questionDrafts, childrenFor]);
+  const contentRevision = useMemo(() => ({}), [state, display, lettersVisible, notice, questionDrafts, childrenFor]);
   const scroll = useTimelineScroll(JSON.stringify([state?.agent?.id]), visible, readingPositions, undefined,
     actions.loadOlder ? { hasOlder: state?.timeline.hasOlder === true, cursor: state?.timeline.entries[0]?.seqStart.toString(), load: actions.loadOlder } : undefined, contentRevision, 'bottom');
   const consumedReveal = useRef<string>();
@@ -332,7 +295,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
     if (visible && selectedSearchKey) scroll.revealEntry(selectedSearchKey, 'center', applySearchInset());
   }, [visible, selectedSearchKey, searchSelection?.request]);
   const hasReplica = state !== undefined;
-  const isAttaching = !hasReplica && attachingAgentId !== undefined;
+  const isAttaching = !hasReplica && hasTarget;
   const searchButton = state?.timeline.initialized ? <button ref={searchTrigger} type="button" className="lab-timeline-search-trigger"
     hidden={searchOpen && !searchTriggerTarget} aria-label="Search this session" title="Search this session" aria-expanded={searchOpen}
     onClick={() => { if (searchOpen) closeSearch(); else setOpenSearchScope(searchScope); }}>
@@ -361,10 +324,7 @@ const WorkbenchTimeline = memo(function WorkbenchTimeline({ nativeTakeover, read
       <div className="lab-timeline-scroll" data-testid="timeline" ref={scroll.viewportRef} tabIndex={0} onScroll={scroll.onScroll} onWheel={scroll.onWheel} onPointerDown={scroll.onPointerDown} onKeyDown={scroll.onKeyDown} onFocus={scroll.onFocus} onTouchStart={scroll.onTouchStart} onTouchMove={scroll.onTouchMove}>
         <div className="lab-conversation-content" ref={scroll.contentRef}>
           {hasReplica ? <>
-            {agentFailure ? <p className="lab-control-note" role="alert">Agent failed: {agentFailure}</p>
-              : connectionFailure ? <p className="lab-control-note" role="alert">{sessionStatus === 'unavailable' ? connectionFailure.message : `Agent connection failed: ${connectionFailure.message}`}</p>
-              : sessionStatus === 'disconnected' ? <p className="lab-control-note" role="alert">{reconnectingNotice(state)}</p> : null}
-            {runtimeNotice ? <p className="lab-control-note" role="status">{runtimeNotice}</p> : null}
+            {notice ? <p className="lab-control-note" role="alert">{sessionNoticeWords(notice)}</p> : null}
             <AgentTimeline
               state={state}
               onEditPrompt={actions.editPrompt}

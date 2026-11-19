@@ -19,7 +19,7 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
   const phase = handoff && ['taking', 'checking', 'restoring'].includes(handoff.phase) ? handoff.phase : pending ? 'taking' : undefined;
   const lease = leaseView(control);
   const native = lease.native;
-  if (lease.state === 'control') return null;
+  if (lease.state === 'control' || lease.state === 'checking') return null;
   const takeControl = async () => {
     if (phase || !connected || !onTakeControl) return;
     setPending(true); setFailure(undefined);
@@ -28,11 +28,9 @@ export function SessionControlNotice({ control, handoff, connected, onTakeContro
       setFailure({ identity, message: error instanceof Error ? error.message : 'Could not take control. Try again when connected.' });
     } finally { setPending(false); }
   };
-  const label = phase === 'restoring' ? 'Restoring session…' : phase === 'checking' ? 'Checking session…'
-    : phase === 'taking' ? 'Taking control…'
-    : leaseNoticeLabel(lease.state);
-  const description = phase === 'restoring' ? 'Control will be available after synchronization.'
-    : !phase && native ? 'Taking over interrupts its running work.'
+  // Every phase of taking over says the same thing to the person who asked for it.
+  const label = phase ? 'Taking control…' : leaseNoticeLabel(lease.state);
+  const description = !phase && native ? 'Taking over interrupts its running work.'
     : !phase && !connected ? 'Reconnect to take control.' : undefined;
   return <div className="lab-session-control" data-read-only="true" data-native={native || undefined} aria-busy={!!phase}>
     <div className="lab-session-control-row">

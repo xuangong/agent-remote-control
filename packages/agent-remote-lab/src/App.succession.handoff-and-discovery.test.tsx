@@ -350,7 +350,9 @@ it('confirms only B through the real session channel in StrictMode and keeps its
   const editor = visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]');
   expect(editor?.textContent).toBe('A local draft');
   await act(async () => { for (const update of f.updates) update('B', 'restoring'); });
-  await settleApp(() => { expect(f.view.textContent).toContain('Native runtime is restoring this session.'); });
+  // A restoring runtime says nothing per session (target T5); the view and its editor stay.
+  await settleApp(() => { expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).toBe(editor); });
+  expect(f.view.textContent).not.toMatch(/Restoring|Reconnecting|Synchronizing|Opening session/);
   expect(visibleQuery(f.view, '.lab-primary-conversation [data-testid="prompt-input"]')).toBe(editor);
   await act(async () => { for (const update of f.updates) update('B'); });
   expect(f.frames.filter(frame => frame.type === 'subscribe').every(frame => frame.agentId === 'agent-B')).toBe(true);

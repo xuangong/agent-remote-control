@@ -1,6 +1,5 @@
 import type { SessionEntry } from '../session-tree.js';
 import { conversationLocalStorage } from '../conversation-storage.js';
-import type { RemoteSessionStatus } from '@orchardworks/agent-client';
 import type { OpenedSession } from '../directory-client.js';
 import { Menu } from '../ui/Menu.js';
 
@@ -46,17 +45,6 @@ export function rememberAgent(agentId: string): void {
 
 export function message(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
-}
-
-export function sessionStatusLabel(status: RemoteSessionStatus): string {
-  switch (status) {
-    case 'connecting': return 'Opening session';
-    case 'catching_up': return 'Synchronizing';
-    case 'disconnected': return 'Reconnecting';
-    case 'unavailable': return 'Unavailable';
-    case 'ready': return 'Ready';
-    case 'idle': return 'Ready';
-  }
 }
 
 export function openedSessionsKey(baseUrl: string): string { return `agent-remote-opened:${baseUrl}`; }

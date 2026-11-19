@@ -78,7 +78,8 @@ it.each(['A', 'B'])('keeps native takeover visible from failed initial binding %
     const controlRequests = f.frames.filter(frame => frame.message?.type === 'session_control_request').length;
     await act(async () => release());
     await settleApp(() => expect(f.frames.filter(frame => frame.message?.type === 'session_control_request').length).toBeGreaterThan(controlRequests));
-    expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Restoring session…"]')?.disabled).toBe(true);
+    // Every phase of the take-over says the same words (I1).
+    expect(f.view.querySelector<HTMLButtonElement>('[aria-label="Taking control…"]')?.disabled).toBe(true);
     expect(f.view.querySelector('[data-testid="prompt-submit"]')).toBeNull();
     await act(async () => releaseControl());
     await settleApp(() => {

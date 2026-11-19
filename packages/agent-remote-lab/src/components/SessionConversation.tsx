@@ -209,14 +209,17 @@ export function SessionConversation(props: SessionConversationProps) {
   // only its input waits (it queues) until a discovery confirms the locator again.
   const locatorWaiting = !!retainedResolution && staleLocator && !retainingInput;
   const pending = disconnected || !!resolutionError && !locatorWaiting || !displayedSession;
-  return <FamilyChat {...props} disconnected={disconnected} onPendingInputChange={count => {
+  // A view opening its first session takes messages, which wait until it is ready (target T4). A failure, an offline Host and a
+  // view whose target changed under a previous session do not: the composer's draft may belong to that previous session.
+  const opening = pending && !session && !disconnected && !(resolutionError && !locatorWaiting) && !error && !props.offline;
+  return <FamilyChat {...props} disconnected={disconnected} opening={opening} onPendingInputChange={count => {
       setInputOwner(previous => count ? previous?.count === count && sessionKey(previous.source) === sessionKey(target) && sessionKey(previous.target) === sessionKey(currentTarget)
         ? previous : { source: target, target: currentTarget, count } : undefined);
       props.onPendingInputChange?.(count);
     }} session={session ?? { ...currentTarget, agentId: '' }} attachmentAvailable={!disconnected && !!session} target={currentTarget} pending={pending} preview={preview} availabilityError={disconnected || owner ? undefined : resolutionNotice ?? error} nativeTakeover={nativeTakeover}
     onRetryAttachment={retrySynchronizing ?? (enabled && canAttach && !props.offline && !props.attachmentManaged ? () => { unavailable.forget(currentTarget); setAttempt(value => value + 1); } : undefined)} />;
 }
-function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
+function FamilyChat({ disconnected, opening, hostLabel, visible = true, fixedDisplayMode, mutationBlocked = false, onPendingInputChange, session, pending, transport, navigation, draftStore, draftBinding, imageDraftBinding, imageRecipient: explicitImageRecipient, controls, menuActions, offline, entries, onNavigate, displayBinding, baseUrl, target, preview, viewId, nativePrefixOnly, availabilityError, onRetryAttachment, consoleCommands, onExecuteConsoleCommand, replica, replicaFor, onSessionReady, onSessionBound, windowViewId, sessionPresentation, renderSessionFooter, familyRoot, nativeTakeover, sessionIntent, attachmentAvailable, compact, successionContext: explicitContext, directoryFor }: SessionConversationProps & { disconnected: boolean; opening: boolean; nativeTakeover?: ReactNode; attachmentAvailable: boolean; session: OpenedSession; pending: boolean; preview?: AgentReplicaState; availabilityError?: string; onRetryAttachment?(): void }) {
   const conversation = useConversationSession(session, transport, replica ?? replicaFor?.(session.agentId), pending, { viewId, nativePrefixOnly, externalAttachment: true, sessionIntent, attachmentAvailable });
   const { state, sessionState, status, actions, questions, setQuestions, imageRecipient, operationBinding } = conversation;
   const nativeIdentityMatches = state?.agent?.id === session.agentId && state.agent.providerId === session.providerId
@@ -290,7 +293,7 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     pendingFirstInputContext: context && context.state !== 'materialized' ? { state: context.state, onRetry: context.onRetry } : undefined,
   } : undefined;
   return <CommunicationNavigationContext.Provider value={inherited?.communication}><LabWorkbench displayBinding={familyDisplayBinding({ displayBinding, target, entries, viewId, windowViewId })} headingMode={compact ? 'toolbar' : 'inline'} defaultDisplayMode="content"
-    sessionIdentity={presentedSession} hostLabel={hostLabel} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
+    sessionIdentity={presentedSession} hostLabel={hostLabel} host={{ online: !offline, ...(hostLabel ? { name: hostLabel } : {}) }} consoleCommands={consoleCommands} onExecuteConsoleCommand={onExecuteConsoleCommand} nativeTakeover={nativeTakeover}
     childrenFor={childrenFor} onOpenChildSession={navigationActions.openChildSession}
     resolveSessionLink={id => inherited?.resolveSessionLink(id) ?? local.resolveSessionLink(id)} revealEntry={inherited?.revealEntry}
     state={displayedState} sessionState={pending ? undefined : sessionState} sessionStatus={pending ? 'connecting' : status} attachingAgentId={operationBinding.source.agentId} actions={safeActions} operationBinding={operationBinding}
@@ -298,7 +301,7 @@ function FamilyChat({ disconnected, hostLabel, visible = true, fixedDisplayMode,
     onQuestionDraftChange={(id, value) => setQuestions(current => ({ ...current, [id]: value }))}
     conversationPath={<strong className="agent-session-title">{presentedSession.title}</strong>} {...presentation} {...firstInputPresentation}
     visible={visible && presentation?.visible !== false} fixedDisplayMode={fixedDisplayMode} mutationBlocked={disconnected || mutationBlocked || presentation?.mutationBlocked}
-    draftOnly={pending || !nativeIdentityMatches || !!presentation?.draftOnly}
+    draftOnly={pending && !opening || identityMismatch || !!presentation?.draftOnly}
     sessionManager={presentation?.sessionManager ?? <>{controls}<SessionHeadingActions sessionKey={key} alwaysCollapsed={!!menuActions}><SessionLink session={target} />{menuActions}</SessionHeadingActions></>}
     onPendingInputChange={reportPendingInput} headingStart={presentation?.headingStart}
     composerNotice={<>{/* While the Host is away the conversation opens again by itself once it is back; nothing to retry. */}

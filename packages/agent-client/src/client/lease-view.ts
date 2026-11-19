@@ -31,10 +31,9 @@ export function leaseView(control: AgentReplicaState['sessionControl']): LeaseVi
   return { state, readOnly: true, checking: false, native: owner !== undefined };
 }
 
-/** The words a read-only notice shows for a lease state. */
-export function leaseNoticeLabel(state: LeaseState): string {
+/** The words a read-only notice shows for a lease state. A control check says nothing: it is not a business fact (target T5). */
+export function leaseNoticeLabel(state: Exclude<LeaseState, 'checking'>): string {
   switch (state) {
-    case 'checking': return 'Checking access…';
     case 'native_cli': return 'Native CLI has control';
     case 'other_controller': return 'Another Controller has control';
     default: return 'Ready to take control';

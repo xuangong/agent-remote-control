@@ -1,11 +1,11 @@
 // The active Host, the conversation stack, the page title and renaming.
-import { holdsUnconfirmedRows, RemoteOperationError } from '@orchardworks/agent-client';
+import { remoteSessionState, RemoteOperationError, sessionActivityLabel, sessionNotice, sessionNoticeWords } from '@orchardworks/agent-client';
 import { useEffect } from 'react';
 import { compositionSession } from '../session-composition.js';
 import type { OpenedSession } from '../directory-client.js';
 import { sessionKey } from '../session-tree.js';
 import { sidePath } from '../side-tree.js';
-import { sessionStatusLabel, viewKey } from './helpers.js';
+import { viewKey } from './helpers.js';
 import type { ActiveSessionSlice } from './useActiveSession.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { RequestedSessionSlice } from './useRequestedSession.js';
@@ -36,9 +36,10 @@ export function useHostAndStack(scope: Pick<AppInputs & ActiveSessionSlice & Rem
 
   const connectionProviderName = providerName ?? state?.agent?.providerId ?? (succession.selected ? providerConnectionName(succession.selected.hostId ?? 'local', succession.selected.providerId) : 'No active Agent');
 
-  // Rows held from the device or across a replacement stand in for the opening words; a broken connection is never hidden.
-  const connectionStatusLabel = hostOffline ? 'Host offline' : state?.agent?.status === 'failed' ? 'Agent failed'
-    : holdsUnconfirmedRows(state) && (status === 'connecting' || status === 'catching_up') ? 'Ready' : sessionStatusLabel(status);
+  // The session's business state: its notice, or its activity; never its connection phase (target T5).
+  const sessionFacts = { session: remoteSessionState(state, status), host: activeHost ? { online: activeHost.online !== false, name: activeHost.name } : undefined, replica: state };
+  const statusNotice = sessionNotice(sessionFacts);
+  const connectionStatusLabel = statusNotice ? sessionNoticeWords(statusNotice) : sessionActivityLabel(sessionFacts) ?? '';
 
 
 

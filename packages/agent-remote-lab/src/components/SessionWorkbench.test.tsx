@@ -6,6 +6,7 @@ import { SessionWorkbench } from './SessionWorkbench.js';
 import { LabWorkbench } from './LabWorkbench.js';
 import { SessionControlNotice } from './SessionControlNotice.js';
 import { SessionHeadingActions } from './SessionHeadingActions.js';
+import { ToastProvider } from './Toast.js';
 import type { AgentReplicaState } from '@orchardworks/agent-client';
 import { createTimelineRenderModel } from '@orchardworks/agent-client-web/react';
 
@@ -249,16 +250,17 @@ it('keeps handoff recovery visible before a native session is available', async 
   expect(notice).toBeDefined(); expect(notice.closest('[hidden]')).toBeNull();
 }, 5000);
 
-it('explains a stream capacity refusal instead of only reporting a reconnect', async () => {
+// Owner decision 5 (I1): a capacity refusal and a pause are L3 facts (Trace, Replica Inspector); the conversation says nothing.
+it('keeps a stream capacity refusal and a pause out of the conversation, in the replica for diagnosis', async () => {
   const message = 'Too many sessions are open across your browsers and devices (limit 64). Close tabs, windows or session views you no longer use.';
-  const capacity: AgentReplicaState = { ...replicaState, diagnostics: [{ code: 'session_capacity', message, recoverable: true }] };
-  const refused = await render(<SessionWorkbench state={capacity} sessionStatus="disconnected" actions={{}} />);
-  expect(refused.querySelector('[role="alert"]')?.textContent).toBe(message);
-  const interrupted = await render(<SessionWorkbench state={{ ...replicaState, diagnostics: [...capacity.diagnostics, { code: 'connection_timeout', message: 'Timed out.', recoverable: true }] }} sessionStatus="disconnected" actions={{}} />);
-  expect(interrupted.querySelector('[role="alert"]')?.textContent).toBe('Timeline synchronization is reconnecting.');
   const resume = 'Paused to free a connection for a window used more recently. Return to this window to resume.';
-  const paused = await render(<SessionWorkbench state={{ ...replicaState, diagnostics: [{ code: 'session_paused', message: resume, recoverable: true }] }} sessionStatus="disconnected" actions={{}} />);
-  expect(paused.querySelector('[role="alert"]')?.textContent).toBe(resume);
+  for (const diagnostic of [{ code: 'session_capacity', message, recoverable: true }, { code: 'session_paused', message: resume, recoverable: true }]) {
+    const state: AgentReplicaState = { ...replicaState, diagnostics: [diagnostic] };
+    const view = await render(<SessionWorkbench state={state} sessionStatus="disconnected" actions={{}} />);
+    expect(view.querySelector('[role="alert"]')).toBeNull();
+    expect(view.textContent).not.toContain(diagnostic.message);
+    expect(view.textContent).not.toMatch(/Reconnecting|Synchronizing|Opening session/);
+  }
 });
 
 it('shows what follows the conversation even before it has loaded, so messages waiting for an offline Host are visible', async () => {
@@ -274,4 +276,48 @@ it('says why a conversation cannot open yet when its Host is offline', async () 
   const empty = container.querySelector('.lab-empty-state')!;
   expect(empty.querySelector('h3')?.textContent).toBe('Mac mini is offline');
   expect(empty.querySelector('p')?.textContent).toBe('The conversation appears here when it is back. Messages you send now wait for it.');
+});
+
+const T5_WORDS = /Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation/i;
+
+it('says no connection word in the heading, the notes or a toast while the session catches up, checks control and loses its link', async () => {
+  vi.useFakeTimers();
+  try {
+    let update!: (status: 'catching_up' | 'disconnected' | 'ready') => void;
+    const checking: AgentReplicaState = { ...replicaState, sessionControl: { access: 'checking', available: false } };
+    function Harness() {
+      const [status, setStatus] = useState<'catching_up' | 'disconnected' | 'ready'>('catching_up');
+      update = setStatus;
+      return <ToastProvider><SessionWorkbench state={checking} sessionStatus={status} draftSessionKey="session" actions={{ sendMessage: async () => {} }} /></ToastProvider>;
+    }
+    const view = await render(<Harness />);
+    for (const status of ['catching_up', 'disconnected', 'ready'] as const) {
+      await act(async () => update(status));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+      const said = [...view.querySelectorAll('.lab-conversation-status, .lab-control-note, .lab-toast')].map(node => node.textContent).join(' ');
+      expect(said, status).not.toMatch(T5_WORDS);
+      expect(view.querySelector('.lab-toast'), status).toBeNull();
+    }
+  } finally { vi.useRealTimers(); }
+});
+
+it('shows the composer with an enabled editor before the first Snapshot when the view has a session to open', async () => {
+  const view = await render(<SessionWorkbench state={undefined} sessionStatus="connecting" draftSessionKey="session" attachingAgentId="" actions={{}} />);
+  const dock = view.querySelector<HTMLElement>('.lab-composer-dock')!;
+  expect(dock.hidden).toBe(false);
+  expect(view.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
+  expect(view.querySelector('.lab-empty-state')).toBeNull();
+  expect(view.textContent).not.toMatch(T5_WORDS);
+  const none = await render(<SessionWorkbench state={undefined} sessionStatus="idle" actions={{}} />);
+  expect(none.querySelector('.lab-empty-state h3')?.textContent).toBe('Start with a Provider');
+});
+
+it('says an offline Host once on the page, and keeps the composer enabled', async () => {
+  const offline = (await render(<SessionWorkbench state={replicaState} sessionStatus="ready" draftSessionKey="session" host={{ online: false, name: 'Mac mini' }} actions={{ sendMessage: async () => {} }} />));
+  expect(offline.textContent!.split('Mac mini is offline').length - 1).toBe(1);
+  expect(offline.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!.disabled).toBe(false);
+  // While the conversation is still opening, its loading notice says it, and the composer does not repeat it.
+  const opening = await render(<SessionWorkbench state={undefined} sessionStatus="connecting" draftSessionKey="session" attachingAgentId="" host={{ online: false, name: 'Mac mini' }}
+    loadingNotice={{ title: 'Mac mini is offline', detail: 'The conversation appears here when it is back.' }} actions={{}} />);
+  expect(opening.textContent!.split('Mac mini is offline').length - 1).toBe(1);
 });

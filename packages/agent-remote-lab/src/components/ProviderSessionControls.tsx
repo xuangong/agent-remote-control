@@ -42,7 +42,7 @@ export function ProviderSessionControls({ providers, selectedProviderId, catalog
       <p id="session-mode-note" className="lab-control-note">Planning requires Provider support.</p>
     </> : null}
     {children}
-    <button type="button" data-testid="session-create" onClick={onCreateSession} disabled={!canCreate} aria-describedby="session-create-note">{creating ? 'Opening session…' : 'Open session'}</button>
+    <button type="button" data-testid="session-create" onClick={onCreateSession} disabled={!canCreate} aria-describedby="session-create-note">{creating ? 'Creating session…' : 'Open session'}</button>
     {catalogStatus === 'loading' ? <p className="lab-control-note" role="status" aria-live="polite">Loading providers</p> : null}
     {catalogStatus === 'empty' ? <p id="session-create-note" className="lab-control-note">No Provider is registered in this lab server.</p> : null}
     {catalogStatus === 'error' ? <p id="session-create-note" className="lab-control-note" role="alert">{catalogError}<button type="button" data-testid="provider-retry" onClick={onRetryProviders}>Retry providers</button></p> : null}

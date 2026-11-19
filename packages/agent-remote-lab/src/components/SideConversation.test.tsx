@@ -59,7 +59,8 @@ it('keeps simultaneous side streams through focus and hidden-window changes and 
   const first = container.querySelector<HTMLElement>('.lab-side-conversation')!;
   expect(first.textContent).toContain('Conversation a');
   expect(first.querySelector('[data-session-status]')?.getAttribute('data-session-status')).toBe('running');
-  expect(first.textContent).toContain('Reconnecting');
+  expect(first.textContent).toContain('Working');
+  expect(first.textContent).not.toContain('Reconnecting');
 });
 
 it('displays cached content before reconnecting and resumes a reopened side window from its epoch and cursor', async () => {

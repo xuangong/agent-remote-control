@@ -361,7 +361,7 @@ describe('App', () => {
     try {
       const container = await render(<App transport={labTransport()} />);
       expect(container.querySelector('[data-testid="workbench"]')).not.toBeNull();
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
       // A conversation that is still opening says nothing until it has rows, and is not the session-start empty state.
       expect(container.textContent).not.toContain('Opening session remembered-agent');
       expect(container.textContent).not.toContain('Start with a Provider');
@@ -370,12 +370,10 @@ describe('App', () => {
     }
   });
 
-  it.each([
-    ['catching_up', 'Synchronizing'],
-    ['disconnected', 'Reconnecting'],
-  ] as const)('presents %s as %s without discarding the last replica', async (sessionStatus, label) => {
+  it.each(['catching_up', 'disconnected'] as const)('presents %s as the business state, never a connection word, without discarding the last replica', async sessionStatus => {
     const container = await render(<App initialState={replicaState} initialSessionStatus={sessionStatus} actions={{}} />);
-    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain(label);
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Ready');
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
     expect(container.querySelector('[aria-label="Agent timeline"]')).not.toBeNull();
   });
 
@@ -407,9 +405,10 @@ describe('App', () => {
     const container = await render(<App initialState={state} initialSessionStatus="ready" actions={{}} />);
     const summary = container.querySelector('[data-testid="connection-summary"]') as HTMLElement;
 
-    expect(summary.textContent).toContain('Agent failed');
+    // The failure is the session's notice, in its own words.
+    expect(summary.textContent).toContain('Provider observation stream failed.');
     expect(summary.textContent).not.toContain('Ready');
-    expect(summary.getAttribute('aria-label')).toContain('Agent failed');
+    expect(summary.getAttribute('aria-label')).toContain('Provider observation stream failed.');
     expect(summary.getAttribute('aria-label')).not.toContain('Ready');
   });
 
@@ -624,7 +623,7 @@ describe('App', () => {
 
       expect(container.querySelector('#lab-context')).toBeNull();
       expect(document.activeElement).toBe(container.querySelector('[data-testid="workbench"]'));
-      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
+      expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
     } finally {
       window.matchMedia = originalMatchMedia;
     }
@@ -688,7 +687,7 @@ describe('App', () => {
     });
 
     expect(transport.resumeAgent).toHaveBeenCalledWith(expect.any(String), previousState.agent.persistence);
-    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).toContain('Opening session');
+    expect(container.querySelector('[data-testid="connection-summary"]')?.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/);
     expect(container.querySelector('[aria-label="Agent timeline"]')).toBeNull();
     expect(container.querySelector('[data-testid="connection-status"]')?.textContent).toBe('Connecting');
   });

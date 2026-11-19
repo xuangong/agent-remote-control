@@ -20,40 +20,21 @@ async function workbench(initial: Partial<Props> = {}) {
   return { container, toast: () => container.querySelector('.lab-toast'), update: (props: Partial<Props>) => act(async () => update(props)) };
 }
 
-it('filters short disconnects and allows a later prolonged disconnect without a cooldown', async () => {
+// Target T5: a session says nothing about its connection. The page's one indicator is the device link (GatewayController).
+it('raises no toast and shows no connection word through disconnects, retries, catch-up and a recovering runtime', async () => {
   const view = await workbench();
-  await view.update({ sessionStatus: 'disconnected' });
-  expect(view.toast()).toBeNull();
-  expect(view.container.querySelector('.lab-conversation-status')?.textContent).toBe('Reconnecting');
-  await advance(4999);
-  expect(view.toast()).toBeNull();
-  await view.update({ sessionStatus: 'ready' });
-  await advance(1000);
-  expect(view.toast()).toBeNull();
-  await view.update({ sessionStatus: 'disconnected' });
-  await advance(5000);
-  expect(view.toast()?.textContent).toContain('Timeline synchronization is reconnecting.');
-  await view.update({ sessionStatus: 'ready' });
-  expect(view.toast()).toBeNull();
-  await view.update({ sessionStatus: 'disconnected' });
-  await advance(5000);
-  expect(view.toast()).not.toBeNull();
-});
-
-it('keeps the original disconnect deadline through retries and catch-up until ready', async () => {
-  const view = await workbench({ sessionStatus: 'disconnected' });
-  await advance(2000);
-  await view.update({ sessionStatus: 'connecting' });
-  await advance(2000);
-  await view.update({ sessionStatus: 'catching_up' });
-  await advance(999);
-  expect(view.toast()).toBeNull();
-  await advance(1);
-  expect(view.toast()).not.toBeNull();
-  await view.update({ sessionStatus: 'connecting' });
-  expect(view.toast()).not.toBeNull();
-  await view.update({ sessionStatus: 'ready' });
-  expect(view.toast()).toBeNull();
+  for (const sessionStatus of ['disconnected', 'connecting', 'catching_up', 'disconnected', 'ready'] as const) {
+    await view.update({ sessionStatus });
+    await advance(10_000);
+    expect(view.toast()).toBeNull();
+    expect(view.container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/i);
+  }
+  for (const state of ['reconnecting', 'restoring', 'connected'] as const) {
+    await view.update({ state: runtime(state) });
+    await advance(10_000);
+    expect(view.toast()).toBeNull();
+    expect(view.container.textContent).not.toMatch(/Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Loading conversation/i);
+  }
 });
 
 it('does not treat an initial connection as a disconnect', async () => {
@@ -64,83 +45,24 @@ it('does not treat an initial connection as a disconnect', async () => {
   expect(view.toast()).toBeNull();
 });
 
-it.each(['visibility', 'page'] as const)('requires five fresh foreground seconds after %s suspension', async kind => {
-  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
-  const view = await workbench({ sessionStatus: 'disconnected' });
-  await advance(3000);
-  const hide = () => act(async () => {
-    if (kind === 'visibility') { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
-    else window.dispatchEvent(new Event('pagehide'));
-  });
-  const show = () => act(async () => {
-    if (kind === 'visibility') { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); }
-    else window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
-  });
-  await hide();
-  await advance(20000);
-  expect(view.toast()).toBeNull();
-  await show();
-  await advance(4999);
-  expect(view.toast()).toBeNull();
-  await advance(1);
-  expect(view.toast()).not.toBeNull();
-  await hide();
-  expect(view.toast()).toBeNull();
-  await show();
-  await advance(4999);
-  expect(view.toast()).toBeNull();
-  await advance(1);
-  expect(view.toast()).not.toBeNull();
-});
-
-it('cancels pending notifications on session switches and panel hiding', async () => {
-  const view = await workbench({ sessionStatus: 'disconnected', draftSessionKey: 'first' });
-  await advance(4000);
-  await view.update({ draftSessionKey: 'second', sessionStatus: 'connecting' });
-  await advance(6000);
-  expect(view.toast()).toBeNull();
-  await view.update({ sessionStatus: 'disconnected' });
-  await advance(4000);
-  await view.update({ visible: false });
-  await advance(6000);
-  expect(view.toast()).toBeNull();
-  await view.update({ visible: true });
-  await advance(4999);
-  expect(view.toast()).toBeNull();
-  await advance(1);
-  expect(view.toast()).not.toBeNull();
-  await view.update({ visible: false });
-  expect(view.toast()).toBeNull();
-});
-
 function runtime(state: 'connected' | 'reconnecting' | 'restoring' | 'unavailable') {
   return { ...replicaState, agent: { ...replicaState.agent!, runtimeInfo: { ...replicaState.agent!.runtimeInfo, connection: { state } } } };
 }
 
-it('debounces native recovery through restoring and dismisses it when connected', async () => {
-  const view = await workbench({ state: runtime('reconnecting') });
-  expect(view.toast()).toBeNull();
-  await advance(3000);
-  await view.update({ state: runtime('restoring') });
-  await advance(2000);
-  expect(view.toast()?.textContent).toContain('Native runtime is restoring');
-  await view.update({ state: runtime('connected') });
-  expect(view.toast()).toBeNull();
-});
-
 it.each([
-  { state: runtime('unavailable'), message: 'Native runtime is unavailable.' },
+  { state: runtime('unavailable'), message: 'The agent is not available on its Host.' },
   { state: { ...replicaState, diagnostics: [{ code: 'unauthorized', message: 'Access denied.', recoverable: false }] }, sessionStatus: 'connecting' as const, message: 'Access denied.' },
-])('reports $message immediately', async ({ message, ...props }) => {
+])('says $message once above the timeline, without a toast', async ({ message, ...props }) => {
   const view = await workbench(props);
-  expect(view.toast()?.textContent).toContain(message);
-  expect(view.toast()?.getAttribute('data-tone')).toBe('error');
+  expect(view.toast()).toBeNull();
+  const notes = [...view.container.querySelectorAll('.lab-control-note')].map(note => note.textContent);
+  expect(notes).toEqual([message]);
 });
 
 it('shows agent failures inline without a runtime toast', async () => {
   const view = await workbench({ state: { ...replicaState,
     agent: { ...replicaState.agent!, status: 'failed', lastError: 'Permission denied.' } } });
-  expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('Agent failed: Permission denied.');
+  expect(view.container.querySelector('.lab-control-note[role="alert"]')?.textContent).toBe('Permission denied.');
   expect(view.toast()).toBeNull();
 });
 
@@ -149,34 +71,6 @@ it('reports send failures immediately', async () => {
   await act(async () => view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   expect(view.toast()?.textContent).toContain('Send failed.');
 });
-
-it('does not accumulate time when the disconnect begins in the background', async () => {
-  const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
-  const view = await workbench({ sessionStatus: 'disconnected' });
-  await advance(30000);
-  expect(view.toast()).toBeNull();
-  await act(async () => { visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); });
-  await advance(4999);
-  expect(view.toast()).toBeNull();
-  await advance(1);
-  expect(view.toast()).not.toBeNull();
-});
-
-it('cancels the recovery timer when the workbench unmounts', async () => {
-  vi.useFakeTimers();
-  let close!: () => void;
-  function Harness() {
-    const [open, setOpen] = useState(true);
-    close = () => setOpen(false);
-    return <ToastProvider>{open ? <LabWorkbench state={replicaState} sessionStatus="disconnected" actions={{}} /> : null}</ToastProvider>;
-  }
-  const container = await render(<Harness />);
-  await advance(4000);
-  await act(async () => close());
-  await advance(6000);
-  expect(container.querySelector('.lab-toast')).toBeNull();
-});
-
 
 it('keeps an unsent message pending across recovery phases and uses the ready action once', async () => {
   const staleSend = vi.fn(async () => {}), send = vi.fn(async () => {});

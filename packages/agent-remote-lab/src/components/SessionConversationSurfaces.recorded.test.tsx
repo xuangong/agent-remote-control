@@ -1,10 +1,11 @@
 import 'fake-indexeddb/auto';
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
 import { HttpWebSocketTransport, remoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
-import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from '../test/wait.js';
 import { SessionViewOperationsContext } from '../session-view-operations.js';
 import { DraftStore } from '../draft-store.js';
 import { render, unmount, setPromptText, promptText } from '../test/setup.js';
@@ -12,11 +13,10 @@ import type { WorkbenchMode } from '../workbench-mode.js';
 import { SessionConversationMount, SessionConversationSurfaces, type SessionSurfaceDescriptor } from './SessionConversationSurfaces.js';
 
 async function fixture() {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
   const sockets: WebSocket[] = [], sends: unknown[] = [];
-  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address => {
-    const socket = new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels: true, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
     sockets.push(socket); return socket as unknown as WebSocketLike;
   } });
   transport.onProtocolMessage(event => { if (event.direction === 'outbound' && event.message.type === 'send_message') sends.push(event.message); });
@@ -43,7 +43,7 @@ async function fixture() {
     </SessionConversationSurfaces></ConversationConnectionScope.Provider></SessionViewOperationsContext.Provider>;
   }
   const container = await render(<Harness />);
-  await act(async () => { await vi.waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'), { timeout: 5000 }); });
+  await act(async () => { await waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'), { timeout: 5000 }); });
   const client = connections.find(target)!.client;
   async function enter(text: string) {
     await act(async () => {
@@ -71,7 +71,7 @@ it.each([true, false])('keeps one real stream and in-flight editor through locat
   try {
     const prompt = f.container.querySelector('[data-testid="prompt-input"]');
     await f.enter('Exactly one operation'); await f.submit();
-    await act(async () => { await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 5000 }); });
+    await act(async () => { await waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 5000 }); });
     await f.update({ mode: 'bot' });
     expect(f.container.querySelector('[data-destination="bot"] [data-testid="prompt-input"]')).toBe(prompt);
     expect(f.container.querySelector('[data-testid="prompt-submit"]')?.getAttribute('aria-label')).toBe('Sending…');
@@ -80,8 +80,8 @@ it.each([true, false])('keeps one real stream and in-flight editor through locat
     if (unclaimed) expect(prompt?.closest('[inert]')).not.toBeNull();
     expect(f.connections.agentIds).toEqual(['surface-agent']);
     if (!unclaimed) await f.update({ rebound: false });
-    await act(async () => { finish(); await vi.waitFor(() => expect(f.sends).toHaveLength(1), { timeout: 5000 }); });
-    if (unclaimed) await vi.waitFor(async () => { await act(async () => {}); expect(f.container.querySelector('.lab-session-conversation-host')).toBeNull(); }, { timeout: 5000 });
+    await act(async () => { finish(); await waitFor(() => expect(f.sends).toHaveLength(1), { timeout: 5000 }); });
+    if (unclaimed) await waitFor(async () => { await act(async () => {}); expect(f.container.querySelector('.lab-session-conversation-host')).toBeNull(); }, { timeout: 5000 });
     else expect(f.container.querySelector('[data-testid="prompt-input"]')).toBe(prompt);
     expect(send).toHaveBeenCalledTimes(1);
     expect(f.sockets).toHaveLength(1);
@@ -104,7 +104,7 @@ it('keeps waiting input parked until a destination returns and never replays an 
     expect(prompt.closest('[hidden]')).not.toBeNull();
     expect(send).not.toHaveBeenCalled();
     await f.update({ claimed: true, mode: 'bot' });
-    await vi.waitFor(async () => { await act(async () => {}); expect(f.container.textContent).toContain('Delivery receipt is unknown.'); }, { timeout: 5000 });
+    await waitFor(async () => { await act(async () => {}); expect(f.container.textContent).toContain('Delivery receipt is unknown.'); }, { timeout: 5000 });
     expect(f.sends).toHaveLength(1);
     expect(f.container.querySelector('[data-testid="prompt-input"]')).toBe(prompt);
     expect(promptText(prompt)).toBe('A separate editable draft');

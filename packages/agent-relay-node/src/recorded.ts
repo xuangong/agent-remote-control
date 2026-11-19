@@ -16,7 +16,7 @@ import type {
   ProviderStreamItem,
 } from '@orchardworks/agent-provider-sdk';
 
-import { createProtocolValidationServer } from './protocol-validation-server.js';
+import { createProtocolValidationServer, type ProtocolValidationServerOptions } from './protocol-validation-server.js';
 
 const LAB_ORIGIN = process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175';
 const PROVIDER_ID = 'recorded';
@@ -472,9 +472,9 @@ class AsyncQueue<T> implements AsyncIterable<T> {
   }
 }
 
-export function createRecordedValidationServer(options: RecordedLabProviderOptions = {}) {
+export function createRecordedValidationServer(options: RecordedLabProviderOptions = {}, serverOptions: Pick<ProtocolValidationServerOptions, 'connectLocalSession'> = {}) {
   const { provider, controller } = createRecordedLabProvider(options);
-  const server = createProtocolValidationServer({ providers: [provider], labOrigin: LAB_ORIGIN });
+  const server = createProtocolValidationServer({ providers: [provider], labOrigin: LAB_ORIGIN, ...serverOptions });
   attachFixtureControls(server, controller);
   return { ...server, recorded: controller };
 }

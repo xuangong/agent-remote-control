@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
 import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
 import { DshProjector } from '@orchardworks/agent-provider-dsh';
 import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from './test/wait.js';
 
 it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-wait-any'])('preserves %s results over live transport, history, and reconnection without duplicating calls', async (scenario) => {
   const providerId = scenario.startsWith('codex') ? 'codex' : scenario;
@@ -22,11 +22,11 @@ it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-w
     async dispose() { start.resolve(); finish.resolve(); closed.resolve(); },
   };
   const provider: AgentProviderAdapter = { descriptor: { providerId, displayName: providerId }, createSession: async () => session, resumeSession: async () => session };
-  const server = createProtocolValidationServer({ providers: [provider], labOrigin: 'http://localhost' });
+  const server = memoryProtocolRelay({ providers: [provider], labOrigin: 'http://localhost' });
   const clients: RemoteSessionClient[] = [];
   try {
-    const { url } = await server.http.listen();
-    const transport = new HttpWebSocketTransport(url, { webSocketFactory: url => new WebSocket(url, { origin: 'http://localhost' }) as unknown as WebSocketLike });
+    const net = server.net, url = net.url;
+    const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, webSocketFactory: url => net.webSocket(url, { origin: 'http://localhost' }) as unknown as WebSocketLike });
     await transport.createAgent('agent', providerId, { sessionId: 'native' });
     async function connect() {
       const replica = new AgentReplica();
@@ -35,12 +35,12 @@ it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-w
       client.subscribeStatus(value => { status = value; });
       clients.push(client);
       client.start();
-      await vi.waitFor(() => expect(status).toBe('ready'));
+      await waitFor(() => expect(status).toBe('ready'));
       return { client, replica };
     }
     const first = await connect();
     start.resolve();
-    await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'running' }));
+    await waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'running' }));
     if (scenario === 'codex-wait') expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ detail: {
       sessionReferences: [{ nativeSessionId: 'child', title: 'child' }, { nativeSessionId: 'sibling', title: 'sibling' }],
     } });
@@ -49,7 +49,7 @@ it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-w
     const content = scenario.startsWith('codex-wait') ? [{ type: 'json', value: { receiverThreadIds: scenario === 'codex-wait' ? ['child', 'sibling'] : [], agentsStates: {} } }] : scenario === 'codex-activity' ? [{ type: 'json', value: { kind: 'interacted', agentThreadId: 'child', agentPath: '/root/review' } }] : scenario === 'codex-files' ? [{ type: 'json', value: { format: 'file_changes', version: 1, files: [
       { path: '/workspace/a.ts', kind: 'modified', diff: '@@ -1 +1 @@\n-old\n+new\n' },
     ] } }] : [expect.objectContaining({ type: 'text', text: 'hello\n' })];
-    await vi.waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'completed', result: { content } }));
+    await waitFor(() => expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ status: 'completed', result: { content } }));
     expect(first.replica.getState().timeline.entries).toHaveLength(1);
     if (scenario === 'codex-activity') expect(first.replica.getState().timeline.entries[0]?.item).toMatchObject({ detail: { sessionReference: { nativeSessionId: 'child', title: '/root/review' } } });
     first.client.stop();
@@ -57,7 +57,7 @@ it.each(['codex', 'dsh', 'codex-files', 'codex-activity', 'codex-wait', 'codex-w
     const entries = reconnected.replica.getState().timeline.entries;
     expect(entries).toHaveLength(1);
     expect(entries[0]?.item).toEqual(first.replica.getState().timeline.entries[0]?.item);
-    const response = await fetch(`${url}/v1/sessions/agent/timeline?protocolVersion=${PROTOCOL_VERSION}&requestId=verify-history&direction=tail&limit=1`);
+    const response = await net.fetch(`${url}/v1/sessions/agent/timeline?protocolVersion=${PROTOCOL_VERSION}&requestId=verify-history&direction=tail&limit=1`);
     expect(response.status).toBe(200);
     expect((await response.json()).payload.entries[0].item).toEqual(entries[0]?.item);
   } finally { clients.forEach(client => client.stop()); await server.close(); }

@@ -2,7 +2,7 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Duplex } from 'node:stream';
-import { WebSocket, WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer, type ClientOptions } from 'ws';
 import type { AgentRemoteRequestAccessPolicy, AgentRemoteHttpMutationPolicy } from '@orchardworks/agent-session-runtime';
 import { BROKER_MAX_FRAME_BYTES, createHostBroker, type BrokerRequestContext, type HostBroker, type HostBrokerOptions, type RelaySocket } from '@orchardworks/agent-relay-core';
 import { sessionSubscriptionRefusal } from '@orchardworks/agent-remote-protocol/model';
@@ -16,6 +16,8 @@ export interface RemoteHostBrokerOptions extends HostBrokerOptions {
   mutationPolicy?: AgentRemoteHttpMutationPolicy;
   connectionExpiresAt?(request: IncomingMessage): number | undefined;
   connectionExpiryCode?(request: IncomingMessage): number;
+  /** Opens the loopback connection that carries a channel subscription to the local Relay; a test that serves without a listener supplies its in-memory client. */
+  connectLocalSession?(url: string, options: ClientOptions): WebSocket;
 }
 
 /** The Relay's handlers plus `install`, which puts them in front of a Node HTTP server's own listeners. */
@@ -57,7 +59,7 @@ export function createRemoteHostBroker(options: RemoteHostBrokerOptions): Remote
         const target = new URL(`/v1/sessions/${encodeURIComponent(agentId)}/events`, url);
         if (!broker.handlesUpgrade(target)) {
           if (!localSessions) return sessionSubscriptionRefusal(new Response(null, { status: 403 }));
-          return { accept(logical) { bridgeLocalSession(logical, channelContext.serverUrl! + target.pathname, request); } };
+          return { accept(logical) { bridgeLocalSession(logical, channelContext.serverUrl! + target.pathname, request, options.connectLocalSession ?? ((url, init) => new WebSocket(url, init))); } };
         }
         // The broker re-checks access for every subscription, as it does for the direct endpoint.
         const prepared = await broker.prepareUpgrade(webRequest(request, target, false), context(request));
@@ -164,13 +166,13 @@ export function relaySocket(socket: WebSocket): RelaySocket {
   };
 }
 /** Bridges one channel subscription to the local Relay's per-session endpoint, which keeps its own authorization. */
-function bridgeLocalSession(logical: SessionChannelSocket, target: string, request: IncomingMessage) {
+function bridgeLocalSession(logical: SessionChannelSocket, target: string, request: IncomingMessage, connect: (url: string, options: ClientOptions) => WebSocket) {
   const headers: Record<string, string> = {};
   for (const name of ['origin', 'cookie', 'authorization']) {
     const value = request.headers[name];
     if (typeof value === 'string') headers[name] = value;
   }
-  const upstream = new WebSocket(target.replace(/^http/, 'ws'), { headers, maxPayload: BROKER_MAX_FRAME_BYTES, handshakeTimeout: 30_000 });
+  const upstream = connect(target.replace(/^http/, 'ws'), { headers, maxPayload: BROKER_MAX_FRAME_BYTES, handshakeTimeout: 30_000 });
   const pending: string[] = [];
   let refused = false;
   upstream.on('error', () => undefined);

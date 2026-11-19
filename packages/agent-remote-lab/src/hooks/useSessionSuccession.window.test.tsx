@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { createServer } from 'node:http';
-import { WebSocket, WebSocketServer } from 'ws';
+import { WebSocketServer } from 'ws';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import { act, useCallback, useState, useSyncExternalStore } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { AgentReplica, HttpWebSocketTransport, WindowWorkspaceClient } from '@orchardworks/agent-client';
@@ -11,6 +12,7 @@ import { SessionDirectoryClient } from '../directory-client.js';
 import { DraftStore } from '../draft-store.js';
 import * as composition from '../session-composition.js';
 import { render, unmount } from '../test/setup.js';
+import { waitFor } from '../test/wait.js';
 import { replicaState } from '../test/fixtures.js';
 import { WindowWorkspaceStore } from '../window-workspace.js';
 import { useAskConversations } from './useAskConversations.js';
@@ -94,11 +96,9 @@ async function fixture(shared = false) {
     });
     socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'ready', successions: 1 }));
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Fixture has no address.');
-  const scope = `http://127.0.0.1:${address.port}`;
-  const transport = new HttpWebSocketTransport(scope, { WebSocket, sessionChannels: true, sessionSuccessions: true });
+  const net = memoryHttp(server), scope = net.url;
+  vi.stubGlobal('fetch', net.fetch);
+  const transport = new HttpWebSocketTransport(scope, { WebSocket: net.WebSocket, sessionChannels: true, sessionSuccessions: true });
   const connections = new ConversationConnections(transport, scope), stores = new Map<string, DraftStore>();
   const client = new WindowWorkspaceClient(scope);
   let windowStore = new WindowWorkspaceStore((await client.inspect(window.id)).window, client);
@@ -132,15 +132,13 @@ async function fixture(shared = false) {
   let container = await render(<Harness />);
   cleanup.push(async () => {
     await unmount(container); connections.clear(); releaseListing?.();
-    for (const socket of sockets.clients) socket.terminate();
-    await new Promise<void>(resolve => sockets.close(() => resolve()));
-    server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
+    net.close(); vi.unstubAllGlobals();
   });
   if (!shared) await act(async () => { await succession.refresh(); });
-  await vi.waitFor(() => expect({ discovering: succession.discovering, error: succession.error }).toEqual({ discovering: false, error: undefined }));
+  await waitFor(() => expect({ discovering: succession.discovering, error: succession.error }).toEqual({ discovering: false, error: undefined }));
   const aSlot = succession.ensureWindowView(window.id, 'a', a), bSlot = succession.ensureWindowView(window.id, 'b', b);
   await act(async () => { succession.projectWindow(window); await succession.open(a, undefined, undefined, aSlot.id); });
-  if (shared) await vi.waitFor(async () => { await act(async () => {}); expect(succession.binding?.session.nativeSessionId).toBe('A'); });
+  if (shared) await waitFor(async () => { await act(async () => {}); expect(succession.binding?.session.nativeSessionId).toBe('A'); });
   return { read: () => succession, window, a, b, aSlot, bSlot, connections, attachments, directory: new SessionDirectoryClient(scope, undefined, 'host'),
     setEnabled: (enabled: boolean) => setEnabled(enabled),
     connectView: (viewId: string, enabled: boolean) => {
@@ -163,7 +161,7 @@ it('accepts a shared child from its SessionFamily without a coordinator attachme
   const child = { ...test.a, nativeSessionId: 'child', parentNativeSessionId: 'A', title: 'Child' };
   await act(async () => { await test.store().operate({ type: 'view.create', view: { ...createWindowView('child-view', child, 'attached'), attachedTo: 'a' } }); });
   const slot = test.bridge().slots!.get('child-view')!;
-  await vi.waitFor(() => expect(test.read().document.edges).toContainEqual({ source: test.aSlot.id, target: slot.id, selected: true }));
+  await waitFor(() => expect(test.read().document.edges).toContainEqual({ source: test.aSlot.id, target: slot.id, selected: true }));
   expect(test.attachments.filter(value => value.nativeSessionId === 'child')).toEqual([]);
   await act(async () => {
     const attached = await test.directory.attachChild(child.providerId, 'A', 'child');
@@ -211,20 +209,20 @@ it('still attaches a standalone descendant through the succession coordinator', 
     test.read().document.editRevision++;
     await test.read().refresh();
   });
-  await vi.waitFor(() => expect(test.attachments.filter(value => value.nativeSessionId === 'child')).toEqual([{ providerId: 'recorded', parentNativeSessionId: 'A', nativeSessionId: 'child' }]));
+  await waitFor(() => expect(test.attachments.filter(value => value.nativeSessionId === 'child')).toEqual([{ providerId: 'recorded', parentNativeSessionId: 'A', nativeSessionId: 'child' }]));
 }, 10000);
 
 it('retains a failed explicit shared view through reselection and retries only on request', async () => {
   const test = await fixture(true);
   test.failAttachment('B');
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'b' }); });
-  await vi.waitFor(() => expect(test.read().error).toBe('Fixture attachment unavailable.'));
+  await waitFor(() => expect(test.read().error).toBe('Fixture attachment unavailable.'));
   await act(async () => { await test.read().open(test.b, undefined, undefined, test.bSlot.id); });
   expect(test.read().error).toBe('Fixture attachment unavailable.');
   expect(test.attachments.filter(value => value.nativeSessionId === 'B')).toHaveLength(1);
   test.failAttachment('B', false);
   await act(async () => test.read().retry());
-  await vi.waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('B'));
+  await waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('B'));
   expect(test.attachments.filter(value => value.nativeSessionId === 'B')).toHaveLength(2);
 }, 10000);
 
@@ -232,22 +230,22 @@ it('restores a shared successor only after access and authorized replay resume',
   const test = await fixture(true);
   test.commit();
   await act(async () => { await test.read().refreshCommitted('handoff-a'); });
-  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  await waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
   await act(async () => test.setEnabled(false));
   expect(test.read().binding).toBeUndefined();
   test.commitAndHold();
   await act(async () => test.setEnabled(true));
-  await vi.waitFor(() => expect(test.entered()).toBe(true));
+  await waitFor(() => expect(test.entered()).toBe(true));
   expect(test.read().binding).toBeUndefined();
   await act(async () => test.release());
-  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  await waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
 }, 10000);
 
 it('resolves a predecessor to its role view again once that view targets the successor', async () => {
   const test = await fixture(true);
   test.commit();
   await act(async () => { await test.read().refreshCommitted('handoff-a'); });
-  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  await waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
   const view = test.read().ensureView(test.a);
   expect(view.intent.target.native.nativeSessionId).toBe('A2');
   // Rendering resolves an already resolved session again; it must not reject the view it chose.
@@ -259,10 +257,10 @@ it('reuses the role view of a handed-off origin before replays load after a relo
   const test = await fixture(true);
   test.commit();
   await act(async () => { await test.read().refreshCommitted('handoff-a'); });
-  await vi.waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
+  await waitFor(async () => { await act(async () => {}); expect(test.read().binding?.session.nativeSessionId).toBe('A2'); });
   test.commitAndHold();
   await test.remount();
-  await vi.waitFor(() => expect(test.entered()).toBe(true));
+  await waitFor(() => expect(test.entered()).toBe(true));
   const role = test.read().document.slots.find(slot => slot.intent.kind === 'role')!;
   expect(role.intent.target.native.nativeSessionId).toBe('A2');
   // Rendering resolves the stale origin before the replays arrive; a second slot with the same id would make the document unsavable.
@@ -291,7 +289,7 @@ it('keeps a shared history group beside a live group through Handoff, selection 
   expect(test.read().desired?.slot.id).toBe(history.id);
   expect(test.store().getSnapshot().views[0]?.binding?.sessionIntent).toBe('history');
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'b' }); });
-  await vi.waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('B'));
+  await waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('B'));
   test.commit();
   await act(async () => { await test.read().refreshCommitted('handoff-a'); });
   expect(test.aSlot.intent.target.native.nativeSessionId).toBe('A2');
@@ -299,11 +297,11 @@ it('keeps a shared history group beside a live group through Handoff, selection 
   expect(test.bridge().slots?.get('a')).toBe(history);
   expect(test.bridge().slots?.get('b')?.intent.kind).toBe('fixed');
   await test.remount();
-  await vi.waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('B'));
+  await waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('B'));
   expect(test.bridge().slots?.get('a')?.id).toBe(history.id);
   expect(test.bridge().slots?.get('a')?.intent.kind).toBe('history');
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'a' }); });
-  await vi.waitFor(() => expect(test.read().desired?.slot.id).toBe(history.id));
+  await waitFor(() => expect(test.read().desired?.slot.id).toBe(history.id));
   expect(test.read().selected?.nativeSessionId).toBe('A');
   expect(test.read().navigationIntent.sessionIntent).toBe('history');
   expect(test.store().getSnapshot().views.find(view => view.id === 'b')?.binding?.nativeSessionId).toBe('B');
@@ -316,7 +314,7 @@ it.each(['bound', 'empty', 'history'])('verifies a committed Handoff after a %s 
   await act(async () => {
     settled = test.read().refreshCommitted('handoff-a').then(() => ({ ok: true }), error => ({ ok: false, error: String(error) }));
   });
-  await vi.waitFor(() => expect(test.entered()).toBe(true));
+  await waitFor(() => expect(test.entered()).toBe(true));
   await act(async () => {
     test.read().projectWindow({ ...test.window, selectedPrimaryViewId: 'b', selectedViewId: 'b',
       views: mode !== 'empty' ? test.window.views : [test.window.views[0]!, createWindowView('b', undefined, 'primary')] });
@@ -349,7 +347,7 @@ it.each(['selected', 'unselected'])('accepts a %s group independently connected 
   });
   const source = { ...test.a, agentId: 'agent-A', viewId: test.aSlot.id };
   const lease = test.connections.acquire(source.agentId, new AgentReplica(), source);
-  await vi.waitFor(() => expect(lease.replica.getState().agent?.runtimeInfo.sessionId).toBe('A'));
+  await waitFor(() => expect(lease.replica.getState().agent?.runtimeInfo.sessionId).toBe('A'));
   expect(test.read().binding).toBeUndefined();
   expect(test.read().sourceCurrent(source)).toBe(true);
   expect(test.read().sourceCurrent({ ...source, agentId: 'wrong-agent' })).toBe(false);
@@ -366,14 +364,14 @@ it('releases the selected primary while the live budget releases it and attaches
   const test = await fixture(true);
   expect(test.connections.find(test.a)).toBeDefined();
   await act(async () => test.connectView('a', false));
-  await vi.waitFor(() => expect(test.connections.find(test.a)).toBeUndefined());
+  await waitFor(() => expect(test.connections.find(test.a)).toBeUndefined());
   expect(test.read().binding).toBeUndefined();
   expect(test.read().selected?.nativeSessionId).toBe('A');
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'b' }); });
-  await vi.waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('B'));
+  await waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('B'));
   await act(async () => { await test.store().operate({ type: 'view.select', viewId: 'a' }); });
-  await vi.waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('A'));
+  await waitFor(() => expect(test.read().selected?.nativeSessionId).toBe('A'));
   expect(test.read().binding).toBeUndefined();
   await act(async () => test.connectView('a', true));
-  await vi.waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('A'));
+  await waitFor(() => expect(test.read().binding?.session.nativeSessionId).toBe('A'));
 }, 10000);

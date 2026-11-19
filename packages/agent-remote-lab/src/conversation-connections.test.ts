@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
 import { AgentReplica, HttpWebSocketTransport, type RemoteAgentTransport, type RemoteSessionStatus, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from './conversation-connections.js';
-import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from './test/wait.js';
 
 async function fixture(sessionChannels = false) {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
   const origin = process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175';
   const sockets: WebSocket[] = [];
-  const transport = new HttpWebSocketTransport(url, { sessionChannels, webSocketFactory: address => {
-    const socket = new WebSocket(address, { origin });
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin });
     sockets.push(socket);
     return socket as unknown as WebSocketLike;
   } });
@@ -32,12 +32,12 @@ it('keeps a tracked subscription current over real HTTP/WebSocket without reconn
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
     first.client.subscribeStatus(value => { status = value; });
-    await vi.waitFor(() => expect(status).toBe('ready'));
+    await waitFor(() => expect(status).toBe('ready'));
     first.release();
     const count = f.history.mock.calls.length;
     const seq = first.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.session.nativeSessionId);
-    await vi.waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(seq));
+    await waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(seq));
     const again = f.connections.acquire('agent', new AgentReplica(), f.session);
     expect(again.client).toBe(first.client);
     expect(again.replica).toBe(first.replica);
@@ -62,14 +62,14 @@ it.each([false, true])('retains an opened Team leader independently of tracking 
     expect(f.sockets).toHaveLength(0);
     expect(f.connections.agentIds).toEqual([]);
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
-    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
     first.release();
     await Promise.resolve();
     f.connections.retainSessions('tracked', []);
     expect(first.client.getSessionState().connection).toBe('ready');
     const before = first.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.session.nativeSessionId);
-    await vi.waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
+    await waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
     const requests = [...wire];
     const again = f.connections.acquire('agent', new AgentReplica(), f.session);
     expect(again.client).toBe(first.client);
@@ -91,7 +91,7 @@ it('removes a Team retention reason without closing a mounted view or retaining 
   const f = await fixture();
   try {
     const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
-    await vi.waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
     f.connections.retainSessions('team-leaders', [f.session]);
     f.connections.retainSessions('team-leaders', [{ ...f.session, hostId: 'another-host' }]);
     expect(lease.client.getSessionState().connection).toBe('ready');
@@ -109,13 +109,13 @@ it('reuses the existing recovery after a real socket disconnect and releases unt
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
     first.client.subscribeStatus(value => { status = value; });
-    await vi.waitFor(() => expect(status).toBe('ready'));
+    await waitFor(() => expect(status).toBe('ready'));
     first.release();
     f.sockets[0]!.terminate();
-    await vi.waitFor(() => expect(status).toBe('disconnected'));
+    await waitFor(() => expect(status).toBe('disconnected'));
     const again = f.connections.acquire('agent', new AgentReplica(), f.session);
     expect(again.client).toBe(first.client);
-    await vi.waitFor(() => expect(status).toBe('ready'), { timeout: 4000 });
+    await waitFor(() => expect(status).toBe('ready'), { timeout: 4000 });
     expect(f.sockets).toHaveLength(2);
     again.release();
     f.connections.retainSessions('tracked', []);
@@ -131,7 +131,7 @@ it('isolates native identities and disposes retained subscriptions at scope tear
     const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status: RemoteSessionStatus = 'idle';
     lease.client.subscribeStatus(value => { status = value; });
-    await vi.waitFor(() => expect(status).toBe('ready'));
+    await waitFor(() => expect(status).toBe('ready'));
     expect(f.connections.find({ ...f.session, hostId: 'host-b' })).toBeUndefined();
     expect(f.connections.find({ ...f.session, providerId: 'other' })).toBeUndefined();
     f.connections.clear();
@@ -149,15 +149,15 @@ it.each([false, true])('recovers timeline over the existing socket without HTTP 
   try {
     const lease = f.connections.acquire('agent', new AgentReplica(), f.session);
     let status = ''; lease.client.subscribeStatus(value => { status = value; });
-    await vi.waitFor(() => expect(status).toBe('ready'));
+    await waitFor(() => expect(status).toBe('ready'));
     expect(f.history).not.toHaveBeenCalled();
     expect(wire).toContainEqual({direction: 'outbound', type: 'timeline_request'});
     wire.length = 0;
     f.sockets[0]!.terminate();
-    await vi.waitFor(() => expect(status).toBe('disconnected'));
+    await waitFor(() => expect(status).toBe('disconnected'));
     const before = lease.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.session.nativeSessionId);
-    await vi.waitFor(() => expect(status).toBe('ready'), {timeout: 4000});
+    await waitFor(() => expect(status).toBe('ready'), {timeout: 4000});
     expect(f.history).not.toHaveBeenCalled();
     expect(lease.replica.getState().timeline.nextSeq).toBeGreaterThan(before);
     const history = wire.findIndex(event => event.direction === 'outbound' && event.type === 'timeline_request');
@@ -180,7 +180,7 @@ it.each([false, true])('retains an unconfirmed native interruption after collect
   f.server.relay.sessionControls!.setNativeOwner('agent', owner);
   try {
     const first = connections.acquire('agent', new AgentReplica(), f.session);
-    await vi.waitFor(() => expect(first.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner } }));
+    await waitFor(() => expect(first.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner } }));
     await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
     await expect(first.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
     first.release();
@@ -188,7 +188,7 @@ it.each([false, true])('retains an unconfirmed native interruption after collect
     expect(connections.agentIds).toEqual([]);
     const next = connections.acquire('agent', new AgentReplica(), f.session);
     expect(next.client).not.toBe(first.client);
-    await vi.waitFor(() => expect(next.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner }, handoff: { phase: 'unknown' } }));
+    await waitFor(() => expect(next.client.getSessionState()).toMatchObject({ connection: 'ready', control: { nativeOwner: owner }, handoff: { phase: 'unknown' } }));
     await expect(next.client.takeControl()).rejects.toMatchObject({ code: 'ECONNRESET' });
     expect(requests).toEqual([false, true, true]);
     expect(f.sockets).toHaveLength(sessionChannels ? 1 : 2);
@@ -202,7 +202,7 @@ it.each([false, true])('reuses an untracked session across a same-turn view tran
   f.transport.onProtocolMessage(event => { if (event.direction === 'outbound') wire.push(event.message.type); });
   try {
     const first = f.connections.acquire('agent', new AgentReplica(), f.session);
-    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
     const initialWire = [...wire];
     first.release();
     const next = f.connections.acquire('agent', new AgentReplica(), f.session);
@@ -213,7 +213,7 @@ it.each([false, true])('reuses an untracked session across a same-turn view tran
     expect(wire).toEqual(initialWire);
     expect(f.sockets).toHaveLength(1);
     next.release();
-    await vi.waitFor(() => expect(f.connections.agentIds).toEqual([]));
+    await waitFor(() => expect(f.connections.agentIds).toEqual([]));
     expect(next.client.getSessionState().connection).toBe('idle');
   } finally { await f.close(); }
 });

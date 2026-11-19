@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { act, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
 import { createWindowView } from '@orchardworks/agent-remote-protocol';
 import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections, ConversationConnectionScope } from '../conversation-connections.js';
@@ -11,16 +11,16 @@ import { WorkspaceReady } from '../workspace-access.js';
 import { LiveConnectionsContext, liveConnections } from '../hooks/useLiveBudget.js';
 import { LiveBudget } from '../live-budget.js';
 import { useWindowSessionRetention } from '../hooks/useWindowSessionRetention.js';
-import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from '../test/wait.js';
 import { render, unmount, setPromptText, promptText } from '../test/setup.js';
 import { SessionConversation } from './SessionConversation.js';
 
 it('releases conversations the live budget no longer keeps, keeping history and drafts, and attaches again when shown', async () => {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
   const sockets: WebSocket[] = [];
-  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address => {
-    const socket = new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels: true, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
     sockets.push(socket); return socket as unknown as WebSocketLike;
   } });
   const created = await transport.createAgent('agent-shared', 'recorded', { sessionId: 'native-shared' });
@@ -51,8 +51,8 @@ it('releases conversations the live budget no longer keeps, keeping history and 
   const container = await render(<Harness />);
   const pane = (id: string) => container.querySelector<HTMLElement>(`[data-view="${id}"]`)!;
   try {
-    await vi.waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'));
-    await vi.waitFor(() => expect(pane('first').textContent).toContain('Recorded history 1'));
+    await waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(pane('first').textContent).toContain('Recorded history 1'));
     expect(container.querySelector('[aria-label="Disconnect session"], [aria-label="Connect session"]')).toBeNull();
     await act(async () => {
       const input = pane('first').querySelector<HTMLElement>('[data-testid="prompt-input"]')!;
@@ -66,20 +66,19 @@ it('releases conversations the live budget no longer keeps, keeping history and 
     expect(pane('first').textContent).not.toContain('Disconnected');
     expect(promptText(pane('first').querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Keep this draft');
     await act(async () => show(new Set()));
-    await vi.waitFor(() => expect(connections.find(target)).toBeUndefined());
+    await waitFor(() => expect(connections.find(target)).toBeUndefined());
     const count = attach.mock.calls.length;
     await act(async () => show(new Set(['first'])));
-    await vi.waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(connections.find(target)?.client.getSessionState().connection).toBe('ready'));
     expect(attach).toHaveBeenCalledTimes(count + 1);
     expect(promptText(pane('first').querySelector<HTMLElement>('[data-testid="prompt-input"]')!)).toBe('Keep this draft');
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 15000);
 
 it('releases a folded pane at once, without waiting for the grace period, and keeps the other pane live', async () => {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
-  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address =>
-    new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels: true, webSocketFactory: address =>
+    net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
   const first = await transport.createAgent('agent-first', 'recorded', { sessionId: 'native-first' });
   const second = await transport.createAgent('agent-second', 'recorded', { sessionId: 'native-second' });
   const targets = { first: { hostId: 'local', providerId: 'recorded', nativeSessionId: first.payload.sessionId, title: 'First' },
@@ -102,24 +101,23 @@ it('releases a folded pane at once, without waiting for the grace period, and ke
   }
   const container = await render(<Harness />);
   try {
-    await vi.waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
-    await vi.waitFor(() => expect(connections.find(targets.second)?.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(connections.find(targets.second)?.client.getSessionState().connection).toBe('ready'));
     await act(async () => fold(true));
     expect(budget.live('first')).toBe(false);
-    await vi.waitFor(() => expect(connections.find(targets.first)).toBeUndefined());
+    await waitFor(() => expect(connections.find(targets.first)).toBeUndefined());
     expect(connections.find(targets.second)?.client.getSessionState().connection).toBe('ready');
     await act(async () => fold(false));
-    await vi.waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(connections.find(targets.first)?.client.getSessionState().connection).toBe('ready'));
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 15000);
 
 for (const known of [true, false]) it(known
   ? 'does not ask a Host the page knows is away, and opens the conversation by itself when it comes back'
   : 'opens a conversation again by itself when its Host comes back after an attempt failed while it was away', async () => {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
-  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address =>
-    new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels: true, webSocketFactory: address =>
+    net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' }) as unknown as WebSocketLike });
   const created = await transport.createAgent('agent-returning', 'recorded', { sessionId: 'native-returning' });
   const target = { hostId: 'local', providerId: 'recorded', nativeSessionId: created.payload.sessionId, title: 'Returning conversation' };
   const connections = new ConversationConnections(transport, url), drafts = new DraftStore(url);
@@ -143,15 +141,15 @@ for (const known of [true, false]) it(known
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(attach).not.toHaveBeenCalled();
     } else {
-      await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(attach).toHaveBeenCalledTimes(1));
       await act(async () => setOffline(true));
     }
     // While the Host is away the conversation needs no Retry: it opens by itself.
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(container.querySelector('[role="alert"] button')).toBeNull();
     await act(async () => setOffline(false));
-    await vi.waitFor(() => expect(attach).toHaveBeenCalledTimes(known ? 1 : 2));
-    await vi.waitFor(() => expect(container.textContent).toContain('Recorded history 1'));
+    await waitFor(() => expect(attach).toHaveBeenCalledTimes(known ? 1 : 2));
+    await waitFor(() => expect(container.textContent).toContain('Recorded history 1'));
     expect(container.textContent).not.toContain('The Host disconnected while opening the session.');
   } finally { await unmount(container); connections.clear(); transport.dispose(); attach.mockRestore(); await server.close(); }
 }, 20000);

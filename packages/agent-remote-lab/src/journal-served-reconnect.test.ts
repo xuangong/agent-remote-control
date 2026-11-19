@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { createServer } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { memoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SessionJournal, type JournalRowInput } from '@orchardworks/agent-remote-journal';
 import { PROTOCOL_VERSION, type ServerMessage } from '@orchardworks/agent-remote-protocol';
@@ -74,26 +75,24 @@ it('keeps older history reachable when a reconnect brings an item updated above 
     });
     socket.send(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, type: 'ready' }));
   });
-  await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
-  closers.push(async () => { for (const socket of sockets.clients) socket.terminate(); await new Promise<void>(resolve => sockets.close(() => resolve())); http.closeAllConnections(); await new Promise<void>(resolve => http.close(() => resolve())); });
-  const address = http.address();
-  if (!address || typeof address === 'string') throw new Error('no port');
+  const net = memoryHttp(http);
+  closers.push(() => net.close());
 
-  const transport = new HttpWebSocketTransport(`http://127.0.0.1:${address.port}`, { WebSocket: WebSocket as never, sessionChannels: true });
+  const transport = new HttpWebSocketTransport(net.url, { fetch: net.fetch, WebSocket: net.WebSocket as never, sessionChannels: true });
   const replica = new AgentReplica();
-  const client = new RemoteSessionClient('one', transport, replica, { historyPageSize: 20 });
+  const client = new RemoteSessionClient('one', transport, replica, { historyPageSize: 20, reconnectInitialDelayMs: 1 });
   const statuses: string[] = [];
   const stop = client.subscribeStatus(status => statuses.push(status));
   closers.push(() => { stop(); client.stop(); transport.dispose(); });
   client.start();
-  await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'), { timeout: 3000, interval: 10 });
+  await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'), { timeout: 3000, interval: 2 });
   const keys = () => replica.getState().timeline.entries.map(entry => entry.itemKey);
   expect(keys()).toEqual(Array.from({ length: 20 }, (_, index) => `n${index + 22}`));
   expect(replica.getState().timeline.hasOlder).toBe(true);
 
   // The board changes while the client is connected: a live frame for an item above the window. It must not land at the bottom.
   pushRow(journal.append(publication(), row('todo', 'board', board(true))));
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise(resolve => setTimeout(resolve, 10));
   expect(keys()).toEqual(Array.from({ length: 20 }, (_, index) => `n${index + 22}`));
 
   // The board changes again (the journal keeps its first sequence) and a new row follows; the client reconnects.
@@ -102,8 +101,8 @@ it('keeps older history reachable when a reconnect brings an item updated above 
   journal.complete(publication(), 'n42', 'digest-42');
   statuses.length = 0;
   for (const socket of open) socket.terminate();
-  await vi.waitFor(() => expect(keys().at(-1)).toBe('n42'), { timeout: 8000, interval: 20 });
-  await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'), { timeout: 3000, interval: 10 });
+  await vi.waitFor(() => expect(keys().at(-1)).toBe('n42'), { timeout: 8000, interval: 2 });
+  await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'), { timeout: 3000, interval: 2 });
   expect(requests.at(-1)).toMatch(/^after:/);
   // The board is older history: it did not land above the held rows, and the rows between are still to be read.
   expect(keys()[0]).toBe('n22');

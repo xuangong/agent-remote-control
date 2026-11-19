@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { AgentProviderAdapter } from '@orchardworks/agent-provider-sdk';
 import { createAgentRemoteHttpServer, createAgentRemoteRelay, InputImageStore, InputResourceStore } from '@orchardworks/agent-session-runtime';
 
-import { createRemoteHostBroker } from './remote-host-broker.js';
+import { createRemoteHostBroker, type RemoteHostBrokerOptions } from './remote-host-broker.js';
 import { createSessionDirectory, type SessionDirectorySource } from './session-directory.js';
 
 import { createLocalLabAuthorizer, createLocalLabMutationPolicy } from './local-authorizer.js';
@@ -16,6 +16,7 @@ export interface ProtocolValidationServerOptions {
   teamResourceDirectory?: string;
   successionStateDirectory?: string;
   directories?: readonly SessionDirectorySource[];
+  connectLocalSession?: RemoteHostBrokerOptions['connectLocalSession'];
 }
 
 export function createProtocolValidationServer(options: ProtocolValidationServerOptions) {
@@ -28,7 +29,7 @@ export function createProtocolValidationServer(options: ProtocolValidationServer
     mutationPolicy: createLocalLabMutationPolicy(options.labOrigin),
   });
   directory.install(http.server, relay, options.labOrigin);
-  const broker = createRemoteHostBroker({ origin: options.labOrigin, teamResources: new InputResourceStore({directory:options.teamResourceDirectory ?? join(homedir(), '.agent-remote-control', 'lab-team-resources')}) });
+  const broker = createRemoteHostBroker({ origin: options.labOrigin, ...(options.connectLocalSession ? { connectLocalSession: options.connectLocalSession } : {}), teamResources: new InputResourceStore({directory:options.teamResourceDirectory ?? join(homedir(), '.agent-remote-control', 'lab-team-resources')}) });
   broker.install(http.server);
   return {
     relay,

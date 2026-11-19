@@ -1,6 +1,7 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { act } from 'react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { memoryHttp, type MemoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { ForkEntries } from '../components/ForkReference.js';
 import { useState, useEffect } from 'react';
@@ -11,22 +12,19 @@ import { useSessionRelations } from './useSessionRelations.js';
 const source = { hostId: 'host', providerId: 'codex', nativeSessionId: 'main', agentId: 'main-agent', title: 'Main' };
 const side: SessionRelation = { id: 'side', kind: 'side', createdAt: '2026-10-02T00:00:00.000Z', source,
   target: { ...source, nativeSessionId: 'side', agentId: 'side-agent', title: 'Side' } };
-const servers: Server[] = [];
-afterEach(async () => {
-  for (const server of servers.splice(0)) {
-    server.closeAllConnections();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-  }
+const networks: MemoryHttp[] = [];
+afterEach(() => {
+  for (const net of networks.splice(0)) net.close();
+  vi.unstubAllGlobals();
   localStorage.clear();
 });
 
 async function serve(handler: (request: IncomingMessage, response: ServerResponse) => Promise<void> | void): Promise<string> {
   const server = createServer((request, response) => { void Promise.resolve(handler(request, response)).catch(() => { response.writeHead(500).end(); }); });
-  servers.push(server);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing test address');
-  return `http://127.0.0.1:${address.port}/u/alice/`;
+  const net = memoryHttp(server);
+  networks.push(net);
+  vi.stubGlobal('fetch', net.fetch);
+  return `${net.url}/u/alice/`;
 }
 function reply(response: ServerResponse, relations: SessionRelation[], status = 200): void {
   response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ relations }));
@@ -357,11 +355,13 @@ it('retains stale role intent after bare absence or failed reset and retires it 
 
 it('imports original creation metadata over HTTP after shared current-source projection', async () => {
   const imports: Record<string, unknown>[] = [];
+  let shared: SessionRelation[] = [];
   const baseUrl = await serve(async (request, response) => {
     if (request.method === 'POST') {
       const input = await body(request); imports.push(input);
-      reply(response, [{ ...side, id: String(input.id), createdAt: String(input.createdAt) }]);
-    } else reply(response, []);
+      shared = [{ ...side, id: String(input.id), createdAt: String(input.createdAt) }];
+    }
+    reply(response, shared);
   });
   const sides = new ForkStore(baseUrl);
   const record = sides.prepare(referenceForkContext(source), { sourceNativeSessionId: 'main', creationSource: { providerId: 'codex', nativeSessionId: 'main' } });

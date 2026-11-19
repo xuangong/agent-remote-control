@@ -1,16 +1,16 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
 import { AgentReplica, HttpWebSocketTransport, type RemoteSessionState, type WebSocketLike } from '@orchardworks/agent-client';
+import { waitFor } from './test/wait.js';
 import { ConversationConnections } from './conversation-connections.js';
-import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
 
 async function fixture(sessionChannels: boolean) {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
+  const server = memoryRecordedRelay(), net = server.net;
   const sockets: WebSocket[] = [], outbound: string[] = [];
-  const transport = new HttpWebSocketTransport(url, { sessionChannels, webSocketFactory: address => {
-    const socket = new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
+  const transport = new HttpWebSocketTransport(net.url, { fetch: net.fetch, sessionChannels, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
     sockets.push(socket);
     return socket as unknown as WebSocketLike;
   } });
@@ -27,7 +27,7 @@ it.each([false, true])('shares a live client, replica and state between two Sess
   const f = await fixture(sessionChannels);
   try {
     const first = f.connections.acquire('shared-agent', new AgentReplica(), f.target);
-    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
     const requests = [...f.outbound];
     const second = f.connections.acquire('shared-agent', new AgentReplica(), f.target);
     expect(second.client).toBe(first.client);
@@ -39,7 +39,7 @@ it.each([false, true])('shares a live client, replica and state between two Sess
     expect(states[0]).toEqual(states[1]);
     const initialSequence = first.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.target.nativeSessionId);
-    await vi.waitFor(() => expect(second.replica.getState().timeline.nextSeq).toBeGreaterThan(initialSequence));
+    await waitFor(() => expect(second.replica.getState().timeline.nextSeq).toBeGreaterThan(initialSequence));
     expect(second.replica.getState()).toBe(first.replica.getState());
     expect(states[0]).toEqual(states[1]);
 
@@ -49,10 +49,10 @@ it.each([false, true])('shares a live client, replica and state between two Sess
     expect(f.connections.find(f.target)?.client).toBe(second.client);
     const sequenceBeforeClose = second.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.target.nativeSessionId);
-    await vi.waitFor(() => expect(second.replica.getState().timeline.nextSeq).toBeGreaterThan(sequenceBeforeClose));
+    await waitFor(() => expect(second.replica.getState().timeline.nextSeq).toBeGreaterThan(sequenceBeforeClose));
     expect(f.sockets).toHaveLength(1);
     secondStop(); second.release();
-    await vi.waitFor(() => expect(f.connections.agentIds).toEqual([]));
+    await waitFor(() => expect(f.connections.agentIds).toEqual([]));
   } finally { await f.close(); }
 }, 10000);
 
@@ -63,14 +63,14 @@ it.each([false, true])('reuses a retained Session across Windows while observing
     f.connections.retainSessions('window:second', [f.target]);
     expect(f.sockets).toHaveLength(0);
     const first = f.connections.acquire('shared-agent', new AgentReplica(), f.target);
-    await vi.waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(first.client.getSessionState().connection).toBe('ready'));
     first.release();
     await Promise.resolve();
     f.connections.retainSessions('window:first', []);
     expect(first.client.getSessionState().connection).toBe('ready');
     const before = first.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(f.target.nativeSessionId);
-    await vi.waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
+    await waitFor(() => expect(first.replica.getState().timeline.nextSeq).toBeGreaterThan(before));
     const requests = [...f.outbound];
     const second = f.connections.acquire('shared-agent', new AgentReplica(), f.target);
     expect(second.client).toBe(first.client);
@@ -81,6 +81,6 @@ it.each([false, true])('reuses a retained Session across Windows while observing
     f.connections.retainSessions('window:second', []);
     expect(second.client.getSessionState().connection).toBe('ready');
     second.release();
-    await vi.waitFor(() => expect(f.connections.agentIds).toEqual([]));
+    await waitFor(() => expect(f.connections.agentIds).toEqual([]));
   } finally { await f.close(); }
 }, 10000);

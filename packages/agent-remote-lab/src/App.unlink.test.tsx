@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
 import type { AgentSessionSetting, AgentSessionTool } from '@orchardworks/agent-provider-sdk';
 import { HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { PROTOCOL_VERSION } from '@orchardworks/agent-remote-protocol';
@@ -12,7 +11,7 @@ import { sessionKey } from './session-tree.js';
 import { App, type LabTransport } from './App.js';
 import { SessionDirectoryClient, type OpenedSession } from './directory-client.js';
 import { ForkStore, referenceForkContext } from './session-forks.js';
-import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
 import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { replicaState } from './test/fixtures.js';
 import { render, unmount, setPromptText, promptText } from './test/setup.js';
@@ -22,7 +21,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clea
 async function waitFor(assertion: () => void): Promise<void> {
   const deadline = performance.now() + 5000;
   for (;;) {
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 2)); });
     try { assertion(); return; }
     catch (error) { if (performance.now() >= deadline) throw error; }
   }
@@ -43,11 +42,12 @@ it('does not reopen a side unlinked during configuration, while still delivering
     session.runtimeInfo = async () => ({ ...await runtimeInfo(), settings: [setting] });
     return session;
   };
-  const relay = createProtocolValidationServer({ providers: [provider], labOrigin: window.location.origin, successionStateDirectory: join(workspace, 'state') });
-  const { url } = await relay.http.listen();
+  const relay = memoryProtocolRelay({ providers: [provider], labOrigin: window.location.origin, successionStateDirectory: join(workspace, 'state') });
+  const url = relay.net.url;
+  vi.stubGlobal('fetch', relay.net.fetch);
   const directory = new SessionDirectoryClient(url);
   const transport = new HttpWebSocketTransport(url, {
-    webSocketFactory: address => new WebSocket(address, { origin: window.location.origin }) as unknown as WebSocketLike,
+    webSocketFactory: address => relay.net.webSocket(address, { origin: window.location.origin }) as unknown as WebSocketLike,
   });
   let view: HTMLDivElement | undefined;
   let releaseConfiguration!: () => void;

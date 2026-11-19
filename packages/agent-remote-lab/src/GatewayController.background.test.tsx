@@ -1,9 +1,9 @@
 import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
 import { AgentReplica, HttpWebSocketTransport, RemoteActivityClient, RemoteSessionClient, type RemoteActivityState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { GatewayController } from './GatewayController.js';
-import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
 import { createRecordedLabProvider } from '@orchardworks/agent-relay-node/recorded';
 import { render, unmount } from './test/setup.js';
 import { workspaceFetch, workspaceSocket } from './workspace-access.js';
@@ -24,7 +24,7 @@ async function eventually(assertion: () => void): Promise<void> {
   for (;;) {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5);
-      await new Promise(resolve => realSetTimeout(resolve, 5));
+      await new Promise(resolve => realSetTimeout(resolve, 0));
     });
     try { assertion(); return; }
     catch (error) { if (performance.now() >= deadline) throw error; }
@@ -36,14 +36,13 @@ async function fixture() {
   let visibility: DocumentVisibilityState = 'visible';
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
   const recorded = createRecordedLabProvider();
-  const relay = createProtocolValidationServer({ providers: [recorded.provider], labOrigin: location.origin });
-  const { url: relayUrl } = await relay.http.listen(0, '127.0.0.1');
+  const relay = memoryProtocolRelay({ providers: [recorded.provider], labOrigin: location.origin });
+  const relayUrl = relay.net.url;
   cleanups.push(() => relay.close());
-  const nativeFetch = globalThis.fetch.bind(globalThis);
-  const creator = new HttpWebSocketTransport(relayUrl, { fetch: nativeFetch });
+  const creator = new HttpWebSocketTransport(relayUrl, { fetch: relay.net.fetch });
   const ids = Array.from({ length: 5 }, (_, index) => `background-session-${index}`);
   for (const id of ids) await creator.createAgent(id, 'recorded', { sessionId: id });
-  // Real HTTP setup runs before faking time; faked Date stalls undici's pooled connections.
+  // The Relay's setup runs before faking time.
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
 
   const basePath = '/u/' + 'a'.repeat(64) + '/';
@@ -55,10 +54,10 @@ async function fixture() {
 
   const sockets: WebSocket[] = [];
   const closed: WebSocket[] = [];
-  class BrowserSocket extends WebSocket {
+  class BrowserSocket extends relay.net.WebSocket {
     constructor(address: string) {
       const incoming = new URL(address);
-      super(relayUrl.replace('http:', 'ws:') + incoming.pathname.replace(basePath, '/') + incoming.search, { origin: location.origin });
+      super(relayUrl.replace('http:', 'ws:') + incoming.pathname.replace(basePath, '/') + incoming.search, undefined, { origin: location.origin });
       sockets.push(this);
       this.on('close', () => closed.push(this));
     }
@@ -95,12 +94,12 @@ async function fixture() {
 
   const advance = async (milliseconds: number) => {
     await act(async () => { await vi.advanceTimersByTimeAsync(milliseconds); });
-    await act(async () => { await new Promise(resolve => realSetTimeout(resolve, 10)); });
+    await act(async () => { await new Promise(resolve => realSetTimeout(resolve, 0)); });
   };
   const healthy = () => {
     expect(closed, 'Existing session and activity channels must stay open').toHaveLength(0);
     expect(sockets, 'Renewing access must not create replacement channels').toHaveLength(2);
-    expect(sockets.every(socket => socket.readyState === WebSocket.OPEN)).toBe(true);
+    expect(sockets.every(socket => socket.readyState === 1)).toBe(true);
     for (const session of sessions) {
       expect(session.statuses).toEqual([]);
       expect(session.client.getSessionState().connection).toBe('ready');

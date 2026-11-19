@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import { WebSocket } from 'ws';
 import type { AgentProviderAdapter, AgentSession } from '@orchardworks/agent-provider-sdk';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from './test/wait.js';
 
 it.each([
   {sessionControl: 'shared', sessionChannels: false}, {sessionControl: 'shared', sessionChannels: true},
@@ -24,17 +25,17 @@ it.each([
   const createSession = vi.fn(async () => session);
   const resumeSession = vi.fn(async () => session);
   const provider: AgentProviderAdapter = { descriptor: { providerId: 'stdio-fixture', displayName: 'Stdio fixture' }, createSession, resumeSession };
-  const server = createProtocolValidationServer({ providers: [provider], labOrigin: 'http://localhost' });
+  const server = memoryProtocolRelay({ providers: [provider], labOrigin: 'http://localhost' });
   const clients: RemoteSessionClient[] = [];
   const observed: unknown[] = [];
   const tokens = new Set<string>();
   try {
-    const { url } = await server.http.listen();
+    const net = server.net, url = net.url;
     async function connect(create = false, observeOnly = false) {
       let socket!: WebSocket;
       const sockets: WebSocket[] = [];
-      const transport = new HttpWebSocketTransport(url, { sessionChannels, webSocketFactory: url => {
-        socket = new WebSocket(url, { origin: 'http://localhost' });
+      const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels, webSocketFactory: url => {
+        socket = net.webSocket(url, { origin: 'http://localhost' });
         sockets.push(socket);
         socket.on('message', data => { const value = JSON.parse(data.toString()); if (value.type === 'session_control' && value.payload.token) tokens.add(value.payload.token); });
         return socket as unknown as WebSocketLike;
@@ -48,8 +49,8 @@ it.each([
       let status = '';
       client.subscribeStatus(value => { status = value; });
       clients.push(client); client.start();
-      await vi.waitFor(() => expect(status).toBe('ready'));
-      await vi.waitFor(() => expect(['control', 'read_only']).toContain(replica.getState().sessionControl?.access));
+      await waitFor(() => expect(status).toBe('ready'));
+      await waitFor(() => expect(['control', 'read_only']).toContain(replica.getState().sessionControl?.access));
       return { client, replica, transport, controlStates, sockets, get socket() { return sockets.find(candidate => candidate.readyState === WebSocket.OPEN) ?? socket; } };
     }
     const a = await connect(true);
@@ -57,14 +58,14 @@ it.each([
     a.controlStates.length = 0;
     const connectionCount = a.sockets.length;
     a.socket.terminate();
-    await vi.waitFor(() => expect(a.sockets.length).toBeGreaterThan(connectionCount));
-    await vi.waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
+    await waitFor(() => expect(a.sockets.length).toBeGreaterThan(connectionCount));
+    await waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
     expect(a.controlStates).toContain('checking');
     expect(a.controlStates).not.toContain('read_only');
     const samePageReplica = new AgentReplica();
     const samePage = new RemoteSessionClient('agent', a.transport, samePageReplica, { requireSessionControl: true });
     clients.push(samePage); samePage.start();
-    await vi.waitFor(() => expect(samePageReplica.getState().sessionControl?.access).toBe('control'));
+    await waitFor(() => expect(samePageReplica.getState().sessionControl?.access).toBe('control'));
     expect(a.replica.getState().sessionControl?.access).toBe('control');
     samePage.stop();
     const b = await connect();
@@ -82,8 +83,8 @@ it.each([
     expect(a.replica.getState().sessionControl?.access).toBe('control');
     expect(b.replica.getState().sessionControl?.access).toBe('control');
     a.socket.terminate();
-    await vi.waitFor(() => expect(a.socket.readyState).toBe(WebSocket.OPEN));
-    await vi.waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
+    await waitFor(() => expect(a.socket.readyState).toBe(WebSocket.OPEN));
+    await waitFor(() => expect(a.replica.getState().sessionControl?.access).toBe('control'));
     await a.client.sendMessage('first page after reconnect');
     cli.client.stop();
     a.client.stop();

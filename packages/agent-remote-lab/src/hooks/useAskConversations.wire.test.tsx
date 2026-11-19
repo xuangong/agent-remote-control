@@ -1,6 +1,7 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { act } from 'react';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+import { memoryHttp, type MemoryHttp } from '@orchardworks/agent-session-runtime/testing';
 import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { SessionDirectoryClient, type OpenedSession } from '../directory-client.js';
 import { conversationLocalStorage, conversationSessionStorage } from '../conversation-storage.js';
@@ -10,15 +11,13 @@ import { sessionKey } from '../session-tree.js';
 import { createCompositionDocument, createCompositionSlot, createAskOwner } from '../session-composition.js';
 import { useAskConversations } from './useAskConversations.js';
 
-const servers: Server[] = [];
+const networks: MemoryHttp[] = [];
 const current = { hostId: 'selected-host', providerId: 'claude', nativeSessionId: 'B', agentId: 'B-agent', title: 'Current B' };
 const target = { hostId: 'ask-host', providerId: 'codex', nativeSessionId: 'X', agentId: 'old-X-agent', title: 'Retained Ask',
   parentNativeSessionId: 'A', parentAgentId: 'old-A-agent', createdAt: '2026-10-10T00:00:00.000Z' };
-afterEach(async () => {
-  for (const server of servers.splice(0)) {
-    server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
-  }
+afterEach(() => {
+  for (const net of networks.splice(0)) net.close();
+  vi.unstubAllGlobals();
   conversationLocalStorage.clear(); conversationSessionStorage.clear(); localStorage.clear(); sessionStorage.clear();
 });
 async function body(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -37,11 +36,10 @@ async function fixture(savedTarget: OpenedSession = target, source = current) {
         ? { error } : { agentId: 'confirmed-X-agent', ...(responseId === undefined ? {} : { nativeSessionId: responseId }) }));
     }).catch(() => response.writeHead(500).end());
   });
-  servers.push(server);
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Missing test address');
-  const baseUrl = `http://127.0.0.1:${address.port}/`;
+  const net = memoryHttp(server);
+  networks.push(net);
+  vi.stubGlobal('fetch', net.fetch);
+  const baseUrl = `${net.url}/`;
   const directory = new SessionDirectoryClient(baseUrl, undefined, 'selected-host');
   const transport = {} as never;
   let ask!: ReturnType<typeof useAskConversations>;

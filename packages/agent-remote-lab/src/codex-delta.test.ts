@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
 import { CodexEventProjector } from '@orchardworks/agent-provider-codex';
 import type { AgentProviderAdapter, AgentSession, ProviderObservation } from '@orchardworks/agent-provider-sdk';
 import { PROTOCOL_VERSION, type AgentStreamMessage } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, RemoteSessionClient, type WebSocketLike } from '@orchardworks/agent-client';
-import { createProtocolValidationServer } from '@orchardworks/agent-relay-node/protocol-validation-server';
+import { memoryProtocolRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from './test/wait.js';
 
 it.each([
   { type: 'agentMessage', deltas: ['e', 'e'], final: 'ee' },
@@ -48,13 +48,13 @@ it.each([
     async dispose() { start.resolve(); closed.resolve(); },
   };
   const provider: AgentProviderAdapter = { descriptor: { providerId: 'codex', displayName: 'Codex' }, createSession: async () => session, resumeSession: async () => session };
-  const server = createProtocolValidationServer({ providers: [provider], labOrigin: 'http://localhost' });
+  const server = memoryProtocolRelay({ providers: [provider], labOrigin: 'http://localhost' });
   const clients: RemoteSessionClient[] = [];
   const received: AgentStreamMessage[] = [];
   try {
-    const { url } = await server.http.listen();
-    const transport = new HttpWebSocketTransport(url, { webSocketFactory: url => {
-      const socket = new WebSocket(url, { origin: 'http://localhost' });
+    const net = server.net, url = net.url;
+    const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, webSocketFactory: url => {
+      const socket = net.webSocket(url, { origin: 'http://localhost' });
       socket.on('message', raw => { const message = JSON.parse(String(raw)); if (message.type === 'agent_stream') received.push(message); });
       return socket as unknown as WebSocketLike;
     } });
@@ -66,12 +66,12 @@ it.each([
       client.subscribeStatus(value => { status = value; });
       clients.push(client);
       client.start();
-      await vi.waitFor(() => expect(status).toBe('ready'));
+      await waitFor(() => expect(status).toBe('ready'));
       return { client, replica };
     }
     const first = await connect();
     start.resolve();
-    await vi.waitFor(() => expect(received.some(message => message.payload.event.type === 'turn_completed')).toBe(true));
+    await waitFor(() => expect(received.some(message => message.payload.event.type === 'turn_completed')).toBe(true));
     const expected = type === 'reasoning' ? { type: 'reasoning', text: final } : { type: 'assistant_message', messageId: 'message', text: final };
     expect(first.replica.getState().timeline.entries.map(entry => entry.item)).toEqual([expected]);
     const timeline = received.filter(message => message.payload.event.type === 'timeline');
@@ -82,7 +82,7 @@ it.each([
     first.client.stop();
     const restored = await connect();
     expect(restored.replica.getState().timeline.entries.map(entry => entry.item)).toEqual([expected]);
-    const response = await fetch(`${url}/v1/sessions/agent/timeline?protocolVersion=${PROTOCOL_VERSION}&requestId=verify&direction=tail&limit=100`);
+    const response = await net.fetch(`${url}/v1/sessions/agent/timeline?protocolVersion=${PROTOCOL_VERSION}&requestId=verify&direction=tail&limit=100`);
     expect(response.status).toBe(200);
     expect((await response.json()).payload.entries.map((entry: { item: unknown }) => entry.item)).toEqual([expected]);
   } finally {

@@ -1,10 +1,11 @@
 import { act, useCallback, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import WebSocket from 'ws';
+import type { WebSocket } from 'ws';
 import { createWindowView, type WindowSessionBinding, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import { AgentReplica, HttpWebSocketTransport, type WebSocketLike } from '@orchardworks/agent-client';
 import { ConversationConnections } from '../conversation-connections.js';
-import { createRecordedValidationServer } from '@orchardworks/agent-relay-node/recorded';
+import { memoryRecordedRelay } from '@orchardworks/agent-relay-node/testing/memory-relay';
+import { waitFor } from '../test/wait.js';
 import { render, unmount } from '../test/setup.js';
 import { useWindowSessionRetention } from './useWindowSessionRetention.js';
 import { LIVE_RECENT } from '../live-budget.js';
@@ -16,11 +17,10 @@ const windowWith = (id: string, targets: WindowSessionBinding[]): WorkspaceWindo
 });
 
 async function fixture() {
-  const server = createRecordedValidationServer();
-  const { url } = await server.http.listen();
+  const server = memoryRecordedRelay(), net = server.net, url = net.url;
   const sockets: WebSocket[] = [], outbound: string[] = [];
-  const transport = new HttpWebSocketTransport(url, { sessionChannels: true, webSocketFactory: address => {
-    const socket = new WebSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
+  const transport = new HttpWebSocketTransport(url, { fetch: net.fetch, sessionChannels: true, webSocketFactory: address => {
+    const socket = net.webSocket(address, { origin: process.env.AGENT_REMOTE_ORIGIN ?? 'http://127.0.0.1:6175' });
     sockets.push(socket); return socket as unknown as WebSocketLike;
   } });
   transport.onProtocolMessage(event => { if (event.direction === 'outbound') outbound.push(event.message.type); });
@@ -57,7 +57,7 @@ it('retains a late acquired Session after its pane closes without preconnecting 
   try {
     expect(f.sockets).toHaveLength(0);
     const opened = f.acquire(target);
-    await vi.waitFor(() => expect(opened.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(opened.client.getSessionState().connection).toBe('ready'));
     opened.release(); await Promise.resolve();
     expect(f.connections.find(target)?.client).toBe(opened.client);
     await view.update(windowWith('first', []));
@@ -70,7 +70,7 @@ it('retains a late acquired Session after its pane closes without preconnecting 
 it('keeps updates live across Window navigation and reuses the existing Session on return', async () => {
   const f = await fixture(), target = await f.session('shared');
   const opened = f.acquire(target);
-  await vi.waitFor(() => expect(opened.client.getSessionState().connection).toBe('ready'));
+  await waitFor(() => expect(opened.client.getSessionState().connection).toBe('ready'));
   const view = await harness(f.connections, windowWith('first', [target]));
   try {
     opened.release(); await Promise.resolve();
@@ -79,7 +79,7 @@ it('keeps updates live across Window navigation and reuses the existing Session 
     expect(f.connections.find(target)?.client).toBe(opened.client);
     const sequence = opened.replica.getState().timeline.nextSeq;
     f.server.recorded.advance(target.nativeSessionId);
-    await vi.waitFor(() => expect(opened.replica.getState().timeline.nextSeq).toBeGreaterThan(sequence));
+    await waitFor(() => expect(opened.replica.getState().timeline.nextSeq).toBeGreaterThan(sequence));
     const sent = [...f.outbound];
     await view.update(windowWith('first', [target]));
     const returned = f.acquire(target);
@@ -212,15 +212,15 @@ it('drops disabled Window retention without closing another enabled view of the 
   const view = await render(<Harness />);
   try {
     const lease = f.acquire(target);
-    await vi.waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
+    await waitFor(() => expect(lease.client.getSessionState().connection).toBe('ready'));
     const sent = vi.spyOn(f.sockets[0]!, 'send');
     await act(async () => choose(second));
     lease.release(); await Promise.resolve();
     await act(async () => preferences.setEnabled('second', 'primary', false));
     expect(f.connections.find(target)).toBeDefined();
     await act(async () => preferences.setEnabled('first', 'primary', false));
-    await vi.waitFor(() => expect(f.connections.find(target)).toBeUndefined());
-    await vi.waitFor(() => expect(sent.mock.calls.some(([frame]) => JSON.parse(String(frame)).type === 'unsubscribe')).toBe(true));
+    await waitFor(() => expect(f.connections.find(target)).toBeUndefined());
+    await waitFor(() => expect(sent.mock.calls.some(([frame]) => JSON.parse(String(frame)).type === 'unsubscribe')).toBe(true));
     await act(async () => choose(first));
     expect(f.connections.find(target)).toBeUndefined();
     expect(preferences.enabled('first', 'primary')).toBe(false);

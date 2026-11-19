@@ -106,17 +106,23 @@ describe('S6 client replica to renderer', () => {
     expect(container.querySelector('[data-delivery-state]')).toBeNull();
   });
 
-  it('takes a draft over a restored replica and offers no send until the first server page confirms it', async () => {
+  it('takes a send over a restored replica, shows it as Sending, and sends it only after the first server page confirms the state', async () => {
     const replica = buildRestoredReplica({ rows: 2 });
-    const live = remoteSessionState(undefined, 'ready');
+    const sent: string[] = [];
     function Composer() {
       const state = useSyncExternalStore(listener => replica.subscribe(listener), () => replica.getState());
-      return <AgentComposer state={state} sessionState={live} draft="Typed early" onSendMessage={async () => undefined} />;
+      // The client turns ready once a server page confirmed the restored window.
+      const session = remoteSessionState(state, state.timeline.restoredFromDevice ? 'catching_up' : 'ready');
+      return <AgentComposer state={state} sessionState={session} draft="Typed early" onSendMessage={async text => { sent.push(text); }} />;
     }
     const container = await show(<Composer />);
     const submit = () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
-    expect(submit().disabled).toBe(true);
-    await act(async () => { replica.applyHistory(buildTailPage(buildTailRows(2), { epoch: 'e1' })); });
     expect(submit().disabled).toBe(false);
+    await act(async () => submit().click());
+    expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Sending');
+    expect(sent).toEqual([]);
+    await act(async () => { replica.applyHistory(buildTailPage(buildTailRows(2), { epoch: 'e1' })); });
+    await act(async () => {});
+    expect(sent).toEqual(['Typed early']);
   });
 });

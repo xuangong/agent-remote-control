@@ -84,8 +84,9 @@ it('holds a message through a real channel reconnect and never replays an unconf
     await act(async () => currentSocket!.terminate());
     await until(() => expect(releaseRecovery).toBeDefined());
     expect(status).toBe('catching_up');
-    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Synchronizing');
-    expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('true');
+    // The session says its business state through the reconnect, never the connection's.
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
+    expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('false');
     await act(async () => {
       const input = container.querySelector('textarea')!;
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Across the reconnect');

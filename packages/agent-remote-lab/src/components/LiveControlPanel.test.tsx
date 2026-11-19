@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render } from '../test/setup.js';
@@ -9,7 +10,7 @@ describe('LiveControlPanel', () => {
   it('sends Enter once, preserves pending text, and clears and focuses after acknowledgement', async () => {
     const acknowledgement = deferred<void>();
     const sendMessage = vi.fn(() => acknowledgement.promise);
-    const container = await render(<LiveControlPanel state={replicaState} onSendMessage={sendMessage} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={sendMessage} />);
     const input = container.querySelector('textarea')!;
     await type(input, '  A new message  ');
     await act(async () => {
@@ -26,7 +27,7 @@ describe('LiveControlPanel', () => {
 
   it('allows newlines and IME confirmation without sending a message', async () => {
     const sendMessage = vi.fn();
-    const container = await render(<LiveControlPanel state={replicaState} onSendMessage={sendMessage} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={sendMessage} />);
     const input = container.querySelector('textarea')!;
     await type(input, '\u4f60\u597d');
     for (const init of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
@@ -45,7 +46,7 @@ describe('LiveControlPanel', () => {
   it('retains a rejected message for retry and leaves the draft intact after cancelling a turn', async () => {
     const sendMessage = vi.fn().mockRejectedValueOnce(new Error('Try again.')).mockResolvedValue(undefined);
     const active = { ...replicaState, agent: { ...replicaState.agent!, activeTurn: { turnId: 'turn-1', startedAt: '2026-09-03T00:00:00.000Z' }, capabilities: { ...replicaState.agent!.capabilities, cancel: true } } };
-    const container = await render(<LiveControlPanel state={active} onSendMessage={sendMessage} onCancel={async () => {}} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onSendMessage={sendMessage} onCancel={async () => {}} />);
     const input = container.querySelector('textarea')!;
     await type(input, 'Keep my draft');
     await act(async () => (container.querySelector('[data-testid="prompt-submit"]') as HTMLButtonElement).click());
@@ -61,7 +62,7 @@ describe('LiveControlPanel', () => {
     const acknowledgement = deferred<void>();
     function Sessions() {
       const [id, setId] = useState('agent-1');
-      return <><button onClick={() => setId(id === 'agent-1' ? 'agent-2' : 'agent-1')}>Switch Agent</button><LiveControlPanel state={{ ...replicaState, agent: { ...replicaState.agent!, id } }} onSendMessage={() => acknowledgement.promise} /></>;
+      return <><button onClick={() => setId(id === 'agent-1' ? 'agent-2' : 'agent-1')}>Switch Agent</button><LiveControlPanel sessionState={remoteSessionState({ ...replicaState, agent: { ...replicaState.agent!, id } }, 'ready')} state={{ ...replicaState, agent: { ...replicaState.agent!, id } }} onSendMessage={() => acknowledgement.promise} /></>;
     }
     const container = await render(<Sessions />);
     const input = container.querySelector('textarea')!;
@@ -85,7 +86,7 @@ describe('LiveControlPanel', () => {
 
   it('submits text through the generic client callback and exposes unsupported controls', async () => {
     const sendMessage = vi.fn();
-    const container = await render(<LiveControlPanel
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')}
       state={replicaState}
       onSendMessage={sendMessage}
       onCancel={vi.fn()}
@@ -102,16 +103,12 @@ describe('LiveControlPanel', () => {
   });
 
   it('keeps message submission unavailable before an Agent Snapshot exists', async () => {
-    const container = await render(<LiveControlPanel />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(undefined, 'ready')} />);
     expect((container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement).disabled).toBe(true);
     expect(container.textContent).toContain('Open or attach to an Agent first.');
   });
 
-  it.each([
-    ['reconnecting', 'Native runtime is reconnecting. Your draft is preserved.', 'Reconnecting'],
-    ['restoring', 'Native runtime is restoring this session. Your draft is preserved.', 'Restoring'],
-    ['unavailable', 'Native runtime is unavailable. Your draft is preserved.', 'Native runtime unavailable'],
-  ] as const)('preserves attached-session copy while the native runtime is %s', async (connectionState, message, activity) => {
+  it.each(['reconnecting', 'restoring', 'unavailable'] as const)('keeps the draft and lets a send wait while the native runtime is %s, saying no connection word', async connectionState => {
     const state = {
       ...replicaState,
       agent: {
@@ -123,21 +120,21 @@ describe('LiveControlPanel', () => {
       },
     };
     const onDraftChange = vi.fn();
-    const container = await render(<LiveControlPanel state={state} draft="Keep my recovery draft" onDraftChange={onDraftChange} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} draft="Keep my recovery draft" onDraftChange={onDraftChange} onSendMessage={vi.fn()} />);
     const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
 
     expect(input).toMatchObject({ disabled: false, value: 'Keep my recovery draft', placeholder: 'Message…' });
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
     await type(input, 'Edited while recovering');
     expect(onDraftChange).toHaveBeenLastCalledWith('Edited while recovering');
-    expect(container.textContent).toContain(message);
+    expect(container.textContent).not.toMatch(/Reconnecting|Restoring|Opening session|Synchronizing|Checking access/i);
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
-    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(activity);
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
   });
 
   it('waits for the send acknowledgement before reporting success', async () => {
     const acknowledgement = deferred<void>();
-    const container = await render(<LiveControlPanel state={replicaState} onSendMessage={() => acknowledgement.promise} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} onSendMessage={() => acknowledgement.promise} />);
     const input = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'Wait for Relay acknowledgement.');
     await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
@@ -167,7 +164,7 @@ describe('LiveControlPanel', () => {
     };
     const sendMessage = vi.fn(() => Promise.reject(new Error('Send was rejected.')));
     const cancel = vi.fn(() => Promise.reject(new Error('Cancel was rejected.')));
-    const container = await render(<LiveControlPanel state={activeState} onSendMessage={sendMessage} onCancel={cancel} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(activeState, 'ready')} state={activeState} onSendMessage={sendMessage} onCancel={cancel} />);
     const input = container.querySelector('[data-testid="prompt-input"]') as HTMLTextAreaElement;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'Retry after rejection.');
     await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
@@ -196,8 +193,8 @@ function deferred<T>(): { promise: Promise<T>; resolve(value?: T): void } {
 it('offers console commands independently of provider capabilities and scopes both composers', async () => {
   const execute = vi.fn(async () => ({}));
   const command = { id: 'console:side', name: 'side', description: 'Open side chat', kind: 'command' as const, aliases: ['btw'] };
-  const container = await render(<><LiveControlPanel state={replicaState} consoleCommands={[command]} onExecuteConsoleCommand={execute} />
-    <LiveControlPanel state={replicaState} /></>);
+  const container = await render(<><LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} consoleCommands={[command]} onExecuteConsoleCommand={execute} />
+    <LiveControlPanel sessionState={remoteSessionState(replicaState, 'ready')} state={replicaState} /></>);
   const inputs = container.querySelectorAll('textarea');
   expect(inputs[0]!.id).not.toBe(inputs[1]!.id);
   await type(inputs[0]!, '/btw explain');
@@ -213,7 +210,7 @@ it('updates direct input permissions without losing drafts or disabling console 
   function Permissions() {
     const [readOnly, setReadOnly] = useState(false);
     return <><button onClick={() => setReadOnly((value) => !value)}>Toggle input permission</button>
-      <LiveControlPanel state={{ ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: !readOnly, commands: true } } }}
+      <LiveControlPanel sessionState={remoteSessionState({ ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: !readOnly, commands: true } } }, 'ready')} state={{ ...replicaState, agent: { ...replicaState.agent!, capabilities: { ...replicaState.agent!.capabilities, sendMessage: !readOnly, commands: true } } }}
         consoleCommands={[command]} onExecuteConsoleCommand={execute} onSendMessage={send} onListCommands={listCommands} />
     </>;
   }

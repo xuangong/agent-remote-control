@@ -3,7 +3,7 @@ import { act, createRef } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
-import { createReplicaState } from '@orchardworks/agent-client';
+import { createReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 
 type Editor = HTMLTextAreaElement | HTMLDivElement;
 const draft = 'Keep this draft\nAnother line';
@@ -25,7 +25,7 @@ async function composer(rich = false, outerBoundary = false) {
   const change = vi.fn();
   const collapse = vi.fn();
   const boundary = createRef<HTMLDivElement>();
-  const controls = <AgentComposer state={state} draft={draft} onDraftChange={change} onSendMessage={send}
+  const controls = <AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} draft={draft} onDraftChange={change} onSendMessage={send}
     keyboardDismissBoundaryRef={outerBoundary ? boundary : undefined} />;
   const container = await render(outerBoundary ? <div ref={boundary} role="dialog"><button onClick={collapse}>Collapse input</button>{controls}</div> : controls);
   const editor = container.querySelector<Editor>('[data-testid="prompt-input"]')!;

@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { remoteSessionState } from '@orchardworks/agent-client';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -17,7 +18,7 @@ it('uses one ordinary send path in idle and busy sessions and exposes queue only
   const send = vi.fn(async () => {});
   function Session() {
     const [running, setRunning] = useState(false);
-    return <><button onClick={() => setRunning(true)}>Start native turn</button><LiveControlPanel state={running ? active : replicaState} onSendMessage={send} /></>;
+    return <><button onClick={() => setRunning(true)}>Start native turn</button><LiveControlPanel sessionState={remoteSessionState(running ? active : replicaState, 'ready')} state={running ? active : replicaState} onSendMessage={send} /></>;
   }
   const container = await render(<Session />);
   expect(container.querySelector('[data-testid="queue-submit"]')).toBeNull();
@@ -35,7 +36,7 @@ it('uses one ordinary send path in idle and busy sessions and exposes queue only
 it('sends a next-turn intent to the native Provider, prevents duplicates and preserves rejected drafts', async () => {
   let reject!: (error: Error) => void;
   const send = vi.fn(() => new Promise<void>((_resolve, fail) => { reject = fail; }));
-  const container = await render(<LiveControlPanel state={active} onSendMessage={send} />);
+  const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onSendMessage={send} />);
   await type(container, 'Do this next');
   const queue = container.querySelector('[data-testid="queue-submit"]') as HTMLButtonElement;
   expect(queue).not.toBeNull();
@@ -49,7 +50,7 @@ it('sends a next-turn intent to the native Provider, prevents duplicates and pre
 
 it('does not offer a synthetic queue for a Provider without native support or intercept Tab', async () => {
   const send = vi.fn();
-  const container = await render(<LiveControlPanel state={{ ...active, agent: { ...active.agent, capabilities: { ...active.agent.capabilities, queueMessage: false } } }} onSendMessage={send} />);
+  const container = await render(<LiveControlPanel sessionState={remoteSessionState({ ...active, agent: { ...active.agent, capabilities: { ...active.agent.capabilities, queueMessage: false } } }, 'ready')} state={{ ...active, agent: { ...active.agent, capabilities: { ...active.agent.capabilities, queueMessage: false } } }} onSendMessage={send} />);
   await type(container, 'Ordinary draft');
   expect(container.querySelector('[data-testid="queue-submit"]')).toBeNull();
   expect(container.querySelector('[data-testid="steer-submit"]')).toBeNull();

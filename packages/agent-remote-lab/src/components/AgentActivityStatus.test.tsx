@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 
 import { render } from '../test/setup.js';
@@ -20,12 +21,12 @@ describe('composer activity', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-10T00:09:09.000Z'));
     try {
-      const container = await render(<LiveControlPanel state={active} onCancel={async () => {}} />);
+      const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onCancel={async () => {}} />);
       expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
       expect(container.querySelector('[data-testid="turn-elapsed"]')?.textContent).toBe('9m 09s');
       await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
       expect(container.querySelector('[data-testid="turn-elapsed"]')?.textContent).toBe('9m 11s');
-      const restored = await render(<LiveControlPanel state={active} onCancel={async () => {}} />);
+      const restored = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onCancel={async () => {}} />);
       expect(restored.querySelector('[data-testid="turn-elapsed"]')?.textContent).toBe('9m 11s');
     } finally { vi.useRealTimers(); }
   });
@@ -35,7 +36,7 @@ describe('composer activity', () => {
     const cancel = vi.fn(() => new Promise<void>((resolve) => { acknowledge = resolve; }));
     function Session() {
       const [running, setRunning] = useState(true);
-      return <><button onClick={() => setRunning(false)}>Native turn ended</button><LiveControlPanel
+      return <><button onClick={() => setRunning(false)}>Native turn ended</button><LiveControlPanel sessionState={remoteSessionState(running ? active : { ...active, agent: { ...active.agent, status: 'idle', activeTurn: null } }, 'ready')}
         state={running ? active : { ...active, agent: { ...active.agent, status: 'idle', activeTurn: null } }}
         draft="Keep this draft" onCancel={cancel}
       /></>;
@@ -59,7 +60,7 @@ describe('composer activity', () => {
 
   it('reports a rejected interrupt and allows retry', async () => {
     const cancel = vi.fn().mockRejectedValueOnce(new Error('Native interrupt rejected.')).mockResolvedValue(undefined);
-    const container = await render(<LiveControlPanel state={active} onCancel={cancel} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onCancel={cancel} />);
     const interrupt = container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement;
     await act(async () => interrupt.click());
     expect(container.querySelector('[role="alert"]')?.textContent).toBe('Native interrupt rejected.');
@@ -69,11 +70,11 @@ describe('composer activity', () => {
     expect(interrupt.disabled).toBe(true);
   });
 
-  it('does not present disconnected state as live or allow interrupt', async () => {
+  it('says the stored turn, never a connection word, and allows no interrupt while the session opens', async () => {
     const cancel = vi.fn();
-    const container = await render(<LiveControlPanel state={active} disabled onCancel={cancel} />);
-    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Opening session');
-    expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'connecting')} state={active} onCancel={cancel} />);
+    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
+    expect(container.textContent).not.toMatch(/Opening session|Synchronizing|Checking access|Reconnecting/);
     const interrupt = container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement;
     expect(interrupt.disabled).toBe(true);
     await act(async () => interrupt.click());
@@ -81,14 +82,14 @@ describe('composer activity', () => {
   });
 
   it('shows Working without inventing a start time when the timestamp is unavailable', async () => {
-    const container = await render(<LiveControlPanel state={{ ...active, agent: { ...active.agent, activeTurn: { turnId: 'turn-1' } } }} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState({ ...active, agent: { ...active.agent, activeTurn: { turnId: 'turn-1' } } }, 'ready')} state={{ ...active, agent: { ...active.agent, activeTurn: { turnId: 'turn-1' } } }} />);
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Working');
     expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
     expect(container.textContent).toContain('Start time unavailable');
   });
 
   it('keeps waiting distinct from Working while retaining interrupt capability', async () => {
-    const container = await render(<LiveControlPanel state={{ ...active, agent: { ...active.agent, status: 'waiting' } }} onCancel={async () => {}} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState({ ...active, agent: { ...active.agent, status: 'waiting' } }, 'ready')} state={{ ...active, agent: { ...active.agent, status: 'waiting' } }} onCancel={async () => {}} />);
     expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Waiting for response');
     expect((container.querySelector('[data-testid="cancel-submit"]') as HTMLButtonElement).disabled).toBe(false);
   });
@@ -99,7 +100,7 @@ it('pauses hidden elapsed clocks and catches up from the timestamp on return', a
   vi.setSystemTime(new Date('2026-09-10T00:00:10Z'));
   const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
   try {
-    const container = await render(<LiveControlPanel state={active} onCancel={async () => {}} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(active, 'ready')} state={active} onCancel={async () => {}} />);
     expect(container.querySelector('time')?.textContent).toBe('10s');
     await act(async () => { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); });
     await act(async () => vi.advanceTimersByTimeAsync(5000));

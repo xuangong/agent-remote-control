@@ -94,7 +94,7 @@ it('queues input during consumer access restoration and dispatches only after ac
   const transport = {} as RemoteAgentTransport;
   function View({ enabled }: { enabled: boolean }) {
     const view = useSessionView({ agentId: 'access-restoration', transport, source, cachedReplica: replica, enabled });
-    return <AgentComposer state={view.state} disabled={view.status !== 'ready'} onSendMessage={view.actions.sendMessage} />;
+    return <AgentComposer sessionState={remoteSessionState(view.state, (view.status !== 'ready') ? 'connecting' : 'ready')} state={view.state} onSendMessage={view.actions.sendMessage} />;
   }
   const container = await render(<View enabled={false} />);
   const input = container.querySelector('textarea')!;

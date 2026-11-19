@@ -3,10 +3,10 @@ import { act } from 'react';
 import { expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
-import { createReplicaState } from '@orchardworks/agent-client';
+import { createReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 
 async function setup(props: Partial<AgentComposerProps> = {}) {
-  const container = await render(<AgentComposer state={undefined} draftOnly {...props} />);
+  const container = await render(<AgentComposer sessionState={remoteSessionState(undefined, 'ready')} state={undefined} draftOnly {...props} />);
   const input = () => container.querySelector('textarea')!;
   const button = () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
   const type = (text: string) => act(async () => {

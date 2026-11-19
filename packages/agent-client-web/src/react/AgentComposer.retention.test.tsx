@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { inspectImageDraft, readImageDraft, writeImageDraft, type ImageDraft } from '../image-drafts.js';
 import { AgentComposer } from './AgentComposer.js';
 import { render, unmount } from '../test/setup.js';
-import { createReplicaState } from '@orchardworks/agent-client';
+import { createReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 
 vi.mock('../image-drafts.js', async importOriginal => ({ ...await importOriginal<typeof import('../image-drafts.js')>(),
   readImageDraft: vi.fn(), writeImageDraft: vi.fn() }));
@@ -37,7 +37,7 @@ async function setup(withImage = false) {
     const [blocked, setBlocked] = useState(false); blockAuthority = () => setBlocked(true);
     const [selectedRecipient, setRecipient] = useState(recipient); replaceRecipient = () => setRecipient({ ...recipient, lifetime: {} });
     const [selectedBinding, setBinding] = useState(binding); replaceOwner = () => setBinding({ ...binding, key: `${binding.key}:other` });
-    return <AgentComposer state={state} draft={text} mutationBlocked={blocked} imageDraftBinding={selectedBinding} imageRecipient={selectedRecipient}
+    return <AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} draft={text} mutationBlocked={blocked} imageDraftBinding={selectedBinding} imageRecipient={selectedRecipient}
       onDraftChange={value => { retainedText = value; setText(value); }} onSendMessage={send} onSendMessageContent={richSend} onUploadImage={upload} />;
   }
   const view = await render(<Harness />);

@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -21,7 +22,7 @@ describe('provider command menu', () => {
   it('stages an exact skill match as a removable tag and sends only on a later submit', async () => {
     const execute = vi.fn().mockRejectedValueOnce(new Error('Try again')).mockResolvedValue({});
     const skill = { id: 'skill-one', name: 'inspect', description: 'Inspect workspace', kind: 'skill' as const };
-    const container = await render(<LiveControlPanel state={state} onListCommands={async () => [skill]} onExecuteCommand={execute} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={async () => [skill]} onExecuteCommand={execute} />);
     await type(container, '/inspect');
     await enter(container);
     expect(execute).not.toHaveBeenCalled();
@@ -40,7 +41,7 @@ describe('provider command menu', () => {
   it('selects skills by click without dispatch and removes a tag without deleting prose', async () => {
     const execute = vi.fn();
     const skill = { id: 'skill-one', name: 'inspect', description: 'Inspect workspace', kind: 'skill' as const };
-    const container = await render(<LiveControlPanel state={state} onListCommands={async () => [skill]} onExecuteCommand={execute} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={async () => [skill]} onExecuteCommand={execute} />);
     await type(container, '/');
     await act(async () => (container.querySelector('[role="option"]') as HTMLButtonElement).click());
     await type(container, 'keep these instructions');
@@ -61,7 +62,7 @@ describe('provider command menu', () => {
       const [working, setWorking] = useState(false);
       return <><button data-testid="switch" onClick={() => setOther(!other)}>Switch session</button>
         <button data-testid="work" onClick={() => setWorking(true)}>Start working</button>
-        <LiveControlPanel state={{ ...state, agent: { ...state.agent, id: other ? 'other' : 'first', status: working ? 'running' : 'idle', capabilities: { ...state.agent.capabilities, queueMessage: true } } }}
+        <LiveControlPanel sessionState={remoteSessionState({ ...state, agent: { ...state.agent, id: other ? 'other' : 'first', status: working ? 'running' : 'idle', capabilities: { ...state.agent.capabilities, queueMessage: true } } }, 'ready')} state={{ ...state, agent: { ...state.agent, id: other ? 'other' : 'first', status: working ? 'running' : 'idle', capabilities: { ...state.agent.capabilities, queueMessage: true } } }}
           onListCommands={async () => [skill]} onExecuteCommand={execute} /></>;
     }
     const container = await render(<Sessions />);
@@ -85,7 +86,7 @@ describe('provider command menu', () => {
   it('loads native descriptors and invokes the opaque ID without sending a model message', async () => {
     const execute = vi.fn(async () => ({ text: 'Native complete' }));
     const send = vi.fn();
-    const container = await render(<LiveControlPanel state={state} onListCommands={async () => [command]} onExecuteCommand={execute} onSendMessage={send} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={async () => [command]} onExecuteCommand={execute} onSendMessage={send} />);
     await type(container, '/');
     expect(container.querySelector('[role="option"]')?.textContent).toContain('/native-custom');
     expect(container.textContent).not.toContain('/status');
@@ -98,7 +99,7 @@ describe('provider command menu', () => {
   it('preserves command arguments and rejects unknown slash input', async () => {
     const execute = vi.fn(async () => ({}));
     const send = vi.fn();
-    const container = await render(<LiveControlPanel state={state} onListCommands={async () => [{ ...command, inputHint: '<text>' }]} onExecuteCommand={execute} onSendMessage={send} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={async () => [{ ...command, inputHint: '<text>' }]} onExecuteCommand={execute} onSendMessage={send} />);
     await type(container, '/native-custom  one  two\nthree');
     await enter(container);
     expect(execute).toHaveBeenCalledWith(command.id, '  one  two\nthree');
@@ -111,7 +112,7 @@ describe('provider command menu', () => {
 
   it('refreshes descriptors on reopen and surfaces discovery failures', async () => {
     const list = vi.fn().mockRejectedValueOnce(new Error('Native discovery failed')).mockResolvedValue([command]);
-    const container = await render(<LiveControlPanel state={state} onListCommands={list} onExecuteCommand={async () => ({})} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={list} onExecuteCommand={async () => ({})} />);
     await type(container, '/');
     expect(container.textContent).toContain('Native discovery failed');
     await act(async () => (container.querySelector('[data-testid="retry-commands"]') as HTMLButtonElement).click());
@@ -124,7 +125,7 @@ describe('provider command menu', () => {
   it('interrupts a pending native command without an active turn and keeps send blocked until completion', async () => {
     let finish!: (result: {}) => void;
     const cancel = vi.fn(async () => {});
-    const container = await render(<LiveControlPanel state={state} onListCommands={async () => [command]}
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={async () => [command]}
       onExecuteCommand={() => new Promise((resolve) => { finish = resolve; })} onCancel={cancel} />);
     await type(container, '/');
     await enter(container);
@@ -141,7 +142,7 @@ describe('provider command menu', () => {
 
   it('dismisses loading and empty command menus with Escape', async () => {
     let finish!: (commands: typeof command[]) => void;
-    const container = await render(<LiveControlPanel state={state} onListCommands={() => new Promise((resolve) => { finish = resolve; })} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onListCommands={() => new Promise((resolve) => { finish = resolve; })} />);
     const escape = async () => act(async () => container.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await type(container, '/');
     expect(container.textContent).toContain('Loading native commands');
@@ -158,7 +159,7 @@ describe('provider command menu', () => {
     let finish!: (commands: typeof command[]) => void;
     function Sessions() {
       const [other, setOther] = useState(false);
-      return <><button onClick={() => setOther(true)}>Switch</button><LiveControlPanel state={other ? { ...state, agent: { ...state.agent, id: 'other' } } : state}
+      return <><button onClick={() => setOther(true)}>Switch</button><LiveControlPanel sessionState={remoteSessionState(other ? { ...state, agent: { ...state.agent, id: 'other' } } : state, 'ready')} state={other ? { ...state, agent: { ...state.agent, id: 'other' } } : state}
         onListCommands={() => new Promise((resolve) => { finish = resolve; })} onExecuteCommand={async () => ({})} /></>;
     }
     const container = await render(<Sessions />);

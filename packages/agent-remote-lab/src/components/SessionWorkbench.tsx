@@ -211,9 +211,6 @@ export function SessionWorkbench({ sessionDescription, onNavigateAttribution, to
             onUploadImage={visible ? actions.uploadImage : undefined}
             draft={messageDraft}
             onDraftChange={onMessageDraftChange}
-            disabled={sessionStatus !== 'ready'}
-            disabledLabel={activityLabel}
-            recovering={!readOnly && !runtimeError && session.recovering}
             onSendMessage={readOnly || mutationBlocked ? undefined : suppliedFeedbackActions.sendMessage}
             sendLater={readOnly ? undefined : sendLater}
             onCancel={actions.cancel}

@@ -1,60 +1,40 @@
 import { useVisibleClock } from './visible-clock.js';
-import { holdsUnconfirmedRows, remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { sessionActivityLabel, sessionNotice, type AgentReplicaState, type RemoteSessionState, type SessionFacts } from '@orchardworks/agent-client';
 
 export interface AgentActivityStatusProps {
   state?: AgentReplicaState;
-  sessionState?: RemoteSessionState;
+  sessionState: RemoteSessionState;
+  host?: SessionFacts['host'];
   visible?: boolean;
-  disabled: boolean;
-  disabledLabel?: string;
   commandPending?: boolean;
   interruptDisabled: boolean;
   interruptLabel: string;
   onInterrupt(): void;
 }
 
-export function AgentActivityStatus({ state, sessionState, visible = true, disabled: blocked, disabledLabel, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
+/** The session's activity line: its business label only (target T5). A notice dims the presence dot; the words of the notice are said elsewhere, once. */
+export function AgentActivityStatus({ state, sessionState: session, host, visible = true, commandPending = false, interruptDisabled, interruptLabel, onInterrupt }: AgentActivityStatusProps) {
   const agent = state?.agent;
-  const session = sessionState ?? remoteSessionState(state, blocked ? 'connecting' : 'ready');
-  const disabled = blocked || !session.synchronized || session.controlChecking;
+  const facts: SessionFacts = { session, host, replica: state };
+  const label = sessionActivityLabel(facts, commandPending);
+  const notice = sessionNotice(facts) !== undefined;
   const terminal = session.activity === 'failed' || session.activity === 'closed';
   const working = session.activity === 'running';
   const waiting = session.activity === 'waiting';
   const active = Boolean(agent?.activeTurn) && (working || waiting);
-  const runtimeConnection = session.runtime;
-  const runtimeUnavailable = runtimeConnection !== undefined && runtimeConnection.state !== 'connected';
-  const unavailable = disabled || runtimeUnavailable;
-  const connectionLabel = session.connection === 'unavailable' ? 'Unavailable'
-    : session.connection === 'disconnected' ? 'Reconnecting'
-    : session.connection === 'connecting' ? 'Opening session'
-    : session.controlChecking ? 'Checking access'
-    : session.connection === 'catching_up' ? 'Synchronizing'
-    : session.connection === 'idle' ? 'Disconnected' : 'Opening session';
-  // Rows held but not yet confirmed: the last business label stands in for the opening and synchronizing words. A broken connection is never hidden.
-  const connectionWordHidden = (session.holdingRows || holdsUnconfirmedRows(state)) && !disabledLabel && (session.connection === 'connecting' || session.connection === 'catching_up' || session.controlChecking);
-  const label = disabled && !connectionWordHidden ? disabledLabel ?? connectionLabel
-    : runtimeConnection?.state === 'reconnecting' ? 'Reconnecting'
-    : runtimeConnection?.state === 'restoring' ? 'Restoring'
-    : runtimeConnection?.state === 'unavailable' ? 'Native runtime unavailable'
-    : session.activity === 'failed' ? 'Agent failed'
-    : session.activity === 'closed' ? 'Closed'
-    : waiting ? 'Waiting for response'
-    : working ? 'Working'
-    : commandPending ? 'Executing command'
-    : session.activity === 'starting' ? 'Starting' : 'Ready';
   const timestamp = agent?.activeTurn?.startedAt;
   const startedAt = typeof timestamp === 'string' ? Date.parse(timestamp) : NaN;
-  const timed = active && !unavailable && Number.isFinite(startedAt);
+  const timed = active && Number.isFinite(startedAt);
   const now = useVisibleClock(timed && visible);
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
-  return <div className="agent-activity" data-connection-pending={unavailable || undefined} data-active={unavailable || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
+  return <div className="agent-activity" data-connection-pending={notice || undefined} data-active={notice || terminal || working || waiting || commandPending || session.activity === 'starting'} aria-label="Agent activity" data-testid="agent-activity">
     <div className="agent-activity-summary">
-      <span className={`agent-presence agent-state-${unavailable ? 'offline' : terminal ? session.activity : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
-      <span className="agent-activity-label" data-testid="agent-activity-label" aria-live="polite">{label}</span>
+      <span className={`agent-presence agent-state-${notice ? 'offline' : terminal ? session.activity : waiting ? 'waiting' : working ? 'running' : 'idle'}`} aria-hidden="true" />
+      <span className="agent-activity-label" data-testid="agent-activity-label" aria-live="polite" hidden={label === undefined}>{label}</span>
       {timed ? <time className="agent-activity-elapsed" data-testid="turn-elapsed" aria-label="Turn elapsed time" aria-live="off" dateTime={`PT${seconds}S`}>{formatElapsed(seconds)}</time>
-        : working && !unavailable ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}
+        : working ? <span className="agent-activity-elapsed">Start time unavailable</span> : null}
     </div>
-    <button type="button" data-testid="cancel-submit" disabled={interruptDisabled} hidden={unavailable || !working && !waiting && !commandPending}
+    <button type="button" data-testid="cancel-submit" disabled={interruptDisabled} hidden={!working && !waiting && !commandPending}
       title={agent?.capabilities.cancel ? 'Interrupt the current native operation' : 'Interrupt is unavailable for this Provider.'}
       onClick={onInterrupt}>{interruptLabel}</button>
   </div>;

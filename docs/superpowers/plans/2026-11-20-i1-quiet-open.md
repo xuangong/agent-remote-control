@@ -138,7 +138,9 @@ Its consumers are the E9 flow, the smoke invariant, the three runners and the co
 - **`AgentComposer`.**
   - `sessionState` becomes required, and the `'connecting'` default is deleted.
   - The `disabled`, `disabledLabel` and `recovering` props are deleted.
-  - `ready`, `canWait` and `dispatchReady` become `composerAvailability(...)`.
+  - `ready`, `canWait` and `dispatchReady` become `composerAvailability(...)` for a plain send. Commands, skills, files and next-turn queueing need the session itself (owner decision 3): they read the session's operation admission (`operations.interaction_response.allowed`, which every operation shares), not `composerAvailability`, because an agent that takes no messages still runs console commands.
+  - A state restored from the device is no longer draft-only: a send over it waits (section 4.5).
+  - A send that waits may be accepted before the session's `onSendMessage` exists (a view still opening); it is dispatched only when the session is `now` and the action is there.
   - The editor is enabled whenever `input === 'enabled'`, including before the first Snapshot.
   - Plain text and images go to `deferMessage` when `dispatch === 'when_ready'`.
   - Commands, skills, files and `next_turn` queueing need the session and wait for `now` (Open question 3).
@@ -623,6 +625,12 @@ What the control arm shows:
 **State accounting.** 0 fields, 0 paths: no product change. Section 3's finding holds.
 
 **Test.** The existing test "requests control before socket history so slow history cannot block ownership acquisition" already drove this flight and only checked that control preceded the tail. It is renamed to the plan's name and now asserts the exact order before any reply (`negotiate`, `timeline_subscription`, `session_control_request`, `timeline_request`), answers the tail first, stays `catching_up`, and turns `ready` on a granted `control`. A new test would have asserted the same rule twice. Mutation: deferring `beginSocketRecovery` behind `controlReady` fails it, and only it, of the 109 tests in the file.
+
+### Task 4: React shells read the rules
+
+**State accounting.** `AgentActivityStatus`: props -2 (`disabled`, `disabledLabel`), +1 (`host`); locals -5 (`disabled`, `unavailable`, `runtimeConnection`, `connectionLabel`, `connectionWordHidden`), +2 (`facts`, `notice`); label branches 15 to 0 (`sessionActivityLabel`). `AgentComposer`: props -3 (`disabled`, `disabledLabel`, `recovering`), +1 (`host`), `sessionState` required; the `'connecting'` default and `runtimeConnectionMessage` deleted; locals -4 (`controlChecking`, `runtimeConnection`, `runtimeUnavailable`, `terminal`), +4 (`availability`, `dispatch`, `sendNow`, `blocked`); the restored-replica draft-only rule deleted. `PendingSendQueue`: a waiting item says "Sending". `AgentSessionSettings` gets `disabled={false}`: its own `synchronized` and operation checks decide (its `disabled` prop goes in Task 9).
+
+**Tests.** `agent-client-web` 655 (was 600), 8.4 s for the package. New: the vector rows through `AgentActivityStatus` (28) and the composer (28); "takes a message typed before the first Snapshot, says Sending at once, keeps focus, and sends it once when the session is ready"; the restored-replica send. Rewritten to rows: the pending suite's setup (`connection` instead of `disabled`/`recovering`), "waits for confirmed control, and keeps a waiting message while a terminal takes the session", the runtime-unavailable case (sends wait, decision 1). Seam S6: "takes a send over a restored replica, shows it as Sending, and sends it only after the first server page confirms the state"; `seams.md` S6 updated. Every composer render in the client-web and lab tests passes `sessionState` (a mechanical change: `remoteSessionState(state, 'ready')`, or `'connecting'` where the test passed `disabled`).
 
 ## 11. Decisions (2026-11-20)
 

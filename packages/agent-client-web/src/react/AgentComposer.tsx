@@ -17,7 +17,7 @@ import { useSendButtonPress } from './useSendButtonPress.js';
 import { usePendingSend } from './usePendingSend.js';
 import { PendingSendQueue } from './PendingSendQueue.js';
 import { AgentActionToolbar, type ComposerAction } from './AgentActionToolbar.js';
-import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { composerAvailability, remoteSessionState, type RemoteSessionState, type AgentReplicaState, type SessionFacts } from '@orchardworks/agent-client';
 
 export interface PendingFirstInputContext {
   state: 'restoring' | 'pending' | 'dispatching' | 'accepted' | 'unknown' | 'unavailable';
@@ -26,7 +26,10 @@ export interface PendingFirstInputContext {
 export interface AgentComposerProps {
   /** Stable ancestor containing this composer and adjacent controls that share its touch gestures. */
   keyboardDismissBoundaryRef?: RefObject<HTMLElement>;
-  sessionState?: RemoteSessionState;
+  /** The session's facts; the composer reads its availability from `composerAvailability` and nothing else about the connection. */
+  sessionState: RemoteSessionState;
+  /** The session's Host as the Relay last said; an offline Host leaves the composer enabled. */
+  host?: SessionFacts['host'];
   /** @deprecated Layout follows the containing Session View; this option no longer hides controls. */
   compact?: boolean;
   /** Prevent editing while preserving capabilities and the current draft. */
@@ -48,11 +51,6 @@ export interface AgentComposerProps {
   consoleCommands?: readonly (AgentCommand & { aliases?: readonly string[] })[];
   onExecuteConsoleCommand?(id: string, args: string): Promise<AgentCommandResult>;
   sessionKey?: string;
-  disabled?: boolean;
-  /** Describes the current connection or synchronization stage while disabled. */
-  disabledLabel?: string;
-  /** Accept unsent messages while a disconnected session is recovering. */
-  recovering?: boolean;
   /** Host-confirmed captured history still awaiting native first-input materialization. */
   pendingFirstInputContext?: PendingFirstInputContext;
   visible?: boolean;
@@ -99,9 +97,8 @@ interface Draft {
   feedback?: { kind: 'success' | 'error'; message: string; delivery?: boolean; commandError?: unknown };
 }
 
-export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, disabled = false, disabledLabel, recovering = false, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
-  // A state restored from the device is a display, never authoritative: it takes drafts and offers no send until the connection confirms it.
-  const draftOnly = draftOnlyRequested || state?.timeline.restoredFromDevice === true;
+export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppliedSessionState, readOnly: forcedReadOnly = false, draftOnly: draftOnlyRequested = false, mutationBlocked = false, readOnlyLabel, readOnlyNotice, readOnlyCollapsed = false, state, sessionControls, renderSessionSettingError, renderCommandError, sessionKey, host, pendingFirstInputContext: firstInputContext, draft: controlledDraft, onDraftChange, onPendingInputChange, onSendMessage, onCancel, onSetSessionSetting, onListCommands, onExecuteCommand, onInspectCommand, onRequestResource, onResolveResource, attachments, consoleCommands = [], onExecuteConsoleCommand, visible = true, activityVisible = visible, draftScope, imageDraftBinding, imageRecipient, onUploadImage, onUploadResource, onSendMessageContent, sendLater }: AgentComposerProps) {
+  const draftOnly = draftOnlyRequested;
   const pendingFirstInputContext = firstInputContext !== undefined;
   const controlId = `composer-${useId().replace(/:/gu, '')}`;
   const composerRef = useComposerKeyboardDismiss(keyboardDismissBoundaryRef);
@@ -136,16 +133,19 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   useLayoutEffect(() => { pendingInputObserver.current?.(pendingInputCount); }, [agentId, pendingInputCount]);
   const operationBusy = Boolean(pending || currentDraft.settingPending || currentDraft.interruptPending);
   const busy = operationBusy;
-  const session = suppliedSessionState ?? remoteSessionState(state, disabled ? 'connecting' : 'ready');
-  const activitySession = draftOnly ? remoteSessionState(undefined, session.connection === 'ready' ? 'connecting' : session.connection) : session;
+  const session = suppliedSessionState;
+  const activitySession = draftOnly ? remoteSessionState(undefined, session.connection) : session;
   const capabilities = state?.agent?.capabilities;
-  const runtimeConnection = session.runtime;
-  const runtimeUnavailable = runtimeConnectionMessage(runtimeConnection?.state);
-  const controlChecking = session.controlChecking;
-  const ready = !draftOnly && !mutationBlocked && session.synchronized && !disabled && !forcedReadOnly && !session.readOnly && !controlChecking && runtimeUnavailable === undefined;
+  // Only a business reason blocks input (target T4). A send goes now, or waits in the queue until the session is ready.
+  const availability = composerAvailability({ session, host, replica: state });
+  const dispatch = availability.input === 'enabled' && !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' ? availability.dispatch : undefined;
+  const sendNow = dispatch === 'now';
+  const canWait = dispatch === 'when_ready';
+  // Commands, skills, files and next-turn queueing need the session itself and wait for it (owner decision 3): synchronized, its
+  // control check over and its runtime connected, which is when any operation is admitted. Only a plain send waits in the queue.
+  const ready = !draftOnly && !mutationBlocked && !forcedReadOnly && agentId !== '' && !session.readOnly && session.operations.interaction_response.allowed;
   const readOnly = forcedReadOnly || !draftOnly && (session.readOnly || capabilities?.sendMessage === false);
-  const terminal = state?.agent?.status === 'failed' || state?.agent?.status === 'closed';
-  const canWait = !draftOnly && !mutationBlocked && (session.recovering || recovering || disabled || controlChecking || runtimeConnection?.state === 'reconnecting' || runtimeConnection?.state === 'restoring') && Boolean(state?.agent) && !readOnly && !terminal && runtimeConnection?.state !== 'unavailable';
+  const blocked = !draftOnly && availability.input === 'disabled';
   const richEnabled = Boolean(imageDraftBinding || capabilities?.imageInput || capabilities?.resourceInput);
   const imageDraft = useImageDraft({ scope: draftScope, sessionKey: agentId, binding: imageDraftBinding, recipient: imageRecipient, text, enabled: richEnabled, active: visible && ready && !readOnly && !pendingFirstInputContext && Boolean(capabilities?.imageInput), upload: onUploadImage,
     onTextChange: value => { currentDraft.text = value; onDraftChange?.(value); refresh(count => count + 1); } });
@@ -184,9 +184,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const laterMode = !!sendLater && !mutationBlocked && !forcedReadOnly;
   const laterBlocked = !laterMode ? undefined : hasAttachments ? 'Images and files cannot wait for the Host. Send them when it is back.'
     : isCommand || currentDraft.selectedSkill ? 'Commands need the Host. Send them when it is back.' : undefined;
-  const dispatchReady = ready && !readOnly && !terminal && !operationBusy && session.operations.send_message.allowed;
-  const sendAllowed = ready && !readOnly && !terminal && session.operations.send_message.allowed;
-  const queueAllowed = ready && !readOnly && !terminal && session.operations.queue_message.allowed;
+  const dispatchReady = sendNow && !operationBusy;
+  const sendAllowed = sendNow;
+  const queueAllowed = ready && session.operations.queue_message.allowed;
   const latest = useRef({ agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient });
   latest.current = { agentId, draftOnly, mutationBlocked, dispatchReady, sendAllowed, queueAllowed, pendingFirstInputContext, onSendMessage, onSendMessageContent, onUploadImage, imageRecipient };
   const richPreparations = useRef(new Map<AbortController, ImageDraftRecipient>());
@@ -426,7 +426,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     }
     if (hasResources && waiting.items.length > 0) return;
     const action = onSendMessage;
-    if (!hasResources && kind === 'send' && (!ready || waiting.items.length > 0) && (ready || canWait) && !operationBusy && hasContent && capabilities?.sendMessage && (hasImages ? onSendMessageContent : action)) { deferMessage(); return; }
+    if (!hasResources && kind === 'send' && (!sendNow || waiting.items.length > 0) && (sendNow || canWait) && !operationBusy && hasContent && capabilities?.sendMessage !== false && (canWait || (hasImages ? onSendMessageContent : action))) { deferMessage(); return; }
     if ((hasAttachments ? !onSendMessageContent : !action) || currentDraft.pending || currentDraft.settingPending || !ready || !hasContent || !imageSendReady) return;
     if (!(kind === 'queue' ? session.operations.queue_message.allowed : session.operations.send_message.allowed) || (kind === 'queue' && (!canQueue || waiting.items.length > 0))) return;
     const submitted = currentDraft.text;
@@ -499,7 +499,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   const toolbarActions: ComposerAction[] = [];
   if (richEnabled && (imageDraftBinding || capabilities?.imageInput)) toolbarActions.push({ id: 'images', label: 'Add images', content: 'Image', priority: 20,
     title: pendingFirstInputContext ? firstInputImageNotice : undefined,
-    disabled: (!state?.agent && !draftOnly) || readOnly || busy || pendingFirstInputContext,
+    disabled: (agentId === '' && !draftOnly) || readOnly || busy || pendingFirstInputContext,
     run: () => { filePickerAgent.current = agentId; editorRef.current?.captureSelection(); fileInputRef.current?.click(); } });
   if (capabilities?.resourceInput) toolbarActions.push({ id: 'resources', label: 'Add resources', content: 'Resource', priority: 19,
     title: pendingFirstInputContext ? 'Resources can be sent after the previous history is included.' : undefined,
@@ -556,7 +556,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     </div> : null}
     <label htmlFor={`${controlId}-input`} className="agent-visually-hidden">Message</label>
     {richEnabled ? <ComposerEditor key={editorIdentity} ref={editorRef} id={`${controlId}-input`} parts={imageDraft.parts} images={imageDraft.images}
-      disabled={(!state?.agent && !draftOnly && !laterMode) || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
+      disabled={(blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy} onChange={parts => { imageDraft.setParts(parts); currentDraft.commandIndex = 0; currentDraft.commandsDismissed = false; currentDraft.feedback = undefined; }}
       onFiles={addImageFiles} onImport={importImageParts} onRetry={imageId => { if (!blockFirstInputImages()) imageDraft.retry(imageId); }} onKeyDown={handleKeyDown}
       describedBy={`${controlId}-hint`} controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       activeDescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined} /> : <textarea
@@ -569,9 +569,9 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
       onKeyDown={handleKeyDown}
       onCompositionStart={() => { composing.current = true; }}
       onCompositionEnd={() => { composing.current = false; }}
-      disabled={!ownershipReadOnly && ((!state?.agent && !draftOnly && !laterMode) || readOnly && !laterMode || busy)}
+      disabled={!ownershipReadOnly && ((blocked || agentId === '') && !draftOnly && !laterMode || readOnly && !laterMode || busy)}
       readOnly={ownershipReadOnly}
-      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly && !laterMode ? readOnlyHint : state?.agent || draftOnly || laterMode ? 'Message…' : 'Open or attach to an Agent first.'}
+      placeholder={ownershipReadOnly ? '' : forcedReadOnly ? readOnlyLabel ?? 'This recording is read-only.' : readOnly && !laterMode ? readOnlyHint : blocked && !laterMode ? availability.words : agentId !== '' || draftOnly || laterMode ? 'Message…' : 'Open or attach to an Agent first.'}
       aria-describedby={`${controlId}-hint`}
       aria-controls={showCommands && commands.length > 0 ? `${controlId}-commands` : undefined}
       aria-activedescendant={showCommands && commands.length > 0 ? `${controlId}-command-${commandIndex}` : undefined}
@@ -580,21 +580,21 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     </div>
     <p id={`${controlId}-hint`} hidden={forcedReadOnly} className={`agent-composer-note${readOnly && !laterMode ? '' : ' agent-visually-hidden'}`}>{readOnly && !laterMode ? readOnlyHint : <>{nativeBusy ? 'Enter to send now' : 'Enter to send'} · Shift+Enter or hold Send for a new line · / for commands</>}</p>
     {!ownershipReadOnly ? <div className="agent-composer-actions">
-      {state?.agent && !draftOnly ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={disabled} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
+      {state?.agent && !draftOnly ? <AgentSessionSettings actions={toolbarActions} sessionState={session} key={agentId} state={state} disabled={false} readOnly={forcedReadOnly} view={currentDraft.view} busy={busy}
         onView={(view) => { currentDraft.view = view; refresh((value) => value + 1); }}
         onPendingChange={(value) => { currentDraft.settingPending = value; if (mounted.current) refresh((count) => count + 1); }}
         onSelect={onSetSessionSetting && !mutationBlocked ? async (id, value) => { if (latest.current.draftOnly || latest.current.mutationBlocked || latest.current.agentId !== agentId) return; await onSetSessionSetting(id, value); } : undefined} renderError={renderSessionSettingError}>{sessionControls}</AgentSessionSettings> : <div className="agent-session-controls">
           <AgentActionToolbar actions={toolbarActions} overflowOpen={currentDraft.view === 'actions'}
             onOverflow={open => { currentDraft.view = open ? 'actions' : undefined; refresh(value => value + 1); }} />
         </div>}
-      <AgentActivityStatus sessionState={activitySession} visible={activityVisible} state={state} disabled={disabled || draftOnly} disabledLabel={!draftOnly && state?.agent ? disabledLabel : undefined}
+      <AgentActivityStatus sessionState={activitySession} host={host} visible={activityVisible} state={draftOnly ? undefined : state}
         commandPending={pending === 'command'}
         interruptDisabled={!canInterrupt || currentDraft.interruptPending === true || (pending !== undefined && pending !== 'command') || !onCancel}
         interruptLabel={currentDraft.interruptPending ? 'Interrupting…' : interruptRequested ? 'Interrupt requested' : 'Interrupt'}
         onInterrupt={() => void run('cancel')} />
       {laterMode ? <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : sendLater!.label} title={laterBlocked ?? `${sendLater!.label} · Hold for a new line`}
         disabled={busy || !hasContent || !!laterBlocked} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>
-      : <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage !== true || (!onSendMessage && !onSendMessageContent))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>}
+      : <button type="button" data-testid="prompt-submit" aria-label={pending === 'send' ? 'Sending…' : 'Send message'} title={hasImages && pendingFirstInputContext ? firstInputImageNotice : `${nativeBusy ? 'Send input to the active native turn' : 'Start a new native turn'} · Hold for a new line`} disabled={!canSubmit || readOnly || busy || hasImages && pendingFirstInputContext || (selectedSkill ? nativeBusy || !onExecuteCommand : !hasContent || (!imageSendReady && !canWait) || (!isCommand && (capabilities?.sendMessage === false || (!onSendMessage && !onSendMessageContent && !canWait))))} {...sendButtonPress}><span aria-hidden="true">{pending === 'send' ? '…' : '↑'}</span></button>}
     </div> : null}
     {laterBlocked ? <p className="agent-composer-note" role="status">{laterBlocked}</p> : null}
     {waiting.items[0]?.phase === 'error' ? <p className="agent-composer-note" role="alert">
@@ -616,8 +616,7 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
     {hasResources && resourceDraft.storageError ? <p role="status" className="agent-composer-note">{resourceDraft.storageError}</p> : null}
     {hasResources && !ready ? <p role="status" className="agent-composer-note">Resources remain in your draft. Reconnect before sending.</p> : null}
     {hasImages ? <ImageUploadStatus parts={imageDraft.parts} images={imageDraft.images} connected={ready} onOpen={imageId => editorRef.current?.openImage(imageId)} /> : null}
-    {!ownershipReadOnly && runtimeUnavailable ? <p className="agent-composer-note" role="status">{runtimeUnavailable}</p>
-      : !ownershipReadOnly && !draftOnly && !state?.agent ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
+    {!ownershipReadOnly && !draftOnly && agentId === '' ? <p className="agent-composer-note">Open or attach to an Agent first.</p> : null}
     {feedback && !(feedback.delivery && state?.outgoingMessages !== undefined) ? commandRecovery != null ? <div className="agent-composer-note">{commandRecovery}</div>
       : <p className="agent-composer-note" role={feedback.kind === 'error' ? 'alert' : 'status'}>{feedback.message}</p> : null}
     {!draftOnly && !onInspectCommand && currentDraft.inspectedSkill && state ? <AgentCommandDetails key={`${agentId}:${currentDraft.inspectedSkill.id}`}
@@ -627,9 +626,3 @@ export function AgentComposer({ keyboardDismissBoundaryRef, sessionState: suppli
   </section>;
 }
 
-function runtimeConnectionMessage(state?: 'connected' | 'reconnecting' | 'restoring' | 'unavailable'): string | undefined {
-  if (state === 'reconnecting') return 'Native runtime is reconnecting. Your draft is preserved.';
-  if (state === 'restoring') return 'Native runtime is restoring this session. Your draft is preserved.';
-  if (state === 'unavailable') return 'Native runtime is unavailable. Your draft is preserved.';
-  return undefined;
-}

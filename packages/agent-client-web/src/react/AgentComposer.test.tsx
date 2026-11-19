@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer } from './AgentComposer.js';
 import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
+import { buildSessionFacts, CONTROL, SESSION_PRESENTATION_VECTORS } from '@orchardworks/agent-client/testing';
 
-it.each([
-  ['connecting', 'Opening session'],
-  ['catching_up', 'Synchronizing'],
-  ['disconnected', 'Reconnecting'],
-] as const)('keeps %s visible while a local draft has no native binding', async (connection, expected) => {
+const T5 = /\b(?:Opening session|Checking access|Synchronizing|Reconnecting|Restoring|Awaiting Agent|Start with a Provider|Loading conversation)\b/i;
+
+it.each(['connecting', 'catching_up', 'disconnected'] as const)('says no connection word while a local draft has no native binding (%s)', async connection => {
   const state: AgentReplicaState = { ...createReplicaState(), agent: {
     id: 'cached', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'running',
     activeTurn: { turnId: 'old-turn', startedAt: '2026-09-20T00:00:00Z' },
@@ -19,7 +18,8 @@ it.each([
   const send = vi.fn(), cancel = vi.fn();
   for (const cached of [state, undefined]) {
     const container = await render(<AgentComposer state={cached} sessionState={remoteSessionState(undefined, connection)} draftOnly draft="Local draft" onSendMessage={send} onCancel={cancel} />);
-    expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe(expected);
+    expect(container.querySelector<HTMLElement>('[data-testid="agent-activity-label"]')?.hidden).toBe(true);
+    expect(container.textContent).not.toMatch(T5);
     expect(container.textContent).not.toContain('Open or attach to an Agent first.');
     expect(container.querySelector<HTMLButtonElement>('[data-testid="cancel-submit"]')?.hidden).toBe(true);
     expect(container.querySelector('[data-testid="turn-elapsed"]')).toBeNull();
@@ -33,9 +33,54 @@ it.each([
 
 it.each([false, true])('does not present Ready for an unbound draft while access checking is %s', async controlChecking => {
   const session = { ...remoteSessionState(undefined, 'ready'), controlChecking };
-  const container = await render(<AgentComposer draftOnly sessionState={session} disabledLabel="Ready" draft="Local draft" />);
-  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Opening session');
+  const container = await render(<AgentComposer draftOnly sessionState={session} draft="Local draft" />);
+  expect(container.querySelector<HTMLElement>('[data-testid="agent-activity-label"]')?.hidden).toBe(true);
+  expect(container.textContent).not.toMatch(T5);
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+});
+
+describe('the composer follows composerAvailability, row by row', () => {
+  it.each(SESSION_PRESENTATION_VECTORS.map(row => [row.name, row] as const))('%s', async (_name, row) => {
+    const container = await render(<AgentComposer sessionKey="agent-1" state={row.facts.replica} sessionState={row.facts.session} host={row.facts.host} onSendMessage={vi.fn()} />);
+    const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+    expect(input.disabled || input.readOnly).toBe(row.composer.input === 'disabled');
+    expect(container.textContent).not.toMatch(T5);
+  });
+});
+
+it('takes a message typed before the first Snapshot, says Sending at once, keeps focus, and sends it once when the session is ready', async () => {
+  const send = vi.fn(async () => {});
+  const opening = buildSessionFacts('connecting', undefined);
+  const restored = buildSessionFacts('catching_up', { snapshot: { status: 'idle' }, restored: true, control: CONTROL.checking });
+  const ready = buildSessionFacts('ready', { snapshot: { status: 'idle' }, control: CONTROL.granted });
+  const view = (facts: typeof ready) => <AgentComposer sessionKey="agent-1" state={facts.replica} sessionState={facts.session} onSendMessage={send} />;
+  const container = await render(view(opening));
+  const input = container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')!;
+  expect(input.disabled).toBe(false);
+  input.focus();
+  const type = (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await type('Typed while opening');
+  await act(async () => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); });
+  const pending = container.querySelectorAll('[data-testid="pending-send"]');
+  expect(pending).toHaveLength(1);
+  expect(pending[0]!.textContent).toContain('Sending');
+  expect(input.value).toBe('');
+  expect(document.activeElement).toBe(input);
+  await type(' next');
+  expect(input.value).toBe(' next');
+  expect(send).not.toHaveBeenCalled();
+  // The Snapshot arrives from the device before the session is ready: the model controls show, the send still waits.
+  await rerender(container, view(restored));
+  expect(container.querySelector('[data-testid="session-model-button"]')).not.toBeNull();
+  expect(send).not.toHaveBeenCalled();
+  await rerender(container, view(ready));
+  await act(async () => {});
+  expect(send).toHaveBeenCalledExactlyOnceWith('Typed while opening');
+  expect(input.value).toBe(' next');
+  expect(container.textContent).not.toMatch(T5);
 });
 
 it('allows cached-session drafts while synchronizing but waits for readiness to send or execute commands', async () => {
@@ -48,7 +93,7 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   const send = vi.fn(() => new Promise<void>(done => { resolve = done; }));
   const command = vi.fn(async () => ({}));
   const draft = vi.fn();
-  const view = (disabled: boolean, current = state) => <AgentComposer state={current} disabled={disabled} onDraftChange={draft}
+  const view = (disabled: boolean, current = state) => <AgentComposer sessionState={remoteSessionState(current, (disabled) ? 'connecting' : 'ready')} state={current} onDraftChange={draft}
     onSendMessage={send} consoleCommands={[{ id: 'side', name: 'side', kind: 'command', description: 'Open a side conversation' }]} onExecuteConsoleCommand={command} />;
   const container = await render(view(true));
   const input = container.querySelector('textarea')!;
@@ -59,8 +104,8 @@ it('allows cached-session drafts while synchronizing but waits for readiness to 
   const enter = () => act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(input.disabled).toBe(false);
   expect(input.placeholder).toBe('Message…');
-  expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('true');
-  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Opening session');
+  expect(container.querySelector('[data-testid="agent-activity"]')?.getAttribute('data-active')).toBe('false');
+  expect(container.querySelector('[data-testid="agent-activity-label"]')?.textContent).toBe('Ready');
   await type('Draft during synchronization');
   expect(draft).toHaveBeenLastCalledWith('Draft during synchronization');
   expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
@@ -94,7 +139,7 @@ it('presents a failed command through its renderer and keeps the message for oth
   const signIn = Object.assign(new Error('Sign in again before changing session permissions.'), { code: 'reauthentication_required' });
   const command = vi.fn().mockRejectedValueOnce(signIn).mockRejectedValueOnce(new Error('The fork could not connect.'));
   const renderCommandError = vi.fn((error: unknown) => (error as { code?: string }).code === 'reauthentication_required' ? <a href="/sign-in">Sign in again</a> : undefined);
-  const container = await render(<AgentComposer state={state} draft="/fork keep going" onSendMessage={vi.fn()} renderCommandError={renderCommandError}
+  const container = await render(<AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} draft="/fork keep going" onSendMessage={vi.fn()} renderCommandError={renderCommandError}
     consoleCommands={[{ id: 'fork', name: 'fork', kind: 'command', description: 'Fork' }]} onExecuteConsoleCommand={command} />);
   const submit = () => act(async () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.click());
   await submit();
@@ -120,7 +165,7 @@ it('keeps image atoms through reconnect and sends ordered image-only content wit
   const upload = vi.fn(async () => attachment);
   const send = vi.fn(async () => {});
   const command = vi.fn(async () => ({}));
-  const view = (disabled: boolean) => <AgentComposer state={state} disabled={disabled} onSendMessageContent={send} onUploadImage={disabled ? undefined : upload} consoleCommands={[{ id: 'side', name: 'side', kind: 'command', description: 'Side' }]} onExecuteConsoleCommand={command} />;
+  const view = (disabled: boolean) => <AgentComposer sessionState={remoteSessionState(state, (disabled) ? 'connecting' : 'ready')} state={state} onSendMessageContent={send} onUploadImage={disabled ? undefined : upload} consoleCommands={[{ id: 'side', name: 'side', kind: 'command', description: 'Side' }]} onExecuteConsoleCommand={command} />;
   const container = await render(view(true));
   const paste = new Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(paste, 'clipboardData', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => '' } });
@@ -161,7 +206,7 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
   const attachment = { attachmentId: 'expired', sha256: 'a'.repeat(64), mediaType: 'image/png' as const, byteLength: 1, imageDimensions: { width: 1, height: 1 } };
   const upload = vi.fn(async (_blob: Blob, _uploadId: string) => attachment);
   const send = vi.fn().mockRejectedValueOnce(Object.assign(new Error('Attachment expired.'), { code: 'invalid_image_input' })).mockResolvedValue(undefined);
-  const container = await render(<AgentComposer state={state} onSendMessageContent={send} onUploadImage={upload} />);
+  const container = await render(<AgentComposer sessionState={remoteSessionState(state, 'ready')} state={state} onSendMessageContent={send} onUploadImage={upload} />);
   const editor = container.querySelector('[role="textbox"]')!;
   const paste = new Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(paste, 'clipboardData', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => '' } });
@@ -193,20 +238,21 @@ it('offers explicit upload retry after the Host rejects an expired attachment', 
   expect(send.mock.calls[1]?.[0]).toEqual([{ type: 'image', attachmentId: 'replacement', label: 'image #1' }]);
 });
 
-it('takes a draft over a state restored from the device but never sends it, and sends once the state is confirmed', async () => {
+it('takes a send over a state restored from the device, says Sending, and sends it only once the state is confirmed', async () => {
   const base = createReplicaState();
   const agent = { id: 'a', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle' as const, activeTurn: null,
     capabilities: { history: true, sendMessage: true, steer: false, cancel: false, readResource: false }, pendingInteractions: [], runtimeInfo: { providerId: 'test', status: 'idle' as const } };
   const restored: AgentReplicaState = { ...base, agent, timeline: { ...base.timeline, initialized: true, restoredFromDevice: true } };
   const confirmed: AgentReplicaState = { ...restored, timeline: { ...restored.timeline, restoredFromDevice: undefined } };
-  const send = vi.fn();
-  const live = remoteSessionState(undefined, 'ready');
-  const container = await render(<AgentComposer state={restored} sessionState={live} draft="Typed early" onSendMessage={send} />);
+  const send = vi.fn(async () => {});
+  const container = await render(<AgentComposer state={restored} sessionState={remoteSessionState(restored, 'catching_up')} draft="Typed early" onSendMessage={send} />);
   expect(container.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')).toMatchObject({ value: 'Typed early', disabled: false });
   const submit = () => container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!;
-  expect(submit().disabled).toBe(true);
-  await act(async () => submit().click());
-  expect(send).not.toHaveBeenCalled();
-  await rerender(container, <AgentComposer state={confirmed} sessionState={live} draft="Typed early" onSendMessage={send} />);
   expect(submit().disabled).toBe(false);
+  await act(async () => submit().click());
+  expect(container.querySelector('[data-testid="pending-send"]')?.textContent).toContain('Sending');
+  expect(send).not.toHaveBeenCalled();
+  await rerender(container, <AgentComposer state={confirmed} sessionState={remoteSessionState(confirmed, 'ready')} draft="" onSendMessage={send} />);
+  await act(async () => {});
+  expect(send).toHaveBeenCalledExactlyOnceWith('Typed early');
 });

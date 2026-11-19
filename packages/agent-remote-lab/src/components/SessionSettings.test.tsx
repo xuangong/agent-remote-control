@@ -1,4 +1,5 @@
 import { act, useState } from 'react';
+import { remoteSessionState } from '@orchardworks/agent-client';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '../test/setup.js';
 import { replicaState } from '../test/fixtures.js';
@@ -18,7 +19,7 @@ describe('chat session settings', () => {
     const updates: string[] = [];
     function Session() {
       const [current, setCurrent] = useState(state);
-      return <LiveControlPanel state={current} onSetSessionSetting={async (id, value) => {
+      return <LiveControlPanel sessionState={remoteSessionState(current, 'ready')} state={current} onSetSessionSetting={async (id, value) => {
         updates.push(`${id}:${value}`);
         await new Promise<void>((resolve) => { finish = resolve; });
         setCurrent({ ...state, agent: { ...state.agent, runtimeInfo: { ...state.agent.runtimeInfo, settings: state.agent.runtimeInfo.settings.map((setting) => setting.id === id ? { ...setting, value } : setting) } } });
@@ -38,7 +39,7 @@ describe('chat session settings', () => {
 
   it('unlocks after acknowledgement even when another native update supersedes the requested value', async () => {
     let finish!: () => void;
-    const container = await render(<LiveControlPanel state={state} onSetSessionSetting={() => new Promise<void>((resolve) => { finish = resolve; })} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onSetSessionSetting={() => new Promise<void>((resolve) => { finish = resolve; })} />);
     await act(async () => (container.querySelector('[data-testid="session-model-button"]') as HTMLButtonElement).click());
     const select = container.querySelector('[data-testid="session-setting-model"]') as HTMLSelectElement;
     await act(async () => { select.value = 'b'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -50,7 +51,7 @@ describe('chat session settings', () => {
 
   it('reports native rejection and allows retry without changing the confirmed value', async () => {
     const selectSetting = vi.fn().mockRejectedValue(new Error('Native setting refused.'));
-    const container = await render(<LiveControlPanel state={state} onSetSessionSetting={selectSetting} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(state, 'ready')} state={state} onSetSessionSetting={selectSetting} />);
     await act(async () => (container.querySelector('[data-testid="session-model-button"]') as HTMLButtonElement).click());
     const select = container.querySelector('[data-testid="session-setting-model"]') as HTMLSelectElement;
     await act(async () => { select.value = 'b'; select.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -63,7 +64,7 @@ describe('chat session settings', () => {
     let reject!: (error: Error) => void;
     function Sessions() {
       const [other, setOther] = useState(false);
-      return <><button onClick={() => setOther(true)}>Switch session</button><LiveControlPanel
+      return <><button onClick={() => setOther(true)}>Switch session</button><LiveControlPanel sessionState={remoteSessionState(other ? { ...state, agent: { ...state.agent, id: 'other-agent' } } : state, 'ready')}
         state={other ? { ...state, agent: { ...state.agent, id: 'other-agent' } } : state}
         onSetSessionSetting={() => new Promise<void>((_resolve, fail) => { reject = fail; })} /></>;
     }
@@ -86,7 +87,7 @@ describe('chat session settings', () => {
     { name: 'waiting', disabled: false, activity: 'waiting', mutable: true },
   ] as const)('keeps current permissions visible and respects connection availability while $name', async ({disabled, activity, mutable}) => {
     const onSelect = vi.fn(async () => {});
-    const container = await render(<LiveControlPanel state={{ ...state, agent: { ...state.agent, status: activity } }} disabled={disabled} onSetSessionSetting={onSelect} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState({ ...state, agent: { ...state.agent, status: activity } }, (disabled) ? 'connecting' : 'ready')} state={{ ...state, agent: { ...state.agent, status: activity } }} onSetSessionSetting={onSelect} />);
     await act(async () => (container.querySelector('[data-testid="session-permissions-button"]') as HTMLButtonElement).click());
     const select = container.querySelector('[data-testid="session-setting-permissions"]') as HTMLSelectElement;
     expect(select.value).toBe('ask');
@@ -111,7 +112,7 @@ describe('chat session settings', () => {
         },
       },
     };
-    const container = await render(<LiveControlPanel state={recovering} onSetSessionSetting={vi.fn()} />);
+    const container = await render(<LiveControlPanel sessionState={remoteSessionState(recovering, 'ready')} state={recovering} onSetSessionSetting={vi.fn()} />);
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="session-model-button"]')!.click());
 
     expect(container.querySelector<HTMLSelectElement>('[data-testid="session-setting-model"]')).toMatchObject({

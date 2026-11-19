@@ -1,6 +1,6 @@
 import { act, useState } from 'react';
 import { expect, it, vi } from 'vitest';
-import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { createReplicaState, type AgentReplicaState, remoteSessionState } from '@orchardworks/agent-client';
 import { AgentComposer } from '@orchardworks/agent-client-web/react';
 import { render } from '../test/setup.js';
 import { SessionDirectoryClient } from '../directory-client.js';
@@ -27,7 +27,7 @@ it('keeps offline successor images out of the waiting queue so its first text ca
   function View() {
     const [online, setOnline] = useState(true); connect = setOnline;
     const context = useSuccessionContext({ directory, operationId: 'handoff', target, enabled: online });
-    return <AgentComposer state={state} disabled={!online} recovering={!online} onSendMessage={send} onSendMessageContent={content} onUploadImage={upload}
+    return <AgentComposer sessionState={remoteSessionState(state, (!online) ? 'connecting' : 'ready')} state={state} onSendMessage={send} onSendMessageContent={content} onUploadImage={upload}
       pendingFirstInputContext={context && context.state !== 'materialized' ? { state: context.state, onRetry: context.onRetry } : undefined} />;
   }
   const container = await render(<View />);

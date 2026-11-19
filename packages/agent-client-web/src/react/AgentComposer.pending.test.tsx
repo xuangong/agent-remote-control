@@ -3,7 +3,8 @@ import { act } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { render, rerender, unmount } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
-import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { CONTROL } from '@orchardworks/agent-client/testing';
+import { createReplicaState, remoteSessionState, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 
 const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
   id: 'one', providerId: 'test', createdAt: '2026-09-20T00:00:00Z', updatedAt: '2026-09-20T00:00:00Z', status: 'idle', activeTurn: null,
@@ -13,12 +14,16 @@ const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...creat
 const running = { ...state, agent: { ...state.agent!, status: 'running' as const, activeTurn: { turnId: 'turn-one', startedAt: '2026-09-20T00:00:00Z' } } };
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-async function setup(props: Partial<AgentComposerProps> = {}) {
+/** Composer props with the session given as a connection over the replica, unless a test gives the session itself. */
+type SetupProps = Partial<Omit<AgentComposerProps, 'sessionState'>> & { connection?: RemoteSessionStatus; sessionState?: RemoteSessionState };
+const composer = ({ connection = 'ready', sessionState, ...props }: SetupProps) => <AgentComposer {...props} sessionState={sessionState ?? remoteSessionState(props.state, connection)} />;
+
+async function setup(props: SetupProps = {}) {
   vi.useFakeTimers();
   const send = vi.fn(async () => {}), cancel = vi.fn(async () => {});
-  let current: AgentComposerProps = { state, disabled: true, recovering: true, onSendMessage: send, onCancel: cancel, ...props };
-  const container = await render(<AgentComposer {...current} />);
-  const update = async (patch: Partial<AgentComposerProps>) => { current = { ...current, ...patch }; await rerender(container, <AgentComposer {...current} />); };
+  let current: SetupProps = { state, connection: 'disconnected', onSendMessage: send, onCancel: cancel, ...props };
+  const container = await render(composer(current));
+  const update = async (patch: SetupProps) => { current = { ...current, ...patch }; await rerender(container, composer(current)); };
   const type = (text: string) => act(async () => {
     const input = container.querySelector('textarea')!;
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text);
@@ -36,7 +41,7 @@ it('allows draft-only text editing while stale native callbacks cannot send or e
   await view.type('Retained draft'); await view.click(); await advance(1000);
   expect(view.container.querySelector('textarea')!.value).toBe('Retained draft');
   expect(view.notice()).toBeNull(); expect(view.send).not.toHaveBeenCalled();
-  await view.update({ state: running, disabled: false, recovering: false });
+  await view.update({ state: running, connection: 'ready' });
   await view.click(); await advance(1000);
   expect(view.send).not.toHaveBeenCalled(); expect(view.cancel).not.toHaveBeenCalled();
   expect(command).not.toHaveBeenCalled(); expect(configure).not.toHaveBeenCalled(); expect(view.notice()).toBeNull();
@@ -61,7 +66,7 @@ it('keeps the opaque image editor and focus through draft-only and confirmed nat
   expect(view.container.querySelector('[data-image-id]')).not.toBeNull();
   await view.click(); await advance(1000);
   expect(upload).not.toHaveBeenCalled(); expect(view.send).not.toHaveBeenCalled(); expect(view.notice()).toBeNull();
-  await view.update({ state, sessionKey: 'C', draftOnly: false, disabled: false, recovering: false });
+  await view.update({ state, sessionKey: 'C', draftOnly: false, connection: 'ready' });
   expect(view.container.querySelector('[role="textbox"]')).toBe(editor);
   expect(document.activeElement).toBe(editor);
   expect(view.container.querySelector('[data-image-id]')).not.toBeNull();
@@ -77,12 +82,12 @@ it('queues multiple messages, keeps editing available and drains FIFO without ch
   await advance(120000);
   expect(view.container.querySelectorAll('[data-testid="pending-send"]')).toHaveLength(2);
   expect(view.send).not.toHaveBeenCalled();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(view.send.mock.calls).toEqual([['First'], ['Second']]);
   expect(view.notice()).toBeNull();
   expect(view.container.querySelector('textarea')!.value).toBe('Still editing');
-  await view.update({ disabled: true, recovering: true });
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'disconnected' });
+  await view.update({ connection: 'ready' });
   expect(view.send).toHaveBeenCalledTimes(2);
 });
 
@@ -96,7 +101,7 @@ it('copies the full pending text and cancels only the selected message', async (
   await view.click('[aria-label="Copy pending message"]');
   expect(copy).toHaveBeenCalledExactlyOnceWith('First\nwith another line');
   await view.click('[aria-label="Cancel pending send"]');
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Second');
   expect(view.container.querySelector('textarea')!.value).toBe('New draft');
 });
@@ -109,7 +114,7 @@ it.each(['visibility', 'page'] as const)('waits in the background and sends on %
     if (kind === 'visibility') { visibility.mockReturnValue('hidden'); document.dispatchEvent(new Event('visibilitychange')); }
     else window.dispatchEvent(new Event('pagehide'));
   });
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   await advance(120000);
   expect(view.send).not.toHaveBeenCalled();
   await act(async () => {
@@ -123,7 +128,7 @@ it('retains a session queue while switching without sending to the other session
   const view = await setup();
   await view.type('Only for one'); await view.click();
   const otherSend = vi.fn(async () => {});
-  await view.update({ state: { ...state, agent: { ...state.agent!, id: 'two' } }, onSendMessage: otherSend, disabled: false, recovering: false });
+  await view.update({ state: { ...state, agent: { ...state.agent!, id: 'two' } }, onSendMessage: otherSend, connection: 'ready' });
   expect(otherSend).not.toHaveBeenCalled();
   expect(view.notice()).toBeNull();
   await view.update({ state, onSendMessage: view.send });
@@ -147,7 +152,7 @@ it('keeps interrupt, queue and slash commands behind readiness', async () => {
   await view.type('/side'); await view.click();
   expect(view.notice()).toBeNull();
   expect(execute).not.toHaveBeenCalled();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(execute).not.toHaveBeenCalled();
 });
 
@@ -155,20 +160,26 @@ it('does not automatically retry an operation whose delivery became uncertain', 
   const send = vi.fn(async () => { throw Object.assign(new Error('Delivery is not confirmed.'), { code: 'connection_disconnected' }); });
   const view = await setup({ onSendMessage: send });
   await view.type('Only once'); await view.click();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(view.notice()?.getAttribute('data-state')).toBe('error');
   expect(view.notice()?.textContent).toContain('Check delivery');
-  await view.update({ disabled: true, recovering: true }); await advance(10000);
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'disconnected' }); await advance(10000);
+  await view.update({ connection: 'ready' });
   expect(send).toHaveBeenCalledTimes(1);
 });
 
-it('preserves read-only and unavailable restrictions during recovery', async () => {
+it('keeps an agent that takes no messages blocked, and lets a message wait while the runtime is unavailable', async () => {
   const view = await setup({ state: { ...state, agent: { ...state.agent!, capabilities: { ...state.agent!.capabilities, sendMessage: false } } } });
   expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
-  await view.update({ state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, connection: { state: 'unavailable' } } } } });
-  await view.type('Cannot send');
-  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  expect(view.container.querySelector('textarea')!.disabled).toBe(true);
+  await view.update({ connection: 'ready', state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, connection: { state: 'unavailable' } } } } });
+  await view.type('Waits for the agent');
+  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
+  await view.click();
+  expect(view.notice()?.textContent).toContain('Sending');
+  expect(view.send).not.toHaveBeenCalled();
+  await view.update({ state });
+  expect(view.send).toHaveBeenCalledExactlyOnceWith('Waits for the agent');
 });
 
 it('waits for image revalidation after reconnect and preserves ordered content', async () => {
@@ -192,7 +203,7 @@ it('waits for image revalidation after reconnect and preserves ordered content',
   await view.click();
   expect(view.notice()?.textContent).toContain('Look at');
   expect(upload).not.toHaveBeenCalled();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(upload).toHaveBeenCalledTimes(1);
   expect(send).not.toHaveBeenCalled();
   await act(async () => finishUpload(attachment));
@@ -225,7 +236,7 @@ it('serializes pending sends while accepting more input during an outstanding se
   const send = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
   const view = await setup({ onSendMessage: send });
   await view.type('First'); await view.click();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(view.notice()?.getAttribute('data-state')).toBe('sending');
   expect(view.container.querySelector<HTMLButtonElement>('[aria-label="Dismiss message after checking delivery"]')!.disabled).toBe(true);
   await view.type('Second'); await view.click();
@@ -241,27 +252,29 @@ it('pauses FIFO behind an unknown outcome until the user checks and dismisses it
   const view = await setup({ onSendMessage: send });
   await view.type('Uncertain'); await view.click();
   await view.type('Later'); await view.click();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(send).toHaveBeenCalledTimes(1);
   expect(view.container.querySelector('[aria-label="Retry pending send"]')).toBeNull();
   await view.click('[aria-label="Dismiss message after checking delivery"]');
   expect(send.mock.calls).toEqual([['Uncertain'], ['Later']]);
 });
 
-it('waits for confirmed control and preserves the queue when another browser owns the session', async () => {
+it('waits for confirmed control, and keeps a waiting message while a terminal takes the session', async () => {
   const view = await setup();
   await view.type('After control'); await view.click();
-  await view.update({ disabled: false, recovering: false, state: { ...state, sessionControl: { access: 'checking', available: false } } });
+  expect(view.notice()?.textContent).toContain('Sending');
+  await view.update({ connection: 'ready', state: { ...state, sessionControl: CONTROL.checking } });
   expect(view.send).not.toHaveBeenCalled();
-  await view.update({ readOnly: true, state: { ...state, sessionControl: { access: 'read_only', available: true } } });
+  await view.update({ state: { ...state, sessionControl: CONTROL.nativeCli } });
   expect(view.send).not.toHaveBeenCalled();
-  expect(view.notice()).not.toBeNull();
-  await view.update({ readOnly: false, state });
+  expect(view.notice()?.textContent).toContain('After control');
+  expect(view.container.querySelector('textarea')!.disabled).toBe(true);
+  await view.update({ state: { ...state, sessionControl: CONTROL.granted } });
   expect(view.send).toHaveBeenCalledExactlyOnceWith('After control');
 });
 
 it('accepts messages during native recovery even without the outer recovery hint', async () => {
-  const view = await setup({ disabled: false, recovering: false, state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, connection: { state: 'restoring' } } } } });
+  const view = await setup({ connection: 'ready', state: { ...state, agent: { ...state.agent!, runtimeInfo: { ...state.agent!.runtimeInfo, connection: { state: 'restoring' } } } } });
   await view.type('After restore'); await view.click();
   expect(view.notice()).not.toBeNull();
   expect(view.send).not.toHaveBeenCalled();
@@ -284,20 +297,20 @@ it('aborts a queued image upload on reconnect and never dispatches its stale com
   Object.defineProperty(paste, 'clipboardData', { value: { files: [new File(['x'], 'x.png', { type: 'image/png' })], getData: () => '' } });
   await act(async () => view.container.querySelector('[role="textbox"]')!.dispatchEvent(paste));
   await view.click();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(upload).toHaveBeenCalledTimes(1);
-  await view.update({ disabled: true, recovering: true });
+  await view.update({ connection: 'disconnected' });
   expect(upload.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
   await act(async () => finish({ ...attachment, attachmentId: 'stale' }));
   expect(send).not.toHaveBeenCalled();
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(upload).toHaveBeenCalledTimes(2);
   await act(async () => finish(attachment));
   expect(send).toHaveBeenCalledExactlyOnceWith([{ type: 'image', attachmentId: 'fresh', label: 'image #1' }], { imageDigests: { fresh: 'b'.repeat(64) } });
 });
 
 it('queues input when control is checking even if the transport reports ready', async () => {
-  const view = await setup({ disabled: false, recovering: false, state: { ...state, sessionControl: { access: 'checking', available: false } } });
+  const view = await setup({ connection: 'ready', state: { ...state, sessionControl: { access: 'checking', available: false } } });
   await view.type('Wait for control'); await view.click();
   expect(view.send).not.toHaveBeenCalled();
   expect(view.container.querySelector('textarea')!.value).toBe('');
@@ -307,8 +320,8 @@ it('queues input when control is checking even if the transport reports ready', 
 
 it('uses public synchronization and operation admission without legacy disabled props', async () => {
   const { remoteSessionState } = await import("@orchardworks/agent-client");
-  const view = await setup({ disabled: false, recovering: false, sessionState: remoteSessionState(state, 'connecting') });
-  expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Opening session');
+  const view = await setup({ connection: 'ready', sessionState: remoteSessionState(state, 'connecting') });
+  expect(view.container.querySelector('[data-testid="agent-activity-label"]')!.textContent).toBe('Ready');
   await view.type('Wait for synchronization');
   await view.click();
   expect(view.send).not.toHaveBeenCalled();
@@ -318,7 +331,8 @@ it('uses public synchronization and operation admission without legacy disabled 
   await advance(1000);
   expect(view.send).not.toHaveBeenCalled();
   await view.type('Another draft');
-  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
+  // The send is refused for now, not for good: another message may wait behind the first.
+  expect(view.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(false);
   await view.update({ sessionState: ready });
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Wait for synchronization');
   expect(view.container.querySelector('textarea')!.value).toBe('Another draft');
@@ -340,7 +354,7 @@ async function pasteImage(container: HTMLElement, text = '') {
 it.each(['success', 'failure'])('preserves B edits when an A rich send settles with %s under the same storage owner', async outcome => {
   let settle!: () => void;
   const send = vi.fn(() => new Promise<void>((resolve, reject) => { settle = () => outcome === 'success' ? resolve() : reject(Object.assign(new Error('Old rejection'), { code: 'invalid_image_input' })); }));
-  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+  const view = await setup({ state: retainedImageState, connection: 'ready', sessionKey: 'A', imageDraftBinding: retainedImageBinding,
     imageRecipient: imageRecipient('A'), onUploadImage: async () => receipt('A'), onSendMessageContent: send });
   await pasteImage(view.container); await view.click();
   expect(send).toHaveBeenCalledOnce();
@@ -353,7 +367,7 @@ it.each(['success', 'failure'])('preserves B edits when an A rich send settles w
 });
 it('uses only the current recipient receipt and digest after storage-owner-preserving navigation', async () => {
   const send = vi.fn(async () => {});
-  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+  const view = await setup({ state: retainedImageState, connection: 'ready', sessionKey: 'A', imageDraftBinding: retainedImageBinding,
     imageRecipient: imageRecipient('A'), onUploadImage: async () => receipt('A'), onSendMessageContent: send });
   await pasteImage(view.container);
   let finish!: (value: ReturnType<typeof receipt>) => void;
@@ -373,14 +387,14 @@ it('keeps the concrete waiting queue visible and recoverable when only the nativ
   expect(view.notice()?.textContent).toContain('Retained pending message');
   await view.update({ imageRecipient: imageRecipient('native-A') });
   expect(view.notice()?.textContent).toContain('Retained pending message');
-  await view.update({ disabled: false, recovering: false });
+  await view.update({ connection: 'ready' });
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Retained pending message');
 });
 
 it('preserves B text when an A plain-text send settles in an image-capable composer sharing K', async () => {
   let finish!: () => void;
   const send = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
-  const view = await setup({ state: retainedImageState, disabled: false, recovering: false, sessionKey: 'A', imageDraftBinding: retainedImageBinding,
+  const view = await setup({ state: retainedImageState, connection: 'ready', sessionKey: 'A', imageDraftBinding: retainedImageBinding,
     imageRecipient: imageRecipient('A'), onSendMessage: send });
   await pasteImage(view.container, 'A question'); await view.click();
   expect(send).toHaveBeenCalledExactlyOnceWith('A question');
@@ -393,7 +407,7 @@ it('preserves B text when an A plain-text send settles in an image-capable compo
 });
 
 it('clears a successful plain-text send in the current fixed image-capable session', async () => {
-  const view = await setup({ state: retainedImageState, disabled: false, recovering: false });
+  const view = await setup({ state: retainedImageState, connection: 'ready' });
   await pasteImage(view.container, 'Current question'); await view.click();
   expect(view.send).toHaveBeenCalledExactlyOnceWith('Current question');
   expect(view.container.querySelector('[role="textbox"]')!.textContent).toBe('');

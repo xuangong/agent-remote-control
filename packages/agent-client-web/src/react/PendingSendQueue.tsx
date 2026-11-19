@@ -17,7 +17,8 @@ export function PendingSendQueue({ items, onCancel, onRetry }: {
               .catch(() => { setCopyError(item.id); });
           }}>
           <span className="agent-pending-text">{item.text}</span>
-          {item.phase === 'error' || item.phase === 'sending' || copyError === item.id || copied === item.id ? <span className="agent-pending-state">{item.phase === 'error' ? item.dispatched ? 'Check delivery' : 'Not sent' : copyError === item.id ? 'Copy failed' : copied === item.id ? 'Copied' : 'Sending'}</span> : null}
+          {/* A message waiting for its session says Sending from the key press on, as one that is on its way does. */}
+          <span className="agent-pending-state">{item.phase === 'error' ? item.dispatched ? 'Check delivery' : 'Not sent' : copyError === item.id ? 'Copy failed' : copied === item.id ? 'Copied' : 'Sending'}</span>
         </button>
         {item.phase === 'error' && !item.dispatched ? <button type="button" aria-label="Retry pending send" onClick={() => onRetry(item.id)}>Retry</button> : null}
         <button type="button" className="agent-pending-dismiss" aria-label={item.dispatched ? 'Dismiss message after checking delivery' : 'Cancel pending send'} disabled={item.phase === 'sending'}

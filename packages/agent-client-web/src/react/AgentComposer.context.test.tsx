@@ -3,7 +3,7 @@ import { act } from 'react';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { render, rerender } from '../test/setup.js';
 import { AgentComposer, type AgentComposerProps } from './AgentComposer.js';
-import { createReplicaState, type AgentReplicaState } from '@orchardworks/agent-client';
+import { createReplicaState, remoteSessionState, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 
 const hint = 'History from the previous session will be included with your first message.';
 const state: AgentReplicaState = { ...createReplicaState(), timeline: { ...createReplicaState().timeline, initialized: true }, agent: {
@@ -18,12 +18,16 @@ beforeEach(() => {
   Range.prototype.getBoundingClientRect = () => new DOMRect();
 });
 
-async function setup(props: Partial<AgentComposerProps> = {}) {
+/** Composer props with the session given as a connection over the replica, unless a test gives the session itself. */
+type SetupProps = Partial<Omit<AgentComposerProps, 'sessionState'>> & { connection?: RemoteSessionStatus; sessionState?: RemoteSessionState };
+const composer = ({ connection = 'ready', sessionState, ...props }: SetupProps) => <AgentComposer {...props} sessionState={sessionState ?? remoteSessionState(props.state, connection)} />;
+
+async function setup(props: SetupProps = {}) {
   const upload = vi.fn(async () => ({ attachmentId: 'ready-image', sha256: 'a'.repeat(64), mediaType: 'image/png' as const, byteLength: 1 }));
   const text = vi.fn(async () => {}), content = vi.fn(async () => {});
-  let current: AgentComposerProps = { state, onUploadImage: upload, onSendMessage: text, onSendMessageContent: content, ...props };
-  const container = await render(<AgentComposer {...current} />);
-  const update = async (patch: Partial<AgentComposerProps>) => { current = { ...current, ...patch }; await rerender(container, <AgentComposer {...current} />); };
+  let current: SetupProps = { state, onUploadImage: upload, onSendMessage: text, onSendMessageContent: content, ...props };
+  const container = await render(composer(current));
+  const update = async (patch: SetupProps) => { current = { ...current, ...patch }; await rerender(container, composer(current)); };
   const paste = async (text = '', images = false) => act(async () => {
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', { value: { files: images ? [new File(['x'], 'x.png', { type: 'image/png' })] : [], getData: (type: string) => type === 'text/plain' ? text : '' } });
@@ -104,10 +108,10 @@ it('clears an unchanged text edit after upload availability changes during deliv
 }, 10000);
 
 it('preserves existing images while pending and resumes upload only after authoritative context confirmation', async () => {
-  const f = await setup({ disabled: true });
+  const f = await setup({ connection: 'connecting' });
   await f.paste('Retained text'); await f.paste('', true);
   const imageId = f.container.querySelector('[data-image-id]')!.getAttribute('data-image-id');
-  await f.update({ disabled: false, pendingFirstInputContext: { state: 'pending' } });
+  await f.update({ connection: 'ready', pendingFirstInputContext: { state: 'pending' } });
   expect(f.upload).not.toHaveBeenCalled();
   expect(f.container.querySelector<HTMLButtonElement>('[data-testid="prompt-submit"]')!.disabled).toBe(true);
   await f.enter();
@@ -124,7 +128,7 @@ it('preserves existing images while pending and resumes upload only after author
 }, 10000);
 
 it('keeps handoff drafts editable without sending or enrolling a reconnect queue while mutations are blocked', async () => {
-  const f = await setup({ mutationBlocked: true, state: running, disabled: true, recovering: true });
+  const f = await setup({ mutationBlocked: true, state: running, connection: 'disconnected' });
   await f.paste('Keep editing through handoff');
   await f.enter();
   expect(f.container.querySelector('[role="textbox"]')!.textContent).toBe('Keep editing through handoff');
@@ -132,7 +136,7 @@ it('keeps handoff drafts editable without sending or enrolling a reconnect queue
   expect(f.text).not.toHaveBeenCalled();
   await f.paste('', true);
   expect(f.upload).not.toHaveBeenCalled();
-  await f.update({ disabled: false, recovering: false });
+  await f.update({ connection: 'ready' });
   await f.enter();
   expect(f.content).not.toHaveBeenCalled(); expect(f.upload).not.toHaveBeenCalled();
   await f.update({ mutationBlocked: false });
@@ -157,13 +161,13 @@ it('keeps confirmed settings visible and native mutations disabled without repor
 
 it('reports retained waiting messages and unconfirmed delivery until the user resolves the queue', async () => {
   const changes: number[] = [];
-  const f = await setup({ disabled: true, recovering: true, onPendingInputChange: count => changes.push(count),
+  const f = await setup({ connection: 'disconnected', onPendingInputChange: count => changes.push(count),
     onSendMessage: async () => { throw new Error('Delivery is not confirmed.'); } });
   expect(changes.at(-1)).toBe(0);
   await f.paste('First pending message'); await f.enter();
   await f.paste('Second pending message'); await f.enter();
   expect(changes.at(-1)).toBe(2);
-  await f.update({ disabled: false, recovering: false });
+  await f.update({ connection: 'ready' });
   expect(f.container.querySelector('[data-testid="pending-send"]')!.getAttribute('data-state')).toBe('error');
   expect(changes.at(-1)).toBe(2);
   await act(async () => f.container.querySelector<HTMLButtonElement>('[aria-label="Dismiss message after checking delivery"]')!.click());
@@ -193,7 +197,7 @@ it('reports an in-flight message but does not count a local console command as p
 
 it('reports pending inputs for the selected session while retaining the previous session queue', async () => {
   const original: number[] = [], other: number[] = [];
-  const f = await setup({ sessionKey: 'original', disabled: true, recovering: true, onPendingInputChange: count => original.push(count) });
+  const f = await setup({ sessionKey: 'original', connection: 'disconnected', onPendingInputChange: count => original.push(count) });
   await f.paste('Keep this with the original session'); await f.enter();
   expect(original.at(-1)).toBe(1);
   await f.update({ sessionKey: 'other', onPendingInputChange: count => other.push(count) });

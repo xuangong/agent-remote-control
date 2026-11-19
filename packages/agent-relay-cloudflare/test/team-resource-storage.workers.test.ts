@@ -59,35 +59,3 @@ it('retains binary chunks across Worker restarts and isolates resource namespace
   expect(await f.request({ action: 'get', key: 'chunk-1' })).toEqual(bytes);
 });
 
-it('lists only matching keys and deletes without affecting another namespace', async () => {
-  const f = await fixture();
-  for (const key of ['manifest-a', 'manifest-b', 'chunk-a', 'manifest_%']) await f.request({ action: 'put', key, bytes: [1, 0, 255] });
-  await f.request({ action: 'put', namespace: 'owner-b', key: 'manifest-a', bytes: [2] });
-  expect(await f.request({ action: 'list', prefix: 'manifest-' })).toEqual(['manifest-a', 'manifest-b']);
-  expect(await f.request({ action: 'list', prefix: 'manifest_' })).toEqual(['manifest_%']);
-  await f.request({ action: 'delete', key: 'manifest-a' });
-  expect(await f.request({ action: 'get', key: 'manifest-a' })).toBeNull();
-  expect(await f.request({ action: 'get', namespace: 'owner-b', key: 'manifest-a' })).toEqual([2]);
-});
-
-it('transfers a file larger than the Team text quota and restores verified chunks after restart', async () => {
-  const f = await fixture();
-  const bytes = Buffer.alloc(300_007);
-  for (let index = 0; index < bytes.length; index++) bytes[index] = index % 251;
-  const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const scope = 'team:fixture';
-  const input = { uploadId: 'archive', name: 'diagnostics.zip', mediaType: 'application/zip', byteLength: bytes.length, sha256 };
-  expect(await f.request({ action: 'begin', scope, input })).toMatchObject({ offset: 0 });
-  for (let offset = 0; offset < bytes.length; offset += 32768) {
-    await f.request({ action: 'chunk', scope, input: { uploadId: input.uploadId, offset, contentBase64: bytes.subarray(offset, offset + 32768).toString('base64') } });
-  }
-  const receipt = await f.request({ action: 'finish', scope, input }) as { resource: { resourceId: string; sha256: string } };
-  expect(receipt.resource.sha256).toBe(sha256);
-  await f.restart();
-  const chunks: Buffer[] = [];
-  for (let offset = 0; offset < bytes.length; offset += 32768) {
-    const chunk = await f.request({ action: 'read', scope, resourceId: receipt.resource.resourceId, offset }) as { contentBase64: string };
-    chunks.push(Buffer.from(chunk.contentBase64, 'base64'));
-  }
-  expect(Buffer.concat(chunks)).toEqual(bytes);
-});

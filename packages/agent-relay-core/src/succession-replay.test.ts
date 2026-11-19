@@ -2,19 +2,16 @@ import { createHash } from 'node:crypto';
 import { deliveryFingerprint, validSavedTeam } from './team-delivery.js';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, expect, test } from 'vitest';
 import { createHostedRelay } from './gateway.js';
 import { migrateBrokerAssociations } from './succession-associations.js';
 import { createHostBroker, type HostBrokerOptions } from './broker.js';
-import { assertSuccessionCapacity, deriveSuccessionCapacity } from './succession-capacity.js';
+import { assertSuccessionCapacity, deriveSuccessionCapacity, SUCCESSION_FEATURE_BYTES } from './succession-capacity.js';
 import { projectSuccessionFavorites } from './favorites-succession.js';
 import { createFavorites } from './favorites.js';
 import { buildCompleteRelayState as codecState } from './complete-relay-state.js';
-import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
+import { encodeHostedSnapshot as encodeSqlSnapshot, hostedRecordEncodingCosts, measureHostedSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { decodeSessionChannelServerMessage, type CommittedSuccessionProjection, type SuccessionAssociationFreeze } from '@orchardworks/agent-remote-protocol';
 import type { RelaySocket } from './transport.js';
@@ -23,7 +20,8 @@ const closers: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of closers.splice(0).reverse()) await close(); }, 10000);
 const ref = (nativeSessionId: string) => ({ controllerId: 'installation', providerId: 'fixture', nativeSessionId });
 const workspace = { controllerId: 'installation', canonicalCwd: '/workspace' };
-const sequenceRef = (index: number) => ref(index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index);
+const sequenceId = (index: number) => index < 3 ? ['A', 'B', 'C'][index]! : 'N' + index;
+const sequenceRef = (index: number) => ref(sequenceId(index));
 
 test('Favorites progress derives latest authorized completion from the same snapshot', async () => {
   const f = await fixture();
@@ -60,7 +58,8 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const auth = { origin, issuer: `http://127.0.0.1:${(authority.address() as { port: number }).port}`, secret: 's'.repeat(32) };
   const namespace = (subject: string) => createHash('sha256').update(JSON.stringify([auth.issuer, subject])).digest('hex');
-  const root = await mkdtemp(join(tmpdir(), 'arc-hosted-replay-')); const path = join(root, 'relay.json');
+  // The durable file is the serialized state, kept in memory: the tests check what is stored, not the disk.
+  let file = '';
   const row = (revision = 2) => {
     const request = { operationId: `op-${revision}`, roleId: 'role', expectedRevision: revision - 1, from: ref(revision === 2 ? 'A' : 'B') };
     const projection: CommittedSuccessionProjection = { version: 1, role: { id: 'role', revision, origin: ref('A'), current: ref(revision === 2 ? 'B' : 'C'), workspace },
@@ -82,11 +81,9 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
   let select: HostBrokerOptions['successionProjectionAllowance'];
   let beforeCommit = async (_value: HostedRelayState) => {};
   let queuedControls = 0;
-  const encodingCosts = accounting ? {
-    measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; }, quoteRecord: quoteSqlRecord,
-  } : undefined;
+  const encodingCosts = accounting ? hostedRecordEncodingCosts(auth) : undefined;
   const start = (initial: unknown) => {
-    const storage = { initial, async commit(value: HostedRelayState) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); await writeFile(path, JSON.stringify(value)); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } };
+    const storage = { initial, async commit(value: HostedRelayState) { await beforeCommit(value); writes++; if (failSave) throw new Error('disk unavailable'); file = JSON.stringify(value); if (failAfterSave) throw new Error('Lost persistence acknowledgement'); } };
     if (!directBroker) return createHostedRelay({ ...auth, successionEncodingCosts: encodingCosts, successionEnrollment: true, successionProjectionAllowance: context => select?.(context) ?? 2 * 1024 * 1024, scheduler: { schedule() {}, cancel() {} }, storage });
     // Isolated Broker consumer: explicit fixture principals, without Gateway proof-queue ordering.
     const state = createRelayState(auth, storage, () => {}, () => {}, encodingCosts);
@@ -105,7 +102,7 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
       return broker.handleRequest(new Request(url, request), { principalSubject: () => subject });
     } };
   };
-  relay = start(initial); await writeFile(path, JSON.stringify(initial));
+  relay = start(initial); file = JSON.stringify(initial);
   const websockets = new WebSocketServer({ noServer: true });
   server.on('request', (incoming, outgoing) => { void (async () => {
     let body = ''; for await (const chunk of incoming) body += chunk;
@@ -127,8 +124,8 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
     return { socket, frames };
   };
   closers.push(async () => { for (const ws of websockets.clients) ws.terminate(); await relay.close(); await new Promise<void>(resolve => server.close(() => resolve()));
-    await new Promise<void>(resolve => authority.close(() => resolve())); await rm(root, { recursive: true, force: true }); });
-  return { auth, namespace, row, request, channel, cookie, origin, credential,
+    await new Promise<void>(resolve => authority.close(() => resolve())); });
+  return { auth, namespace, row, initial, request, channel, cookie, origin, credential,
     queuedControls: () => queuedControls,
     select: (selector: NonNullable<HostBrokerOptions['successionProjectionAllowance']>) => { select = selector; },
     writes: () => writes,
@@ -140,9 +137,9 @@ async function fixture(configure?: (state: HostedRelayState) => void, recentAuth
       closers.push(async () => { release(); });
       return { entered, release };
     }, recover: () => { failSave = false; failAfterSave = false; }, failAfterWrite: () => { failAfterSave = true; }, fail: () => { failSave = true; }, deny: () => { denied = true; }, outage: () => { unavailable = true; },
-    saved: async () => JSON.parse(await readFile(path, 'utf8')) as HostedRelayState,
-    replaceSaved: async (change: (state: HostedRelayState) => void) => { const value = JSON.parse(await readFile(path, 'utf8')); change(value); await writeFile(path, JSON.stringify(value)); },
-    restart: async () => { const value = JSON.parse(await readFile(path, 'utf8')); await relay.close(); relay = start(value); } };
+    saved: async () => JSON.parse(file) as HostedRelayState,
+    replaceSaved: async (change: (state: HostedRelayState) => void) => { const value = JSON.parse(file); change(value); file = JSON.stringify(value); },
+    restart: async () => { const value = JSON.parse(file); await relay.close(); relay = start(value); } };
 }
 function adapt(socket: any): RelaySocket {
   return { get readyState() { return socket.readyState; }, get bufferedAmount() { return socket.bufferedAmount; }, send: value => socket.send(value), close: (code, reason) => socket.close(code, reason),
@@ -336,10 +333,11 @@ test('rejects malformed authenticated readback and browser forged commit fields 
   expect((await f.saved()).tenants[0]!.broker.associations!.freezes[0]).not.toHaveProperty('projection');
 }, 10000);
 
+const OVERSIZED_CHAIN = 40;
 test('retains oversized legacy exact recovery while fresh preparation has no accounting runtime', async () => {
   const f = await fixture(state => {
     const template = state.tenants[0]!.broker.associations!.freezes[0]!;
-    state.tenants[0]!.broker.associations!.freezes = Array.from({ length: 512 }, (_, index) => {
+    state.tenants[0]!.broker.associations!.freezes = Array.from({ length: OVERSIZED_CHAIN }, (_, index) => {
       const row = structuredClone(template), revision = index + 2;
       const request = { operationId: 'op-' + revision, roleId: 'role', expectedRevision: revision - 1, from: sequenceRef(index) };
       row.receipt.token = 'freeze-' + revision; row.receipt.request = request;
@@ -349,11 +347,13 @@ test('retains oversized legacy exact recovery while fresh preparation has no acc
         prepared: { ...row.projection!.receipt.prepared!, ...request, to: sequenceRef(index + 1) } };
       return row;
     });
+    (state.tenants[0]!.broker.associations as any).retainedExtra = 'x'.repeat(SUCCESSION_FEATURE_BYTES);
   });
+  expect(JSON.stringify(f.initial).length).toBeGreaterThan(SUCCESSION_FEATURE_BYTES);
   const native = await controller(f);
-  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'over-capacity', providerId: 'fixture', nativeSessionId: 'N512', expectedRevision: 513 });
+  const response = await f.request('v1/remote/hosts/mapped-host/succession/prepare', 'owner', { operationId: 'over-capacity', providerId: 'fixture', nativeSessionId: sequenceId(OVERSIZED_CHAIN), expectedRevision: OVERSIZED_CHAIN + 1 });
   expect(response.status).toBe(409); expect((await response.json()).code).toBe('succession_preparation_unavailable');
-  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(512);
+  expect((await f.saved()).tenants[0]!.broker.associations!.freezes).toHaveLength(OVERSIZED_CHAIN);
   expect(native.effects).toMatchObject({ prepare: 0, commit: 0, input: 0 });
   const old = await f.request('v1/remote/hosts/mapped-host/succession/status', 'owner', { operationId: 'op-2' }); expect((await old.json()).role.current.nativeSessionId).toBe('B');
   expect((await f.request('v1/remote/hosts/mapped-host/succession/reconcile', 'owner', { operationId: 'op-2' })).status).toBe(200);
@@ -877,7 +877,7 @@ for (const shared of [false, true]) test(`source completion publishes one comple
   expect(done.creations).toEqual([[JSON.stringify(['mapped-host', 'fixture', shared ? done.sharing!.reservations[0]!.nativeRequestId : request.operationId]), { fingerprint: JSON.stringify({ providerId: 'fixture', cwd: request.cwd, workspaceId: null, model: null, reasoningEffort: null, planning: null, conversationKind: request.conversationKind, sourceNativeSessionId: 'A' }), agentId: host.agentId }]]); expect(done.associations!.admissions).toHaveLength(0); expect(done.associations!.revision).toBe(2);
   expect(done.bindings[1]).toMatchObject({ nativeSessionId: host.nativeId, agentId: host.agentId, sourceRelation: { kind: request.conversationKind, nativeSourceRef: ref('A') } });
   if (shared) { expect(broker.sharing!.reservations[0]!.agentId).toBeUndefined(); expect(done.sharing!.reservations[0]!.agentId).toBe(host.agentId); }
-  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, f.auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: measureHostedSnapshot(state as HostedRelayState, f.auth) }; }, quoteRecord: quoteSqlRecord };
   expect(deriveSuccessionCapacity(before, costs).tenants[0]!.bindingSlots).toBe(1);
   expect(deriveSuccessionCapacity(terminal!, costs).tenants[0]!.bindingSlots).toBe(0);
   expect(deriveSuccessionCapacity(terminal!, costs).remainingBytes).toBeLessThan(deriveSuccessionCapacity(before, costs).remainingBytes);
@@ -1085,7 +1085,7 @@ for (const excess of [0, 1]) test(`fresh source consumer observes the actual-cod
       request: { operationId: 'other', roleId: 'other', expectedRevision: 1, from: ref('other') }, associationRevision: 0, lineage: [ref('other')], relations: [] } });
   }, false, true);
   const host = await sourceController(f); await f.request('v1/remote/hosts');
-  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, f.auth).costs }; }, quoteRecord: quoteSqlRecord };
+  const costs = { measureSnapshot(state: Readonly<HostedRelayState>) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: measureHostedSnapshot(state as HostedRelayState, f.auth) }; }, quoteRecord: quoteSqlRecord };
   const proposed = await f.saved(); seedSourceAdmission(proposed); proposed.tenants[0]!.broker.associations!.revision++;
   const receipt = proposed.tenants[0]!.broker.associations!.freezes[0]!.receipt;
   if (receipt.version !== 2) throw new Error('Expected bounded fixture');
@@ -1209,7 +1209,7 @@ function recoveredIdentity(state: HostedRelayState) {
 }
 function fillFeatureBudget(state: HostedRelayState) {
   const costs = { measureSnapshot: (value: Readonly<HostedRelayState>) => ({ snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: 1, chunkBytes: SQL_CHUNK_BYTES,
-    costs: encodeSqlSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }).costs }), quoteRecord: quoteSqlRecord };
+    costs: measureHostedSnapshot(value as HostedRelayState, { ...state.config, secret: 's'.repeat(32) }) }), quoteRecord: quoteSqlRecord };
   const associations = state.tenants[0]!.broker.associations as any; associations.padding = '';
   associations.padding = 'x'.repeat(8388608 - deriveSuccessionCapacity(state, costs).featureCharge);
   for (let index = 0; index < 3; index++) associations.padding = associations.padding.slice(0, associations.padding.length - Math.max(0, deriveSuccessionCapacity(state, costs).featureCharge - 8388608));

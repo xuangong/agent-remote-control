@@ -5,11 +5,11 @@ import { expect, test } from 'vitest';
 import { createRelayState, emptyRelayState, validateRelayState, type HostedRelayState } from './state.js';
 import { deriveSuccessionCapacity, isSuccessionCapacityError, type SuccessionEncodingCosts } from './succession-capacity.js';
 import { validBrokerAssociations, migrateBrokerAssociations } from './succession-associations.js';
-import { encodeHostedSnapshot as encodeSqlSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
+import { encodeHostedSnapshot as encodeSqlSnapshot, measureHostedSnapshot, quoteHostedRecord as quoteSqlRecord, HOSTED_SNAPSHOT_FORMAT as SQL_SNAPSHOT_FORMAT, HOSTED_RECORD_FORMAT as SQL_RECORD_FORMAT, HOSTED_CHUNK_BYTES as SQL_CHUNK_BYTES } from './record-codec.js';
 
 const auth = { origin: 'https://relay.example', issuer: 'https://issuer.example', secret: 's'.repeat(32) };
 const costs: SuccessionEncodingCosts = {
-  measureSnapshot(state) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: encodeSqlSnapshot(state as HostedRelayState, auth).costs }; },
+  measureSnapshot(state) { return { snapshotFormat: SQL_SNAPSHOT_FORMAT, recordFormat: SQL_RECORD_FORMAT, chunkBytes: SQL_CHUNK_BYTES, costs: measureHostedSnapshot(state as HostedRelayState, auth) }; },
   quoteRecord: quoteSqlRecord,
 };
 function initial(ceiling = 65536, subject = 'owner'): HostedRelayState {

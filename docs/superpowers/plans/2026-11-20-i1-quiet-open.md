@@ -570,6 +570,31 @@ Follow `.agents/skills/prepare-arc-local/SKILL.md`:
 
 To be filled by Task 9 and Task 10: accounting against section 5, runner tables for both arms, suites, and the `pnpm local` report.
 
+### Task 0: one word list and the control arm
+
+**State accounting.** Product: 0. Test support: `connection-words.mjs` (+1 list, +1 pattern, +1 function). The runners: `local-switch.mjs` and `local-baselines.mjs` lose their own lists (the S4b `OPENING_WORDS`); T1's `OPENING_LABELS` subset stays, so its counts compare with P0. `session-control.mjs` loses its Restoring and Checking access regexes and gains `--type-during-open` and `--session`.
+
+**Runner changes found while measuring** (method, not product):
+- The link opens the session in the instance's Window, which docks other sessions beside it. The runner types into, and reads the pane status of, the selected primary group (`.lab-primary-group[data-selected]`); the page's toasts, app bar status and device banner are read anywhere. It waits for an editable editor in that pane: the shell painted before the Window loads has its own editor, which is replaced.
+- The prompt carries the run and the open's ordinal, so its delivered row is told apart from the history's identical prompts.
+- A key with no sending mark within 5 s counts as refused (`enterRefused`); that open has no delivery times.
+- It reads the instance's Copilot sessions with `session list --provider copilot` (the unfiltered list's first 50 had none).
+
+**Control arm.** Build `c1f1954e` (dirty only in the runners), journals on, smart reading on for Copilot, a fresh Copilot session with one real turn (`…/copilot/6c58098e`), 10 opens and 3 two-send views per condition; raw data in `.tmp/i1-control-*.json`. Times are p50 / p95 in ms; opens with a T5 word count every open of the condition.
+
+| Condition | Opens with a T5 word | Words seen (opens) | Editor editable from load | Key to sending | Key to acknowledged | Key to delivered | Enter refused | Focus kept / text kept | `negotiated` to grant |
+|---|---|---|---|---|---|---|---|---|---|
+| 1x, 0 ms | 1 / 10 | Opening session 1, Synchronizing 1, Start with a Provider 1 | 200 / 266 | 20 / 47 | 40 / 67 | 103 / 128 | 0 | 10 / 10 | 28 / 71 |
+| 4x, 0 ms | 1 / 10 | Opening session 1, Synchronizing 1, Start with a Provider 1 | 867 / 1021 | 92 / 112 | 140 / 158 | 304 / 325 | 0 | 10 / 10 | 78 / 81 |
+| 1x, 100 ms | 6 / 10 | Opening session 6, Synchronizing 1, Start with a Provider 1 | 1030 / 1357 | 27 / 36 (n=6) | 148 / 156 (n=6) | 208 / 215 (n=6) | 4 | 4 / 4 (the refused opens) | 109 / 120 |
+| 4x, 100 ms | 10 / 10 | Opening session 10, Synchronizing 1, Start with a Provider 1 | 1604 / 1970 | 106 / 181 | 260 / 317 | 358 / 427 | 0 | 0 / 0 | 118 / 131 |
+
+What the control arm shows:
+- The first open of each condition, in a fresh browser context, shows Start with a Provider, Opening session and Synchronizing. Later opens paint the rows this device stored and hide the opening words at 0 ms, but not at 100 ms: Opening session shows in 6 of 10 and 10 of 10 opens.
+- The editor is editable (`contenteditable`) while Opening session shows, but Enter is refused until the session is ready: 4 of 10 opens at 1x and 100 ms. The other opens pressed Enter after `ready`, because the editor became editable late.
+- At 100 ms every accepted send lost the editor's focus within 50 ms of Enter, and the text typed after it went nowhere: 6 of 6 at 1x, 10 of 10 at 4x. At 0 ms none did. Only the refused opens kept focus, because nothing was sent. Task 4's focus test and E9 cover this.
+- The two-send views, for comparison with S5: first send sending 31 / 35, 105 / 110, 38 / 50, 199 / 223; acknowledged 53 / 60, 154 / 155, 159 / 175, 349 / 373 (same condition order).
+
 ## 11. Decisions (2026-11-20)
 
 The owner asked for autonomous progress on the approved Orchard design. These answers follow its decisions 4 and 5:

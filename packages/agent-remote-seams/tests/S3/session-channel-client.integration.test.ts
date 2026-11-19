@@ -531,6 +531,8 @@ describe('session channel transport', () => {
     for (const socket of harness.sockets) socket.on('message', data => {
       if (JSON.parse(String(data)).type === 'ping') socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
     });
+    // The slow pong arrives 1.5 s after the probe, inside the client's 4 s foreground probe deadline: fake timers stand for the wait.
+    if (outcome === 'slow_resume_then_acknowledge') { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => { vi.useRealTimers(); }); }
     const hiddenAt = Date.now();
     const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
     cleanups.push(() => now.mockRestore());
@@ -821,6 +823,8 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
         socket.send(JSON.stringify({ protocolVersion: version, type: 'pong' }));
       }, outcome === 'slow_resume_then_acknowledge' ? 1500 : 0);
     });
+    // The slow pong arrives 1.5 s after the probe, inside the client's 4 s foreground probe deadline: fake timers stand for the wait.
+    if (outcome === 'slow_resume_then_acknowledge') { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); cleanups.push(() => { vi.useRealTimers(); }); }
     const hiddenAt = Date.now();
     const now = vi.spyOn(Date, 'now').mockReturnValue(hiddenAt);
     cleanups.push(() => now.mockRestore());
@@ -829,7 +833,7 @@ it.each(['acknowledge', 'resume_then_acknowledge', 'slow_resume_then_acknowledge
     document.visibilityState = 'visible'; document.dispatchEvent(new Event('visibilitychange'));
     now.mockRestore();
     await vi.waitFor(() => expect(harness.frames.filter(({frame}) => frame.type === 'ping')).toHaveLength(1));
-    if (outcome === 'slow_resume_then_acknowledge') await new Promise(resolve => setTimeout(resolve, 1700));
+    if (outcome === 'slow_resume_then_acknowledge') { await vi.advanceTimersByTimeAsync(1700); vi.useRealTimers(); }
     expect(result).toBe('pending');
     expect(status).toBe('ready');
   }

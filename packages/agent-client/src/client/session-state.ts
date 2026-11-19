@@ -13,19 +13,9 @@ export interface RemoteSessionState {
   readonly handoff?: SessionHandoffState;
   readonly connection: RemoteSessionStatus;
   readonly synchronized: boolean;
-  /**
-   * Rows are on screen that the connection has not confirmed as current: they came from this device's store, or a replacement is waiting for its tail.
-   * While they are, the labels that say a session is opening, synchronizing or checking access give way to its last business label.
-   */
-  readonly holdingRows: boolean;
   readonly runtime: AgentRuntimeInfo['connection'];
   readonly control: AgentReplicaState['sessionControl'];
   readonly operations: Readonly<Record<SessionOperationKind, SessionOperationAvailability>>;
-}
-
-/** Rows are held that the connection has not confirmed as current: they came from this device's store, or a replacement waits for its tail. */
-export function holdsUnconfirmedRows(replica: AgentReplicaState | undefined): boolean {
-  return !!replica && (replica.timeline.restoredFromDevice === true || replica.timeline.pendingEpoch !== undefined);
 }
 
 const operations: readonly SessionOperationKind[] = ['send_message', 'queue_message', 'steer', 'cancel', 'set_planning', 'set_session_setting', 'execute_command', 'interaction_response'];
@@ -37,9 +27,8 @@ export function remoteSessionState(replica: AgentReplicaState | undefined, conne
   const runtime = replica?.agent ? replica.agent.runtimeInfo.connection ?? { state: 'connected' as const } : undefined;
   const control = replica?.sessionControl;
   const { checking: controlChecking, readOnly } = leaseView(control);
-  const holdingRows = holdsUnconfirmedRows(replica);
   return {
-    connection, synchronized, holdingRows, activity,
+    connection, synchronized, activity,
     busy: activity === 'running' || activity === 'waiting', controlChecking, readOnly,
     recovering: !readOnly && connection !== 'unavailable' && runtime?.state !== 'unavailable' && (!synchronized || controlChecking || runtime?.state === 'reconnecting' || runtime?.state === 'restoring'),
     runtime, control,

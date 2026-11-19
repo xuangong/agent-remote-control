@@ -39,8 +39,3 @@ export function leaseNoticeLabel(state: Exclude<LeaseState, 'checking'>): string
     default: return 'Ready to take control';
   }
 }
-
-/** The words the session's activity line shows when a native owner holds it; undefined for every other state. */
-export function leaseActivityLabel(state: LeaseState): string | undefined {
-  return state === 'native_cli' ? 'Native CLI has control' : state === 'other_controller' ? 'Native control transferred' : undefined;
-}

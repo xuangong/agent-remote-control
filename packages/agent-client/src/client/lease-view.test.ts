@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { leaseActivityLabel, leaseNoticeLabel, leaseView, type LeaseState } from './lease-view.js';
+import { leaseNoticeLabel, leaseView, type LeaseState } from './lease-view.js';
 import type { AgentReplicaState } from '../replica/types.js';
 
 type Control = AgentReplicaState['sessionControl'];
@@ -21,6 +21,5 @@ describe('the lease view table', () => {
     expect(leaseView(row.control)).toEqual({ state: row.state, readOnly: row.readOnly, checking: row.checking, native: row.native });
     // A control check has no words: the session says nothing while it runs (target T5).
     if (row.state !== 'checking') expect(leaseNoticeLabel(row.state)).toBe(row.notice);
-    expect(leaseActivityLabel(row.state)).toBe(row.activity);
   });
 });

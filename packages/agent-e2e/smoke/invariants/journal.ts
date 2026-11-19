@@ -1,5 +1,5 @@
 import { result, type InvariantResult, type PageReport, type Transcript, type Violation } from './types.js';
-import { agentOf, intervalsBetween, markers, payloadOf, received } from './wire.js';
+import { agentOf, frames, intervalsBetween, markers, payloadOf, received, sent } from './wire.js';
 
 /**
  * M2: the sequences the page receives are contiguous within an epoch of one connection. A live entry continues the newest
@@ -98,3 +98,30 @@ export function noRefusedRowHole(transcript: Transcript): InvariantResult {
   return result('no-refused-row-hole', checked, violations);
 }
 
+
+/**
+ * M4: every window a Controller publishes is either taken (acknowledged up to its sequence) or refused by name at its sequence, never
+ * dropped without an answer; and a window larger than `sessionBytes`, when given, is refused (`quota_exceeded`), not taken in part.
+ */
+export function quotaRefusalsReported(transcript: Transcript, { sessionBytes }: { sessionBytes?: number } = {}): InvariantResult {
+  const violations: Violation[] = [];
+  const answers = (key: string, generation: unknown, after: number) => frames(transcript).filter(frame => frame.n > after && frame.direction === 'relay->browser'
+    && payloadOf(frame.message).sessionKey === key && payloadOf(frame.message).generation === generation);
+  let checked = 0;
+  for (const frame of sent(transcript, 'journal_publish')) {
+    const { sessionKey, generation, entries = [] } = payloadOf(frame.message);
+    for (const entry of entries as Array<{ sequence: number; op: string }>) {
+      if (entry.op !== 'window') continue;
+      checked += 1;
+      const later = answers(sessionKey, generation, frame.n);
+      const refused = later.find(item => item.message.type === 'journal_refused' && payloadOf(item.message).sequence === entry.sequence);
+      const taken = later.some(item => item.message.type === 'journal_ack' && payloadOf(item.message).watermark >= entry.sequence);
+      const bytes = new TextEncoder().encode(JSON.stringify(entry)).length;
+      if (!refused && !taken) violations.push({ message: `the window at sequence ${entry.sequence} of ${sessionKey} got no answer`, at: frame.t });
+      else if (refused && taken) violations.push({ message: `the window at sequence ${entry.sequence} of ${sessionKey} was refused and acknowledged`, at: frame.t });
+      else if (sessionBytes !== undefined && bytes > sessionBytes && !refused) violations.push({ message: `a window of ${bytes} bytes was taken by a session limited to ${sessionBytes}`, at: frame.t });
+      else if (refused && payloadOf(refused.message).reason !== 'quota_exceeded' && sessionBytes !== undefined && bytes > sessionBytes) violations.push({ message: `a window over the limit was refused as ${payloadOf(refused.message).reason}`, at: frame.t });
+    }
+  }
+  return result('quota-refusals-reported', checked, violations);
+}

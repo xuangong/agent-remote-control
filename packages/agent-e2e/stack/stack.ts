@@ -16,6 +16,7 @@ import { createAgentHost, type AgentHost } from '@orchardworks/agent-remote-cont
 import { controllerPath } from '@orchardworks/agent-remote-protocol/model';
 import type { ControllerRelease } from '@orchardworks/agent-remote-protocol';
 import { createDevboxServer } from '@orchardworks/agent-relay-node/devbox';
+import { actAsLocalUser } from './owner.js';
 import { scriptedProvider, type ScriptedProviderOptions } from './scripted-provider.js';
 
 const WORKBENCH_DIST = resolve(import.meta.dirname, '../../agent-remote-lab/dist');
@@ -89,14 +90,7 @@ export async function startStack(options: StackOptions = {}) {
   const stopController = async () => { const running = controller; controller = undefined; await running?.close(); };
   await startController();
 
-  /** Acts as the local user for one call: signs in, runs it with the cookie and the user's base path, and signs out. */
-  const asOwner = async <T>(call: (request: (method: string, path: string, body?: unknown) => Promise<Response>) => Promise<T>): Promise<T> => {
-    const status = await fetch(origin + '/auth/status', { signal: AbortSignal.timeout(10_000) });
-    const { basePath } = await status.json() as { basePath: string };
-    const headers = { cookie: status.headers.getSetCookie().map(value => value.split(';')[0]).join('; '), origin, 'content-type': 'application/json' };
-    try { return await call((method, path, body) => fetch(origin + basePath + path, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(10_000) })); }
-    finally { await (await fetch(origin + '/auth/logout', { method: 'POST', headers, body: '{}', signal: AbortSignal.timeout(10_000) })).body?.cancel(); }
-  };
+  const asOwner = <T>(call: Parameters<typeof actAsLocalUser<T>>[1]) => actAsLocalUser(origin, call);
   if (options.smartReading !== false) {
     await asOwner(async request => {
       for (const each of [provider, ...otherProviders]) {

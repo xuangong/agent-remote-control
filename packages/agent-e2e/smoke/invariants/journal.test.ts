@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { page, streamEntry, tailPage, transcript } from './builders.js';
-import { journalSequencesContiguous, liveOnlyItemsSurvive, noRefusedRowHole, oneReplacementPerRestart, trimReported, turnRowsCompleteAfterReturn } from './journal.js';
+import { journalSequencesContiguous, liveOnlyItemsSurvive, quotaRefusalsReported, noRefusedRowHole, oneReplacementPerRestart, trimReported, turnRowsCompleteAfterReturn } from './journal.js';
 
 describe('journal sequences are contiguous', () => {
   it('passes when live entries continue the tail page', () => {
@@ -71,5 +71,23 @@ describe('no refused-row hole', () => {
   it('fails when an entry skips a sequence', () => {
     const entries = [{ itemKey: 'a', seqStart: 1, seqEnd: 2 }, { itemKey: 'b', seqStart: 4, seqEnd: 4 }];
     expect(noRefusedRowHole(transcript().receive(1, 'timeline_page', tailPage('e1', 1, 4, { entries })).build()).status).toBe('failed');
+  });
+});
+
+describe('quota refusals are reported', () => {
+  const publish = (bytes: number) => ({ sessionKey: 'p:s', generation: 1, entries: [{ sequence: 1, op: 'window', items: [{ text: 'x'.repeat(bytes) }] }] });
+  const answered = (reply: (builder: ReturnType<typeof transcript>) => void, bytes = 5000) => { const builder = transcript().send(1, 'journal_publish', publish(bytes)); reply(builder); return builder.build(); };
+  it('passes for a window refused by name and for one taken within the limit', () => {
+    expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_refused', { sessionKey: 'p:s', generation: 1, sequence: 1, reason: 'quota_exceeded' })), { sessionBytes: 1024 }).status).toBe('passed');
+    expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_ack', { sessionKey: 'p:s', generation: 1, watermark: 1 }), 100), { sessionBytes: 1024 }).status).toBe('passed');
+  });
+  it('fails for a window nobody answered, for both answers, and for a window over the limit that was taken', () => {
+    expect(quotaRefusalsReported(answered(() => {})).violations[0]?.message).toMatch(/no answer/);
+    expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_refused', { sessionKey: 'p:s', generation: 1, sequence: 1, reason: 'quota_exceeded' }).receive(3, 'journal_ack', { sessionKey: 'p:s', generation: 1, watermark: 1 }))).violations[0]?.message).toMatch(/refused and acknowledged/);
+    expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_ack', { sessionKey: 'p:s', generation: 1, watermark: 1 })), { sessionBytes: 1024 }).violations[0]?.message).toMatch(/taken by a session limited/);
+  });
+  it('ignores an answer for another generation and is not exercised without a window', () => {
+    expect(quotaRefusalsReported(answered(b => b.receive(2, 'journal_ack', { sessionKey: 'p:s', generation: 2, watermark: 1 }))).status).toBe('failed');
+    expect(quotaRefusalsReported(transcript().build()).status).toBe('not_exercised');
   });
 });

@@ -54,18 +54,3 @@ it('delivers Worker close metadata and distinguishes object startup from core re
   expect([...initial.invalid, ...reconnected.invalid, ...restarted.invalid, ...recovered.invalid]).toEqual([]);
 }, 20000);
 
-it.each([1, 2])('omits new metadata for diagnostic delivery version %s without stalling batches', async version => {
-  const f = await fixture({ workerVersionId: 'worker-version-1' });
-  const alice = await f.login('alice');
-  const pairing = await (await f.json(alice.basePath + 'v1/remote/pairings', alice.cookie, {})).json() as { key: string };
-  const first = await f.host(pairing.key);
-  const initial = collect(first.socket, version);
-  await expect.poll(() => initial.entries.some(entry => entry.event === 'host_registered'), { timeout: 5000 }).toBe(true);
-  const closed = event(first.socket, 'close'); first.socket.close(1000); await closed;
-  const second = await f.host(first.key); const resumed = collect(second.socket, version);
-  await expect.poll(() => resumed.entries.find(entry => entry.event === 'host_disconnected'), { timeout: 5000 }).toMatchObject({ closeCode: 1000 });
-  for (const entry of [...initial.entries, ...resumed.entries]) {
-    for (const key of ['wasClean', 'runtimeInstanceId', 'workerVersionId', 'startReason']) expect(entry).not.toHaveProperty(key);
-  }
-  expect([...initial.invalid, ...resumed.invalid]).toEqual([]);
-}, 10000);

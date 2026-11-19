@@ -2,11 +2,12 @@
 // repository root while the instance runs: node packages/agent-remote-lab/performance/local-switch.mjs [label]
 // THROTTLE=4 adds a 4x CPU slowdown. ARC_ORIGIN opens the page at another origin (a latency proxy); SWITCH_LIMIT is the number of
 // bots switched to (default 6). Prints one JSON line: roster load, idle main-thread time, and medians for switching to a bot for the
-// first time (cold) and again (warm), with the HTTP API requests, the states that showed an opening label and the states without
+// first time (cold) and again (warm), with the HTTP API requests, the states that showed a T5 connection word and the states without
 // rows between the click and the moment the conversation is shown.
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
+import { SESSION_CONNECTION_WORDS } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 const root = process.cwd();
 const origin = process.env.ARC_ORIGIN ?? JSON.parse(execFileSync('pnpm', ['--silent', 'local', 'status', '--json'], { cwd: root, encoding: 'utf8' })).origin;
 const { chromium } = createRequire(join(root, 'packages/agent-remote-lab/package.json'))('@playwright/test');
@@ -21,7 +22,7 @@ try {
   page.on('request', request => { if (['xhr', 'fetch'].includes(request.resourceType())) requests.push(Date.now()); });
   await page.addInitScript(`(() => {
     const log = [];
-    const OPENING = ['Opening session', 'Loading conversation', 'Awaiting Agent', 'Start with a Provider'];
+    const OPENING = ${JSON.stringify(SESSION_CONNECTION_WORDS)};
     let last = '';
     const sample = () => {
       const conversation = document.querySelector('.lab-bot-conversation');

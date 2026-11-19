@@ -43,6 +43,7 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import { answeredBy, composerUnchanged, controllerJournalEvents, holeCheck, journalServed, mixThresholds, parseJournalMeta, rowlessStates, stats, windowCounts } from './journal-measurement.mjs';
+import { SESSION_CONNECTION_PATTERN } from '@orchardworks/agent-e2e/faults/connection-words.mjs';
 import { startLatencyProxy } from '@orchardworks/agent-e2e/faults/latency-proxy.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -351,11 +352,11 @@ async function waitForState(handle, predicate, label, ms = actionMs) {
 
 // T1 counts observed states (the observer records every change at 8 ms resolution) from the moment the conversation mounts: its
 // first label, placeholder or message. They are counts, never clock thresholds.
+// T1 counts its own subset of the T5 list, so its counts compare with the P0 baselines.
 const OPENING_LABELS = ['Opening session', 'Loading conversation', 'Awaiting Agent', 'Start with a Provider'];
 const showsOpening = state => [...state.labels, ...state.loading].some(text => OPENING_LABELS.some(label => text.includes(label)));
-// S4b also counts the other connection words that give way to a session's last business label while rows are held.
-const OPENING_WORDS = [...OPENING_LABELS, 'Synchronizing', 'Checking access'];
-const showsOpeningWord = state => [...state.labels, ...state.loading, ...state.control].some(text => OPENING_WORDS.some(label => text.includes(label)));
+// S4b also counts the other connection words: since I1 every word of the T5 list (agent-e2e's connection-words.mjs).
+const showsOpeningWord = state => [...state.labels, ...state.loading, ...state.control].some(text => SESSION_CONNECTION_PATTERN.test(text));
 const openSummary = (capture, start) => {
   const content = firstAt(capture.states, state => state.messages > 0);
   const ready = firstAt(capture.states, isReady);

@@ -130,3 +130,12 @@ The owner judged the released page a diagnostic tool rather than an IM product a
 | I4 Workbench and phone | Window mode on the new tokens, the phone layout, the Orchard brand across the site. | Component and e2e suites at desktop and phone widths. |
 
 After I4: the rest of P2 (operation queue and business states), S6b, P3, P4 and P5 as above.
+
+## Release 2026-11-20: journals on in production (step J)
+
+- Built from main `da280c5b`, the same code as Worker `1701a6e0`.
+- Partitions Worker `agent-remote-control-journals` version `99170f75`, deployed first.
+- Relay deployed with `wrangler.journals-enabled.jsonc` as version `974938b1`. The rollback target is `1701a6e0`, which turns journals off.
+- `/health` returned 200, and tailing the Relay showed no configuration error.
+- For a few minutes after the deploy, `PUT …/smart-reading` answered `journals_unavailable`. The running Durable Object was still on the previous version: Cloudflare propagates Worker and Durable Object code independently, as `docs/current/agent-remote/deployment.md` notes.
+- After that, the owner turned smart reading on for `claude`, `codex` and `copilot` on all 4 Hosts.

@@ -262,8 +262,21 @@ node packages/agent-remote-lab/performance/summarize-p1d.mjs .tmp/s4
 - **`restart-continuity`.** Every given session is open in its own page, every row node is marked, the instance restarts, and the runner counts the marked nodes still in the document and the states without rows. `--reps` restarts give `reps` samples per session.
 - **`replacement-absorbed`.** Every Copilot session runs a turn whose shell command takes two minutes (the runner answers its tool approval), a draft is typed in the composer, the timeline is scrolled to its middle and every row node is marked; the instance restarts during the tool, which makes the Controller's window differ from the journal's open item, and the Relay replaces the journal (`open_item`). A sample counts only when the Relay's `journal_window` diagnostics show a `changed` or `open_item` replacement for the session. The runner reports marked nodes, composer text, focus and selection, and the offset of the first visible row.
 - **`runtime-release`.** `release-continuity` for the Copilot sessions, with the Relay's windows. Copilot has no runtime to release (`released: false`), so it shows that rows are kept while nothing happens.
-- **`switch`.** `local-switch.mjs` for the one `--throttle` rate, through the proxy (`ARC_ORIGIN`), with the HTTP API requests, the states that showed an opening label and the states without rows of each switch.
+- **`switch`.** `local-switch.mjs` for the one `--throttle` rate, through the proxy (`ARC_ORIGIN`), with the HTTP API requests, the states that showed a T5 connection word and the states without rows of each switch.
 - **Counted T1 fields** of every open (`open-known`, `open-fresh`): `contentSinceMountMs`, `contentSinceAttachMs` (from the page's first session control request), `openingLabelFrames` and `rowlessFramesSinceMount`.
 - **Sample counts.** A percentile is stated from 20 samples (10 for the conditions that restart the instance for each sample); with fewer the summary prints the maximum and the count.
 
 `summarize-p1d.mjs` is tested by `src/summarize-p1d.test.ts`; the proxy (`packages/agent-e2e/faults/latency-proxy.mjs`) by its transport test over real HTTP and WebSocket.
+
+## Session control and quiet open (S5, I1)
+
+`session-control.mjs` opens the instance's first Copilot session `--opens` times and sends from `--sends` views, under `--throttle` and `--rtt` as above (header of the file). The T5 connection words come from one list, `packages/agent-e2e/faults/connection-words.mjs`, which `local-baselines.mjs` and `local-switch.mjs` read as well.
+
+- **Every open** records `connectionWords`: the T5 words that any frame of the status elements (conversation status, activity label, control owner, empty state, control notes, toasts, connection status) or the composer showed. It also records whether the editor was editable when the composer first painted, and `negotiatedToGrantMs`.
+- **`--type-during-open`** (I1) types `Reply with the single word OK.` as soon as the editor is editable after the page loads, with the open's ordinal appended so its row can be told from the history's, and presses Enter. From the key press it records `sendingMs` (the first pending send or delivery mark), `acknowledgedMs` (the `command_acknowledged` frame) and `deliveredMs` (the user row in the timeline). Fifty milliseconds after Enter it records whether the editor kept focus, then types ` next` and records whether the editor holds it. Every open runs a real model turn, and the runner waits for the session to be idle before the next.
+
+```sh
+for c in "1 0" "4 0" "1 100" "4 100"; do set -- $c
+  node packages/agent-remote-lab/performance/session-control.mjs --label i1-control --throttle $1 --rtt $2 --opens 10 --sends 3 --type-during-open --out .tmp/i1-control-$1x-$2ms.json
+done
+```

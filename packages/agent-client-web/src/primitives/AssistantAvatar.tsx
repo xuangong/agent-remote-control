@@ -3,6 +3,7 @@ import type { BotPicture } from '@orchardworks/agent-remote-protocol';
 import { avatarEye, avatarEyes, avatarShapes, avatarWith, type AvatarMood } from '../theme/avatar.js';
 import { avatarMotion } from '../theme/motion.js';
 import { orchardMotion } from '../theme/tokens.js';
+import { rootClass } from './classes.js';
 import { useMotionState } from './MotionProvider.js';
 
 /**
@@ -25,7 +26,7 @@ export function AssistantAvatar({ id, picture, size, mood = 'idle', label, class
     previous.current = mood;
   }, [mood]);
   const [first, second, third] = shape.keyframes;
-  return <span className={className ? `orchard-avatar orchard-avatar ${className}` : 'orchard-avatar orchard-avatar'}
+  return <span className={rootClass('orchard-avatar', className)}
     data-shape={recipe.shape} data-mood={mood} {...(motion.bob ? { 'data-bob': '' } : {})} {...(motion.pop && pops > 0 ? { 'data-pop': String(pops) } : {})}
     style={{ '--orchard-avatar-size': `${size}px` } as CSSProperties}
     {...(label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true })}>

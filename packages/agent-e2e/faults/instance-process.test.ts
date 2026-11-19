@@ -68,21 +68,24 @@ describe('restarting the instance', () => {
     expect(JSON.parse(await limitsOf({ journalLimits: { sessionBytes: 262144, hostBytes: 8388608 } }) as string)).toEqual({ sessionBytes: 262144, hostBytes: 8388608 });
     expect(await limitsOf({})).toBeUndefined();
   });
-  it('signs the command line in again when a restart left it signed out, and gives up with an error after its attempts', async () => {
-    const calls: string[][] = [];
-    let state = false;
+  it('signs the command line out and in again when the user API refuses it, and gives up with an error after its attempts', async () => {
+    const calls: string[] = [];
+    let accepted = false;
+    const signedOut = () => Object.assign(new Error('failed'), { stdout: '{"error":{"code":"signed_out"}}' });
     const exec = async (file: string, args: string[]) => {
-      calls.push([file, ...args]);
-      if (args[0] === 'login' && args[1] === 'status') return { stdout: JSON.stringify({ signedIn: state }) };
-      if (args[0] === 'login') state = calls.filter(call => call[1] === 'login' && call.length === 2).length >= 2;
+      if (file === 'pnpm') return { stdout: '' };
+      calls.push(args.join(' '));
+      if (args[0] === 'host') { if (!accepted) throw signedOut(); return { stdout: '{"hosts":[]}' }; }
+      if (args[0] === 'login') accepted = calls.filter(call => call === 'login').length >= 2;
       return { stdout: '' };
     };
     const waits: number[] = [];
     expect(await ensureCommandLineSignedIn({ checkout: '/work/checkout', exec, waitMs: 7, wait: async ms => { waits.push(ms); } })).toBe('signed-in-again');
+    expect(calls).toEqual(['host list', 'logout', 'login', 'host list', 'logout', 'login', 'host list']);
     expect(waits).toEqual([7]);
-    const outcome = await restartInstance(instanceIn(), { checkout: '/work/checkout', exec, signInWaitMs: 0 });
-    expect(outcome.commandLine).toBe('signed-in');
-    await expect(ensureCommandLineSignedIn({ checkout: '/work/checkout', attempts: 2, wait: async () => {}, exec: async (_file, args) => ({ stdout: args[1] === 'status' ? '{"signedIn":false}' : '' }) })).rejects.toThrow(/stayed signed out after 2 sign-ins/);
+    expect((await restartInstance(instanceIn(), { checkout: '/work/checkout', exec, signInWaitMs: 0 })).commandLine).toBe('signed-in');
+    await expect(ensureCommandLineSignedIn({ checkout: '/work/checkout', attempts: 2, wait: async () => {}, exec: async (_file, args) => { if (args[0] === 'host') throw signedOut(); return { stdout: '' }; } })).rejects.toThrow(/stayed signed out after 2 sign-ins/);
+    await expect(ensureCommandLineSignedIn({ checkout: '/work/checkout', exec: async () => { throw new Error('relay_unreachable'); } })).rejects.toThrow(/relay_unreachable/);
   });
   it('reads the instance from the development command', async () => {
     const info = { instance: 'x-1', directory: '/state/x-1', origin: 'http://localhost:9', source: '/work/checkout', state: 'running' };

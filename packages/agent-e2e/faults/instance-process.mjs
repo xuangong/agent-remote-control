@@ -79,18 +79,23 @@ export async function restartInstance(instance, { checkout, emptyStore = false, 
 
 /**
  * Makes sure the instance's command line is signed in, which `up` tries once and only reports when it fails (a restart that
- * meets the site's sign-in limit, for example). A scenario that sends through the command line after a restart needs it, so
- * this asks `login status` and runs `login` again, waiting `waitMs` between attempts, before it gives up with an error.
+ * meets the site's sign-in limit, for example). It asks the user API (`host list`), not `login status`: credentials the
+ * user API refuses can still pass `/auth/status`, and `login` keeps them. So a refused command line is signed out and in
+ * again, waiting `waitMs` between attempts, before this gives up with an error.
  */
 export async function ensureCommandLineSignedIn({ checkout, exec = (file, args, options) => run(file, args, options), attempts = 4, waitMs = 20_000, wait = delay } = {}) {
   const dev = (...args) => exec('agent-remote-controller-dev', args, { cwd: checkout, encoding: 'utf8', timeout: 60_000 });
-  const signedIn = async () => { try { return JSON.parse((await dev('login', 'status')).stdout).signedIn === true; } catch { return false; } };
-  if (await signedIn()) return 'signed-in';
+  const accepted = async () => {
+    try { await dev('host', 'list'); return true; }
+    catch (error) { return !/"signed_out"/.test(String(error?.stdout ?? '')) && !/signed_out/.test(String(error?.message ?? '')) ? Promise.reject(error) : false; }
+  };
+  if (await accepted()) return 'signed-in';
   let failure = '';
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try { await dev('login'); } catch (error) { failure = String(error?.stdout || error?.message || error).slice(0, 300); }
-    if (await signedIn()) return 'signed-in-again';
+    try { await dev('logout'); await dev('login'); } catch (error) { failure = String(error?.stdout || error?.message || error).slice(0, 300); }
+    if (await accepted()) return 'signed-in-again';
     if (attempt < attempts) await wait(waitMs);
   }
-  throw new Error(`The instance's command line stayed signed out after ${attempts} sign-ins${failure ? ` (${failure})` : ''}; run agent-remote-controller-dev login.`);
+  throw new Error(`The instance's command line stayed signed out after ${attempts} sign-ins${failure ? ` (${failure})` : ''}; run agent-remote-controller-dev logout, then login.`);
 }
+

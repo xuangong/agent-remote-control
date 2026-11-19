@@ -35,19 +35,19 @@ export function createAttachment(ctx: SessionCoreContext) {
     catch { /* Diagnostics cannot change session lifetime. */ }
   }
   function watch(binding: Binding) {
-    const { admission, bindings, idle, liveAgent, registration, relay, terminalRefresh, uncertainAgents } = ctx;
+    const { admission, bindings, idle, liveAgent, providers, relay, terminalRefresh, uncertainAgents } = ctx;
     const childHeld = () => hasHeldChild(bindings.values(), binding, child => !!liveAgent(child.agentId) || idle.hasDemand(child.agentId));
     idle.watch(binding.agentId, () => mayReleaseIdle({
       closed: admission.closed, uncertain: uncertainAgents.has(binding.agentId), pending: bindings.isPending(binding.providerId, binding.nativeSessionId),
-      directoryCanRelease: !!registration(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
+      directoryCanRelease: !!providers.require(binding.providerId).directory.canReleaseSession?.(binding.nativeSessionId), runtimeCanReleaseIdle: !!liveAgent(binding.agentId)?.canReleaseIdle(),
       childHeld: childHeld(),
     }), async () => {
       await terminalRefresh.releaseJournal(binding);
       await relay.closeAgent(binding.agentId);
-      await registration(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
+      await providers.require(binding.providerId).directory.sessionReleased?.(binding.nativeSessionId);
       lifecycle('session_idle_released', binding);
     }, async isCurrent => {
-      const source = registration(binding.providerId).directory;
+      const source = providers.require(binding.providerId).directory;
       const agent = liveAgent(binding.agentId);
       if (!source.reconcileIdleSession || !mayReconcileIdle({ directoryCanReconcile: true, runtimeCanReleaseIdle: !!agent?.canReleaseIdle(), childHeld: childHeld() }) || !agent) return false;
       // Discovery can resolve a child before the complete family check finishes.
@@ -63,8 +63,8 @@ export function createAttachment(ctx: SessionCoreContext) {
     });
   }
   async function releaseIfDiverged(binding: Binding): Promise<void> {
-    const { liveAgent, registration, relay, terminalRefresh } = ctx;
-    const directory = registration(binding.providerId).directory;
+    const { liveAgent, providers, relay, terminalRefresh } = ctx;
+    const directory = providers.require(binding.providerId).directory;
     if (!directory.checkDivergence || binding.parentNativeSessionId || !liveAgent(binding.agentId) || !await directory.checkDivergence(binding.nativeSessionId)) return;
     const agent = liveAgent(binding.agentId);
     if (!agent?.canReleaseIdle()) return;
@@ -97,7 +97,7 @@ export function createAttachment(ctx: SessionCoreContext) {
     } catch (error) { release(); parent?.release(); throw error; }
   }
   async function project(providerId: string, proposedAgentId: string, nativeSessionId: string, parentNativeSessionId?: string, takeOver?: string, takeoverAdmitted = false, takeoverScope = 'host:takeover', qualifiedResult = false): Promise<Binding> {
-    const { admission, bindings, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, nativeAttachments, nativeFamily, nativeRef, originalCreation, originalNativePrefix, prepared, registration, relay, roles, sessionRefs, succession, successionBoundary, successionReady, tpm, workerToolsApplied } = ctx;
+    const { admission, bindings, directoryOperation, genericSuccessionSource, nativePrefixExtensions, workerExtensions, idle, journals, liveAgent, nativeAttachments, nativeFamily, nativeRef, originalCreation, originalNativePrefix, prepared, providers, relay, roles, sessionRefs, succession, successionBoundary, successionReady, tpm, workerToolsApplied } = ctx;
     await successionReady;
     const nativeCreation = originalCreation(nativeRef({ providerId, nativeSessionId }));
     const creationIdentity = nativeCreation ? serializeAgentEmptyCreationResult(nativeCreation) : undefined;
@@ -125,7 +125,7 @@ export function createAttachment(ctx: SessionCoreContext) {
         const agent = liveAgent(proposedAgentId);
         if (agent) { assertAttachment(agent); idle.touch(proposedAgentId); return; }
       }
-      const source = registration(providerId).directory;
+      const source = providers.require(providerId).directory;
       let parent: RemoteHostSessionLease | undefined;
       try {
         if (parentNativeSessionId) {

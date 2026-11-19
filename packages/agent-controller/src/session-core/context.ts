@@ -1,6 +1,6 @@
 import type { AgentEmptyCreationResult, AgentPersistenceHandle, AgentSession, AgentSessionExtensions } from '@orchardworks/agent-provider-sdk';
 import type { NativeSessionRef, TrustedSuccessionContext } from '@orchardworks/agent-remote-protocol';
-import type { AgentRemoteHttpResult, AgentRemoteRelay, OperationCache, RemoteHostControlRequest, RemoteHostCatalog, RemoteHostSessionLease, SessionBindings, SessionWireAgent } from '@orchardworks/agent-session-runtime';
+import type { AgentRemoteHttpResult, AgentRemoteRelay, OperationCache, RemoteHostControlRequest, RemoteHostSessionLease, SessionBindings, SessionWireAgent } from '@orchardworks/agent-session-runtime';
 
 import type { createHostStatusReader } from '../host-status.js';
 import type { createIdleSessions } from '../idle-sessions.js';
@@ -20,6 +20,7 @@ import type { SessionRefContext } from '../session-refs.js';
 import type { SessionCallerCatalog } from '../session-callers.js';
 import type { SessionCaller, SessionCallResult } from '../session-routes.js';
 import type { Admission } from './admission.js';
+import type { ProviderRegistry } from './provider-registry.js';
 import type { AgentHostProviderRegistration, AgentHostRuntimeOptions, SessionBinding } from './types.js';
 
 /** What a native attachment was opened from: the provider's session, and the identity of the creation result or prefix handle it was opened with. */
@@ -51,7 +52,6 @@ export interface SessionCoreContext {
   readonly bindings: SessionBindings;
   readonly idle: ReturnType<typeof createIdleSessions>;
   readonly operationCache: OperationCache;
-  readonly catalogs: Map<string, RemoteHostCatalog>;
   readonly hostStatus: ReturnType<typeof createHostStatusReader>;
   readonly cancelTimeoutMs: number;
   readonly successionReady: Promise<unknown>;
@@ -63,7 +63,7 @@ export interface SessionCoreContext {
   readonly enrollment: SessionSuccessionEnrollment | undefined;
   readonly sessionRefs: SessionRefContext | undefined;
   readonly roles: SessionRoles;
-  readonly registrations: Map<string, AgentHostProviderRegistration>;
+  readonly providers: ProviderRegistry;
   readonly prepared: Map<string, AgentSession>;
   readonly uncertainAgents: Set<string>;
   readonly journals: JournalPublisher;
@@ -75,7 +75,6 @@ export interface SessionCoreContext {
   readonly nativeAttachments: WeakMap<SessionWireAgent, NativeAttachment>;
   readonly successionConfig: AgentHostRuntimeOptions['succession'];
   readonly nativeSuccession: NativeSuccession;
-  registration(providerId: string): AgentHostProviderRegistration;
   liveAgent(agentId: string): ReturnType<AgentRemoteRelay['requireAgent']> | undefined;
   nativeRef(binding: Pick<SessionBinding, 'providerId' | 'nativeSessionId'>): NativeSessionRef;
   mutationFamily(targets: readonly NativeSessionRef[]): NativeSessionRef[];

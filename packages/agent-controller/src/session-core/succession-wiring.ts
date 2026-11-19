@@ -42,24 +42,24 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     return {
       async supports(source, targetProviderId) {
         await authorizeSuccessionRead(source, source);
-        const target = ctx.registration(targetProviderId);
+        const target = ctx.providers.require(targetProviderId);
         if (ctx.options.providerEnabled?.(targetProviderId) === false || !target.adapter.readSessionHistory
           || !target.directory.setSourceBindingReader || !target.directory.sourceReferences) return false;
         // A generic successor takes over the role its source holds, or the handoff is refused.
         const role = await ctx.roles.genericSuccession(source, targetProviderId);
         if (!role.allowed) throw new SuccessionPreparationRejected('succession_role_unavailable', role.reason);
         if (ctx.nativeSuccession) return await ctx.nativeSuccession.supports(source, targetProviderId) === true;
-        return target.directory.supportsSourceReferences === true && hasCurrentNativeEvidence(target.adapter) && hasCurrentNativeEvidence(ctx.registration(source.providerId).adapter);
+        return target.directory.supportsSourceReferences === true && hasCurrentNativeEvidence(target.adapter) && hasCurrentNativeEvidence(ctx.providers.require(source.providerId).adapter);
       },
       async supportsBoundedProjection(source, targetProviderId) {
         await authorizeSuccessionRead(source, source);
         if (ctx.nativeSuccession) return await ctx.nativeSuccession.supportsBoundedProjection?.(source, targetProviderId) === true;
-        return boundedSourceIdentity(ctx.successionConfig!.controllerId) && boundedSourceIdentity(targetProviderId) && hasCurrentNativeEvidence(ctx.registration(targetProviderId).adapter) && hasCurrentNativeEvidence(ctx.registration(source.providerId).adapter);
+        return boundedSourceIdentity(ctx.successionConfig!.controllerId) && boundedSourceIdentity(targetProviderId) && hasCurrentNativeEvidence(ctx.providers.require(targetProviderId).adapter) && hasCurrentNativeEvidence(ctx.providers.require(source.providerId).adapter);
       },
       async supportsNativePrefix(source, selection) {
         await authorizeSuccessionRead(source, source);
         await nativePrefixExtensions(source, () => source.nativeSessionId);
-        const directory = ctx.registration(source.providerId).directory;
+        const directory = ctx.providers.require(source.providerId).directory;
         if (!boundedSourceIdentity(source.controllerId) || !boundedSourceIdentity(source.providerId) || !directory.createNativePrefix || !directory.verifyNativePrefix) return false;
         const lease = await acquireNative(source);
         try {
@@ -75,7 +75,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
         if (!selection) throw new Error('Native prefix selection is missing.');
         await authorizeSuccessionRead(request.from, request.from);
         let actual: string | undefined;
-        const extensions = await nativePrefixExtensions(request.from, () => actual), directory = ctx.registration(request.from.providerId).directory;
+        const extensions = await nativePrefixExtensions(request.from, () => actual), directory = ctx.providers.require(request.from.providerId).directory;
         if (!directory.createNativePrefix) throw new Error('Native prefix creation is unavailable.');
         const handle = await directory.createNativePrefix({ nativeSessionId: request.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, extensions, undefined, async handle => {
           actual = handle.sessionId;
@@ -85,7 +85,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
         return { target: { controllerId: request.from.controllerId, providerId: handle.providerId, nativeSessionId: handle.sessionId }, handle };
       },
       async verifyNativePrefix(prepared, handle) {
-        const selection = prepared.preparation, directory = ctx.registration(prepared.from.providerId).directory;
+        const selection = prepared.preparation, directory = ctx.providers.require(prepared.from.providerId).directory;
         if (!selection || !directory.verifyNativePrefix) throw new Error('Native prefix verification is unavailable.');
         await directory.verifyNativePrefix({ nativeSessionId: prepared.from.nativeSessionId, turnId: selection.turnId, messageId: selection.messageId }, handle);
       },
@@ -95,8 +95,8 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       },
       async selectNativeCreation(source, operationId, targetProviderId) {
         await authorizeSuccessionRead(source, source);
-        const evidence = ctx.registration(targetProviderId).adapter.nativeEvidence;
-        if (!hasCurrentNativeEvidence(ctx.registration(targetProviderId).adapter)) return undefined;
+        const evidence = ctx.providers.require(targetProviderId).adapter.nativeEvidence;
+        if (!hasCurrentNativeEvidence(ctx.providers.require(targetProviderId).adapter)) return undefined;
         const role = ctx.succession?.store.all().find(state => nativeSessionRefKey(state.role.current) === nativeSessionRefKey(source))?.role;
         if (!role) throw new Error('Native ctx.succession role is unavailable.');
         // The successor carries its source's role from creation; the role's tools run only once it is attached.
@@ -119,7 +119,7 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
       authorizeRead: authorizeSuccessionRead,
       async readHistory(source, query) {
         await authorizeSuccessionRead(source, source);
-        const adapter = ctx.registration(source.providerId).adapter;
+        const adapter = ctx.providers.require(source.providerId).adapter;
         if (!adapter.readSessionHistory) throw new Error('Routed native history is unavailable.');
         return adapter.readSessionHistory(source.nativeSessionId, query);
       },
@@ -180,8 +180,8 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
   }
   /** Rebuild each native attachment from stable role anchors and its own actual recipient. */
   async function nativePrefixExtensions(source: NativeSessionRef, actual: () => string | undefined): Promise<AgentSessionExtensions> {
-    const { registration, successionService, team, tpm } = ctx;
-    const directory = registration(source.providerId).directory;
+    const { providers, successionService, team, tpm } = ctx;
+    const directory = providers.require(source.providerId).directory;
     const ancestry = nativePrefixSegmentAncestors(source, successionService!.store.all().flatMap(state => state.operations.filter(row => row.phase === 'committed')));
     const grants = (await directory.sourceReferences?.() ?? []).filter(grant => ancestry.some(ref => ref.nativeSessionId === grant.nativeSessionId));
     if (grants.length > 1) throw new Error('Source reference ancestry is ambiguous.');
@@ -194,9 +194,9 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
   }
   /** Worker tools for a session without a role: declared at creation where providers fix tools then, present only while enabled elsewhere. */
   function workerExtensions(providerId: string, holder: NativeSessionRef | undefined, actual: () => NativeSessionRef | undefined): AgentSessionExtensions | undefined {
-    const { registration, workerSupport } = ctx;
+    const { providers, workerSupport } = ctx;
     if (!workerSupport) return undefined;
-    const capability = registration(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
+    const capability = providers.require(providerId).adapter.descriptor.sessionExtensions?.toolNamespaces;
     const enabled = holder ? workerSupport.enabled(holder) : workerSupport.enabledByDefault();
     if (capability === 'creation') return { toolNamespaces: [workerSupport.namespace(actual, !enabled)] };
     // Without tool search, a session gets the namespace while enabled; an 'attachment' adapter receives an enablement change on its next attachment.
@@ -205,11 +205,11 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
   }
   /** Applies enablement changes to live sessions whose provider can change tools during a session. */
   async function applyWorkerTools(): Promise<void> {
-    const { bindings, liveAgent, nativeAttachments, nativeRef, registration, roles, workerSupport, workerToolsApplied } = ctx;
+    const { bindings, liveAgent, nativeAttachments, nativeRef, providers, roles, workerSupport, workerToolsApplied } = ctx;
     if (!workerSupport) return;
     for (const binding of [...bindings.values()]) {
       const agent = liveAgent(binding.agentId), session = agent && nativeAttachments.get(agent)?.session;
-      if (!session?.updateToolNamespaces || registration(binding.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== 'live') continue;
+      if (!session?.updateToolNamespaces || providers.require(binding.providerId).adapter.descriptor.sessionExtensions?.toolNamespaces !== 'live') continue;
       const ref = nativeRef(binding);
       if (await roles.extensions(ref, () => ref)) continue;
       const enabled = workerSupport.enabled(ref);
@@ -219,12 +219,12 @@ export function createSuccessionWiring(ctx: SessionCoreContext) {
     }
   }
   async function authorizeSuccessionRead(reader: NativeSessionRef, source: NativeSessionRef): Promise<void> {
-    const { options, originalCreation, originalNativePrefix, registration, successionConfig } = ctx;
+    const { options, originalCreation, originalNativePrefix, providers, successionConfig } = ctx;
     for (const target of [reader, source]) {
       const creation = originalCreation(target), prefix = originalNativePrefix(target);
       if (target.controllerId !== (successionConfig?.controllerId ?? options.controllerId ?? 'local')) throw new HostExecutionPolicyError('Source is outside this Controller.');
       if (options.providerEnabled?.(target.providerId) === false) throw new HostExecutionPolicyError('Source provider is disabled.');
-      const directory = registration(target.providerId).directory;
+      const directory = providers.require(target.providerId).directory;
       const cwd = directory.sessionWorkspace ? await directory.sessionWorkspace(target.nativeSessionId, prefix?.handle ?? (creation?.status === 'created' ? creation.handle : undefined))
         : (await directory.list()).find(item => item.nativeSessionId === target.nativeSessionId)?.workspace;
       if (!cwd) throw new HostExecutionPolicyError('Source workspace is unavailable.');

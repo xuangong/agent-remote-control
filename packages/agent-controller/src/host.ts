@@ -17,6 +17,7 @@ import { createCodexDaemonControl } from './codex-daemon-control.js';
 import { RELAY_DIAGNOSTIC_PATH, parseRelayDiagnosticBatch, type RelayDiagnostic } from '@orchardworks/agent-remote-protocol/model';
 import { createControllerUpdater } from './controller-update.js';
 import type { ControllerIdentity, ControllerRelease, ControllerUpdateStatus } from '@orchardworks/agent-remote-protocol';
+import { createProviderRegistry } from './session-core/provider-registry.js';
 import { createIdleSessions } from './idle-sessions.js';
 import { createHostStatusReader, hostStatusPaths } from './host-status.js';
 import { allowedWorkspace, protectHostDirectory } from './execution-policy.js';
@@ -38,7 +39,7 @@ import { createAdmission } from './session-core/admission.js';
 import { createSessionCatalog, catalogSessionStates } from './session-core/catalog.js';
 import { handoffRefusal, nativeFamily as familyOf } from './session-core/family.js';
 import * as lineage from './session-core/lineage.js';
-import { bounded, HostRequestError, json, positiveTimeout } from './session-core/requests.js';
+import { bounded, json, positiveTimeout } from './session-core/requests.js';
 import type { AgentHostProviderRegistration, AgentHostRuntime, AgentHostRuntimeOptions, SessionBinding as Binding } from './session-core/types.js';
 import { createUplinkFence } from './session-core/uplink-fence.js';
 import { createAttachment } from './session-core/attachment.js';
@@ -236,7 +237,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     directory: protectHostDirectory(registration.directory, { ...options.executionPolicy!,
       lockPermissions: registration.nativePermissionControl ? false : options.executionPolicy!.lockPermissions }) })) };
   if (!options.registrations.length && !options.providerEnabled) throw new Error('Agent Host requires at least one provider registration.');
-  const registrations = new Map<string, AgentHostProviderRegistration>();
+  const providers = createProviderRegistry(({ directory }) => new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
   const prepared = new Map<string, AgentSession>();
   const nativeAttachments = new WeakMap<SessionWireAgent, { session: AgentSession; nativeCreation?: string; nativePrefix?: string }>();
   /** Every read of a provider's directory, whoever asks for it (the page's revision check, a listing, the state confirmation), passes the summaries to `listed`. */
@@ -253,14 +254,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
   }) });
   for (const registration of options.registrations) {
-    const id = registration.adapter.descriptor.providerId;
-    if (registration.directory.providerId !== id) throw new Error(`Directory provider identity does not match ${id}.`);
-    if (registrations.has(id)) throw new Error(`Duplicate Agent Host provider: ${id}.`);
-    registrations.set(id, observeListing(registration));
+    providers.add(observeListing(registration));
   }
   /** Only providers whose adapters declare journal support are published; every other provider keeps today's forwarding. */
   const journals = createJournalPublisher({
-    providers: () => [...registrations.values()]
+    providers: () => providers.all()
       .filter(({ adapter, directory }) => adapter.journal !== undefined && options.providerEnabled?.(directory.providerId) !== false)
       .map(({ adapter }) => adapter.descriptor.providerId),
     ...(options.onJournalDiagnostic ? { diagnostic: options.onJournalDiagnostic } : {}),
@@ -323,7 +321,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     uncertain: agent => { uncertainAgents.add(bindingFor(agent).agentId); },
   }, ...(options.inputImages ? { inputImageStore: new InputImageStore(options.inputImages) } : {}),
     ...(options.inputResources ? { inputResourceStore: new InputResourceStore(options.inputResources) } : {}) });
-  const catalogs = new Map([...registrations.values()].map(({ directory }) => [directory.providerId, new RemoteHostCatalog({ roots: directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs })]));
   const bindings = new SessionBindings();
   const liveSessionStates = () => [...bindings.values()].flatMap(binding => {
     const live = liveAgent(binding.agentId), state = live && liveSessionState(live.handoffAdmissionState());
@@ -337,11 +334,11 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       return liveSessionStates();
     },
     replies: session => sessionReplies.facts(session),
-    catalogs: () => [...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
+    catalogs: () => providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(({ directory }) => ({ providerId: directory.providerId, read: async () => catalogSessionStates(await directory.list()) })),
   });
   const hostStatus = createHostStatusReader({ sessions: liveSessionStates,
-    paths: () => hostStatusPaths(async () => (await Promise.all([...registrations.values()].filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
+    paths: () => hostStatusPaths(async () => (await Promise.all(providers.all().filter(({ directory }) => options.providerEnabled?.(directory.providerId) !== false)
       .map(async ({ directory }) => (await directory.workspaces()).map(workspace => workspace.path)))).flat()) });
   const pending = new Set<Promise<unknown>>();
   const idle = createIdleSessions({ graceMs: options.idleGraceMs, reconcileMs: options.idleReconcileMs });
@@ -352,7 +349,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   let closePromise: Promise<void> | undefined;
   const terminalRefresh = createTerminalRefresh({
     now: () => Date.now(),
-    directory: providerId => registrations.get(providerId)?.directory,
+    directory: providerId => providers.get(providerId)?.directory,
     bindings: () => bindings.values(),
     bindingOf: (providerId, nativeSessionId) => bindings.getByNative(providerId, nativeSessionId),
     isLive: agentId => !!liveAgent(agentId),
@@ -400,11 +397,6 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     void operation.finally(() => pending.delete(operation)).catch(() => undefined);
     return operation;
   }
-  function registration(providerId: string): AgentHostProviderRegistration {
-    const value = registrations.get(providerId);
-    if (!value) throw new HostRequestError(400, 'invalid_provider', 'The selected provider is unavailable on this Host.');
-    return value;
-  }
   function bindingFor(agent: SessionWireAgent): Binding {
     for (const binding of bindings.values()) {
       const agentId = binding.agentId;
@@ -423,7 +415,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
   function addRegistration(value: AgentHostProviderRegistration): void {
     if (admission.stopped) throw new Error('Host cannot register a provider while stopping.');
     const id = value.adapter.descriptor.providerId;
-    if (id !== value.directory.providerId || registrations.has(id)) throw new Error('Invalid or duplicate provider registration.');
+    if (id !== value.directory.providerId || providers.has(id)) throw new Error('Invalid or duplicate provider registration.');
     const registration = options.executionPolicy ? { ...value, directory: protectHostDirectory(value.directory, {
       ...options.executionPolicy, lockPermissions: value.nativePermissionControl ? false : options.executionPolicy.lockPermissions,
     }) } : value;
@@ -433,16 +425,15 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       resumeSession: value.adapter.resumeSession.bind(value.adapter),
     });
     const observed = observeListing(registration);
-    registrations.set(id, observed);
-    catalogs.set(id, new RemoteHostCatalog({ roots: observed.directory.list, revisionMaxAgeMs: catalogRevisionMaxAgeMs }));
+    providers.add(observed);
     successionWiring.bindProvider(observed);
   }
   const sessionCatalog: SessionCallerCatalog = createSessionCatalog({
-    providerIds: () => registrations.keys(),
+    providerIds: () => providers.ids(),
     enabled: providerId => options.providerEnabled?.(providerId) !== false,
-    catalog: providerId => catalogs.get(providerId),
-    directory: providerId => registrations.get(providerId)?.directory,
-    adapter: providerId => registration(providerId).adapter,
+    catalog: providerId => providers.catalog(providerId),
+    directory: providerId => providers.get(providerId)?.directory,
+    adapter: providerId => providers.require(providerId).adapter,
     runtimeState: (providerId, nativeSessionId) => {
       const binding = bindings.getByNative(providerId, nativeSessionId), live = binding && liveAgent(binding.agentId);
       return live?.handoffAdmissionState();
@@ -457,7 +448,7 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     },
     ...(successionService ? { mainRouting: successionTpmRouting(successionService, successionConfig!.controllerId, successionWiring.acquireNative) } : {}),
     available: () => !admission.stopped,
-    supportedProviders: () => [...registrations.values()].filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
+    supportedProviders: () => providers.all().filter(({ adapter }) => options.providerEnabled?.(adapter.descriptor.providerId) !== false
       && adapter.descriptor.sessionExtensions?.instructions && adapter.descriptor.sessionExtensions?.tools).map(({ adapter }) => adapter.descriptor.providerId),
     async acquire(providerId, nativeSessionId) {
       if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM session provider is unavailable.');
@@ -472,21 +463,21 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       if (admission.stopped || options.providerEnabled?.(providerId) === false) throw new Error('TPM provider is unavailable.');
       const existing = bindings.getByNative(providerId, nativeSessionId);
       if (existing && (liveAgent(existing.agentId) || bindings.isPending(providerId, nativeSessionId))) throw new Error('Close the recovered session before binding it as a TPM.');
-      const session = await directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => registration(providerId).directory.open(nativeSessionId, { extensions }));
+      const session = await directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], async () => providers.require(providerId).directory.open(nativeSessionId, { extensions }));
       const info = await session.runtimeInfo();
       if (info.sessionId !== nativeSessionId) throw new Error('Recovered native session identity does not match.');
       if (options.executionPolicy) await allowedWorkspace(options.executionPolicy, info.cwd);
     },
     async create(providerId, creation, extensions) {
-      const config = roleSessionConfig(registration(providerId).adapter.descriptor, creation, extensions);
-      return directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => registration(providerId).directory.create(config, evidence));
+      const config = roleSessionConfig(providers.require(providerId).adapter.descriptor, creation, extensions);
+      return directoryNativeEffect(successionBoundary?.currentEntry(), successionBoundary?.currentEntry()?.targets ?? [], evidence => providers.require(providerId).directory.create(config, evidence));
     },
     execute: executeOperation('host:tpm'),
   };
   const tpm = options.tpm ? new TpmCoordinator(options.tpm, automationAccess) : undefined;
   const team = options.team?.request ? new TeamRuntime(options.team.stateDirectory, {...automationAccess, sessionRouting: successionService?.roleRouting ?? automationAccess.sessionRouting!,
     genericSuccession: () => !!successionService && options.team?.genericSuccession?.() === true, callForSupport: () => options.team?.callForSupport?.() === true,
-    readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => registration(providerId).adapter.descriptor.sessionAccess?.readOnly),
+    readOnlyProviders: () => automationAccess.supportedProviders().filter(providerId => providers.require(providerId).adapter.descriptor.sessionAccess?.readOnly),
     execute: executeOperation('host:team')}, options.team.request, options.team.tickMs) : undefined;
   const roles = new SessionRoles([...(team ? [team] : []), ...(tpm ? [tpmRole(tpm)] : [])]);
   // A message that waited for this Host goes to the session that carries its conversation now, through the same access as roles.
@@ -501,12 +492,12 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     acquire: automationAccess.acquire,
   } }) : undefined;
   const workerSupport = options.team?.request ? new WorkerSupport({ request: options.team.request, available: () => options.team?.callForSupport?.() === true,
-    stateDirectory: options.team.stateDirectory, title: async ref => await registration(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
+    stateDirectory: options.team.stateDirectory, title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId) }) : undefined;
   const workerToolsApplied = new Map<string, boolean>();
   workerSupport?.onChange(() => { void successionWiring.applyWorkerTools().catch(() => undefined); });
   const workerSupportTimer = workerSupport ? setInterval(() => { if (!admission.closed) void workerSupport.refresh(automationAccess.controllerId).catch(() => undefined); }, options.team?.tickMs ?? 3000) : undefined;
   workerSupportTimer?.unref?.();
-  const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => [...registrations.values()], () => tpm?.store.all() ?? [], source => successionWiring.authorizeSuccessionRead(source, source), directoryOperation) : undefined;
+  const enrollment = successionService ? new SessionSuccessionEnrollment(successionService, successionConfig!.controllerId, () => providers.all(), () => tpm?.store.all() ?? [], source => successionWiring.authorizeSuccessionRead(source, source), directoryOperation) : undefined;
   const enrollFromRelay = async (request: RemoteHostControlRequest, context: TrustedSuccessionContext) => {
     if (!options.succession?.enrollment || !enrollment || admission.stopped) return json(403, { code: 'succession_enrollment_unavailable', error: 'Trusted succession enrollment is unavailable.' });
     await tpm?.ready;
@@ -517,14 +508,14 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
     return enrollment.control(request, context);
   };
   Object.assign(ctx, {
-    options, admission, relay, bindings, idle, operationCache, catalogs, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
+    options, admission, relay, bindings, idle, operationCache, hostStatus, cancelTimeoutMs, successionReady, successionService, succession, successionBoundary,
     tpm, team, enrollment, sessionRefs, roles, workerSupport, workerToolsApplied, nativeAttachments, successionConfig, nativeSuccession,
-    registrations, prepared, uncertainAgents, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
+    providers, prepared, uncertainAgents, journals, terminalRefresh, automationAccess, sessionCatalog, create, controlRequest, genericSuccessionSource,
     nativePrefixExtensions: successionWiring.nativePrefixExtensions,
-    registration, liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
+    liveAgent, nativeRef, mutationFamily, directoryOperation, tracked, project, callSession, authorizeSuccessionRead: successionWiring.authorizeSuccessionRead,
     workerExtensions: successionWiring.workerExtensions, markShared: successionWiring.markShared, nativeFamily, originalCreation, originalNativePrefix, assertHandoffState, acquireSession,
   } satisfies SessionCoreContext);
-  for (const value of registrations.values()) successionWiring.bindProvider(value);
+  for (const value of providers.all()) successionWiring.bindProvider(value);
   return { relay, sessionStates, journals, sessionCatalog, callSession, callRole, ...(sessionRefs ? { sessionRefs } : {}), ...(outbox ? { outbox } : {}), executionRouting: successionService?.executionRouting, roleRouting: successionService?.roleRouting, addRegistration, control: request => control(request), enrollFromRelay, executeOperation, acquireSession, setRelayConnected: idle.setConnected,
     // An owner-confirmed update closes admission immediately. Shutdown and the launcher bound cleanup time; session state must not indefinitely defer it.
     beginControllerRestart: () => admission.beginDrain(),
@@ -546,8 +537,8 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
         sessionReplies.close();
         bindings.close();
         const releasing = idle.close();
-        for (const catalog of catalogs.values()) catalog.dispose();
-        const cleanup = Promise.allSettled([releasing, relay.close(), ...[...registrations.values()].map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
+        providers.dispose();
+        const cleanup = Promise.allSettled([releasing, relay.close(), ...providers.all().map(({ directory }) => Promise.resolve(directory.close())), ...pending]);
         await bounded(cleanup, shutdownTimeoutMs);
         resourceIdIndex?.flush();
       }

@@ -33,11 +33,11 @@ import { boundedSourceIdentity, failureResponse, HostRequestError, json, parseAt
 export function createControlRoutes(ctx: SessionCoreContext) {
   const operationScope = (request: RemoteHostControlRequest): string => request.operationScope ?? 'local';
   async function create(request: RemoteHostControlRequest, payload: Record<string, unknown>, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
-    const { authorizeSuccessionRead, bindings, enrollment, markShared, mutationFamily, nativeRef, operationCache, options, project, registration, sessionRefs, successionBoundary, tracked, workerExtensions } = ctx;
+    const { authorizeSuccessionRead, bindings, enrollment, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, successionBoundary, tracked, workerExtensions } = ctx;
     const { providerId, operationId, proposedAgentId, editing, provenance, settings } = parseCreateRequest(request, payload);
     const source = provenance ? nativeRef(provenance) : undefined;
     const targets = source ? mutationFamily([source]) : [];
-    const selected = registration(providerId), directory = selected.directory;
+    const selected = providers.require(providerId), directory = selected.directory;
     const scope = operationScope(request);
     const qualified = (context?.successionEnrollmentVersion ?? 0) >= 2 && !!settings.sourceNativeSessionId && !!enrollment;
     const sourceReader = settings.sourceNativeSessionId ? nativeRef({ providerId, nativeSessionId: settings.sourceNativeSessionId }) : undefined;
@@ -126,7 +126,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
     return result.status >= 400 ? { ...result, body: JSON.stringify({ ...data, requestId }) } : result;
   }
   async function controlRequest(request: RemoteHostControlRequest, context?: TrustedSuccessionContext): Promise<AgentRemoteHttpResult> {
-    const { admission, authorizeSuccessionRead, bindings, callSession, catalogs, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, registration, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tpm, tracked } = ctx;
+    const { admission, authorizeSuccessionRead, bindings, callSession, directoryOperation, enrollment, hostStatus, liveAgent, markShared, mutationFamily, nativeRef, operationCache, options, project, providers, sessionRefs, succession, successionBoundary, successionReady, successionService, team, tpm, tracked } = ctx;
     try {
       await successionReady;
       const refusal = admission.refuse(request.method);
@@ -258,7 +258,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
       }
       if (request.method === 'GET') {
         const providerId = requiredString(url.searchParams.get('providerId'), 'providerId');
-        const directory = registration(providerId).directory;
+        const directory = providers.require(providerId).directory;
         if (url.pathname === '/remote/workspace-folders') return json(200, await browseWorkspaceFolders(url.searchParams, options.executionPolicy, (await directory.workspaces())[0]?.path));
         if (url.pathname === '/remote/workspaces') return json(200, { workspaces: await directory.workspaces() });
         if (url.pathname === '/remote/models') return json(200, await (directory.models?.() ?? { models: [] }));
@@ -266,7 +266,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
           if (!sessionRefs) throw new HostRequestError(400, 'unsupported_configuration', 'Session references are unavailable. Update the Controller.');
           return json(200, await describeSessionRefs({ providerId, nativeSessionId: requiredString(url.searchParams.get('nativeSessionId'), 'nativeSessionId') }, sessionRefs));
         }
-        const catalog = catalogs.get(providerId)!;
+        const catalog = providers.catalog(providerId)!;
         if (url.pathname === '/remote/catalog/listing') {
           if (!directory.listing) throw new HostRequestError(400, 'unsupported_configuration', 'Manual listing is unavailable for this provider.');
           await directory.list();
@@ -285,7 +285,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
       if (request.method === 'POST') {
         const payload = parseBody(request.body);
         if (url.pathname === '/remote/catalog/listing') {
-          const directory = registration(requiredString(payload.providerId, 'providerId')).directory;
+          const directory = providers.require(requiredString(payload.providerId, 'providerId')).directory;
           if (!directory.listing) throw new HostRequestError(400, 'unsupported_configuration', 'Manual listing is unavailable for this provider.');
           if (Object.keys(payload).some(key => key !== 'providerId')) throw new HostRequestError(400, 'invalid_request', 'Only providerId is accepted.');
           void directory.listing.refresh().catch(() => undefined);
@@ -304,7 +304,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
             || Object.keys(payload).some(key => !['providerId', 'nativeSessionId', 'action', 'target'].includes(key))) {
             throw new HostRequestError(400, 'invalid_request', 'Name the reference to add or remove.');
           }
-          registration(holder.providerId);
+          providers.require(holder.providerId);
           try { return json(200, await changeSessionRef(holder, payload.action, { providerId: target.providerId, nativeSessionId: target.nativeSessionId }, sessionRefs)); }
           catch (error) {
             if (error instanceof SessionRefError) throw new HostRequestError(error.code === 'session_not_found' ? 404 : 400, error.code, error.message);
@@ -314,7 +314,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
         if (url.pathname === '/remote/session/rename') {
           const rename = parseRenameRequest(request, payload);
           const { providerId, nativeSessionId, title } = rename;
-          const directory = registration(providerId).directory;
+          const directory = providers.require(providerId).directory;
           if (!directory.renameSession) throw new HostRequestError(400, 'unsupported_configuration', 'Native session renaming is unavailable. Update the Controller.');
           const targets = mutationFamily([nativeRef({ providerId, nativeSessionId })]);
           let result: { title: string };
@@ -338,7 +338,7 @@ export function createControlRoutes(ctx: SessionCoreContext) {
           return json(200, { title: currentTitle ?? result.title });
         }
         if (url.pathname === '/remote/workspace-folders/create') {
-          registration(requiredString(payload.providerId, 'providerId'));
+          providers.require(requiredString(payload.providerId, 'providerId'));
           if (request.sessionId) throw new HostRequestError(400, 'invalid_request', 'Folder creation does not target a session.');
           return json(201, await createWorkspaceFolder(payload.parentPath, payload.name, options.executionPolicy));
         }

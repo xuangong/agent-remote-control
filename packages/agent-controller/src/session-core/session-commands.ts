@@ -79,10 +79,10 @@ export function createSessionCommands(ctx: SessionCoreContext, options: AgentHos
     async release(ref) {
       const binding = ctx.bindings.getByNative(ref.providerId, ref.nativeSessionId), agent = binding && ctx.liveAgent(binding.agentId);
       if (!binding || !agent) return true;
-      if (ctx.idle.hasDemand(binding.agentId) || !ctx.registration(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
+      if (ctx.idle.hasDemand(binding.agentId) || !ctx.providers.require(ref.providerId).directory.canReleaseSession?.(ref.nativeSessionId) || !agent.canReleaseIdle()) return false;
       await ctx.terminalRefresh.releaseJournal(binding);
       await ctx.relay.closeAgent(binding.agentId);
-      await ctx.registration(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
+      await ctx.providers.require(ref.providerId).directory.sessionReleased?.(ref.nativeSessionId);
       return true;
     },
   };
@@ -106,16 +106,16 @@ export function createSessionCommands(ctx: SessionCoreContext, options: AgentHos
     hostId: async () => options.hostId?.(),
     async grantedSource(holder) {
       if (options.providerEnabled?.(holder.providerId) === false) return undefined;
-      return ctx.registrations.get(holder.providerId)?.directory.sourceReference?.(holder.nativeSessionId);
+      return ctx.providers.get(holder.providerId)?.directory.sourceReference?.(holder.nativeSessionId);
     },
     async setGrantRemoved(holder, removed) {
-      const directory = ctx.registrations.get(holder.providerId)?.directory;
+      const directory = ctx.providers.get(holder.providerId)?.directory;
       if (!await directory?.sourceReference?.(holder.nativeSessionId).catch(() => undefined)) return;
       await directory!.setSourceReferenceRemoved?.(holder.nativeSessionId, removed);
     },
     async title(target) {
       if (options.providerEnabled?.(target.providerId) === false) return undefined;
-      const summary = await ctx.catalogs.get(target.providerId)?.session(target.nativeSessionId);
+      const summary = await ctx.providers.catalog(target.providerId)?.session(target.nativeSessionId);
       return summary ? summary.title ?? '' : undefined;
     },
   } : undefined;
